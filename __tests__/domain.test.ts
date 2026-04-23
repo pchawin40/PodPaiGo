@@ -10,7 +10,8 @@ import {
   calculateLeaveByTime,
   rankRecommendations
 } from '../lib/domain';
-import { TripData, ParkingOption, RideshareOption, TransitOption, TsaEstimate } from '../lib/types';
+import { TripData, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from '../lib/types';
+import { MockProvider } from '../lib/providers';
 
 describe('Time Utilities', () => {
   test('parseTime should correctly parse time string', () => {
@@ -37,11 +38,12 @@ describe('Trip Duration Calculation', () => {
   test('calculateTripDuration should calculate duration between departure and return', () => {
     const tripData: TripData = {
       type: 'round-trip',
+      origin: '98101',
+      destination: 'Central Terminal',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
-      returnTime: '15:00',
-      terminal: 'Central Terminal'
+      returnTime: '15:00'
     };
     const result = calculateTripDuration(tripData);
     expect(result).toBe(2 * 24 * 60 + 5 * 60); // 2 days + 5 hours in minutes
@@ -50,11 +52,12 @@ describe('Trip Duration Calculation', () => {
   test('calculateTripDuration should return 0 for same date/time', () => {
     const tripData: TripData = {
       type: 'round-trip',
+      origin: '98101',
+      destination: 'Central Terminal',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-01',
-      returnTime: '10:00',
-      terminal: 'Central Terminal'
+      returnTime: '10:00'
     };
     const result = calculateTripDuration(tripData);
     expect(result).toBe(0);
@@ -68,7 +71,13 @@ describe('Parking Cost Calculations', () => {
     type: 'official',
     price: 25, // daily rate
     distance: 5,
-    availability: 80
+    availability: 80,
+    trustStatus: 'verified-source',
+    sourceName: 'SeaTac Airport',
+    sourceLink: 'https://www.portseattle.org/sea-tac',
+    mapLink: 'https://maps.google.com/?q=SeaTac+Official+Parking',
+    lastUpdated: new Date().toISOString(),
+    assumptions: ['Daily rate applies for full trip duration']
   };
 
   const offAirportParking: ParkingOption = {
@@ -77,7 +86,13 @@ describe('Parking Cost Calculations', () => {
     type: 'off-airport',
     price: 15, // daily rate
     distance: 10,
-    availability: 90
+    availability: 90,
+    trustStatus: 'estimated',
+    sourceName: 'Third-party parking aggregator',
+    sourceLink: 'https://example.com/parking',
+    mapLink: 'https://maps.google.com/?q=Park+Fly+Lot+A+SeaTac',
+    lastUpdated: new Date().toISOString(),
+    assumptions: ['Pricing may vary by season']
   };
 
   test('calculateOfficialParkingCost should calculate correctly', () => {
@@ -111,15 +126,22 @@ describe('Rideshare Cost Calculations', () => {
     name: 'Uber',
     price: 45, // one-way price
     duration: 25,
-    availability: 85
+    availability: 85,
+    trustStatus: 'live',
+    sourceName: 'Uber API',
+    sourceLink: 'https://www.uber.com',
+    mapLink: 'https://maps.google.com/?q=Uber+SeaTac',
+    lastUpdated: new Date().toISOString(),
+    assumptions: ['Traffic conditions considered']
   };
 
   test('calculateRideshareCost should return one-way price for one-way trips', () => {
     const tripData: TripData = {
       type: 'one-way-departure',
+      origin: '98101',
+      destination: 'Central Terminal',
       departureDate: '2024-01-01',
-      departureTime: '10:00',
-      terminal: 'Central Terminal'
+      departureTime: '10:00'
     };
     const result = calculateRideshareCost(rideshare, tripData);
     expect(result).toBe(45);
@@ -128,11 +150,12 @@ describe('Rideshare Cost Calculations', () => {
   test('calculateRideshareCost should double the price for round trip', () => {
     const tripData: TripData = {
       type: 'round-trip',
+      origin: '98101',
+      destination: 'Central Terminal',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
-      returnTime: '15:00',
-      terminal: 'Central Terminal'
+      returnTime: '15:00'
     };
     const result = calculateRideshareCost(rideshare, tripData);
     expect(result).toBe(90);
@@ -145,15 +168,22 @@ describe('Transit Cost Calculations', () => {
     name: 'Light Rail',
     price: 3.25, // one-way price
     duration: 40,
-    frequency: 10
+    frequency: 10,
+    trustStatus: 'verified-source',
+    sourceName: 'Sound Transit',
+    sourceLink: 'https://www.soundtransit.org',
+    mapLink: 'https://maps.google.com/?q=SeaTac+Light+Rail',
+    lastUpdated: new Date().toISOString(),
+    assumptions: ['ORCA card required for discounted fare']
   };
 
   test('calculateTransitCost should return the base price for one-way trips', () => {
     const tripData: TripData = {
       type: 'one-way-arrival',
+      origin: '98101',
+      destination: 'Central Terminal',
       arrivalDate: '2024-01-01',
-      arrivalTime: '10:00',
-      terminal: 'Central Terminal'
+      arrivalTime: '10:00'
     };
     const result = calculateTransitCost(transit, tripData);
     expect(result).toBe(3.25);
@@ -162,11 +192,12 @@ describe('Transit Cost Calculations', () => {
   test('calculateTransitCost should double for round-trip', () => {
     const tripData: TripData = {
       type: 'round-trip',
+      origin: '98101',
+      destination: 'Central Terminal',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
-      returnTime: '15:00',
-      terminal: 'Central Terminal'
+      returnTime: '15:00'
     };
     const result = calculateTransitCost(transit, tripData);
     expect(result).toBe(6.5);
@@ -176,16 +207,20 @@ describe('Transit Cost Calculations', () => {
 describe('Leave-by Time Calculation', () => {
   const tripData: TripData = {
     type: 'one-way-departure',
+    origin: '98101',
+    destination: 'Central Terminal',
     departureDate: '2024-01-01',
     departureTime: '14:00', // 2:00 PM flight
-    terminal: 'Central Terminal'
   };
 
   test('calculateLeaveByTime should calculate departure time correctly', () => {
     const tsaEstimate: TsaEstimate = {
-      terminal: 'Central Terminal',
+      destination: 'Central Terminal',
       waitTime: 20,
-      status: 'estimated'
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Mock TSA',
+      assumptions: ['Based on historical wait times']
     };
     const transportDuration = 25;
     const buffer = 30;
@@ -203,7 +238,13 @@ describe('Recommendation Ranking', () => {
       type: 'official',
       price: 25,
       distance: 5,
-      availability: 80
+      availability: 80,
+      trustStatus: 'verified-source',
+      sourceName: 'SeaTac Airport',
+      sourceLink: 'https://www.portseattle.org/sea-tac',
+      mapLink: 'https://maps.google.com/?q=SeaTac+Official+Parking',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Daily rate applies for full trip duration']
     },
     {
       id: 'off-airport-1',
@@ -211,7 +252,13 @@ describe('Recommendation Ranking', () => {
       type: 'off-airport',
       price: 15,
       distance: 10,
-      availability: 90
+      availability: 90,
+      trustStatus: 'estimated',
+      sourceName: 'Third-party parking aggregator',
+      sourceLink: 'https://example.com/parking',
+      mapLink: 'https://maps.google.com/?q=Park+Fly+Lot+A+SeaTac',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Pricing may vary by season']
     }
   ];
 
@@ -221,7 +268,13 @@ describe('Recommendation Ranking', () => {
       name: 'Uber',
       price: 45,
       duration: 25,
-      availability: 85
+      availability: 85,
+      trustStatus: 'live',
+      sourceName: 'Uber API',
+      sourceLink: 'https://www.uber.com',
+      mapLink: 'https://maps.google.com/?q=Uber+SeaTac',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Live traffic conditions considered']
     }
   ];
 
@@ -231,39 +284,68 @@ describe('Recommendation Ranking', () => {
       name: 'Light Rail',
       price: 3.25,
       duration: 40,
-      frequency: 10
+      frequency: 10,
+      trustStatus: 'verified-source',
+      sourceName: 'Sound Transit',
+      sourceLink: 'https://www.soundtransit.org',
+      mapLink: 'https://maps.google.com/?q=SeaTac+Light+Rail',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['ORCA card required for discounted fare']
     }
   ];
 
   const tripData: TripData = {
     type: 'round-trip',
+    origin: '98101',
+    destination: 'Central Terminal',
     departureDate: '2024-01-01',
     departureTime: '10:00',
     returnDate: '2024-01-03',
-    returnTime: '15:00',
-    terminal: 'Central Terminal'
+    returnTime: '15:00'
   };
 
   test('rankRecommendations should return ranked recommendations', () => {
     const tsaEstimate: TsaEstimate = {
-      terminal: 'Central Terminal',
+      destination: 'Central Terminal',
       waitTime: 20,
-      status: 'estimated'
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Mock TSA',
+      assumptions: ['Based on historical wait times']
     };
     const result = rankRecommendations(tripData, parkingOptions, rideshareOptions, transitOptions, tsaEstimate);
 
     expect(result).toHaveLength(4); // 2 parking + 1 rideshare + 1 transit
     expect(result[0]).toHaveProperty('score');
+    expect(result[0]).toHaveProperty('stressScore');
     expect(result[0]).toHaveProperty('cost');
     expect(result[0]).toHaveProperty('reasons');
     expect(result[0].type).toBeDefined();
   });
 
+  test('rankRecommendations should compute true minimum cost correctly', () => {
+    const tsaEstimate: TsaEstimate = {
+      destination: 'Central Terminal',
+      waitTime: 20,
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Mock TSA',
+      assumptions: ['Based on historical wait times']
+    };
+    const result = rankRecommendations(tripData, parkingOptions, rideshareOptions, transitOptions, tsaEstimate);
+    const minCost = Math.min(...result.map(item => item.cost));
+    expect(result.some(item => item.cost === minCost)).toBe(true);
+    expect(minCost).toBe(6.5);
+  });
+
   test('rankRecommendations should sort by score descending', () => {
     const tsaEstimate: TsaEstimate = {
-      terminal: 'Central Terminal',
+      destination: 'Central Terminal',
       waitTime: 20,
-      status: 'estimated'
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Mock TSA',
+      assumptions: ['Based on historical wait times']
     };
     const result = rankRecommendations(tripData, parkingOptions, rideshareOptions, transitOptions, tsaEstimate);
 
@@ -274,9 +356,12 @@ describe('Recommendation Ranking', () => {
 
   test('rankRecommendations should include reasons for recommendations', () => {
     const tsaEstimate: TsaEstimate = {
-      terminal: 'Central Terminal',
+      destination: 'Central Terminal',
       waitTime: 20,
-      status: 'estimated'
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Mock TSA',
+      assumptions: ['Based on historical wait times']
     };
     const result = rankRecommendations(tripData, parkingOptions, rideshareOptions, transitOptions, tsaEstimate);
 
@@ -284,5 +369,15 @@ describe('Recommendation Ranking', () => {
       expect(Array.isArray(rec.reasons)).toBe(true);
       expect(rec.reasons.length).toBeGreaterThan(0);
     });
+  });
+
+  test('Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names', async () => {
+    const provider = new MockProvider();
+    const transitJourneys = await provider.getTransitOptions('Monroe, WA 98272', 'Seattle-Tacoma International Airport');
+
+    expect(transitJourneys.length).toBeGreaterThan(0);
+    expect(transitJourneys.every(journey => journey.name.startsWith('Drive to'))).toBe(true);
+    expect(transitJourneys.some(journey => journey.name.includes('Light Rail to SeaTac'))).toBe(true);
+    expect(transitJourneys.some(journey => journey.totalDuration <= 120)).toBe(true);
   });
 });

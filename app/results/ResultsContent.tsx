@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { TripData, Recommendation, TripType } from '../../lib/types';
+import { TripData, Recommendation, TripType, TrustStatus, ParkingOption, RideshareOption, TransitOption } from '../../lib/types';
 import { RecommendationEngine } from '../../lib/recommendationEngine';
 import { RankedRecommendation } from '../../lib/domain';
 
@@ -20,35 +20,38 @@ export default function ResultsContent() {
 
   useEffect(() => {
     const type = searchParams.get('type') as TripData['type'] | null;
+    const origin = searchParams.get('origin') || '';
     const destination = searchParams.get('destination') || ''; // renamed from terminal
+    const parkingDurationStr = searchParams.get('parkingDuration');
+    const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
 
     let data: TripData | null = null;
 
     if (type === 'one-way-departure') {
       const departureDate = searchParams.get('departureDate') || '';
       const departureTime = searchParams.get('departureTime') || '';
-      if (departureDate && departureTime && destination) {
-        data = { type, departureDate, departureTime, destination };
+      if (departureDate && departureTime && origin && destination) {
+        data = { type, origin, destination, departureDate, departureTime, parkingDuration };
       }
     } else if (type === 'one-way-arrival') {
       const arrivalDate = searchParams.get('arrivalDate') || '';
       const arrivalTime = searchParams.get('arrivalTime') || '';
-      if (arrivalDate && arrivalTime && destination) {
-        data = { type, arrivalDate, arrivalTime, destination };
+      if (arrivalDate && arrivalTime && origin && destination) {
+        data = { type, origin, destination, arrivalDate, arrivalTime };
       }
     } else if (type === 'round-trip') {
       const departureDate = searchParams.get('departureDate') || '';
       const departureTime = searchParams.get('departureTime') || '';
       const returnDate = searchParams.get('returnDate') || '';
       const returnTime = searchParams.get('returnTime') || '';
-      if (departureDate && departureTime && returnDate && returnTime && destination) {
-        data = { type, departureDate, departureTime, returnDate, returnTime, destination };
+      if (departureDate && departureTime && returnDate && returnTime && origin && destination) {
+        data = { type, origin, destination, departureDate, departureTime, returnDate, returnTime, parkingDuration };
       }
     } else if (type === 'dropoff-pickup') {
       const airportTripDate = searchParams.get('airportTripDate') || '';
       const airportTripTime = searchParams.get('airportTripTime') || '';
-      if (airportTripDate && airportTripTime && destination) {
-        data = { type, airportTripDate, airportTripTime, destination };
+      if (airportTripDate && airportTripTime && origin && destination) {
+        data = { type, origin, destination, airportTripDate, airportTripTime };
       }
     }
 
@@ -112,11 +115,15 @@ export default function ResultsContent() {
       // Update URL params
       const params = new URLSearchParams();
       params.set('type', newTripData.type);
+      params.set('origin', newTripData.origin);
       params.set('destination', newTripData.destination);
 
       if (newTripData.type === 'one-way-departure') {
         params.set('departureDate', newTripData.departureDate);
         params.set('departureTime', newTripData.departureTime);
+        if (newTripData.parkingDuration) {
+          params.set('parkingDuration', newTripData.parkingDuration.toString());
+        }
       } else if (newTripData.type === 'one-way-arrival') {
         params.set('arrivalDate', newTripData.arrivalDate);
         params.set('arrivalTime', newTripData.arrivalTime);
@@ -125,6 +132,9 @@ export default function ResultsContent() {
         params.set('departureTime', newTripData.departureTime);
         params.set('returnDate', newTripData.returnDate);
         params.set('returnTime', newTripData.returnTime);
+        if (newTripData.parkingDuration) {
+          params.set('parkingDuration', newTripData.parkingDuration.toString());
+        }
       } else if (newTripData.type === 'dropoff-pickup') {
         params.set('airportTripDate', newTripData.airportTripDate);
         params.set('airportTripTime', newTripData.airportTripTime);
@@ -148,6 +158,43 @@ export default function ResultsContent() {
     setEditingData(null);
   };
 
+  const getTrustRank = (status: TrustStatus): number => {
+    switch (status) {
+      case 'verified-source':
+        return 4;
+      case 'live':
+        return 3;
+      case 'estimated':
+        return 2;
+      case 'fallback':
+        return 1;
+      default:
+        return 0;
+    }
+  };
+
+  const getOptionTrustStatus = (option: ParkingOption | RideshareOption | TransitOption): TrustStatus => {
+    return option.trustStatus;
+  };
+
+  const chooseCheapestOption = (options: RankedRecommendation[]) => {
+    return options.reduce((best, current) => {
+      if (current.cost !== best.cost) return current.cost < best.cost ? current : best;
+      if (current.duration !== best.duration) return current.duration < best.duration ? current : best;
+      return getTrustRank(getOptionTrustStatus(current.option)) > getTrustRank(getOptionTrustStatus(best.option)) ? current : best;
+    }, options[0]);
+  };
+
+  const chooseLeastStressfulOption = (options: RankedRecommendation[]) => {
+    return options.reduce((best, current) => {
+      if (current.stressScore !== best.stressScore) return current.stressScore > best.stressScore ? current : best;
+      if (getTrustRank(getOptionTrustStatus(current.option)) !== getTrustRank(getOptionTrustStatus(best.option))) {
+        return getTrustRank(getOptionTrustStatus(current.option)) > getTrustRank(getOptionTrustStatus(best.option)) ? current : best;
+      }
+      return current.duration < best.duration ? current : best;
+    }, options[0]);
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50">
@@ -165,8 +212,9 @@ export default function ResultsContent() {
     );
   }
 
-  const cheapestOption = rankedOptions[0];
-  const leastStressfulOption = rankedOptions.find(opt => opt.reasons.includes('High availability') || opt.reasons.includes('Frequent service'));
+  const cheapestOption = rankedOptions.length > 0 ? chooseCheapestOption(rankedOptions) : null;
+
+  const leastStressfulOption = rankedOptions.length > 0 ? chooseLeastStressfulOption(rankedOptions) : null;
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
@@ -218,7 +266,11 @@ export default function ResultsContent() {
             )}
 
             <div>
-              <span className="font-medium">Terminal:</span> {tripData.destination}
+              <span className="font-medium">Origin:</span> {tripData.origin}
+            </div>
+
+            <div>
+              <span className="font-medium">Destination:</span> {tripData.destination}
             </div>
 
             <div>
@@ -331,9 +383,6 @@ export default function ResultsContent() {
                           {option.reasons.map((reason, idx) => (
                             <li key={idx}>{reason}</li>
                           ))}
-                          {option.type === 'parking' && (
-                            <li>Full trip duration pricing</li>
-                          )}
                           {option.type === 'rideshare' && (
                             <li>{tripData.type === 'round-trip' ? 'Roundtrip pricing' : 'One-way pricing'}</li>
                           )}
@@ -388,6 +437,7 @@ function EditTripForm({ initialData, onSubmit, onCancel }: {
 }) {
   const [formData, setFormData] = useState({
     type: initialData.type,
+    origin: initialData.origin,
     destination: initialData.destination,
     departureDate: 'departureDate' in initialData ? initialData.departureDate : '',
     departureTime: 'departureTime' in initialData ? initialData.departureTime : '',
@@ -397,41 +447,110 @@ function EditTripForm({ initialData, onSubmit, onCancel }: {
     returnTime: 'returnTime' in initialData ? initialData.returnTime : '',
     airportTripDate: 'airportTripDate' in initialData ? initialData.airportTripDate : '',
     airportTripTime: 'airportTripTime' in initialData ? initialData.airportTripTime : '',
+    parkingDuration: 'parkingDuration' in initialData && initialData.parkingDuration ? (initialData.parkingDuration / 60).toString() : '',
   });
+
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  const validateFormData = (): string[] => {
+    const errors: string[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day for date comparison
+
+    if (formData.type === 'one-way-departure' || formData.type === 'round-trip') {
+      if (!formData.departureDate) {
+        errors.push('Departure date is required');
+      } else {
+        const departureDate = new Date(formData.departureDate);
+        if (departureDate < today) {
+          errors.push('Departure date cannot be in the past');
+        }
+      }
+    }
+
+    if (formData.type === 'one-way-arrival') {
+      if (!formData.arrivalDate) {
+        errors.push('Arrival date is required');
+      } else {
+        const arrivalDate = new Date(formData.arrivalDate);
+        if (arrivalDate < today) {
+          errors.push('Arrival date cannot be in the past');
+        }
+      }
+    }
+
+    if (formData.type === 'round-trip') {
+      if (!formData.returnDate) {
+        errors.push('Return date is required');
+      } else if (formData.departureDate && formData.returnDate) {
+        const departureDate = new Date(formData.departureDate);
+        const returnDate = new Date(formData.returnDate);
+        if (returnDate < departureDate) {
+          errors.push('Return date must be after departure date');
+        }
+      }
+    }
+
+    if (formData.type === 'dropoff-pickup') {
+      if (!formData.airportTripDate) {
+        errors.push('Airport trip date is required');
+      } else {
+        const airportTripDate = new Date(formData.airportTripDate);
+        if (airportTripDate < today) {
+          errors.push('Airport trip date cannot be in the past');
+        }
+      }
+    }
+
+    return errors;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const errors = validateFormData();
+    setValidationErrors(errors);
+    
+    if (errors.length > 0) {
+      return; // Don't proceed with submission
+    }
     let data: TripData;
 
     if (formData.type === 'one-way-departure') {
       data = {
         type: formData.type,
+        origin: formData.origin,
+        destination: formData.destination,
         departureDate: formData.departureDate,
         departureTime: formData.departureTime,
-        destination: formData.destination,
+        parkingDuration: formData.parkingDuration ? parseFloat(formData.parkingDuration) * 60 : undefined,
       };
     } else if (formData.type === 'one-way-arrival') {
       data = {
         type: formData.type,
+        origin: formData.origin,
+        destination: formData.destination,
         arrivalDate: formData.arrivalDate,
         arrivalTime: formData.arrivalTime,
-        destination: formData.destination,
       };
     } else if (formData.type === 'round-trip') {
       data = {
         type: formData.type,
+        origin: formData.origin,
+        destination: formData.destination,
         departureDate: formData.departureDate,
         departureTime: formData.departureTime,
         returnDate: formData.returnDate,
         returnTime: formData.returnTime,
-        destination: formData.destination,
+        parkingDuration: formData.parkingDuration ? parseFloat(formData.parkingDuration) * 60 : undefined,
       };
     } else {
       data = {
         type: formData.type,
+        origin: formData.origin,
+        destination: formData.destination,
         airportTripDate: formData.airportTripDate,
         airportTripTime: formData.airportTripTime,
-        destination: formData.destination,
       };
     }
 
@@ -444,6 +563,19 @@ function EditTripForm({ initialData, onSubmit, onCancel }: {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {validationErrors.length > 0 && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+          <h3 className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+            Please fix the following errors:
+          </h3>
+          <ul className="list-disc list-inside text-sm text-red-700 dark:text-red-300 space-y-1">
+            {validationErrors.map((error, index) => (
+              <li key={index}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -463,7 +595,23 @@ function EditTripForm({ initialData, onSubmit, onCancel }: {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Terminal
+            Origin ZIP or address
+          </label>
+          <input
+            type="text"
+            value={formData.origin}
+            onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
+            placeholder="Enter your home ZIP or address"
+            required
+            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Destination terminal
           </label>
           <select
             value={formData.destination}
@@ -514,6 +662,26 @@ function EditTripForm({ initialData, onSubmit, onCancel }: {
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
             />
           </div>
+        </div>
+      )}
+
+      {(formData.type === 'one-way-departure' || formData.type === 'round-trip') && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Expected parking duration (hours)
+            <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+              Optional - leave blank for default estimate
+            </span>
+          </label>
+          <input
+            type="number"
+            value={formData.parkingDuration}
+            onChange={(e) => setFormData({ ...formData, parkingDuration: e.target.value })}
+            placeholder="e.g., 24 for 1 day"
+            min="0.5"
+            step="0.5"
+            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
+          />
         </div>
       )}
 

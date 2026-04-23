@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     const tripData: TripData = await request.json();
 
     // Validate tripData
-    if (!tripData.type || !tripData.destination) {
+    if (!tripData.type || !tripData.origin || !tripData.destination) {
       return NextResponse.json({ error: 'Invalid trip data' }, { status: 400 });
     }
 

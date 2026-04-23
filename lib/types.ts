@@ -7,29 +7,35 @@ export type TripType =
 export type TripData =
   | {
       type: 'one-way-departure';
+      origin: string;
+      destination: string;
       departureDate: string;
       departureTime: string;
-      destination: string; // renamed from terminal
+      parkingDuration?: number; // in minutes, optional user override
     }
   | {
       type: 'one-way-arrival';
+      origin: string;
+      destination: string;
       arrivalDate: string;
       arrivalTime: string;
-      destination: string; // renamed from terminal
     }
   | {
       type: 'round-trip';
+      origin: string;
+      destination: string;
       departureDate: string;
       departureTime: string;
       returnDate: string;
       returnTime: string;
-      destination: string; // renamed from terminal
+      parkingDuration?: number; // in minutes, optional user override
     }
   | {
       type: 'dropoff-pickup';
+      origin: string;
+      destination: string;
       airportTripDate: string;
       airportTripTime: string;
-      destination: string; // renamed from terminal
     };
 
 export type TrustStatus = 'live' | 'verified-source' | 'estimated' | 'fallback';
@@ -69,12 +75,31 @@ export type TransitOption = {
   price: number;
   duration: number;
   frequency: number; // minutes between services
+  availability?: number;
   trustStatus: TrustStatus;
   sourceName: string;
   sourceLink?: string;
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
+};
+
+export type TransitSegment = {
+  mode: 'drive' | 'walk' | 'bus' | 'light-rail' | 'train' | 'ferry';
+  name: string;
+  duration: number; // in minutes
+  distance?: number; // in miles, for drive segments
+  cost: number;
+  frequency?: number; // for scheduled transit
+};
+
+export type TransitJourney = TransitOption & {
+  id: string;
+  name: string;
+  totalDuration: number; // total door-to-door time in minutes
+  totalCost: number;
+  segments: TransitSegment[];
+  transfers: number; // number of transfers
 };
 
 export type TrafficEstimate = {

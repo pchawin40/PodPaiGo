@@ -6,6 +6,7 @@ import { TripType } from '../../lib/types';
 
 type TripFormState = {
   type: TripType;
+  origin: string;
   destination: string; // renamed from terminal
   departureDate: string;
   departureTime: string;
@@ -15,12 +16,14 @@ type TripFormState = {
   returnTime: string;
   airportTripDate: string;
   airportTripTime: string;
+  parkingDuration: string; // in hours, for user input
 };
 
 export default function TripForm() {
   const router = useRouter();
   const [tripData, setTripData] = useState<TripFormState>({
     type: 'one-way-departure',
+    origin: '',
     destination: 'Central Terminal', // renamed from terminal
     departureDate: '',
     departureTime: '',
@@ -30,18 +33,88 @@ export default function TripForm() {
     returnTime: '',
     airportTripDate: '',
     airportTripTime: '',
+    parkingDuration: '',
   });
+
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+
+  const validateTripData = (): string[] => {
+    const errors: string[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day for date comparison
+
+    if (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') {
+      if (!tripData.departureDate) {
+        errors.push('Departure date is required');
+      } else {
+        const departureDate = new Date(tripData.departureDate);
+        if (departureDate < today) {
+          errors.push('Departure date cannot be in the past');
+        }
+      }
+    }
+
+    if (tripData.type === 'one-way-arrival') {
+      if (!tripData.arrivalDate) {
+        errors.push('Arrival date is required');
+      } else {
+        const arrivalDate = new Date(tripData.arrivalDate);
+        if (arrivalDate < today) {
+          errors.push('Arrival date cannot be in the past');
+        }
+      }
+    }
+
+    if (tripData.type === 'round-trip') {
+      if (!tripData.returnDate) {
+        errors.push('Return date is required');
+      } else if (tripData.departureDate && tripData.returnDate) {
+        const departureDate = new Date(tripData.departureDate);
+        const returnDate = new Date(tripData.returnDate);
+        if (returnDate < departureDate) {
+          errors.push('Return date must be after departure date');
+        }
+      }
+    }
+
+    if (tripData.type === 'dropoff-pickup') {
+      if (!tripData.airportTripDate) {
+        errors.push('Airport trip date is required');
+      } else {
+        const airportTripDate = new Date(tripData.airportTripDate);
+        if (airportTripDate < today) {
+          errors.push('Airport trip date cannot be in the past');
+        }
+      }
+    }
+
+    return errors;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    const errors = validateTripData();
+    setValidationErrors(errors);
+    
+    if (errors.length > 0) {
+      return; // Don't proceed with submission
+    }
     const params = new URLSearchParams({
       type: tripData.type,
+      origin: tripData.origin,
       destination: tripData.destination, // renamed from terminal
     });
 
     if (tripData.type === 'one-way-departure') {
       params.set('departureDate', tripData.departureDate);
       params.set('departureTime', tripData.departureTime);
+      if (tripData.parkingDuration) {
+        const durationHours = parseFloat(tripData.parkingDuration);
+        if (!isNaN(durationHours) && durationHours > 0) {
+          params.set('parkingDuration', (durationHours * 60).toString());
+        }
+      }
     }
 
     if (tripData.type === 'one-way-arrival') {
@@ -54,6 +127,12 @@ export default function TripForm() {
       params.set('departureTime', tripData.departureTime);
       params.set('returnDate', tripData.returnDate);
       params.set('returnTime', tripData.returnTime);
+      if (tripData.parkingDuration) {
+        const durationHours = parseFloat(tripData.parkingDuration);
+        if (!isNaN(durationHours) && durationHours > 0) {
+          params.set('parkingDuration', (durationHours * 60).toString());
+        }
+      }
     }
 
     if (tripData.type === 'dropoff-pickup') {
@@ -76,6 +155,19 @@ export default function TripForm() {
             Plan your trip
           </h1>
 
+          {validationErrors.length > 0 && (
+            <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+                Please fix the following errors:
+              </h3>
+              <ul className="list-disc list-inside text-sm text-red-700 dark:text-red-300 space-y-1">
+                {validationErrors.map((error, index) => (
+                  <li key={index}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -91,6 +183,20 @@ export default function TripForm() {
                 <option value="round-trip">Round trip</option>
                 <option value="dropoff-pickup">Drop-off / pickup</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Origin ZIP or address
+              </label>
+              <input
+                type="text"
+                value={tripData.origin}
+                onChange={(e) => setTripData({ ...tripData, origin: e.target.value })}
+                placeholder="Enter your home ZIP or address"
+                required
+                className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
+              />
             </div>
 
             {(isDepartureType || isDropoffPickup) && (
@@ -133,6 +239,26 @@ export default function TripForm() {
                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
                   />
                 </div>
+
+                {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Expected parking duration (hours)
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+                        Optional - leave blank for default estimate
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      value={tripData.parkingDuration}
+                      onChange={(e) => setTripData({ ...tripData, parkingDuration: e.target.value })}
+                      placeholder="e.g., 24 for 1 day"
+                      min="0.5"
+                      step="0.5"
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
