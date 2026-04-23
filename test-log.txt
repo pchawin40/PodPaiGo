@@ -1,0 +1,57 @@
+
+> podpaigo@0.1.0 test
+> jest
+
+  console.warn
+    Live traffic API failed, falling back to mock: Error: Google Maps API key not configured
+        at LiveTrafficProvider.getTrafficEstimate (/home/pathocha000/personal/PodPaiGo/podpaigo/lib/providers.ts:98:15)
+        at MockProvider.getRouteEstimate (/home/pathocha000/personal/PodPaiGo/podpaigo/lib/providers.ts:218:45)
+        at MockProvider.getTransitOptions (/home/pathocha000/personal/PodPaiGo/podpaigo/lib/providers.ts:314:40)
+        at Object.<anonymous> (/home/pathocha000/personal/PodPaiGo/podpaigo/__tests__/domain.test.ts:376:29)
+
+      148 |       };
+      149 |     } catch (error) {
+    > 150 |       console.warn('Live traffic API failed, falling back to mock:', error);
+          |               ^
+      151 |       const route = normalizeTrafficRoute(origin, destination);
+      152 |       return mockTrafficEstimates[route] || {
+      153 |         route,
+
+      at LiveTrafficProvider.getTrafficEstimate (lib/providers.ts:150:15)
+      at MockProvider.getRouteEstimate (lib/providers.ts:218:45)
+      at MockProvider.getTransitOptions (lib/providers.ts:314:40)
+      at Object.<anonymous> (__tests__/domain.test.ts:376:29)
+
+PASS __tests__/domain.test.ts
+  Time Utilities
+    ✓ parseTime should correctly parse time string (3 ms)
+    ✓ addMinutes should add minutes correctly (1 ms)
+    ✓ formatTime should format time correctly
+  Trip Duration Calculation
+    ✓ calculateTripDuration should calculate duration between departure and return
+    ✓ calculateTripDuration should return 0 for same date/time (1 ms)
+  Parking Cost Calculations
+    ✓ calculateOfficialParkingCost should calculate correctly (1 ms)
+    ✓ calculateOffAirportParkingCost should calculate correctly
+    ✓ calculateOfficialParkingCost should return 0 for off-airport parking
+    ✓ calculateOffAirportParkingCost should return 0 for official parking (1 ms)
+  Rideshare Cost Calculations
+    ✓ calculateRideshareCost should return one-way price for one-way trips
+    ✓ calculateRideshareCost should double the price for round trip
+  Transit Cost Calculations
+    ✓ calculateTransitCost should return the base price for one-way trips (1 ms)
+    ✓ calculateTransitCost should double for round-trip
+  Leave-by Time Calculation
+    ✓ calculateLeaveByTime should calculate departure time correctly (1 ms)
+  Recommendation Ranking
+    ✓ rankRecommendations should return ranked recommendations (5 ms)
+    ✓ rankRecommendations should compute true minimum cost correctly
+    ✓ rankRecommendations should sort by score descending (1 ms)
+    ✓ rankRecommendations should include reasons for recommendations (1 ms)
+    ✓ Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names (138 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       19 passed, 19 total
+Snapshots:   0 total
+Time:        0.723 s
+Ran all test suites.

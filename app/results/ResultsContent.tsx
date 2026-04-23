@@ -2,26 +2,409 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { TripData, Recommendation, TripType, TrustStatus, ParkingOption, RideshareOption, TransitOption } from '../../lib/types';
+import { Recommendation, TripData, TrustStatus } from '../../lib/types';
 import { RecommendationEngine } from '../../lib/recommendationEngine';
 import { RankedRecommendation } from '../../lib/domain';
+import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
+import { PROVIDER_LINKS } from '../../lib/providerCatalog';
+
+type SortTab = 'easiest' | 'cheapest' | 'fastest';
+
+function formatMoney(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`;
+}
+
+function formatMinutes(min: number): string {
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function formatTimeFriendly(time24: string): string {
+  const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
+  if (!m) return time24;
+  let hours = Number(m[1]);
+  const minutes = m[2];
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${minutes} ${ampm}`;
+}
+
+function confidenceFromTrust(trust: TrustStatus): { label: string; className: string } {
+  switch (trust) {
+    case 'verified-source':
+      return { label: 'High confidence', className: 'bg-blue-50 text-blue-800 border-blue-200' };
+    case 'live':
+      return { label: 'Live', className: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+    case 'estimated':
+      return { label: 'Estimated', className: 'bg-amber-50 text-amber-900 border-amber-200' };
+    case 'fallback':
+    default:
+      return { label: 'Low confidence', className: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
+  }
+}
+
+function typeLabel(type: RankedRecommendation['type']): string {
+  if (type === 'rideshare') return 'Ride';
+  if (type === 'parking') return 'Parking';
+  return 'Transit';
+}
+
+function bestLink(option: any): string | null {
+  return option.sourceLink || option.mapLink || null;
+}
+
+function pricingKindLabel(kind?: string): string {
+  switch (kind) {
+    case 'live':
+      return 'Live';
+    case 'estimated':
+      return 'Estimated';
+    case 'mock':
+      return 'Mock data';
+    case 'check-live':
+      return 'Check live price';
+    case 'from-per-day':
+      return 'From / day';
+    default:
+      return '—';
+  }
+}
+
+function formatProviderPrice(it: any): { primary: string; secondary?: string } {
+  const kind = it.priceDisplay as string | undefined;
+  const unit = it.priceUnit as string | undefined;
+
+  if (kind === 'check-live') {
+    return { primary: 'Check live price', secondary: it.priceNote };
+  }
+
+  if (kind === 'from-per-day' && unit === 'per-day' && typeof it.price === 'number') {
+    return { primary: `From ${formatMoney(it.price)}/day`, secondary: it.priceNote };
+  }
+
+  if ((kind === 'estimated' || kind === 'mock') && typeof it.price === 'number') {
+    const prefix = kind === 'mock' ? 'Mock:' : 'Est.';
+    return { primary: `${prefix} ${formatMoney(it.price)}`, secondary: it.priceNote };
+  }
+
+  if (typeof it.price === 'number') {
+    return { primary: formatMoney(it.price), secondary: it.priceNote };
+  }
+
+  return { primary: 'Check price', secondary: it.priceNote };
+}
+
+function PriceLegend() {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+      <div className="font-semibold text-zinc-900">Price legend</div>
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <div className="font-medium">Live</div>
+          <div className="text-xs text-zinc-600">Pulled from provider/API</div>
+        </div>
+        <div>
+          <div className="font-medium">Estimated</div>
+          <div className="text-xs text-zinc-600">Calculated or based on typical rates</div>
+        </div>
+        <div>
+          <div className="font-medium">From / day</div>
+          <div className="text-xs text-zinc-600">Daily rate; trip total may vary by length of stay</div>
+        </div>
+        <div>
+          <div className="font-medium">Check live price</div>
+          <div className="text-xs text-zinc-600">App does not have reliable live pricing yet; open provider to confirm</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PricingLinksSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<any>;
+}) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
+        <p className="mt-1 text-sm text-zinc-600">Pricing + links (best-effort, may vary).</p>
+      </div>
+      <div className="divide-y divide-zinc-100">
+        {items.map((it: any) => {
+          const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
+          const price = formatProviderPrice(it);
+          const link = bestLink(it);
+          const kind = it.priceDisplay as string | undefined;
+
+          return (
+            <div key={it.id || it.name} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-zinc-900">{it.name}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <div className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                    {trust.label}
+                  </div>
+                  {kind && (
+                    <div className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                      {pricingKindLabel(kind)}
+                    </div>
+                  )}
+                </div>
+                {price.secondary && (
+                  <div className="mt-2 text-xs text-zinc-500">{price.secondary}</div>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-semibold text-zinc-900">{price.primary}</div>
+                {link && (
+                  <a
+                    href={link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Check
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SortTabs({ value, onChange }: { value: SortTab; onChange: (v: SortTab) => void }) {
+  const tabs: Array<{ key: SortTab; label: string; sub: string }> = [
+    { key: 'easiest', label: 'Easiest', sub: 'Lowest stress' },
+    { key: 'cheapest', label: 'Cheapest', sub: 'Lowest cost' },
+    { key: 'fastest', label: 'Fastest', sub: 'Shortest time' },
+  ];
+
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm">
+      {tabs.map((t) => {
+        const active = value === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={
+              'rounded-xl px-3 py-2 text-left transition ' +
+              (active ? 'bg-blue-600 text-white' : 'bg-white text-zinc-900 hover:bg-zinc-50')
+            }
+          >
+            <div className="text-sm font-semibold">{t.label}</div>
+            <div className={active ? 'text-xs text-blue-100' : 'text-xs text-zinc-500'}>{t.sub}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function optionPriceSummary(option: any, computedTotal: number, tripData: TripData | null): { primary: string; secondary?: string; badge?: string } {
+  const kind = option?.priceDisplay as string | undefined;
+  const unit = option?.priceUnit as string | undefined;
+
+  if (kind === 'check-live') {
+    return {
+      primary: 'Check live price',
+      secondary: option?.priceNote,
+      badge: 'Check live price',
+    };
+  }
+
+  if (kind === 'from-per-day' && unit === 'per-day' && typeof option?.price === 'number') {
+    // If parking duration is available in tripData, compute estimated trip total using ceiling(days).
+    if (tripData && 'parkingDuration' in tripData && tripData.parkingDuration) {
+      const minutes = tripData.parkingDuration as number;
+      const hours = minutes / 60;
+      const days = Math.max(1, Math.ceil(hours / 24));
+      const tripTotal = option.price * days;
+      return {
+        primary: `From ${formatMoney(option.price)}/day`,
+        secondary: `Est. trip total: ${formatMoney(tripTotal)} for ${days} day(s) · Check final price with provider`,
+        badge: 'Estimated',
+      };
+    }
+
+    return {
+      primary: `From ${formatMoney(option.price)}/day`,
+      secondary: option?.priceNote,
+      badge: 'Estimated',
+    };
+  }
+
+  if (kind === 'mock') {
+    return {
+      primary: `Mock estimate: ${formatMoney(computedTotal)}`,
+      secondary: option?.priceNote,
+      badge: 'Mock data',
+    };
+  }
+
+  if (kind === 'estimated') {
+    return {
+      primary: `Est. ${formatMoney(computedTotal)}`,
+      secondary: option?.priceNote,
+      badge: 'Estimated',
+    };
+  }
+
+  // Default legacy behavior
+  return {
+    primary: formatMoney(computedTotal),
+    secondary: option?.priceNote,
+  };
+}
+
+function OptionCard({
+  item,
+  rank,
+  tripData,
+}: {
+  item: RankedRecommendation;
+  rank: number;
+  tripData: TripData | null;
+}) {
+  const opt: any = item.option;
+  const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
+
+  const sourceLink = opt.sourceLink || null;
+  const routeLink = opt.mapLink || null;
+
+  const price = optionPriceSummary(opt, item.cost, tripData);
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-base font-semibold text-zinc-900">{opt.name}</div>
+            <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
+              {typeLabel(item.type)}
+            </div>
+            {rank === 1 && (
+              <div className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                Recommended
+              </div>
+            )}
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <div className="text-lg font-semibold text-zinc-900">{price.primary}</div>
+            <div className="text-sm text-zinc-600">• {formatMinutes(item.duration)}</div>
+            <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
+              {trust.label}
+            </div>
+            {price.badge && (
+              <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                {price.badge}
+              </div>
+            )}
+          </div>
+          {price.secondary && (
+            <div className="mt-2 text-xs text-zinc-500">{price.secondary}</div>
+          )}
+
+          <div className="mt-4">
+            <div className="text-sm font-medium text-zinc-900">Why this option</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+              {item.reasons.slice(0, 3).map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-row gap-2 sm:flex-col sm:items-stretch">
+          {sourceLink && (
+            <a
+              href={sourceLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              View / Book
+            </a>
+          )}
+          {routeLink && (
+            <a
+              href={routeLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Route
+            </a>
+          )}
+        </div>
+      </div>
+
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">Details & evidence</summary>
+        <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+          <div><span className="font-medium">Source:</span> {opt.sourceName}</div>
+          {opt.lastUpdated && (
+            <div className="mt-1"><span className="font-medium">Updated:</span> {new Date(opt.lastUpdated).toLocaleString()}</div>
+          )}
+          {Array.isArray(opt.assumptions) && opt.assumptions.length > 0 && (
+            <>
+              <div className="mt-3 font-medium">Assumptions</div>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {opt.assumptions.slice(0, 6).map((a: string) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
 
 export default function ResultsContent() {
   const searchParams = useSearchParams();
+
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editingData, setEditingData] = useState<TripData | null>(null);
+
+  const [sort, setSort] = useState<SortTab>('easiest');
+
+  const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
+  const intent = searchParams.get('intent') || '';
+
+  const seatacZone = useMemo(() => {
+    if (!airlineOrFlight) return null;
+    return resolveSeatacCheckinZone(airlineOrFlight);
+  }, [airlineOrFlight]);
 
   useEffect(() => {
     const type = searchParams.get('type') as TripData['type'] | null;
     const origin = searchParams.get('origin') || '';
-    const destination = searchParams.get('destination') || ''; // renamed from terminal
+    const destination = searchParams.get('destination') || '';
     const parkingDurationStr = searchParams.get('parkingDuration');
     const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
 
@@ -63,7 +446,7 @@ export default function ResultsContent() {
         },
         body: JSON.stringify(data),
       })
-        .then(response => response.json())
+        .then((response) => response.json())
         .then((rec: Recommendation) => {
           setRecommendation(rec);
           setTripData(data);
@@ -77,7 +460,7 @@ export default function ResultsContent() {
           );
           setRankedOptions(ranked);
         })
-        .catch(error => {
+        .catch((error) => {
           console.error('Error fetching recommendations:', error);
           setLoading(false);
         })
@@ -97,6 +480,7 @@ export default function ResultsContent() {
         },
         body: JSON.stringify(newTripData),
       });
+
       const rec: Recommendation = await response.json();
       setRecommendation(rec);
       setTripData(newTripData);
@@ -109,14 +493,20 @@ export default function ResultsContent() {
         rec.tsaEstimate
       );
       setRankedOptions(ranked);
+
       setIsEditing(false);
       setEditingData(null);
 
-      // Update URL params
       const params = new URLSearchParams();
       params.set('type', newTripData.type);
       params.set('origin', newTripData.origin);
       params.set('destination', newTripData.destination);
+
+      // Preserve consumer-only context.
+      const existingIntent = searchParams.get('intent');
+      const existingAirlineOrFlight = searchParams.get('airlineOrFlight');
+      if (existingIntent) params.set('intent', existingIntent);
+      if (existingAirlineOrFlight) params.set('airlineOrFlight', existingAirlineOrFlight);
 
       if (newTripData.type === 'one-way-departure') {
         params.set('departureDate', newTripData.departureDate);
@@ -158,271 +548,241 @@ export default function ResultsContent() {
     setEditingData(null);
   };
 
-  const getTrustRank = (status: TrustStatus): number => {
-    switch (status) {
-      case 'verified-source':
-        return 4;
-      case 'live':
-        return 3;
-      case 'estimated':
-        return 2;
-      case 'fallback':
-        return 1;
-      default:
-        return 0;
+  const sortedOptions = useMemo(() => {
+    const arr = [...rankedOptions];
+
+    if (sort === 'cheapest') {
+      return arr.sort((a, b) => (a.cost - b.cost) || (a.duration - b.duration));
     }
-  };
 
-  const getOptionTrustStatus = (option: ParkingOption | RideshareOption | TransitOption): TrustStatus => {
-    return option.trustStatus;
-  };
+    if (sort === 'fastest') {
+      return arr.sort((a, b) => (a.duration - b.duration) || (a.cost - b.cost));
+    }
 
-  const chooseCheapestOption = (options: RankedRecommendation[]) => {
-    return options.reduce((best, current) => {
-      if (current.cost !== best.cost) return current.cost < best.cost ? current : best;
-      if (current.duration !== best.duration) return current.duration < best.duration ? current : best;
-      return getTrustRank(getOptionTrustStatus(current.option)) > getTrustRank(getOptionTrustStatus(best.option)) ? current : best;
-    }, options[0]);
-  };
+    // easiest
+    return arr.sort((a, b) => (b.stressScore - a.stressScore) || (a.cost - b.cost));
+  }, [rankedOptions, sort]);
 
-  const chooseLeastStressfulOption = (options: RankedRecommendation[]) => {
-    return options.reduce((best, current) => {
-      if (current.stressScore !== best.stressScore) return current.stressScore > best.stressScore ? current : best;
-      if (getTrustRank(getOptionTrustStatus(current.option)) !== getTrustRank(getOptionTrustStatus(best.option))) {
-        return getTrustRank(getOptionTrustStatus(current.option)) > getTrustRank(getOptionTrustStatus(best.option)) ? current : best;
-      }
-      return current.duration < best.duration ? current : best;
-    }, options[0]);
-  };
+  const extraParkingProviders = useMemo(
+    () => [
+      {
+        id: 'seatac-official',
+        name: PROVIDER_LINKS.seatacOfficialParking.label,
+        trustStatus: 'verified-source' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Rates vary by length of stay and availability',
+        sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
+        sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
+      },
+      {
+        id: 'airport-parking-res',
+        name: PROVIDER_LINKS.airportParkingReservationsSea.label,
+        trustStatus: 'estimated' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Search nearby lots and compare',
+        sourceName: PROVIDER_LINKS.airportParkingReservationsSea.sourceName,
+        sourceLink: PROVIDER_LINKS.airportParkingReservationsSea.url,
+      },
+    ],
+    []
+  );
+
+  const extraRideProviders = useMemo(
+    () => [
+      {
+        id: 'uber-link',
+        name: PROVIDER_LINKS.uberDeepLink.label,
+        trustStatus: 'estimated' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Prices vary widely by time and demand',
+        sourceName: PROVIDER_LINKS.uberDeepLink.sourceName,
+        sourceLink: PROVIDER_LINKS.uberDeepLink.url,
+      },
+      {
+        id: 'lyft-link',
+        name: PROVIDER_LINKS.lyftDeepLink.label,
+        trustStatus: 'estimated' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Prices vary widely by time and demand',
+        sourceName: PROVIDER_LINKS.lyftDeepLink.sourceName,
+        sourceLink: PROVIDER_LINKS.lyftDeepLink.url,
+      },
+    ],
+    []
+  );
+
+  const extraTransitProviders = useMemo(
+    () => [
+      {
+        id: 'soundtransit-planner',
+        name: PROVIDER_LINKS.soundTransitPlanner.label,
+        trustStatus: 'verified-source' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Use the planner for schedules and up-to-date alerts',
+        sourceName: PROVIDER_LINKS.soundTransitPlanner.sourceName,
+        sourceLink: PROVIDER_LINKS.soundTransitPlanner.url,
+      },
+      {
+        id: 'google-maps-transit',
+        name: 'Google Maps (transit directions)',
+        trustStatus: 'estimated' as const,
+        priceDisplay: 'check-live' as const,
+        priceNote: 'Search routes and real-time service advisories',
+        sourceName: PROVIDER_LINKS.googleMaps.sourceName,
+        sourceLink: PROVIDER_LINKS.googleMaps.url,
+      },
+    ],
+    []
+  );
 
   if (loading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50">
-        <div className="text-xl">Loading recommendations...</div>
+        <div className="text-lg text-zinc-700">Loading options…</div>
       </div>
     );
   }
 
   if (!tripData || !recommendation) {
     return (
-      <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50">
-        <div className="text-xl text-red-600">Invalid trip data. Please go back and try again.</div>
-        <Link href="/trip" className="mt-4 text-blue-600 hover:underline">Plan Trip</Link>
+      <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 px-4">
+        <div className="text-lg font-medium text-zinc-900">We couldn’t read your trip.</div>
+        <div className="mt-1 text-sm text-zinc-600">Go back and try again.</div>
+        <Link href="/trip" className="mt-5 inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-700">
+          Plan a trip
+        </Link>
       </div>
     );
   }
 
-  const cheapestOption = rankedOptions.length > 0 ? chooseCheapestOption(rankedOptions) : null;
-
-  const leastStressfulOption = rankedOptions.length > 0 ? chooseLeastStressfulOption(rankedOptions) : null;
-
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
-      <main className="flex-1 w-full max-w-4xl mx-auto py-4 px-4">
-        {/* Trip Summary */}
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <h1 className="text-2xl font-bold text-black dark:text-zinc-50">
-              Trip Summary
-            </h1>
-            <button
-              onClick={startEditing}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-            >
-              Edit Trip
-            </button>
+      <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-8">
+        {/* Hero */}
+        <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-sm font-medium text-zinc-500">SeaTac</div>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
+                {recommendation.leaveByTime
+                  ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
+                  : 'Your best options'}
+              </h1>
+              <p className="mt-2 text-sm text-zinc-600">
+                {seatacZone?.note ? seatacZone.note : 'SeaTac Airport'}
+                {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
+                {airlineOrFlight ? ` • ${airlineOrFlight}` : ''}
+                {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip')
+                  ? ` • TSA ${recommendation.tsaEstimate.waitTime}m`
+                  : ''}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={startEditing}
+                className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+              >
+                Edit trip
+              </button>
+              <Link
+                href="/trip"
+                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                New trip
+              </Link>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="font-medium">Trip type:</span>{' '}
-              {tripData.type === 'one-way-departure' && 'One-way departure'}
-              {tripData.type === 'one-way-arrival' && 'One-way arrival'}
-              {tripData.type === 'round-trip' && 'Round trip'}
-              {tripData.type === 'dropoff-pickup' && 'Drop-off / pickup'}
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-zinc-50 p-4">
+              <div className="text-xs font-medium text-zinc-500">Origin</div>
+              <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
             </div>
-
-            {'departureDate' in tripData && (
-              <div>
-                <span className="font-medium">Departing:</span> {tripData.departureDate} at {tripData.departureTime}
-              </div>
-            )}
-
-            {'returnDate' in tripData && (
-              <div>
-                <span className="font-medium">Returning:</span> {tripData.returnDate} at {tripData.returnTime}
-              </div>
-            )}
-
-            {'arrivalDate' in tripData && (
-              <div>
-                <span className="font-medium">Arriving:</span> {tripData.arrivalDate} at {tripData.arrivalTime}
-              </div>
-            )}
-
-            {'airportTripDate' in tripData && (
-              <div>
-                <span className="font-medium">Airport trip:</span> {tripData.airportTripDate} at {tripData.airportTripTime}
-              </div>
-            )}
-
-            <div>
-              <span className="font-medium">Origin:</span> {tripData.origin}
+            <div className="rounded-xl bg-zinc-50 p-4">
+              <div className="text-xs font-medium text-zinc-500">Destination</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-900">SeaTac Airport</div>
+              <div className="mt-1 text-xs text-zinc-600">{tripData.destination}</div>
             </div>
-
-            <div>
-              <span className="font-medium">Destination:</span> {tripData.destination}
-            </div>
-
-            <div>
-              <span className="font-medium">TSA Wait:</span> {recommendation.tsaEstimate.waitTime} min ({recommendation.tsaEstimate.status})
-            </div>
-
-            {recommendation.tripDuration !== undefined && (
-              <div>
-                <span className="font-medium">Trip length:</span> {Math.ceil(recommendation.tripDuration / 60)}h ({recommendation.tripDuration} min)
+            <div className="rounded-xl bg-zinc-50 p-4">
+              <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-900">
+                {recommendation.trafficEstimate ? `${recommendation.trafficEstimate.duration} min` : '—'}
               </div>
-            )}
-
-            {recommendation.leaveByTime && (
-              <div>
-                <span className="font-medium">Leave by:</span> {recommendation.leaveByTime}
+              <div className="mt-1 text-xs text-zinc-600">
+                {recommendation.trafficEstimate
+                  ? `${recommendation.trafficEstimate.congestion} congestion`
+                  : 'No traffic estimate'}
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Edit Trip Panel */}
+        {/* Price legend */}
+        <div className="mt-6">
+          <PriceLegend />
+        </div>
+
+        {/* Edit panel */}
         {isEditing && editingData && (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow mb-6">
-            <h2 className="text-xl font-bold text-black dark:text-zinc-50 mb-4">
-              Edit Trip Details
-            </h2>
-            <EditTripForm
-              initialData={editingData}
-              onSubmit={handleRecalculate}
-              onCancel={cancelEditing}
-            />
+          <div className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
+                <p className="mt-1 text-sm text-zinc-600">Adjust your timing or origin. We’ll recalculate instantly.</p>
+              </div>
+              <button
+                type="button"
+                onClick={cancelEditing}
+                className="text-sm font-medium text-blue-700 hover:text-blue-800"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <EditTripForm initialData={editingData} onSubmit={handleRecalculate} onCancel={cancelEditing} />
+            </div>
           </div>
         )}
 
-        {/* Best Options */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {cheapestOption && (
-            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border-l-4 border-green-500">
-              <h2 className="text-lg font-semibold text-green-800 dark:text-green-200 mb-2">
-                💰 Cheapest Option
-              </h2>
-              <div className="text-sm">
-                <p className="font-medium">{cheapestOption.option.name}</p>
-                <p className="text-green-700 dark:text-green-300">${cheapestOption.cost}</p>
-                <p className="text-gray-600 dark:text-gray-400">{cheapestOption.duration} min travel</p>
-              </div>
-            </div>
-          )}
-
-          {leastStressfulOption && (
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-l-4 border-blue-500">
-              <h2 className="text-lg font-semibold text-blue-800 dark:text-blue-200 mb-2">
-                😌 Least Stressful
-              </h2>
-              <div className="text-sm">
-                <p className="font-medium">{leastStressfulOption.option.name}</p>
-                <p className="text-blue-700 dark:text-blue-300">${leastStressfulOption.cost}</p>
-                <p className="text-gray-600 dark:text-gray-400">{leastStressfulOption.duration} min travel</p>
-              </div>
-            </div>
-          )}
+        {/* Sort */}
+        <div className="mt-6">
+          <SortTabs value={sort} onChange={setSort} />
         </div>
 
-        {/* Comparison Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-          <h2 className="text-xl font-semibold p-4 bg-gray-50 dark:bg-gray-700 text-black dark:text-zinc-50">
-            All Options Compared
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 dark:bg-gray-600">
-                <tr>
-                  <th className="px-4 py-2 text-left">Option</th>
-                  <th className="px-4 py-2 text-left">Trust</th>
-                  <th className="px-4 py-2 text-right">Cost</th>
-                  <th className="px-4 py-2 text-right">Drive Time</th>
-                  <th className="px-4 py-2 text-left">Why Selected</th>
-                  <th className="px-4 py-2 text-left">Evidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankedOptions.map((option, index) => {
-                  const opt = option.option;
-                  const trustStatus = opt.trustStatus;
-                  const trustColor = 
-                    trustStatus === 'live' ? 'text-green-600' :
-                    trustStatus === 'verified-source' ? 'text-blue-600' :
-                    trustStatus === 'estimated' ? 'text-yellow-600' : 'text-red-600';
+        {/* Options */}
+        <div className="mt-4 grid grid-cols-1 gap-4">
+          {sortedOptions.map((opt, idx) => (
+            <OptionCard key={`${opt.type}-${(opt.option as any).id || idx}`} item={opt} rank={idx + 1} tripData={tripData} />
+          ))}
+        </div>
 
-                  return (
-                    <tr key={`${option.type}-${index}`} className="border-t border-gray-200 dark:border-gray-600">
-                      <td className="px-4 py-3 font-medium">
-                        {opt.name}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`font-medium ${trustColor}`}>
-                          {trustStatus === 'live' ? '🔴 Live' :
-                           trustStatus === 'verified-source' ? '🔵 Verified' :
-                           trustStatus === 'estimated' ? '🟡 Estimated' : '🔴 Fallback'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold">
-                        ${option.cost}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {option.duration} min
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        <ul className="list-disc list-inside space-y-1">
-                          {option.reasons.map((reason, idx) => (
-                            <li key={idx}>{reason}</li>
-                          ))}
-                          {option.type === 'rideshare' && (
-                            <li>{tripData.type === 'round-trip' ? 'Roundtrip pricing' : 'One-way pricing'}</li>
-                          )}
-                          {option.type === 'transit' && (
-                            <li>{tripData.type === 'round-trip' ? 'Roundtrip fare' : 'One-way fare'}</li>
-                          )}
-                        </ul>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                        <div className="space-y-1">
-                          <div><strong>Source:</strong> {opt.sourceName}</div>
-                          {opt.sourceLink && (
-                            <div><strong>Link:</strong> <a href={opt.sourceLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a></div>
-                          )}
-                          {opt.mapLink && (
-                            <div><strong>Map:</strong> <a href={opt.mapLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">View</a></div>
-                          )}
-                          <div><strong>Updated:</strong> {new Date(opt.lastUpdated).toLocaleDateString()}</div>
-                          <div><strong>Assumptions:</strong></div>
-                          <ul className="list-disc list-inside ml-4 space-y-1">
-                            {opt.assumptions.map((assumption, idx) => (
-                              <li key={idx}>{assumption}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* Pricing links */}
+        <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <PricingLinksSection
+            title="Parking providers"
+            items={[...(recommendation.parking as any), ...extraParkingProviders]}
+          />
+          <PricingLinksSection
+            title="Ride providers"
+            items={[...(recommendation.rideshare as any), ...extraRideProviders]}
+          />
+          <div className="lg:col-span-2">
+            <PricingLinksSection
+              title="Transit options"
+              items={[...(recommendation.transit as any), ...extraTransitProviders]}
+            />
           </div>
         </div>
 
-        <div className="mt-6 text-center">
+        <div className="mt-10 flex justify-center">
           <Link
             href="/trip"
-            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 text-base font-medium text-white shadow-sm hover:bg-blue-700"
+            className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
           >
-            Plan Another Trip
+            Plan another trip
           </Link>
         </div>
       </main>
@@ -430,334 +790,326 @@ export default function ResultsContent() {
   );
 }
 
-function EditTripForm({ initialData, onSubmit, onCancel }: {
+function EditTripForm({
+  initialData,
+  onSubmit,
+  onCancel,
+}: {
   initialData: TripData;
   onSubmit: (data: TripData) => void;
   onCancel: () => void;
 }) {
-  const [formData, setFormData] = useState({
-    type: initialData.type,
-    origin: initialData.origin,
-    destination: initialData.destination,
-    departureDate: 'departureDate' in initialData ? initialData.departureDate : '',
-    departureTime: 'departureTime' in initialData ? initialData.departureTime : '',
-    arrivalDate: 'arrivalDate' in initialData ? initialData.arrivalDate : '',
-    arrivalTime: 'arrivalTime' in initialData ? initialData.arrivalTime : '',
-    returnDate: 'returnDate' in initialData ? initialData.returnDate : '',
-    returnTime: 'returnTime' in initialData ? initialData.returnTime : '',
-    airportTripDate: 'airportTripDate' in initialData ? initialData.airportTripDate : '',
-    airportTripTime: 'airportTripTime' in initialData ? initialData.airportTripTime : '',
-    parkingDuration: 'parkingDuration' in initialData && initialData.parkingDuration ? (initialData.parkingDuration / 60).toString() : '',
-  });
+  const [origin, setOrigin] = useState(initialData.origin);
+  const [parkingDurationHours, setParkingDurationHours] = useState(
+    'parkingDuration' in initialData && initialData.parkingDuration
+      ? String(Math.round((initialData.parkingDuration / 60) * 10) / 10)
+      : ''
+  );
 
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [departureDate, setDepartureDate] = useState(
+    'departureDate' in initialData ? initialData.departureDate : ''
+  );
+  const [departureTime, setDepartureTime] = useState(
+    'departureTime' in initialData ? initialData.departureTime : ''
+  );
 
-  const validateFormData = (): string[] => {
-    const errors: string[] = [];
+  const [airportTripDate, setAirportTripDate] = useState(
+    'airportTripDate' in initialData ? initialData.airportTripDate : ''
+  );
+  const [airportTripTime, setAirportTripTime] = useState(
+    'airportTripTime' in initialData ? initialData.airportTripTime : ''
+  );
+
+  const [arrivalDate, setArrivalDate] = useState(
+    'arrivalDate' in initialData ? initialData.arrivalDate : ''
+  );
+  const [arrivalTime, setArrivalTime] = useState(
+    'arrivalTime' in initialData ? initialData.arrivalTime : ''
+  );
+
+  const [returnDate, setReturnDate] = useState(
+    'returnDate' in initialData ? initialData.returnDate : ''
+  );
+  const [returnTime, setReturnTime] = useState(
+    'returnTime' in initialData ? initialData.returnTime : ''
+  );
+
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const validate = (): string[] => {
+    const next: string[] = [];
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time to start of day for date comparison
+    today.setHours(0, 0, 0, 0);
 
-    if (formData.type === 'one-way-departure' || formData.type === 'round-trip') {
-      if (!formData.departureDate) {
-        errors.push('Departure date is required');
-      } else {
-        const departureDate = new Date(formData.departureDate);
-        if (departureDate < today) {
-          errors.push('Departure date cannot be in the past');
-        }
+    if (!origin.trim()) next.push('Origin is required.');
+
+    const checkDateNotPast = (dateString: string, label: string) => {
+      if (!dateString) {
+        next.push(`${label} is required.`);
+        return;
+      }
+      const d = new Date(dateString);
+      if (d < today) next.push(`${label} cannot be in the past.`);
+    };
+
+    if (initialData.type === 'one-way-departure') {
+      checkDateNotPast(departureDate, 'Date');
+      if (!departureTime) next.push('Time is required.');
+    }
+
+    if (initialData.type === 'dropoff-pickup') {
+      checkDateNotPast(airportTripDate, 'Date');
+      if (!airportTripTime) next.push('Time is required.');
+    }
+
+    if (initialData.type === 'one-way-arrival') {
+      checkDateNotPast(arrivalDate, 'Date');
+      if (!arrivalTime) next.push('Time is required.');
+    }
+
+    if (initialData.type === 'round-trip') {
+      checkDateNotPast(departureDate, 'Departure date');
+      if (!departureTime) next.push('Departure time is required.');
+      checkDateNotPast(returnDate, 'Return date');
+      if (!returnTime) next.push('Return time is required.');
+
+      if (departureDate && returnDate) {
+        const dep = new Date(departureDate);
+        const ret = new Date(returnDate);
+        if (ret < dep) next.push('Return date must be after departure date.');
       }
     }
 
-    if (formData.type === 'one-way-arrival') {
-      if (!formData.arrivalDate) {
-        errors.push('Arrival date is required');
-      } else {
-        const arrivalDate = new Date(formData.arrivalDate);
-        if (arrivalDate < today) {
-          errors.push('Arrival date cannot be in the past');
-        }
+    if (parkingDurationHours) {
+      const hours = Number(parkingDurationHours);
+      if (!Number.isFinite(hours) || hours <= 0) {
+        next.push('Parking duration must be a positive number of hours.');
       }
     }
 
-    if (formData.type === 'round-trip') {
-      if (!formData.returnDate) {
-        errors.push('Return date is required');
-      } else if (formData.departureDate && formData.returnDate) {
-        const departureDate = new Date(formData.departureDate);
-        const returnDate = new Date(formData.returnDate);
-        if (returnDate < departureDate) {
-          errors.push('Return date must be after departure date');
-        }
-      }
-    }
-
-    if (formData.type === 'dropoff-pickup') {
-      if (!formData.airportTripDate) {
-        errors.push('Airport trip date is required');
-      } else {
-        const airportTripDate = new Date(formData.airportTripDate);
-        if (airportTripDate < today) {
-          errors.push('Airport trip date cannot be in the past');
-        }
-      }
-    }
-
-    return errors;
+    return next;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const errors = validateFormData();
-    setValidationErrors(errors);
-    
-    if (errors.length > 0) {
-      return; // Don't proceed with submission
-    }
+    const next = validate();
+    setErrors(next);
+    if (next.length > 0) return;
+
+    const parkingDuration = parkingDurationHours ? Math.round(Number(parkingDurationHours) * 60) : undefined;
+
     let data: TripData;
 
-    if (formData.type === 'one-way-departure') {
+    if (initialData.type === 'one-way-departure') {
       data = {
-        type: formData.type,
-        origin: formData.origin,
-        destination: formData.destination,
-        departureDate: formData.departureDate,
-        departureTime: formData.departureTime,
-        parkingDuration: formData.parkingDuration ? parseFloat(formData.parkingDuration) * 60 : undefined,
+        type: initialData.type,
+        origin,
+        destination: initialData.destination,
+        departureDate,
+        departureTime,
+        parkingDuration,
       };
-    } else if (formData.type === 'one-way-arrival') {
+    } else if (initialData.type === 'dropoff-pickup') {
       data = {
-        type: formData.type,
-        origin: formData.origin,
-        destination: formData.destination,
-        arrivalDate: formData.arrivalDate,
-        arrivalTime: formData.arrivalTime,
+        type: initialData.type,
+        origin,
+        destination: initialData.destination,
+        airportTripDate,
+        airportTripTime,
       };
-    } else if (formData.type === 'round-trip') {
+    } else if (initialData.type === 'one-way-arrival') {
       data = {
-        type: formData.type,
-        origin: formData.origin,
-        destination: formData.destination,
-        departureDate: formData.departureDate,
-        departureTime: formData.departureTime,
-        returnDate: formData.returnDate,
-        returnTime: formData.returnTime,
-        parkingDuration: formData.parkingDuration ? parseFloat(formData.parkingDuration) * 60 : undefined,
+        type: initialData.type,
+        origin,
+        destination: initialData.destination,
+        arrivalDate,
+        arrivalTime,
       };
     } else {
       data = {
-        type: formData.type,
-        origin: formData.origin,
-        destination: formData.destination,
-        airportTripDate: formData.airportTripDate,
-        airportTripTime: formData.airportTripTime,
+        type: initialData.type,
+        origin,
+        destination: initialData.destination,
+        departureDate,
+        departureTime,
+        returnDate,
+        returnTime,
+        parkingDuration,
       };
     }
 
     onSubmit(data);
   };
 
-  const isDepartureType = formData.type === 'one-way-departure' || formData.type === 'round-trip';
-  const isArrivalType = formData.type === 'one-way-arrival';
-  const isDropoffPickup = formData.type === 'dropoff-pickup';
+  const isDeparture = initialData.type === 'one-way-departure';
+  const isDropoffPickup = initialData.type === 'dropoff-pickup';
+  const isArrival = initialData.type === 'one-way-arrival';
+  const isRoundTrip = initialData.type === 'round-trip';
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      {validationErrors.length > 0 && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-          <h3 className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
-            Please fix the following errors:
-          </h3>
-          <ul className="list-disc list-inside text-sm text-red-700 dark:text-red-300 space-y-1">
-            {validationErrors.map((error, index) => (
-              <li key={index}>{error}</li>
+    <form onSubmit={submit} className="space-y-4">
+      {errors.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="text-sm font-medium text-red-900">Please fix:</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800">
+            {errors.map((e) => (
+              <li key={e}>{e}</li>
             ))}
           </ul>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Trip type
-          </label>
-          <select
-            value={formData.type}
-            onChange={(e) => setFormData({ ...formData, type: e.target.value as TripType })}
-            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-          >
-            <option value="one-way-departure">One-way departure</option>
-            <option value="one-way-arrival">One-way arrival</option>
-            <option value="round-trip">Round trip</option>
-            <option value="dropoff-pickup">Drop-off / pickup</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Origin ZIP or address
-          </label>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className="block text-sm font-medium text-zinc-800">Origin</label>
           <input
-            type="text"
-            value={formData.origin}
-            onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
-            placeholder="Enter your home ZIP or address"
-            required
-            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
+            value={origin}
+            onChange={(e) => setOrigin(e.target.value)}
+            className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           />
         </div>
+
+        {isDeparture && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Date</label>
+              <input
+                type="date"
+                value={departureDate}
+                onChange={(e) => setDepartureDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Time</label>
+              <input
+                type="time"
+                value={departureTime}
+                onChange={(e) => setDepartureTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </>
+        )}
+
+        {isDropoffPickup && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Date</label>
+              <input
+                type="date"
+                value={airportTripDate}
+                onChange={(e) => setAirportTripDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Time</label>
+              <input
+                type="time"
+                value={airportTripTime}
+                onChange={(e) => setAirportTripTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </>
+        )}
+
+        {isArrival && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Date</label>
+              <input
+                type="date"
+                value={arrivalDate}
+                onChange={(e) => setArrivalDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Time</label>
+              <input
+                type="time"
+                value={arrivalTime}
+                onChange={(e) => setArrivalTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </>
+        )}
+
+        {isRoundTrip && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Departure date</label>
+              <input
+                type="date"
+                value={departureDate}
+                onChange={(e) => setDepartureDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Departure time</label>
+              <input
+                type="time"
+                value={departureTime}
+                onChange={(e) => setDepartureTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Return date</label>
+              <input
+                type="date"
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Return time</label>
+              <input
+                type="time"
+                value={returnTime}
+                onChange={(e) => setReturnTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </>
+        )}
+
+        {(isDeparture || isRoundTrip) && (
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-zinc-800">
+              Parking duration (hours)
+              <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+            </label>
+            <input
+              type="number"
+              value={parkingDurationHours}
+              onChange={(e) => setParkingDurationHours(e.target.value)}
+              min="0.5"
+              step="0.5"
+              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Destination terminal
-          </label>
-          <select
-            value={formData.destination}
-            onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-          >
-            <option value="Central Terminal">Central Terminal</option>
-            <option value="North Satellite">North Satellite</option>
-            <option value="South Satellite">South Satellite</option>
-          </select>
-        </div>
-      </div>
-
-      {(isDepartureType || isDropoffPickup) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {isDropoffPickup ? 'Airport trip date' : 'Departure date'}
-            </label>
-            <input
-              type="date"
-              value={isDropoffPickup ? formData.airportTripDate : formData.departureDate}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  [isDropoffPickup ? 'airportTripDate' : 'departureDate']: e.target.value,
-                })
-              }
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {isDropoffPickup ? 'Airport trip time' : 'Departure time'}
-            </label>
-            <input
-              type="time"
-              value={isDropoffPickup ? formData.airportTripTime : formData.departureTime}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  [isDropoffPickup ? 'airportTripTime' : 'departureTime']: e.target.value,
-                })
-              }
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-        </div>
-      )}
-
-      {(formData.type === 'one-way-departure' || formData.type === 'round-trip') && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Expected parking duration (hours)
-            <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
-              Optional - leave blank for default estimate
-            </span>
-          </label>
-          <input
-            type="number"
-            value={formData.parkingDuration}
-            onChange={(e) => setFormData({ ...formData, parkingDuration: e.target.value })}
-            placeholder="e.g., 24 for 1 day"
-            min="0.5"
-            step="0.5"
-            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-          />
-        </div>
-      )}
-
-      {isArrivalType && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Arrival date
-            </label>
-            <input
-              type="date"
-              value={formData.arrivalDate}
-              onChange={(e) => setFormData({ ...formData, arrivalDate: e.target.value })}
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Arrival time
-            </label>
-            <input
-              type="time"
-              value={formData.arrivalTime}
-              onChange={(e) => setFormData({ ...formData, arrivalTime: e.target.value })}
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-        </div>
-      )}
-
-      {formData.type === 'round-trip' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Return date
-            </label>
-            <input
-              type="date"
-              value={formData.returnDate}
-              onChange={(e) => setFormData({ ...formData, returnDate: e.target.value })}
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Return time
-            </label>
-            <input
-              type="time"
-              value={formData.returnTime}
-              onChange={(e) => setFormData({ ...formData, returnTime: e.target.value })}
-              required
-              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white px-3 py-2"
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-4 pt-4">
-        <button
-          type="submit"
-          className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          Recalculate
-        </button>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <button
           type="button"
           onClick={onCancel}
-          className="px-6 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600"
+          className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
         >
           Cancel
+        </button>
+        <button
+          type="submit"
+          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          Recalculate
         </button>
       </div>
     </form>

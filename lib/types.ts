@@ -40,14 +40,39 @@ export type TripData =
 
 export type TrustStatus = 'live' | 'verified-source' | 'estimated' | 'fallback';
 
+export type PriceDisplay =
+  | 'live'
+  | 'estimated'
+  | 'mock'
+  | 'check-live'
+  | 'from-per-day';
+
+export type PriceUnit = 'total' | 'per-day';
+
 export type ParkingOption = {
   id: string;
   name: string;
   type: 'official' | 'off-airport';
+  /**
+   * Internal numeric price used by the recommendation engine.
+   * UI may hide this if `priceDisplay` is not `live`.
+   */
   price: number;
+  /**
+   * How the UI should present this price.
+   * Default: derived from trust status (legacy).
+   */
+  priceDisplay?: PriceDisplay;
+  /** If `priceDisplay` is `from-per-day`, interpret `price` as a daily rate. */
+  priceUnit?: PriceUnit;
+  /** Extra context shown next to pricing (e.g. "Check live price", "Mock data"). */
+  priceNote?: string;
   distance: number; // in minutes
   availability: number; // percentage
   trustStatus: TrustStatus;
+  routeTrustStatus?: TrustStatus;
+  routeOrigin?: string;
+  routeDestination?: string;
   sourceName: string;
   sourceLink?: string;
   mapLink?: string;
@@ -58,10 +83,17 @@ export type ParkingOption = {
 export type RideshareOption = {
   id: string;
   name: string;
+  /** Internal numeric price used by the recommendation engine (may be estimated/mock). */
   price: number;
+  priceDisplay?: PriceDisplay;
+  priceUnit?: PriceUnit;
+  priceNote?: string;
   duration: number; // in minutes
   availability: number;
   trustStatus: TrustStatus;
+  routeTrustStatus?: TrustStatus;
+  routeOrigin?: string;
+  routeDestination?: string;
   sourceName: string;
   sourceLink?: string;
   mapLink?: string;
@@ -72,11 +104,18 @@ export type RideshareOption = {
 export type TransitOption = {
   id: string;
   name: string;
+  /** Fare (usually verified-source, but still not "live"). */
   price: number;
+  priceDisplay?: PriceDisplay;
+  priceUnit?: PriceUnit;
+  priceNote?: string;
   duration: number;
   frequency: number; // minutes between services
   availability?: number;
   trustStatus: TrustStatus;
+  routeTrustStatus?: TrustStatus;
+  routeOrigin?: string;
+  routeDestination?: string;
   sourceName: string;
   sourceLink?: string;
   mapLink?: string;

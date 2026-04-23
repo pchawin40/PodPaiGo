@@ -41,9 +41,9 @@ export class RecommendationEngine {
     const route = tripData.type === 'one-way-arrival' ? 'airport-home' : 'home-airport';
 
     const [parking, rideshare, transit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
-      this.provider.getParkingOptions(tripData.destination),
-      this.provider.getRideshareOptions(tripData.origin, tripData.destination),
-      this.provider.getTransitOptions(tripData.origin, tripData.destination),
+      this.provider.getParkingOptions(tripData.origin, tripData.destination, tripDateTime),
+      this.provider.getRideshareOptions(tripData.origin, tripData.destination, tripDateTime),
+      this.provider.getTransitOptions(tripData.origin, tripData.destination, tripDateTime),
       this.provider.getTsaEstimate(tripData.destination),
       this.provider.getTrafficEstimate(tripData.origin, tripData.destination, tripDateTime),
       this.provider.getFlightInfo(tripData.destination, tripDateTime),

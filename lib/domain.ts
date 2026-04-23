@@ -1,5 +1,6 @@
 import { TripData, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate, TrustStatus } from './types';
 
+
 /**
  * Domain logic for GateWise - pure functions for calculations and recommendations
  */

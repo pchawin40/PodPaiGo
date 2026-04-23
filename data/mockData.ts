@@ -1,61 +1,91 @@
 import { LocationInfo, FlightInfo, ParkingOption, RideshareOption, TrafficEstimate, TransitOption } from '../lib/types';
+import { PROVIDER_LINKS, googleMapsSearchLink } from '../lib/providerCatalog';
 
 export const mockParkingOptions: ParkingOption[] = [
   {
     id: 'official-1',
-    name: 'SeaTac Official Parking Garage',
+    name: 'SeaTac Official Parking (Garage)',
     type: 'official',
-    price: 25,
+    // This is a rough daily-rate baseline used for ranking + estimating trip total.
+    // Do not treat as a live quote.
+    price: 39,
+    priceDisplay: 'from-per-day',
+    priceUnit: 'per-day',
+    priceNote: 'Official daily rate (check live info)',
     distance: 5,
     availability: 80,
     trustStatus: 'verified-source',
-    sourceName: 'SeaTac Airport',
-    sourceLink: 'https://www.portseattle.org/sea-tac',
-    mapLink: 'https://maps.google.com/?q=SeaTac+Official+Parking+Garage',
+    sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
+    sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
+    mapLink: googleMapsSearchLink('SeaTac Official Parking Garage'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Daily rate applies for full trip duration', 'Availability based on historical data']
+    assumptions: [
+      'Daily rate is a baseline estimate; verify during booking',
+      'Availability is historical/illustrative (not live)'
+    ]
   },
   {
     id: 'official-2',
-    name: 'Central Terminal Parking',
+    name: 'SeaTac Official Parking (General)',
     type: 'official',
-    price: 30,
+    price: 39,
+    priceDisplay: 'from-per-day',
+    priceUnit: 'per-day',
+    priceNote: 'Official daily rate (check live info)',
     distance: 3,
     availability: 60,
     trustStatus: 'verified-source',
-    sourceName: 'SeaTac Airport',
-    sourceLink: 'https://www.portseattle.org/sea-tac',
-    mapLink: 'https://maps.google.com/?q=SeaTac+Central+Terminal+Parking',
+    sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
+    sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
+    mapLink: googleMapsSearchLink('Seattle-Tacoma International Airport parking'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Daily rate applies for full trip duration', 'Availability based on historical data']
+    assumptions: [
+      'Daily rate is a baseline estimate; verify during booking',
+      'Availability is historical/illustrative (not live)'
+    ]
   },
   {
-    id: 'off-airport-1',
-    name: 'Park & Fly Lot A',
+    id: 'off-airport-wallypark',
+    name: 'WallyPark (off-airport shuttle lot)',
     type: 'off-airport',
-    price: 15,
-    distance: 10,
+    // Rough daily-rate placeholder for ranking only.
+    price: 32,
+    priceDisplay: 'from-per-day',
+    priceUnit: 'per-day',
+    priceNote: 'Estimated daily rate — check live price',
+    distance: 12,
     availability: 90,
     trustStatus: 'estimated',
-    sourceName: 'Third-party parking aggregator',
-    sourceLink: 'https://example.com/parking',
-    mapLink: 'https://maps.google.com/?q=Park+Fly+Lot+A+SeaTac',
+    sourceName: PROVIDER_LINKS.wallyparkSea.sourceName,
+    sourceLink: PROVIDER_LINKS.wallyparkSea.url,
+    mapLink: googleMapsSearchLink('WallyPark SeaTac'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Pricing may vary by season', 'Shuttle service included', 'Advance booking recommended']
+    assumptions: [
+      'Pricing varies by date/time and promos',
+      'Shuttle service included',
+      'Check live price before booking'
+    ]
   },
   {
-    id: 'off-airport-2',
-    name: 'Budget Airport Parking',
+    id: 'off-airport-masterpark',
+    name: 'MasterPark (off-airport shuttle lot)',
     type: 'off-airport',
-    price: 12,
+    price: 34,
+    priceDisplay: 'from-per-day',
+    priceUnit: 'per-day',
+    priceNote: 'Estimated daily rate — check live price',
     distance: 15,
-    availability: 95,
+    availability: 85,
     trustStatus: 'estimated',
-    sourceName: 'Third-party parking aggregator',
-    sourceLink: 'https://example.com/parking',
-    mapLink: 'https://maps.google.com/?q=Budget+Airport+Parking+SeaTac',
+    sourceName: PROVIDER_LINKS.masterparkSea.sourceName,
+    sourceLink: PROVIDER_LINKS.masterparkSea.url,
+    mapLink: googleMapsSearchLink('MasterPark SeaTac'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Pricing may vary by season', 'Shuttle service included', 'Advance booking recommended']
+    assumptions: [
+      'Pricing varies by date/time and promos',
+      'Shuttle service included',
+      'Check live price before booking'
+    ]
   },
 ];
 
@@ -63,41 +93,56 @@ export const mockRideshareOptions: RideshareOption[] = [
   {
     id: 'uber',
     name: 'Uber',
-    price: 45,
+    // Placeholder used for ranking only — NOT a live quote.
+    price: 85,
+    priceDisplay: 'check-live',
+    priceNote: 'Check live price in the Uber app',
     duration: 25,
     availability: 85,
-    trustStatus: 'live',
-    sourceName: 'Uber API',
-    sourceLink: 'https://www.uber.com',
-    mapLink: 'https://maps.google.com/?q=Uber+SeaTac',
+    trustStatus: 'estimated',
+    sourceName: 'Mock rideshare model',
+    sourceLink: PROVIDER_LINKS.uberDeepLink.url,
+    mapLink: googleMapsSearchLink('Seattle-Tacoma International Airport'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Surge pricing may apply', 'Wait time for pickup included', 'Traffic conditions considered']
+    assumptions: [
+      'Not a live Uber quote',
+      'Surge pricing may apply',
+      'Check the app for real-time pricing'
+    ]
   },
   {
     id: 'lyft',
     name: 'Lyft',
-    price: 42,
+    price: 80,
+    priceDisplay: 'check-live',
+    priceNote: 'Check live price in the Lyft app',
     duration: 28,
     availability: 80,
-    trustStatus: 'live',
-    sourceName: 'Lyft API',
-    sourceLink: 'https://www.lyft.com',
-    mapLink: 'https://maps.google.com/?q=Lyft+SeaTac',
+    trustStatus: 'estimated',
+    sourceName: 'Mock rideshare model',
+    sourceLink: PROVIDER_LINKS.lyftDeepLink.url,
+    mapLink: googleMapsSearchLink('Seattle-Tacoma International Airport'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Prime Time pricing may apply', 'Wait time for pickup included', 'Traffic conditions considered']
+    assumptions: [
+      'Not a live Lyft quote',
+      'Pricing varies heavily by time and demand',
+      'Check the app for real-time pricing'
+    ]
   },
   {
     id: 'taxi',
-    name: 'Taxi',
-    price: 50,
+    name: 'Taxi (estimate)',
+    price: 95,
+    priceDisplay: 'estimated',
+    priceNote: 'Meter + airport fees vary',
     duration: 20,
     availability: 70,
     trustStatus: 'estimated',
-    sourceName: 'Local taxi dispatch',
-    sourceLink: 'https://example.com/taxi',
-    mapLink: 'https://maps.google.com/?q=Taxi+SeaTac',
+    sourceName: 'Estimated taxi fare model',
+    sourceLink: undefined,
+    mapLink: googleMapsSearchLink('Taxi SeaTac'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Metered fare plus airport surcharge', 'Availability may vary by time of day']
+    assumptions: ['Not a live quote', 'Metered fare plus airport fees']
   },
 ];
 
@@ -106,29 +151,33 @@ export const mockTransitOptions: TransitOption[] = [
     id: 'light-rail',
     name: 'Light Rail',
     price: 3.25,
+    priceDisplay: 'estimated',
+    priceNote: 'Fare info (not a live quote)',
     duration: 40,
     frequency: 10,
     availability: 90,
     trustStatus: 'verified-source',
     sourceName: 'Sound Transit',
     sourceLink: 'https://www.soundtransit.org',
-    mapLink: 'https://maps.google.com/?q=SeaTac+Light+Rail',
+    mapLink: googleMapsSearchLink('SeaTac light rail station'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['ORCA card required for discounted fare', 'Frequency may vary during peak hours']
+    assumptions: ['Fare may change; verify before travel', 'Frequency may vary during peak hours']
   },
   {
     id: 'bus-174',
     name: 'Bus Route 174',
     price: 2.75,
+    priceDisplay: 'estimated',
+    priceNote: 'Fare info (not a live quote)',
     duration: 45,
     frequency: 15,
     availability: 75,
     trustStatus: 'verified-source',
     sourceName: 'King County Metro',
-    sourceLink: 'https://www.kingcounty.gov/metro',
-    mapLink: 'https://maps.google.com/?q=Bus+Route+174+SeaTac',
+    sourceLink: 'https://kingcounty.gov/en/dept/metro',
+    mapLink: googleMapsSearchLink('King County Metro Route 174 SeaTac'),
     lastUpdated: new Date().toISOString(),
-    assumptions: ['ORCA card required for discounted fare', 'Frequency may vary during peak hours']
+    assumptions: ['Fare may change; verify before travel', 'Frequency may vary during peak hours']
   },
 ];
 
@@ -143,19 +192,19 @@ export const mockTrafficEstimates: Record<string, TrafficEstimate> = {
     route: 'home-airport',
     duration: 28,
     congestion: 'medium',
-    trustStatus: 'live',
-    sourceName: 'Google Maps',
+    trustStatus: 'estimated',
+    sourceName: 'Historical averages',
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Based on current traffic conditions', 'May vary by time of day and weather']
+    assumptions: ['Not live traffic', 'May vary by time of day and weather']
   },
   'airport-home': {
     route: 'airport-home',
     duration: 24,
     congestion: 'low',
-    trustStatus: 'live',
-    sourceName: 'Google Maps',
+    trustStatus: 'estimated',
+    sourceName: 'Historical averages',
     lastUpdated: new Date().toISOString(),
-    assumptions: ['Based on current traffic conditions', 'May vary by time of day and weather']
+    assumptions: ['Not live traffic', 'May vary by time of day and weather']
   },
 };
 

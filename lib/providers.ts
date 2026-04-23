@@ -1,71 +1,34 @@
-import { ParkingOption, RideshareOption, TransitOption, TransitJourney, TransitSegment, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate } from './types';
-import { mockParkingOptions, mockRideshareOptions, mockTransitOptions, tsaEstimates, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
+import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate } from './types';
+import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { seaTacAirport } from './airports';
 
 // Data-driven approach to determine transit hubs for non-direct rail origins
 
 // Small dataset for WA-focused transit hubs (MVP)
 const transitHubs = [
-  { name: 'Northgate Transit Center', lat: 47.7081, lng: -122.3273, driveTimeFactor: 30, transitTime: 45, isParkAndRide: false },
-  { name: 'Lynnwood Transit Center', lat: 47.8256, lng: -122.3166, driveTimeFactor: 40, transitTime: 55, isParkAndRide: true },
-  { name: 'Tukwila International Blvd Station', lat: 47.4736, lng: -122.2600, driveTimeFactor: 50, transitTime: 55, isParkAndRide: false },
-  { name: 'Angle Lake Station', lat: 47.4226, lng: -122.2979, driveTimeFactor: 55, transitTime: 60, isParkAndRide: true },
+  { name: 'Northgate Transit Center', driveTimeFactor: 30, transitTime: 45, isParkAndRide: false },
+  { name: 'Lynnwood Transit Center', driveTimeFactor: 40, transitTime: 55, isParkAndRide: true },
+  { name: 'Tukwila International Blvd Station', driveTimeFactor: 50, transitTime: 55, isParkAndRide: false },
+  { name: 'Angle Lake Station', driveTimeFactor: 55, transitTime: 60, isParkAndRide: true },
 ];
 
-// Updated journey calculation function
-function calculateTransitJourneys(origin: string, destination: string): TransitJourney[] {
-  const originLower = origin.toLowerCase();
+function resolveSeatacDestinationForRouting(destinationKey: string): string {
+  const lower = destinationKey.toLowerCase();
+  const isSeatac =
+    lower.includes('central terminal') ||
+    lower.includes('north satellite') ||
+    lower.includes('south satellite') ||
+    lower.includes('terminal') ||
+    lower.includes('satellite') ||
+    lower.includes('sea-tac') ||
+    lower.includes('seatac') ||
+    lower.includes('airport');
 
-  function estimateDriveTimeToHub(hub: { driveTimeFactor: number }): number {
-    if (originLower.includes('monroe') || originLower.includes('98272')) {
-      return hub.driveTimeFactor;
-    }
-    return hub.driveTimeFactor + 10;
+  if (isSeatac) {
+    return 'Seattle-Tacoma International Airport (SEA), 17801 International Blvd, SeaTac, WA 98158';
   }
 
-  function estimateWaitMinutes(): number {
-    return 5;
-  }
-
-  function estimateTransferPenalty(): number {
-    return 10;
-  }
-
-  return transitHubs.map((hub) => {
-    const driveTime = Math.ceil(estimateDriveTimeToHub(hub));
-    const waitTime = estimateWaitMinutes();
-    const transferPenalty = estimateTransferPenalty();
-    const transitTime = hub.transitTime;
-    const totalDuration = driveTime + waitTime + transferPenalty + transitTime;
-    const isViable = totalDuration <= 120 && driveTime <= 60;
-
-    return {
-      id: `drive-transit-${hub.name.toLowerCase().replace(/ /g, '-')}`,
-      name: `Drive to ${hub.name} + Light Rail to SeaTac`,
-      price: 3.25,
-      duration: totalDuration,
-      frequency: 10,
-      totalDuration,
-      totalCost: 3.25,
-      segments: [
-        { mode: 'drive', name: `Drive to ${hub.name}`, duration: driveTime, distance: driveTime, cost: 0 },
-        { mode: 'walk', name: 'Walk to platform', duration: 5, cost: 0 },
-        { mode: 'light-rail', name: 'Light Rail to SeaTac', duration: transitTime, cost: 3.25, frequency: 10 }
-      ],
-      transfers: 1,
-      availability: isViable ? 85 : 30,
-      trustStatus: isViable ? 'verified-source' : 'fallback',
-      assumptions: [
-        'Based on nearest viable transit hub in Washington state',
-        `Drive to ${hub.name} and take light rail to SeaTac`,
-        isViable ? 'Viable door-to-door transit option' : 'Longer door-to-door transit, may be less realistic'
-      ],
-      sourceName: 'Mock transit planner',
-      sourceLink: 'https://www.mocktransit.com',
-      mapLink: `https://maps.google.com/?q=${encodeURIComponent(hub.name + ' Seattle')}`,
-      lastUpdated: new Date().toISOString(),
-    };
-  });
+  return destinationKey;
 }
 
 function normalizeTrafficRoute(origin: string, destination: string): string {
@@ -88,7 +51,7 @@ export interface TrafficProvider {
 }
 
 export interface ParkingProvider {
-  getParkingOptions(destination: string): Promise<ParkingOption[]>;
+  getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]>;
 }
 
 export interface FlightProvider {
@@ -104,8 +67,9 @@ export interface AirportInfoProvider {
 }
 
 export interface DataProvider extends TrafficProvider, ParkingProvider, FlightProvider, TsaProvider, AirportInfoProvider {
-  getRideshareOptions(origin: string, destination: string): Promise<RideshareOption[]>;
-  getTransitOptions(origin: string, destination: string): Promise<TransitJourney[]>;
+  getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]>;
+  getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]>;
+  getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]>;
 }
 
 export class MockTrafficProvider implements TrafficProvider {
@@ -200,59 +164,213 @@ export class LiveTrafficProvider implements TrafficProvider {
 
 export class MockProvider implements DataProvider {
   private trafficProvider: TrafficProvider;
+  private routeCache = new Map<string, TrafficEstimate>();
 
   constructor() {
     const trafficProviderType = process.env.TRAFFIC_PROVIDER || 'live';
     this.trafficProvider = trafficProviderType === 'live' ? new LiveTrafficProvider() : new MockTrafficProvider();
   }
 
-  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
-    return this.trafficProvider.getTrafficEstimate(origin, destination, dateTime);
+  private buildGoogleDirectionsLink(origin: string, destination: string): string {
+    return `https://www.google.com/maps/dir/${encodeURIComponent(origin)}/${encodeURIComponent(destination)}`;
   }
 
-  async getParkingOptions(destination: string): Promise<ParkingOption[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    // TODO: Replace with a live parking inventory API.
-    return mockParkingOptions.map(option => ({
-      ...option,
-      sourceName: 'Seattle-Tacoma International Airport',
-      sourceLink: 'https://www.portseattle.org/sea-tac',
+  private estimateRouteDuration(origin: string, destination: string, fallbackMinutes: number): TrafficEstimate {
+    const originLower = origin.toLowerCase();
+    let duration = fallbackMinutes;
+
+    if (originLower.includes('monroe') || originLower.includes('98272')) {
+      duration = Math.max(fallbackMinutes, 50);
+    } else if (originLower.includes('seattle') || originLower.includes('98101')) {
+      duration = Math.min(fallbackMinutes, 25);
+    }
+
+    return {
+      route: `${origin}->${destination}`,
+      duration,
+      congestion: 'medium',
+      trustStatus: 'estimated',
+      sourceName: 'Estimated route model',
       lastUpdated: new Date().toISOString(),
-      assumptions: [...option.assumptions, `Pricing based on destination: ${destination}`],
+      assumptions: [`Estimated origin-aware travel time for ${origin} to ${destination}`],
+    };
+  }
+
+  private estimateHubDriveTime(origin: string, hub: { driveTimeFactor: number }): number {
+    const originLower = origin.toLowerCase();
+    if (originLower.includes('monroe') || originLower.includes('98272')) {
+      return hub.driveTimeFactor;
+    }
+    if (originLower.includes('seattle') || originLower.includes('98101')) {
+      return Math.max(15, hub.driveTimeFactor - 10);
+    }
+    return hub.driveTimeFactor + 5;
+  }
+
+  private async getRouteEstimate(origin: string, destination: string, dateTime: string, allowLive: boolean): Promise<TrafficEstimate> {
+    const cacheKey = `${origin}|${destination}|${dateTime}|${allowLive}`;
+    if (this.routeCache.has(cacheKey)) {
+      return this.routeCache.get(cacheKey)!;
+    }
+
+    let estimate: TrafficEstimate;
+    if (allowLive && this.trafficProvider instanceof LiveTrafficProvider) {
+      estimate = await this.trafficProvider.getTrafficEstimate(origin, destination, dateTime);
+    } else {
+      estimate = this.estimateRouteDuration(origin, destination, 35);
+    }
+
+    this.routeCache.set(cacheKey, estimate);
+    return estimate;
+  }
+
+  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+    const routeDestination = resolveSeatacDestinationForRouting(destination);
+    return this.trafficProvider.getTrafficEstimate(origin, routeDestination, dateTime);
+  }
+
+  async getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]> {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const routeOrigins = origin;
+
+    return Promise.all(mockParkingOptions.map(async option => {
+      const routeDestination = `${option.name}, SeaTac, WA`;
+      const shouldLiveRoute = option.type === 'official';
+      const routeEstimate = shouldLiveRoute
+        ? await this.getRouteEstimate(origin, routeDestination, dateTime, true)
+        : this.estimateRouteDuration(origin, routeDestination, option.id === 'off-airport-1' ? 55 : 60);
+
+      const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
+      const sourceLink = option.sourceLink && option.sourceLink.includes('example.com') ? undefined : option.sourceLink;
+
+      return {
+        ...option,
+        distance: routeEstimate.duration,
+        routeTrustStatus: routeEstimate.trustStatus,
+        routeOrigin: routeOrigins,
+        routeDestination,
+        sourceLink,
+        mapLink,
+        lastUpdated: new Date().toISOString(),
+        assumptions: [
+          ...option.assumptions,
+          `Route from ${origin} to ${routeDestination}`,
+          routeEstimate.trustStatus === 'live' ? 'Based on live routing' : 'Estimated route time for origin-aware travel',
+        ],
+      };
     }));
   }
 
-  async getRideshareOptions(origin: string, destination: string): Promise<RideshareOption[]> {
+  async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    // TODO: Replace with a live rideshare provider integration.
+    const routeDestination = resolveSeatacDestinationForRouting(destination);
+    const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
+    const baseDuration = routeEstimate.duration + 5;
+
     return mockRideshareOptions.map(option => ({
       ...option,
-      sourceName: 'Mock rideshare aggregator',
-      sourceLink: 'https://www.mockrideshare.com',
+      duration: baseDuration,
+      routeTrustStatus: routeEstimate.trustStatus,
+      routeOrigin: origin,
+      routeDestination,
+      sourceLink: option.id === 'uber'
+        ? 'https://m.uber.com/ul/?action=setPickup&pickup=my_location'
+        : option.id === 'lyft'
+          ? 'https://lyft.com/ride'
+          : undefined,
+      mapLink: this.buildGoogleDirectionsLink(origin, routeDestination),
       lastUpdated: new Date().toISOString(),
-      assumptions: [...option.assumptions, `Route from ${origin} to ${destination}`],
+      assumptions: [
+        ...option.assumptions,
+        `Route from ${origin} to ${routeDestination}`,
+        routeEstimate.trustStatus === 'live' ? 'Based on live traffic and pickup routing' : 'Estimated ride time',
+      ],
     }));
   }
 
-  async getTransitOptions(origin: string, destination: string): Promise<TransitJourney[]> {
+  async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    
-    // Calculate realistic transit journeys based on origin
-    const journeys = calculateTransitJourneys(origin, destination);
-    
-    return journeys.map(journey => ({
-      ...journey,
-      sourceName: 'Mock transit planner',
-      sourceLink: 'https://www.mocktransit.com',
-      lastUpdated: new Date().toISOString(),
-      assumptions: [...journey.assumptions, `Route from ${origin} to ${destination}`],
-    }));
+    const routeDestinationAirport = resolveSeatacDestinationForRouting(destination);
+
+    const hubRoutes = transitHubs.map(hub => {
+      const routeDestinationHub = `${hub.name}, Seattle, WA`;
+      const driveTime = this.estimateHubDriveTime(origin, hub);
+      const waitTime = 5;
+      const transferPenalty = 10;
+      const totalDuration = driveTime + waitTime + transferPenalty + hub.transitTime;
+      const isViable = totalDuration <= 120 && driveTime <= 60;
+      return {
+        hub,
+        routeDestinationHub,
+        driveTime,
+        waitTime,
+        transferPenalty,
+        totalDuration,
+        isViable,
+      };
+    });
+
+    const bestHubRoute = hubRoutes.reduce((best, current) => current.totalDuration < best.totalDuration ? current : best, hubRoutes[0]);
+    const bestHubEstimate = await this.getRouteEstimate(origin, bestHubRoute.routeDestinationHub, dateTime, true);
+    // We currently model transit as “drive to a hub + rail to SeaTac”, so we don't route to the airport here.
+    void routeDestinationAirport;
+
+    return hubRoutes.map(route => {
+      const isBestHub = route.hub.name === bestHubRoute.hub.name;
+      const driveTime = isBestHub ? Math.max(route.driveTime, bestHubEstimate.duration) : route.driveTime;
+      const routeTrustStatus = isBestHub ? bestHubEstimate.trustStatus : 'estimated';
+      const totalDuration = driveTime + route.waitTime + route.transferPenalty + route.hub.transitTime;
+      const isViable = totalDuration <= 120 && driveTime <= 60;
+      const routeDestinationHub = route.routeDestinationHub;
+
+      return {
+        id: `drive-transit-${route.hub.name.toLowerCase().replace(/ /g, '-')}`,
+        name: `Drive to ${route.hub.name} + Light Rail to SeaTac`,
+        price: 3.25,
+        duration: totalDuration,
+        frequency: 10,
+        totalDuration,
+        totalCost: 3.25,
+        segments: [
+          { mode: 'drive', name: `Drive to ${route.hub.name}`, duration: driveTime, distance: driveTime, cost: 0 },
+          { mode: 'walk', name: 'Walk to platform', duration: 5, cost: 0 },
+          { mode: 'light-rail', name: 'Light Rail to SeaTac', duration: route.hub.transitTime, cost: 3.25, frequency: 10 }
+        ],
+        transfers: 1,
+        availability: isViable ? 85 : 30,
+        trustStatus: isViable ? 'verified-source' : 'estimated',
+        routeTrustStatus,
+        routeOrigin: origin,
+        routeDestination: routeDestinationHub,
+        assumptions: [
+          'Based on nearest viable transit hub in Washington state',
+          `Drive to ${route.hub.name} and take light rail to SeaTac`,
+          routeTrustStatus === 'live' ? 'Live route for drive-to-hub segment' : 'Estimated drive-to-hub time',
+        ],
+        sourceName: 'Sound Transit',
+        sourceLink: 'https://www.soundtransit.org',
+        mapLink: this.buildGoogleDirectionsLink(origin, routeDestinationHub),
+        lastUpdated: new Date().toISOString(),
+      };
+    });
   }
 
-  async getFlightInfo(terminal: string, dateTime: string): Promise<FlightInfo> {
+  async getFlightInfo(destination: string, dateTime: string): Promise<FlightInfo> {
     await new Promise((resolve) => setTimeout(resolve, 100));
     // TODO: Replace with a live flight data integration.
-    return mockFlightInfo[terminal] || { terminal, status: 'On time', gate: 'A1', scheduledTime: dateTime };
+    const hit = mockFlightInfo[destination];
+    if (hit) return hit;
+
+    return {
+      destination,
+      status: 'On time',
+      gate: 'TBD',
+      scheduledTime: dateTime,
+      trustStatus: 'fallback',
+      sourceName: 'Mock flight provider',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['No flight data for this destination key'],
+    };
   }
 
   async getTsaEstimate(terminal: string): Promise<TsaEstimate> {
