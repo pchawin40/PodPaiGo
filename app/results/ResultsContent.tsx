@@ -712,9 +712,18 @@ export default function ResultsContent() {
                 {recommendation.trafficEstimate ? `${recommendation.trafficEstimate.duration} min` : '—'}
               </div>
               <div className="mt-1 text-xs text-zinc-600">
-                {recommendation.trafficEstimate
-                  ? `${recommendation.trafficEstimate.congestion} congestion`
-                  : 'No traffic estimate'}
+                {recommendation.trafficEstimate ? (
+                  recommendation.trafficEstimate.trustStatus === 'live' ? (
+                    <>
+                      <span>Live traffic data · Updated just now</span>
+                      {recommendation.trafficEstimate.staticDuration && (
+                        <div className="text-xs text-zinc-600">Typical: {Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)}-{Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)} min</div>
+                      )}
+                    </>
+                  ) : (
+                    `${recommendation.trafficEstimate.congestion} congestion`
+                  )
+                ) : 'No traffic estimate'}
               </div>
             </div>
           </div>

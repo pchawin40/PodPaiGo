@@ -97,6 +97,24 @@ export class MockTrafficProvider implements TrafficProvider {
   }
 }
 
+// Simple in-memory cache for route estimates
+const ROUTE_CACHE = new Map<string, { ts: number; estimate: TrafficEstimate }>();
+const ROUTE_INFLIGHT = new Map<string, Promise<TrafficEstimate>>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function hashCacheKey(input: string): string {
+  // Non-cryptographic hash for log correlation without leaking address strings.
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h * 31 + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+function logGoogleRoutesCache(event: 'HIT' | 'MISS' | 'IN-FLIGHT', cacheKey: string, routeLabel: string) {
+  console.log(`[GoogleRoutesCache] ${event}`, { id: hashCacheKey(cacheKey), route: routeLabel });
+}
+
 export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 
@@ -117,201 +135,238 @@ export class LiveTrafficProvider implements TrafficProvider {
   }
 
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+    // dateTime can be undefined at runtime (e.g., tests). Default to "now" to keep routing functional.
+    const resolvedDateTime = (dateTime ?? new Date().toISOString());
+    const cacheKey = `${origin.trim()}|${destination.trim()}|${resolvedDateTime.trim()}`;
+    const routeKey = normalizeTrafficRoute(origin, destination);
+    const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
+
     try {
       if (!this.serverKey) {
         throw new Error('Google Maps server API key not configured');
       }
 
-      // Geocode origin and destination where possible
-      const [originLatLng, destLatLng] = await Promise.all([
-        this.geocodeLatLng(origin),
-        this.geocodeLatLng(destination),
-      ]);
-
-      // Prepare computeRouteMatrix request body
-      const departureTimeSeconds = Math.max(0, Math.floor(new Date(dateTime).getTime() / 1000));
-
-      const body: any = {
-        travelMode: 'DRIVE',
-        routingPreference: 'TRAFFIC_AWARE',
-        origins: [],
-        destinations: [],
-        // regionCode helps routing in ambiguous areas
-        regionCode: 'US',
-        departureTime: { seconds: departureTimeSeconds },
-      };
-
-      if (originLatLng) {
-        body.origins.push({ waypoint: { location: { latLng: { latitude: originLatLng.lat, longitude: originLatLng.lng } } } });
-      } else {
-        // fallback to textual origin
-        body.origins.push({ waypoint: { address: origin } });
+      const now = Date.now();
+      const cached = ROUTE_CACHE.get(cacheKey);
+      if (cached && now - cached.ts < CACHE_TTL_MS) {
+        logGoogleRoutesCache('HIT', cacheKey, routeLabel);
+        return cached.estimate;
+      }
+      if (cached) {
+        ROUTE_CACHE.delete(cacheKey);
       }
 
-      if (destLatLng) {
-        body.destinations.push({ waypoint: { location: { latLng: { latitude: destLatLng.lat, longitude: destLatLng.lng } } } });
-      } else {
-        body.destinations.push({ waypoint: { address: destination } });
+      const existingInFlight = ROUTE_INFLIGHT.get(cacheKey);
+      if (existingInFlight) {
+        logGoogleRoutesCache('IN-FLIGHT', cacheKey, routeLabel);
+        return await existingInFlight;
       }
 
-      const url = `https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix`;
+      logGoogleRoutesCache('MISS', cacheKey, routeLabel);
 
-      const headers: any = {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': this.serverKey,
-        'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,staticDuration,distanceMeters,status,condition',
-      };
+      const inflightPromise = (async () => {
+        // Geocode origin and destination where possible
+        const [originLatLng, destLatLng] = await Promise.all([
+          this.geocodeLatLng(origin),
+          this.geocodeLatLng(destination),
+        ]);
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Google Routes Matrix URL:', '(routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix)');
-        console.log('Google Routes API payload (preview):', JSON.stringify(body));
-      }
+        // Prepare computeRouteMatrix request body
+        const departureTimeSeconds = Math.max(0, Math.floor(new Date(resolvedDateTime).getTime() / 1000));
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
+        const body: any = {
+          travelMode: 'DRIVE',
+          routingPreference: 'TRAFFIC_AWARE',
+          origins: [],
+          destinations: [],
+          // regionCode helps routing in ambiguous areas
+          regionCode: 'US',
+          departureTime: { seconds: departureTimeSeconds },
+        };
 
-      // Log which key type we're using for this request (server/browser/none)
-      const keyType = this.serverKey ? 'server' : (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? 'browser' : 'none');
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Google Routes matrix request using key type:', keyType);
-      }
+        if (originLatLng) {
+          body.origins.push({ waypoint: { location: { latLng: { latitude: originLatLng.lat, longitude: originLatLng.lng } } } });
+        } else {
+          // fallback to textual origin
+          body.origins.push({ waypoint: { address: origin } });
+        }
 
-      // Read as text first because the computeRouteMatrix can stream / ndjson
-      const text = await res.text();
+        if (destLatLng) {
+          body.destinations.push({ waypoint: { location: { latLng: { latitude: destLatLng.lat, longitude: destLatLng.lng } } } });
+        } else {
+          body.destinations.push({ waypoint: { address: destination } });
+        }
 
-      // Safe debug logging (no key)
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Google Routes API HTTP status:', res.status);
-        console.log('Google Routes API response snippet:', text ? text.slice(0, 500) : '[empty]');
-      }
+        const url = `https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix`;
 
-      if (!text) {
-        throw new Error('Empty response from Routes API');
-      }
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.serverKey!,
+          'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,staticDuration,distanceMeters,status,condition',
+        };
 
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        // Try to parse newline-delimited JSON: take the last parsable line
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i];
-          try {
-            const parsed = JSON.parse(line);
-            // prefer an object with rows or matrix
-            if (parsed && (parsed.rows || parsed.matrix || Array.isArray(parsed))) {
-              data = parsed;
-              break;
+        // Perform the network call
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        // Log which key type we're using for this request (server/browser/none)
+        const keyType = this.serverKey ? 'server' : (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? 'browser' : 'none');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Google Routes matrix request using key type:', keyType);
+        }
+
+        // Read as text first because the computeRouteMatrix can stream / ndjson
+        const text = await res.text();
+
+        // Safe debug logging (no key)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Google Routes API HTTP status:', res.status);
+          console.log('Google Routes API response snippet:', text ? text.slice(0, 500) : '[empty]');
+        }
+
+        if (!text) {
+          throw new Error('Empty response from Routes API');
+        }
+
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          // Try to parse newline-delimited JSON: take the last parsable line
+          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i];
+            try {
+              const parsed = JSON.parse(line);
+              // prefer an object with rows or matrix
+              if (parsed && (parsed.rows || parsed.matrix || Array.isArray(parsed))) {
+                data = parsed;
+                break;
+              }
+              if (!data) data = parsed;
+            } catch (_) {
+              // continue
             }
-            if (!data) data = parsed;
-          } catch (_) {
-            // continue
           }
         }
-      }
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Parsed Routes API data (shallow):', data ? (Array.isArray(data) ? 'array' : (data.rows || data.matrix ? 'has rows/matrix' : typeof data)) : 'null');
-      }
-
-      // Support multiple response shapes: array, object.rows, object.matrix.rows
-      let element: any = null;
-
-      if (Array.isArray(data) && data.length > 0) {
-        // dataset is array of elements
-        element = data[0];
-      } else {
-        const rows = data?.rows ?? data?.matrix?.rows ?? null;
-        if (!rows || !rows[0] || !rows[0].elements || !rows[0].elements[0]) {
-          throw new Error(`Invalid Routes API response: ${data?.error?.message || 'no rows'}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Parsed Routes API data (shallow):', data ? (Array.isArray(data) ? 'array' : (data.rows || data.matrix ? 'has rows/matrix' : typeof data)) : 'null');
         }
-        element = rows[0].elements[0];
+
+        // Support multiple response shapes: array, object.rows, object.matrix.rows
+        let element: any = null;
+
+        if (Array.isArray(data) && data.length > 0) {
+          // dataset is array of elements
+          element = data[0];
+        } else {
+          const rows = data?.rows ?? data?.matrix?.rows ?? null;
+          if (!rows || !rows[0] || !rows[0].elements || !rows[0].elements[0]) {
+            throw new Error(`Invalid Routes API response: ${data?.error?.message || 'no rows'}`);
+          }
+          element = rows[0].elements[0];
+        }
+
+        // Acceptance logic: treat success when HTTP 200, condition === 'ROUTE_EXISTS', duration present,
+        // and status is empty object / missing / or string 'OK'. Treat failure only when explicit errors or condition mismatch.
+        const condition = element?.condition;
+        const statusField = element?.status;
+        const statusIsEmptyObject = statusField && typeof statusField === 'object' && Object.keys(statusField).length === 0;
+        const statusIsOkString = typeof statusField === 'string' && statusField.toUpperCase() === 'OK';
+        const statusAcceptable = statusField === undefined || statusField === null || statusIsEmptyObject || statusIsOkString;
+
+        // check for duration presence in various formats
+        let hasDuration = false;
+        if (typeof element?.durationMillis === 'number') hasDuration = true;
+        else if (element?.duration && typeof element.duration === 'string' && /^\d+s$/.test(element.duration)) hasDuration = true;
+        else if (element?.duration && typeof element.duration.value === 'number') hasDuration = true;
+        else if (element?.staticDuration) hasDuration = true;
+
+        if (!(res.status === 200 && condition === 'ROUTE_EXISTS' && hasDuration && statusAcceptable)) {
+          throw new Error(`Routes API element indicates failure: condition=${String(condition)}, status=${statusIsEmptyObject ? '[empty object]' : String(statusField)}, durationPresent=${hasDuration}`);
+        }
+
+        // duration may be in different forms. Handle strings like "2259s" or durationMillis or duration.value
+        let durationMs: number | null = null;
+
+        if (typeof element.durationMillis === 'number') {
+          durationMs = element.durationMillis;
+        } else if (typeof element.duration === 'string') {
+          const m = element.duration.match(/^(\d+)s$/);
+          if (m) durationMs = parseInt(m[1], 10) * 1000;
+        } else if (element.duration && typeof element.duration.value === 'number') {
+          durationMs = element.duration.value * 1000;
+        } else if (typeof element.staticDuration === 'string') {
+          const m = element.staticDuration.match(/^(\d+)s$/);
+          if (m) durationMs = parseInt(m[1], 10) * 1000;
+        } else if (element.staticDuration && typeof element.staticDuration === 'number') {
+          durationMs = element.staticDuration;
+        }
+
+        if (durationMs == null) {
+          throw new Error('No duration available from Routes API');
+        }
+
+        const durationMinutes = Math.ceil(durationMs / 60000);
+
+        // Heuristic congestion: compare traffic-aware duration vs staticDuration if available
+        let congestion: 'low' | 'medium' | 'high' = 'medium';
+        let staticMs: number | null = null;
+        if (typeof element.staticDuration === 'string') {
+          const m = element.staticDuration.match(/^(\d+)s$/);
+          if (m) staticMs = parseInt(m[1], 10) * 1000;
+        } else if (typeof element.staticDuration === 'number') {
+          staticMs = element.staticDuration;
+        } else if (element.duration && typeof element.duration.value === 'number' && typeof element.durationMillis === 'number') {
+          staticMs = element.duration.value * 1000;
+        }
+
+        if (staticMs && durationMs) {
+          const ratio = durationMs / (staticMs || durationMs);
+          if (ratio < 1.2) congestion = 'low';
+          else if (ratio < 1.5) congestion = 'medium';
+          else congestion = 'high';
+        }
+
+        const estimate: TrafficEstimate = {
+          route: routeKey,
+          duration: durationMinutes,
+          staticDuration: staticMs ? Math.ceil(staticMs / 60000) : undefined,
+          congestion,
+          trustStatus: 'live',
+          sourceName: 'Google Routes API',
+          lastUpdated: new Date().toISOString(),
+          assumptions: ['Real-time traffic data from Google Routes API', 'May vary by time of day'],
+        };
+
+        // store in cache
+        try {
+          ROUTE_CACHE.set(cacheKey, { ts: Date.now(), estimate });
+        } catch (e) {
+          // ignore
+        }
+
+        if (process.env.NODE_ENV === 'development') console.log('Routes API: success (live) HTTP status OK');
+        return estimate;
+      })();
+
+      ROUTE_INFLIGHT.set(cacheKey, inflightPromise);
+      try {
+        return await inflightPromise;
+      } finally {
+        ROUTE_INFLIGHT.delete(cacheKey);
       }
-
-      // Acceptance logic: treat success when HTTP 200, condition === 'ROUTE_EXISTS', duration present,
-      // and status is empty object / missing / or string 'OK'. Treat failure only when explicit errors or condition mismatch.
-      const condition = element?.condition;
-      const statusField = element?.status;
-      const statusIsEmptyObject = statusField && typeof statusField === 'object' && Object.keys(statusField).length === 0;
-      const statusIsOkString = typeof statusField === 'string' && statusField.toUpperCase() === 'OK';
-      const statusAcceptable = statusField === undefined || statusField === null || statusIsEmptyObject || statusIsOkString;
-
-      // check for duration presence in various formats
-      let hasDuration = false;
-      if (typeof element?.durationMillis === 'number') hasDuration = true;
-      else if (element?.duration && typeof element.duration === 'string' && /^\d+s$/.test(element.duration)) hasDuration = true;
-      else if (element?.duration && typeof element.duration.value === 'number') hasDuration = true;
-      else if (element?.staticDuration) hasDuration = true;
-
-      if (!(res.status === 200 && condition === 'ROUTE_EXISTS' && hasDuration && statusAcceptable)) {
-        throw new Error(`Routes API element indicates failure: condition=${String(condition)}, status=${statusIsEmptyObject ? '[empty object]' : String(statusField)}, durationPresent=${hasDuration}`);
-      }
-
-      // duration may be in different forms. Handle strings like "2259s" or durationMillis or duration.value
-      let durationMs: number | null = null;
-
-      if (typeof element.durationMillis === 'number') {
-        durationMs = element.durationMillis;
-      } else if (typeof element.duration === 'string') {
-        const m = element.duration.match(/^(\d+)s$/);
-        if (m) durationMs = parseInt(m[1], 10) * 1000;
-      } else if (element.duration && typeof element.duration.value === 'number') {
-        durationMs = element.duration.value * 1000;
-      } else if (typeof element.staticDuration === 'string') {
-        const m = element.staticDuration.match(/^(\d+)s$/);
-        if (m) durationMs = parseInt(m[1], 10) * 1000;
-      } else if (element.staticDuration && typeof element.staticDuration === 'number') {
-        durationMs = element.staticDuration;
-      }
-
-      if (durationMs == null) {
-        throw new Error('No duration available from Routes API');
-      }
-
-      const durationMinutes = Math.ceil(durationMs / 60000);
-
-      // Heuristic congestion: compare traffic-aware duration vs staticDuration if available
-      let congestion: 'low' | 'medium' | 'high' = 'medium';
-      let staticMs: number | null = null;
-      if (typeof element.staticDuration === 'string') {
-        const m = element.staticDuration.match(/^(\d+)s$/);
-        if (m) staticMs = parseInt(m[1], 10) * 1000;
-      } else if (typeof element.staticDuration === 'number') {
-        staticMs = element.staticDuration;
-      } else if (element.duration && typeof element.duration.value === 'number' && typeof element.durationMillis === 'number') {
-        staticMs = element.duration.value * 1000;
-      }
-
-      if (staticMs && durationMs) {
-        const ratio = durationMs / (staticMs || durationMs);
-        if (ratio < 1.2) congestion = 'low';
-        else if (ratio < 1.5) congestion = 'medium';
-        else congestion = 'high';
-      }
-
-      const routeKey = normalizeTrafficRoute(origin, destination);
-      // Log success
-      console.log('Routes API: success (live) HTTP status OK');
-      return {
-        route: routeKey,
-        duration: durationMinutes,
-        congestion,
-        trustStatus: 'live',
-        sourceName: 'Google Routes API',
-        lastUpdated: new Date().toISOString(),
-        assumptions: ['Real-time traffic data from Google Routes API', 'May vary by time of day'],
-      };
     } catch (error: any) {
       // Log safe status message if available
       const safeMsg = error?.message || (error?.error?.message) || String(error);
       console.warn('Live traffic API failed, falling back to mock:', safeMsg);
-      const route = normalizeTrafficRoute(origin, destination);
-      return mockTrafficEstimates[route] || {
-        route,
+
+      return mockTrafficEstimates[routeKey] || {
+        route: routeKey,
         duration: 25,
         congestion: 'medium',
         trustStatus: 'estimated',

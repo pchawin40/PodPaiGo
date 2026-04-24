@@ -143,7 +143,8 @@ export type TransitJourney = TransitOption & {
 
 export type TrafficEstimate = {
   route: string;
-  duration: number;
+  duration: number; // duration in minutes (traffic-aware)
+  staticDuration?: number; // optional static duration in minutes (no-traffic typical)
   congestion: 'low' | 'medium' | 'high';
   trustStatus: TrustStatus;
   sourceName: string;

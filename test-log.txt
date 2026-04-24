@@ -10,49 +10,49 @@
   console.warn
     Live traffic API failed, falling back to mock: Google Maps server API key not configured
 
-      309 |       // Log safe status message if available
-      310 |       const safeMsg = error?.message || (error?.error?.message) || String(error);
-    > 311 |       console.warn('Live traffic API failed, falling back to mock:', safeMsg);
+      322 |       // Log safe status message if available
+      323 |       const safeMsg = error?.message || (error?.error?.message) || String(error);
+    > 324 |       console.warn('Live traffic API failed, falling back to mock:', safeMsg);
           |               ^
-      312 |       const route = normalizeTrafficRoute(origin, destination);
-      313 |       return mockTrafficEstimates[route] || {
-      314 |         route,
+      325 |       const route = normalizeTrafficRoute(origin, destination);
+      326 |       return mockTrafficEstimates[route] || {
+      327 |         route,
 
-      at LiveTrafficProvider.getTrafficEstimate (lib/providers.ts:311:15)
-      at MockProvider.getRouteEstimate (lib/providers.ts:379:45)
-      at MockProvider.getTransitOptions (lib/providers.ts:475:40)
+      at LiveTrafficProvider.getTrafficEstimate (lib/providers.ts:324:15)
+      at MockProvider.getRouteEstimate (lib/providers.ts:392:45)
+      at MockProvider.getTransitOptions (lib/providers.ts:488:40)
       at Object.<anonymous> (__tests__/domain.test.ts:376:29)
 
 PASS __tests__/domain.test.ts
   Time Utilities
-    ✓ parseTime should correctly parse time string (2 ms)
+    ✓ parseTime should correctly parse time string (3 ms)
     ✓ addMinutes should add minutes correctly (1 ms)
     ✓ formatTime should format time correctly
   Trip Duration Calculation
-    ✓ calculateTripDuration should calculate duration between departure and return
-    ✓ calculateTripDuration should return 0 for same date/time (1 ms)
+    ✓ calculateTripDuration should calculate duration between departure and return (1 ms)
+    ✓ calculateTripDuration should return 0 for same date/time
   Parking Cost Calculations
-    ✓ calculateOfficialParkingCost should calculate correctly
-    ✓ calculateOffAirportParkingCost should calculate correctly
+    ✓ calculateOfficialParkingCost should calculate correctly (1 ms)
+    ✓ calculateOffAirportParkingCost should calculate correctly (1 ms)
     ✓ calculateOfficialParkingCost should return 0 for off-airport parking (1 ms)
-    ✓ calculateOffAirportParkingCost should return 0 for official parking
+    ✓ calculateOffAirportParkingCost should return 0 for official parking (1 ms)
   Rideshare Cost Calculations
-    ✓ calculateRideshareCost should return one-way price for one-way trips
-    ✓ calculateRideshareCost should double the price for round trip (1 ms)
+    ✓ calculateRideshareCost should return one-way price for one-way trips (1 ms)
+    ✓ calculateRideshareCost should double the price for round trip (2 ms)
   Transit Cost Calculations
     ✓ calculateTransitCost should return the base price for one-way trips (1 ms)
     ✓ calculateTransitCost should double for round-trip
   Leave-by Time Calculation
-    ✓ calculateLeaveByTime should calculate departure time correctly (1 ms)
+    ✓ calculateLeaveByTime should calculate departure time correctly
   Recommendation Ranking
     ✓ rankRecommendations should return ranked recommendations (2 ms)
-    ✓ rankRecommendations should compute true minimum cost correctly (1 ms)
+    ✓ rankRecommendations should compute true minimum cost correctly
     ✓ rankRecommendations should sort by score descending
-    ✓ rankRecommendations should include reasons for recommendations (1 ms)
-    ✓ Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names (104 ms)
+    ✓ rankRecommendations should include reasons for recommendations (2 ms)
+    ✓ Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names (108 ms)
 
 Test Suites: 1 passed, 1 total
 Tests:       19 passed, 19 total
 Snapshots:   0 total
-Time:        0.619 s, estimated 1 s
+Time:        0.801 s, estimated 1 s
 Ran all test suites.

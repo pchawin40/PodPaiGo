@@ -6,28 +6,18 @@
 - Environments: .env.local
 
   Creating an optimized production build ...
-✓ Compiled successfully in 1899ms
+✓ Compiled successfully in 3.1s
   Running TypeScript ...
-  Finished TypeScript in 2.7s ...
-  Collecting page data using 8 workers ...
-Google Maps server key detected: yes
-  Generating static pages using 8 workers (0/7) ...
-Google Maps server key detected: yes
-  Generating static pages using 8 workers (1/7) 
-Google Maps server key detected: yes
-  Generating static pages using 8 workers (3/7) 
-  Generating static pages using 8 workers (5/7) 
-✓ Generating static pages using 8 workers (7/7) in 410ms
-  Finalizing page optimization ...
+Failed to type check.
 
-Route (app)
-┌ ○ /
-├ ○ /_not-found
-├ ƒ /api/recommendations
-├ ○ /results
-└ ○ /trip
+./lib/providers.ts:168:11
+Type error: Cannot find name 'headers'. Did you mean 'Headers'?
 
-
-○  (Static)   prerendered as static content
-ƒ  (Dynamic)  server-rendered on demand
-
+  [90m166 |[0m         [36mconst[0m res = [36mawait[0m fetch(url, {
+  [90m167 |[0m           method: [32m'POST'[0m,
+[31m[1m>[0m [90m168 |[0m           headers,
+  [90m    |[0m           [31m[1m^[0m
+  [90m169 |[0m           body: [33mJSON[0m.stringify(body),
+  [90m170 |[0m         });
+  [90m171 |[0m
+Next.js build worker exited with code: 1 and signal: null
