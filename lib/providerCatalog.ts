@@ -19,6 +19,16 @@ export const PROVIDER_LINKS = {
     url: 'https://www.airportparkingreservations.com/airportparking/seattle_tacoma_international_airport_parking.html',
     sourceName: 'AirportParkingReservations',
   },
+  spothero: {
+    label: 'SpotHero',
+    url: 'https://spothero.com',
+    sourceName: 'SpotHero',
+  },
+  waycom: {
+    label: 'Way.com',
+    url: 'https://way.com',
+    sourceName: 'Way.com',
+  },
   uberDeepLink: {
     label: 'Uber (open app)',
     url: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',

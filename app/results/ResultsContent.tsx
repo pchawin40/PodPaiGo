@@ -10,6 +10,7 @@ import { RecommendationEngine } from '../../lib/recommendationEngine';
 import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
+import ParkingBookingComparison from './ParkingBookingComparison';
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
 
@@ -761,10 +762,15 @@ export default function ResultsContent() {
 
         {/* Pricing links */}
         <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <PricingLinksSection
-            title="Parking providers"
-            items={[...(recommendation.parking as any), ...extraParkingProviders]}
-          />
+          <div>
+            <PricingLinksSection
+              title="Parking providers"
+              items={[...(recommendation.parking as any), ...extraParkingProviders]}
+            />
+            {/* Parking booking comparison (compact, expandable) */}
+            <ParkingBookingComparison parkingOptions={[...(recommendation.parking as any), ...extraParkingProviders]} tripData={tripData} />
+          </div>
+
           <PricingLinksSection
             title="Ride providers"
             items={[...(recommendation.rideshare as any), ...extraRideProviders]}

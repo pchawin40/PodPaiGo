@@ -37,15 +37,15 @@ function intentCopy(intent: Intent) {
     case 'flying-out':
       return {
         title: 'Flying out',
-        timeLabel: 'Departure time',
-        helper: 'Use your scheduled departure time. We’ll back-calculate your best “leave by” time.',
+        timeLabel: 'When does your flight leave?',
+        helper: 'Use your scheduled airline departure time.',
         wantsAirline: true,
         wantsParkingDuration: true,
       };
     case 'picking-up':
       return {
         title: 'Picking someone up',
-        timeLabel: 'Arrival time',
+        timeLabel: "When does their flight arrive?",
         helper: 'Use their scheduled arrival time. We’ll estimate when you should leave.',
         wantsAirline: false,
         wantsParkingDuration: false,
@@ -53,15 +53,15 @@ function intentCopy(intent: Intent) {
     case 'dropping-off':
       return {
         title: 'Dropping someone off',
-        timeLabel: 'Departure time',
-        helper: 'Use their scheduled departure time. We’ll estimate when you should leave.',
+        timeLabel: 'When do they need to arrive at SeaTac?',
+        helper: "Use the time they need to be at the airport; we'll estimate when you should leave.",
         wantsAirline: false,
         wantsParkingDuration: false,
       };
     case 'parking-trip':
       return {
         title: 'Parking trip',
-        timeLabel: 'Arrive at airport by',
+        timeLabel: 'When do you want to arrive at SeaTac?',
         helper: 'We’ll compare official garage vs nearby lots and rides.',
         wantsAirline: false,
         wantsParkingDuration: true,
@@ -108,6 +108,9 @@ export default function TripFlow() {
   const [step, setStep] = useState<Step>(1);
   const [errors, setErrors] = useState<string[]>([]);
 
+  // track if user manually interacted with time input
+  const [timeTouched, setTimeTouched] = useState(false);
+
   const [state, setState] = useState<FormState>({
     intent: null,
     airlineOrFlight: '',
@@ -148,16 +151,28 @@ export default function TripFlow() {
     if (!state.intent) next.push('Please choose what you’re doing today.');
     if (!state.origin.trim()) next.push('Origin is required.');
 
+    // Date and time required
     if (!state.date) {
       next.push('Date is required.');
-    } else {
-      const chosen = new Date(state.date);
-      if (chosen < today) next.push('Date cannot be in the past.');
     }
 
-    if (!state.time) next.push('Time is required.');
+    if (!state.time) {
+      next.push('Time is required.');
+    }
 
-    if (intent && intentCopy(intent).wantsAirline) {
+    // If both present, validate combined datetime against now
+    if (state.date && state.time) {
+      const combined = new Date(`${state.date}T${state.time}`);
+      const now = new Date();
+      if (isNaN(combined.getTime())) {
+        next.push('Invalid date or time');
+      } else if (combined.getTime() < now.getTime()) {
+        next.push('Trip time cannot be in the past.');
+      }
+    }
+
+    // Airline/flight is helpful but optional for flying-out; do not block submission if blank
+    if (intent && intentCopy(intent).wantsAirline && intent !== 'flying-out') {
       if (!state.airlineOrFlight.trim()) {
         next.push('Airline or flight number is required.');
       }
@@ -182,21 +197,44 @@ export default function TripFlow() {
 
     // Friendly defaults when entering step 2.
     setState((s) => {
-      if (s.date && s.time) return s;
       const now = new Date();
       const yyyyMmDd = now.toISOString().slice(0, 10);
-      const minutes = now.getMinutes();
-      const roundedMinutes = Math.ceil(minutes / 5) * 5;
-      now.setMinutes(roundedMinutes, 0, 0);
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
+
+      // If date already set keep it; otherwise default to today for all intents
+      let nextDate = s.date || yyyyMmDd;
+
+      // Default time behavior depends on intent
+      let nextTime = s.time; // preserve if already provided
+
+      if (!nextTime) {
+        if (state.intent === 'flying-out') {
+          // keep time blank for flying out to avoid confusion
+          nextTime = '';
+        } else if (state.intent === 'picking-up' || state.intent === 'parking-trip') {
+          // now + 60 minutes
+          const d = new Date();
+          d.setMinutes(d.getMinutes() + 60);
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          nextTime = `${hh}:${mm}`;
+        } else if (state.intent === 'dropping-off') {
+          // now + 90 minutes
+          const d = new Date();
+          d.setMinutes(d.getMinutes() + 90);
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          nextTime = `${hh}:${mm}`;
+        }
+      }
+
       return {
         ...s,
-        date: s.date || yyyyMmDd,
-        time: s.time || `${hh}:${mm}`,
+        date: nextDate,
+        time: nextTime,
       };
     });
 
+    // Do not mark timeTouched when we programmatically set defaults
     setStep(2);
   };
 
@@ -336,8 +374,8 @@ export default function TripFlow() {
               <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
                 {intentCopy(intent).wantsAirline && (
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Airline or flight number
+                        <label className="block text-sm font-medium text-zinc-800">
+                      Airline or flight number (optional)
                     </label>
                     <input
                       value={state.airlineOrFlight}
@@ -346,7 +384,7 @@ export default function TripFlow() {
                       className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     />
                     <div className="mt-2 text-xs text-zinc-500">
-                      We’ll map this to the right SeaTac check-in area so you don’t have to choose a terminal.
+                      Optional — helps us suggest the right SeaTac check-in area.
                     </div>
                   </div>
                 )}
@@ -368,9 +406,17 @@ export default function TripFlow() {
                   <input
                     type="time"
                     value={state.time}
-                    onChange={(e) => setState((s) => ({ ...s, time: e.target.value }))}
+                    onChange={(e) => {
+                      setTimeTouched(true);
+                      setState((s) => ({ ...s, time: e.target.value }));
+                    }}
                     className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    aria-label="Trip time"
                   />
+                  {/* Intent-specific placeholder/helper for time when blank */}
+                  {state.time === '' && intent === 'flying-out' && (
+                    <div className="mt-2 text-xs text-zinc-500">Select flight departure time</div>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">
@@ -411,6 +457,23 @@ export default function TripFlow() {
                   </div>
                 )}
               </div>
+
+              {/* Near-time warning (non-blocking) - only show after user edited/selected time */}
+              {timeTouched && state.date && state.time && (() => {
+                const combined = new Date(`${state.date}T${state.time}`);
+                const now = new Date();
+                if (!isNaN(combined.getTime())) {
+                  const mins = Math.ceil((combined.getTime() - now.getTime()) / 60000);
+                  if (mins > 0 && mins < 60) {
+                    return (
+                      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Your trip time is very soon. You may need to leave immediately or consider the fastest option.
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
 
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <button

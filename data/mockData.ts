@@ -3,12 +3,11 @@ import { PROVIDER_LINKS, googleMapsSearchLink } from '../lib/providerCatalog';
 
 export const mockParkingOptions: ParkingOption[] = [
   {
-    id: 'official-1',
-    name: 'SeaTac Official Parking (Garage)',
+    id: 'sea-reserved',
+    name: 'SEA Reserved Parking (Official)',
     type: 'official',
-    // This is a rough daily-rate baseline used for ranking + estimating trip total.
-    // Do not treat as a live quote.
-    price: 39,
+    // example official reserved daily rate (estimate)
+    price: 47,
     priceDisplay: 'from-per-day',
     priceUnit: 'per-day',
     priceNote: 'Official daily rate (check live info)',
@@ -17,7 +16,7 @@ export const mockParkingOptions: ParkingOption[] = [
     trustStatus: 'verified-source',
     sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
     sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
-    mapLink: googleMapsSearchLink('SeaTac Official Parking Garage'),
+    mapLink: googleMapsSearchLink('SEA reserved parking'),
     lastUpdated: new Date().toISOString(),
     assumptions: [
       'Daily rate is a baseline estimate; verify during booking',
@@ -25,10 +24,10 @@ export const mockParkingOptions: ParkingOption[] = [
     ]
   },
   {
-    id: 'official-2',
-    name: 'SeaTac Official Parking (General)',
+    id: 'sea-general',
+    name: 'SEA General Parking (Official)',
     type: 'official',
-    price: 39,
+    price: 37,
     priceDisplay: 'from-per-day',
     priceUnit: 'per-day',
     priceNote: 'Official daily rate (check live info)',
@@ -37,7 +36,7 @@ export const mockParkingOptions: ParkingOption[] = [
     trustStatus: 'verified-source',
     sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
     sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
-    mapLink: googleMapsSearchLink('Seattle-Tacoma International Airport parking'),
+    mapLink: googleMapsSearchLink('SEA general parking'),
     lastUpdated: new Date().toISOString(),
     assumptions: [
       'Daily rate is a baseline estimate; verify during booking',
