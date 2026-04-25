@@ -24,6 +24,13 @@ type FormState = {
   cabin: CabinClass;
 };
 
+function formatLocalDateInputValue(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function intentToTripType(intent: Intent): TripType {
   switch (intent) {
     case 'flying-out':
@@ -65,7 +72,7 @@ function intentCopy(intent: Intent) {
       };
     case 'parking-trip':
       return {
-        title: 'Parking trip',
+        title: 'Airport parking',
         timeLabel: 'When do you want to arrive at SeaTac?',
         helper: 'We’ll compare official garage vs nearby lots and rides.',
         wantsAirline: false,
@@ -155,9 +162,6 @@ export default function TripFlow() {
     }
 
     // Step 2 validates the full form.
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     if (!state.intent) next.push('Please choose what you’re doing today.');
     if (!state.origin.trim()) next.push('Origin is required.');
 
@@ -208,7 +212,7 @@ export default function TripFlow() {
     // Friendly defaults when entering step 2.
     setState((s) => {
       const now = new Date();
-      const yyyyMmDd = now.toISOString().slice(0, 10);
+      const yyyyMmDd = formatLocalDateInputValue(now);
 
       // If date already set keep it; otherwise default to today for all intents
       const nextDate = s.date || yyyyMmDd;
@@ -334,27 +338,58 @@ export default function TripFlow() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Card
                 title="Flying out"
-                subtitle="Get a leave-by time + best way to the airport"
+                subtitle="Catching a flight? Compare parking, rideshare, and transit."
                 selected={state.intent === 'flying-out'}
-                onClick={() => setState((s) => ({ ...s, intent: 'flying-out' }))}
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    intent: 'flying-out',
+                    date: '',
+                    time: '',
+                  }))
+                }
               />
+
               <Card
                 title="Picking someone up"
-                subtitle="Plan your drive or rideshare to arrivals"
+                subtitle="Meeting arrivals? Time your drive, traffic, and pickup."
                 selected={state.intent === 'picking-up'}
-                onClick={() => setState((s) => ({ ...s, intent: 'picking-up' }))}
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    intent: 'picking-up',
+                    date: '',
+                    time: '',
+                  }))
+                }
               />
+
               <Card
                 title="Dropping someone off"
-                subtitle="Get timing + drop-off guidance"
+                subtitle="Helping someone depart? Plan curbside timing."
                 selected={state.intent === 'dropping-off'}
-                onClick={() => setState((s) => ({ ...s, intent: 'dropping-off' }))}
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    intent: 'dropping-off',
+                    date: '',
+                    time: '',
+                  }))
+                }
               />
+
               <Card
-                title="Parking trip"
-                subtitle="Compare garage vs shuttle lots + pricing links"
+                title="Airport parking"
+                subtitle="Compare garage, shuttle lots, and booking options."
                 selected={state.intent === 'parking-trip'}
-                onClick={() => setState((s) => ({ ...s, intent: 'parking-trip' }))}
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    intent: 'parking-trip',
+                    date: '',
+                    time: '',
+                  }))
+                }
               />
             </div>
 
@@ -362,7 +397,8 @@ export default function TripFlow() {
               <button
                 type="button"
                 onClick={onContinue}
-                className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-base font-medium text-white shadow-sm hover:bg-blue-700 sm:w-auto"
+                disabled={!state.intent}
+                className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-base font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 Continue
               </button>
@@ -554,7 +590,7 @@ export default function TripFlow() {
 
                 {intentCopy(intent).wantsAirline && (
                   <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-zinc-800">
+                    <label className="block text-sm font-medium text-zinc-800">
                       Airline or flight number (optional)
                     </label>
                     <input

@@ -1,51 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
-type AddressSuggestion = {
-  displayName: string;
+type Prediction = {
+  description: string;
+  place_id: string;
 };
-
-async function reverseGeocode(lat: number, lon: number, signal: AbortSignal): Promise<string | null> {
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
-    const res = await fetch(url, {
-      signal,
-      headers: {
-        // Nominatim requires an identifying header.
-        // (In a real production app, proxy through your own backend.)
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!res.ok) return null;
-    const data = (await res.json()) as { display_name?: string };
-    return data.display_name || null;
-  } catch {
-    return null;
-  }
-}
-
-async function searchAddresses(query: string, signal: AbortSignal): Promise<AddressSuggestion[]> {
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      signal,
-      headers: {
-        'Accept': 'application/json',
-      },
-    });
-    if (!res.ok) return [];
-
-    const data = (await res.json()) as Array<{ display_name?: string }>;
-    return data
-      .map((d) => d.display_name)
-      .filter(Boolean)
-      .map((displayName) => ({ displayName: displayName as string }));
-  } catch {
-    return [];
-  }
-}
 
 const LOCAL_STORAGE_KEY = 'podpaigo-recent-origins';
 const MAX_RECENTS = 5;
@@ -73,37 +33,155 @@ function saveRecentOrigin(origin: string) {
   }
 }
 
-export function AddressInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
+interface Props {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-}) {
-  const [isLocating, setIsLocating] = useState(false);
-  const [locateError, setLocateError] = useState<string | null>(null);
+}
 
-  // Initialize query directly from prop
-  const [query, setQuery] = useState(value || '');
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
-  // recent origins initialized lazily
+export function AddressInput({ label, value, onChange, placeholder }: Props) {
+  const [inputValue, setInputValue] = useState(value || '');
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [loadingPredictions, setLoadingPredictions] = useState(false);
+
   const [recentOrigins, setRecentOrigins] = useState<string[]>(() =>
     typeof window === 'undefined' ? [] : getRecentOrigins()
   );
 
-  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-
-  // keyboard navigation index, -1 means no selection
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const autocompleteService = useRef<any | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
+  const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
+  const [isLocating, setIsLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
+  const [apiKeyPresent, setApiKeyPresent] = useState<boolean | null>(null);
 
-  const canUseGeo = useMemo(() => typeof navigator !== 'undefined' && !!navigator.geolocation, []);
+  // Load Google Maps JS Places Library if not loaded and apiKey present
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+      setApiKeyPresent(false);
+      return;
+    }
+    setApiKeyPresent(true);
+
+    if (window.google && window.google.maps && window.google.maps.places) {
+      if (!autocompleteService.current) {
+        autocompleteService.current = new window.google.maps.places.AutocompleteService();
+      }
+      return;
+    }
+
+    if (document.getElementById('google-maps-script')) {
+      const onLoadHandler = () => {
+        if (window.google && window.google.maps && window.google.maps.places && !autocompleteService.current) {
+          autocompleteService.current = new window.google.maps.places.AutocompleteService();
+        }
+      };
+      document.getElementById('google-maps-script')?.addEventListener('load', onLoadHandler);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'google-maps-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      if (window.google && window.google.maps && window.google.maps.places) {
+        autocompleteService.current = new window.google.maps.places.AutocompleteService();
+      }
+    };
+    script.onerror = () => {
+      setApiKeyPresent(false);
+    };
+    document.head.appendChild(script);
+
+    // cleanup on unmount
+    return () => {
+      script.onload = null;
+      script.onerror = null;
+    };
+  }, []);
+
+  // Fetch predictions based on input value, debounce to avoid setState in effect
+  useEffect(() => {
+    if (!autocompleteService.current || !apiKeyPresent || inputValue.trim().length < 3) {
+      setLoadingPredictions(false);
+      // Delay clearing suggestions in next tick to avoid hook conflicts
+      const t = setTimeout(() => setPredictions([]), 0);
+      return () => clearTimeout(t);
+    }
+
+    setLoadingPredictions(true);
+    const request = {
+      input: inputValue,
+      // No types restrictions, Google deprecated types: ['address', etc.]
+    };
+
+    // Wrap callback in async timeout to avoid setState in effect directly
+    const timeoutId = setTimeout(() => {
+      autocompleteService.current.getPlacePredictions(request, (results: Prediction[] | null) => {
+        setLoadingPredictions(false);
+        if (!results) {
+          setPredictions([]);
+          return;
+        }
+        setPredictions(results);
+        setIsOpen(true);
+        setHighlightedIndex(-1);
+      });
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [inputValue, apiKeyPresent]);
+
+  const onSelectPrediction = (prediction: Prediction) => {
+    setInputValue(prediction.description);
+    setIsOpen(false);
+    onChange(prediction.description);
+    saveRecentOrigin(prediction.description);
+    setRecentOrigins(getRecentOrigins());
+    setHighlightedIndex(-1);
+  };
+
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+    onChange(e.target.value);
+    setIsOpen(true);
+    setHighlightedIndex(-1);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isOpen || predictions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((idx) => (idx < predictions.length - 1 ? idx + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((idx) => (idx > 0 ? idx - 1 : predictions.length - 1));
+    } else if (e.key === 'Enter') {
+      if (highlightedIndex >= 0 && highlightedIndex < predictions.length) {
+        e.preventDefault();
+        onSelectPrediction(predictions[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+    }
+  };
 
   const detectLocation = async () => {
     if (!canUseGeo) {
@@ -126,163 +204,114 @@ export function AddressInput({
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
 
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      const readable = await reverseGeocode(lat, lon, abortRef.current.signal);
-
-      onChange(readable || `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-      setIsOpen(false);
-      // Save to recent origins
-      if (readable) {
-        saveRecentOrigin(readable);
+      if (window.google && window.google.maps && window.google.maps.Geocoder) {
+        const geocoder = new window.google.maps.Geocoder();
+        geocoder.geocode({ location: { lat, lng: lon } }, (results: any[], status: string) => {
+          if (status === 'OK' && results[0]) {
+            onChange(results[0].formatted_address);
+            setInputValue(results[0].formatted_address);
+            saveRecentOrigin(results[0].formatted_address);
+            setRecentOrigins(getRecentOrigins());
+          } else {
+            onChange(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+            setInputValue(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+          }
+          setIsLocating(false);
+          setIsOpen(false);
+        });
+      } else {
+        onChange(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+        setInputValue(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+        saveRecentOrigin(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
         setRecentOrigins(getRecentOrigins());
+        setIsLocating(false);
+        setIsOpen(false);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to get location';
       setLocateError(message);
-    } finally {
       setIsLocating(false);
-    }
-  };
-
-  // Debounced query effect for address suggestions
-  useEffect(() => {
-    abortRef.current?.abort();
-
-    if (query.trim().length < 3) {
-      // Instead of clearing synchronously, clear in next tick
-      const handle = setTimeout(() => {
-        setSuggestions([]);
-      }, 0);
-      return () => clearTimeout(handle);
-    }
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    async function fetchSuggestions() {
-      const res = await searchAddresses(query, controller.signal);
-      setSuggestions(res);
-      setIsOpen(true);
-      setHighlightedIndex(-1);
-    }
-
-    fetchSuggestions();
-
-    return () => controller.abort();
-  }, [query]);
-
-  // Keyboard navigation handler
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!isOpen) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setHighlightedIndex((hi) => Math.min(hi + 1, suggestions.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlightedIndex((hi) => Math.max(hi - 1, 0));
-    } else if (e.key === 'Enter') {
-      if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
-        e.preventDefault();
-        const selected = suggestions[highlightedIndex];
-        onChange(selected.displayName);
-        setQuery(selected.displayName);
-        setIsOpen(false);
-        saveRecentOrigin(selected.displayName);
-        setRecentOrigins(getRecentOrigins());
-        setHighlightedIndex(-1);
-      }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setIsOpen(false);
-      setHighlightedIndex(-1);
     }
   };
 
   // Click recent origin entry
   const onRecentClick = (value: string) => {
     onChange(value);
-    setQuery(value);
+    setInputValue(value);
     setIsOpen(false);
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 relative">
       <div className="flex items-end justify-between gap-3">
         <label className="block text-sm font-medium text-zinc-800">{label}</label>
-
         <button
           type="button"
           onClick={detectLocation}
-          disabled={isLocating || !canUseGeo}
+          disabled={isLocating}
           className="text-sm text-blue-700 hover:text-blue-800 disabled:opacity-50"
         >
           {isLocating ? 'Detecting…' : 'Use current location'}
         </button>
       </div>
 
-      <div className="relative">
-        <input
-          value={query}
-          onChange={(e) => {
-            const next = e.target.value;
-            setQuery(next);
-            onChange(next);
-            setIsOpen(true);
-            setHighlightedIndex(-1);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onBlur={() => {
-            // Allow click selection.
-            window.setTimeout(() => setIsOpen(false), 150);
-          }}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          aria-autocomplete="list"
-          aria-expanded={isOpen}
-          aria-controls="address-suggestion-list"
-          role="combobox"
-          className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-        />
+      <input
+        type="text"
+        ref={inputRef}
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-controls="address-suggestion-list"
+        aria-autocomplete="list"
+        aria-activedescendant={
+          highlightedIndex >= 0 ? `prediction-${predictions[highlightedIndex].place_id}` : undefined
+        }
+        value={inputValue}
+        onChange={onInputChange}
+        onKeyDown={onKeyDown}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setTimeout(() => setIsOpen(false), 150)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      />
 
-        {isOpen && suggestions.length > 0 && (
-          <ul
-            id="address-suggestion-list"
-            role="listbox"
-            className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg"
-          >
-            {suggestions.map((s, idx) => {
-              const selected = idx === highlightedIndex;
-              return (
-                <li
-                  key={s.displayName}
-                  role="option"
-                  aria-selected={selected}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onChange(s.displayName);
-                    setQuery(s.displayName);
-                    setIsOpen(false);
-                    saveRecentOrigin(s.displayName);
-                    setRecentOrigins(getRecentOrigins());
-                    setHighlightedIndex(-1);
-                  }}
-                  className={`cursor-pointer px-4 py-3 text-sm text-zinc-900 hover:bg-zinc-100 ${
-                    selected ? 'bg-blue-600 text-white' : ''
-                  }`}
-                  tabIndex={-1}
-                >
-                  {s.displayName}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+      {isOpen && inputValue.trim().length >= 3 && (
+        <div
+          id="address-suggestion-list"
+          role="listbox"
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg"
+        >
+          {loadingPredictions && (
+            <div className="px-4 py-3 text-sm text-zinc-600">Searching…</div>
+          )}
+
+          {!loadingPredictions && predictions.length === 0 && inputValue.trim().length >= 3 && (
+            <div className="px-4 py-3 text-sm text-zinc-600">No matches found</div>
+          )}
+
+          {!loadingPredictions && predictions.map((prediction, idx) => {
+            const selected = idx === highlightedIndex;
+            return (
+              <div
+                aria-selected={selected}
+                id={`prediction-${prediction.place_id}`}
+                key={prediction.place_id}
+                role="option"
+                onMouseDown={(e) => e.preventDefault()} // prevent blur before click
+                onClick={() => onSelectPrediction(prediction)}
+                tabIndex={-1}
+                className={`cursor-pointer px-4 py-3 text-sm ${
+                  selected ? 'bg-blue-600 text-white' : 'text-zinc-900 hover:bg-zinc-100'
+                }`}
+              >
+                {prediction.description}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {recentOrigins.length > 0 && !isOpen && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-3">
+        <div className="rounded-xl border border-zinc-200 bg-white p-3 mt-2">
           <div className="text-xs font-medium text-zinc-700 mb-2">Recent origins</div>
           <ul className="flex flex-wrap gap-2">
             {recentOrigins.map((origin) => (
@@ -300,11 +329,9 @@ export function AddressInput({
         </div>
       )}
 
-      {locateError && <p className="text-xs text-zinc-500">{locateError}</p>}
+      {locateError && <p className="text-xs text-red-600 mt-1">{locateError}</p>}
 
-      <p className="text-xs text-zinc-500">
-        Tip: start typing an address, or use your current location.
-      </p>
+      <p className="text-xs text-zinc-500 mt-1">Tip: start typing an address, or use your current location.</p>
     </div>
   );
 }

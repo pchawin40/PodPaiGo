@@ -11,6 +11,7 @@ import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import ParkingBookingComparison from './ParkingBookingComparison';
+import { AddressInput } from '../trip/AddressInput';
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
 
@@ -749,16 +750,16 @@ function OptionCard({
 
     if (timing.status === 'good') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-    return mins != null
-      ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
-      : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+      return mins != null
+        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
+        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
     }
 
     if (timing.status === 'tight') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-    return mins != null
-      ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
-      : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+      return mins != null
+        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
+        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
     }
 
     // too-late
@@ -1879,25 +1880,25 @@ export default function ResultsContent() {
             <>
               {(intent === 'flying-out' && tripData.type === 'one-way-departure')
                 ? viableOptions.map((opt, idx) => (
-                    <OptionCard
-                      key={`${opt.type}-${(opt.option as any).id || idx}`}
-                      item={opt}
-                      rank={idx + 1}
-                      tripData={tripData}
-                      intent={intent}
-                      sort={sort}
-                    />
-                  ))
+                  <OptionCard
+                    key={`${opt.type}-${(opt.option as any).id || idx}`}
+                    item={opt}
+                    rank={idx + 1}
+                    tripData={tripData}
+                    intent={intent}
+                    sort={sort}
+                  />
+                ))
                 : sortedOptions.map((opt, idx) => (
-                <OptionCard
-                  key={`${opt.type}-${(opt.option as any).id || idx}`}
-                  item={opt}
-                  rank={idx + 1}
-                  tripData={tripData}
-                  intent={intent}
-                  sort={sort}
-                />
-                  ))}
+                  <OptionCard
+                    key={`${opt.type}-${(opt.option as any).id || idx}`}
+                    item={opt}
+                    rank={idx + 1}
+                    tripData={tripData}
+                    intent={intent}
+                    sort={sort}
+                  />
+                ))}
 
 
               {intent === 'flying-out' && tripData.type === 'one-way-departure' && tooLateOptions.length > 0 && viableOptions.length > 0 && (
@@ -2343,11 +2344,11 @@ function EditTripForm({
         )}
 
         <div className="sm:col-span-2">
-          <label className="block text-sm font-medium text-zinc-800">Origin</label>
-          <input
+          <AddressInput
+            label="Origin"
             value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            onChange={setOrigin}
+            placeholder="Start typing your address"
           />
         </div>
 
