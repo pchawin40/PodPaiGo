@@ -4,6 +4,12 @@ export type TripType =
   | 'round-trip'
   | 'dropoff-pickup';
 
+export type TransportAvailability = 'car' | 'rideshare' | 'transit' | 'all';
+
+export type SecurityOption = 'standard' | 'precheck' | 'clear' | 'clear-precheck';
+export type FlightType = 'domestic' | 'international';
+export type CabinClass = 'economy' | 'premium';
+
 export type TripData =
   | {
       type: 'one-way-departure';
@@ -12,6 +18,12 @@ export type TripData =
       departureDate: string;
       departureTime: string;
       parkingDuration?: number; // in minutes, optional user override
+      transportAvailability?: TransportAvailability;
+      checkingBags?: boolean;
+      securityOption?: SecurityOption;
+      flightType?: FlightType;
+      cabin?: CabinClass;
+      checkedInAtAirport?: boolean; // default: true
     }
   | {
       type: 'one-way-arrival';
@@ -19,6 +31,7 @@ export type TripData =
       destination: string;
       arrivalDate: string;
       arrivalTime: string;
+      transportAvailability?: TransportAvailability;
     }
   | {
       type: 'round-trip';
@@ -29,6 +42,7 @@ export type TripData =
       returnDate: string;
       returnTime: string;
       parkingDuration?: number; // in minutes, optional user override
+      transportAvailability?: TransportAvailability;
     }
   | {
       type: 'dropoff-pickup';
@@ -36,6 +50,7 @@ export type TripData =
       destination: string;
       airportTripDate: string;
       airportTripTime: string;
+      transportAvailability?: TransportAvailability;
     };
 
 export type TrustStatus = 'live' | 'verified-source' | 'estimated' | 'fallback';
@@ -53,6 +68,11 @@ export type ParkingOption = {
   id: string;
   name: string;
   type: 'official' | 'off-airport';
+  /** Minutes to park, pay, unload, etc. */
+  parkingBufferMinutes?: number;
+  /** Minutes from lot/garage to terminal (walk or shuttle). */
+  transferToTerminalMinutes?: number;
+  transferType?: 'walk' | 'shuttle' | 'airport-garage';
   /**
    * Internal numeric price used by the recommendation engine.
    * UI may hide this if `priceDisplay` is not `live`.

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AddressInput } from './AddressInput';
-import { TripType } from '../../lib/types';
+import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType } from '../../lib/types';
 import { getSeatacRideshareDropoffNote, resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 
 type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
@@ -12,11 +12,16 @@ type Step = 1 | 2;
 
 type FormState = {
   intent: Intent | null;
+  transportAvailability: TransportAvailability;
   airlineOrFlight: string;
   origin: string;
   date: string;
   time: string;
   parkingDurationHours: string;
+  checkingBags: boolean;
+  securityOption: SecurityOption;
+  flightType: FlightType;
+  cabin: CabinClass;
 };
 
 function intentToTripType(intent: Intent): TripType {
@@ -113,11 +118,16 @@ export default function TripFlow() {
 
   const [state, setState] = useState<FormState>({
     intent: null,
+    transportAvailability: 'all',
     airlineOrFlight: '',
     origin: '',
     date: '',
     time: '',
     parkingDurationHours: '',
+    checkingBags: false,
+    securityOption: 'standard',
+    flightType: 'domestic',
+    cabin: 'economy',
   });
 
   const intent = state.intent;
@@ -258,6 +268,7 @@ export default function TripFlow() {
     params.set('origin', state.origin);
     params.set('destination', destination);
     params.set('intent', state.intent!);
+    params.set('transport', state.transportAvailability);
 
     if (state.airlineOrFlight.trim()) {
       params.set('airlineOrFlight', state.airlineOrFlight.trim());
@@ -266,6 +277,14 @@ export default function TripFlow() {
     if (tripType === 'one-way-departure') {
       params.set('departureDate', state.date);
       params.set('departureTime', state.time);
+
+      // Flying-out only: airport readiness assumptions
+      if (state.intent === 'flying-out') {
+        params.set('bags', state.checkingBags ? 'yes' : 'no');
+        params.set('security', state.securityOption);
+        params.set('flightType', state.flightType);
+        params.set('cabin', state.cabin);
+      }
 
       if (state.parkingDurationHours) {
         const minutes = Math.round(Number(state.parkingDurationHours) * 60);
@@ -372,6 +391,167 @@ export default function TripFlow() {
               </div>
 
               <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <div className="text-sm font-medium text-zinc-900">What can you use today?</div>
+                  <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {(
+                      [
+                        { key: 'car' as const, title: 'Driving is okay', sub: 'Prioritize parking and park-and-ride options, but still compare other strong choices.' },
+                        { key: 'rideshare' as const, title: 'I need rideshare/taxi', sub: 'Shows Uber, Lyft, taxi, and non-car transit where available.' },
+                        { key: 'transit' as const, title: 'Transit only', sub: 'No car or rideshare.' },
+                        { key: 'all' as const, title: 'No preference — compare everything', sub: 'Show car, rideshare, taxi, transit, parking, and park-and-ride.' },
+                      ] as Array<{ key: TransportAvailability; title: string; sub: string }>
+                    ).map((opt) => {
+                      const selected = state.transportAvailability === opt.key;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setState((s) => ({ ...s, transportAvailability: opt.key }))}
+                          className={
+                            'w-full rounded-2xl border p-4 text-left shadow-sm transition ' +
+                            (selected
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50')
+                          }
+                        >
+                          <div className="text-sm font-semibold text-zinc-900">{opt.title}</div>
+                          <div className="mt-1 text-xs text-zinc-600">{opt.sub}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-xs text-zinc-500">Default: No preference — compare everything</div>
+                </div>
+
+                {intent === 'flying-out' && (
+                  <div className="md:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="text-sm font-medium text-zinc-900">Airport readiness</div>
+                    <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <div className="text-sm font-medium text-zinc-800">Checking bags?</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, checkingBags: false }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (!state.checkingBags
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            No
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, checkingBags: true }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (state.checkingBags
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            Yes
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-sm font-medium text-zinc-800">Flight type</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, flightType: 'domestic' }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (state.flightType === 'domestic'
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            Domestic
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, flightType: 'international' }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (state.flightType === 'international'
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            International
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <div className="text-sm font-medium text-zinc-800">Security option</div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {(
+                            [
+                              { key: 'standard' as const, label: 'Standard TSA' },
+                              { key: 'precheck' as const, label: 'TSA PreCheck' },
+                              { key: 'clear' as const, label: 'CLEAR' },
+                              { key: 'clear-precheck' as const, label: 'CLEAR + PreCheck' },
+                            ] as Array<{ key: SecurityOption; label: string }>
+                          ).map((opt) => {
+                            const selected = state.securityOption === opt.key;
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => setState((s) => ({ ...s, securityOption: opt.key }))}
+                                className={
+                                  'rounded-xl border px-3 py-2 text-left text-sm font-medium ' +
+                                  (selected
+                                    ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                    : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                                }
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <div className="text-sm font-medium text-zinc-800">Cabin (optional)</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, cabin: 'economy' }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (state.cabin === 'economy'
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            Economy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setState((s) => ({ ...s, cabin: 'premium' }))}
+                            className={
+                              'rounded-xl border px-3 py-2 text-sm font-medium ' +
+                              (state.cabin === 'premium'
+                                ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                                : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                            }
+                          >
+                            Premium/Business/First
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {intentCopy(intent).wantsAirline && (
                   <div className="md:col-span-2">
                         <label className="block text-sm font-medium text-zinc-800">

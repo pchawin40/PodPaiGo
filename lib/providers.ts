@@ -54,6 +54,42 @@ function normalizeTrafficRoute(origin: string, destination: string): string {
   return `${origin}-${destination}`;
 }
 
+function resolveParkingTransferMeta(option: ParkingOption): {
+  parkingBufferMinutes: number;
+  transferToTerminalMinutes: number;
+  transferType: 'walk' | 'shuttle' | 'airport-garage';
+} {
+  const id = (option.id || '').toLowerCase();
+  const name = (option.name || '').toLowerCase();
+
+  const isReserved = id === 'sea-reserved' || name.includes('reserved');
+  if (isReserved) {
+    return { parkingBufferMinutes: 5, transferToTerminalMinutes: 3, transferType: 'walk' };
+  }
+
+  const isGeneral = id === 'sea-general' || name.includes('general');
+  if (isGeneral) {
+    return { parkingBufferMinutes: 8, transferToTerminalMinutes: 5, transferType: 'walk' };
+  }
+
+  const isWally = id.includes('wally') || name.includes('wally');
+  if (isWally) {
+    return { parkingBufferMinutes: 10, transferToTerminalMinutes: 12, transferType: 'shuttle' };
+  }
+
+  const isMaster = id.includes('master') || name.includes('master');
+  if (isMaster) {
+    return { parkingBufferMinutes: 10, transferToTerminalMinutes: 12, transferType: 'shuttle' };
+  }
+
+  if (option.type === 'off-airport') {
+    return { parkingBufferMinutes: 10, transferToTerminalMinutes: 12, transferType: 'shuttle' };
+  }
+
+  // Default for official/other: short buffer + walk/garage to terminal.
+  return { parkingBufferMinutes: 8, transferToTerminalMinutes: 5, transferType: 'walk' };
+}
+
 export interface TrafficProvider {
   getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate>;
 }
@@ -391,6 +427,10 @@ export class MockProvider implements DataProvider {
     return `https://www.google.com/maps/dir/${encodeURIComponent(origin)}/${encodeURIComponent(destination)}`;
   }
 
+  private buildGoogleMapsSearchLink(query: string): string {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  }
+
   private estimateRouteDuration(origin: string, destination: string, fallbackMinutes: number): TrafficEstimate {
     const originLower = origin.toLowerCase();
     let duration = fallbackMinutes;
@@ -456,11 +496,19 @@ export class MockProvider implements DataProvider {
         ? await this.getRouteEstimate(origin, routeDestination, dateTime, true)
         : this.estimateRouteDuration(origin, routeDestination, option.id === 'off-airport-1' ? 55 : 60);
 
+      const meta = resolveParkingTransferMeta(option);
+      const parkingBufferMinutes = option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
+      const transferToTerminalMinutes = option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
+      const transferType = option.transferType ?? meta.transferType;
+
       const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
       const sourceLink = option.sourceLink && option.sourceLink.includes('example.com') ? undefined : option.sourceLink;
 
       return {
         ...option,
+        parkingBufferMinutes,
+        transferToTerminalMinutes,
+        transferType,
         distance: routeEstimate.duration,
         routeTrustStatus: routeEstimate.trustStatus,
         routeOrigin: routeOrigins,
@@ -483,25 +531,31 @@ export class MockProvider implements DataProvider {
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
     const baseDuration = routeEstimate.duration + 5;
 
-    return mockRideshareOptions.map(option => ({
-      ...option,
-      duration: baseDuration,
-      routeTrustStatus: routeEstimate.trustStatus,
-      routeOrigin: origin,
-      routeDestination,
-      sourceLink: option.id === 'uber'
-        ? 'https://m.uber.com/ul/?action=setPickup&pickup=my_location'
-        : option.id === 'lyft'
-          ? 'https://lyft.com/ride'
-          : undefined,
-      mapLink: this.buildGoogleDirectionsLink(origin, routeDestination),
-      lastUpdated: new Date().toISOString(),
-      assumptions: [
-        ...option.assumptions,
-        `Route from ${origin} to ${routeDestination}`,
-        routeEstimate.trustStatus === 'live' ? 'Based on live traffic and pickup routing' : 'Estimated ride time',
-      ],
-    }));
+    return mockRideshareOptions.map(option => {
+      const taxiQuery = origin?.trim() ? `Taxi near ${origin}` : 'Taxi SeaTac';
+
+      return {
+        ...option,
+        duration: baseDuration,
+        routeTrustStatus: routeEstimate.trustStatus,
+        routeOrigin: origin,
+        routeDestination,
+        sourceLink: option.id === 'uber'
+          ? 'https://m.uber.com/ul/?action=setPickup&pickup=my_location'
+          : option.id === 'lyft'
+            ? 'https://lyft.com/ride'
+            : option.id === 'taxi'
+              ? this.buildGoogleMapsSearchLink(taxiQuery)
+              : undefined,
+        mapLink: this.buildGoogleDirectionsLink(origin, routeDestination),
+        lastUpdated: new Date().toISOString(),
+        assumptions: [
+          ...option.assumptions,
+          `Route from ${origin} to ${routeDestination}`,
+          routeEstimate.trustStatus === 'live' ? 'Based on live traffic and pickup routing' : 'Estimated ride time',
+        ],
+      };
+    });
   }
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {

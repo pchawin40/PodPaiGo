@@ -39,7 +39,8 @@ function getTrustPenalty(trustStatus: TrustStatus): number {
 function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOption | TransitJourney, type: 'parking' | 'rideshare' | 'transit'): number {
   if (type === 'parking') {
     const parkingOption = option as ParkingOption;
-    return parkingOption.distance <= 5 ? 18 : parkingOption.distance <= 10 ? 10 : 4;
+    const totalMinutes = getParkingTotalMinutes(parkingOption);
+    return totalMinutes <= 10 ? 18 : totalMinutes <= 20 ? 10 : 4;
   }
 
   if (type === 'rideshare') {
@@ -82,6 +83,13 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
   return parking.type === 'off-airport' ? 12 : 4;
 }
 
+function getParkingTotalMinutes(parking: ParkingOption): number {
+  const driveMinutes = parking.distance || 0;
+  const parkingBufferMinutes = parking.parkingBufferMinutes ?? 0;
+  const transferToTerminalMinutes = parking.transferToTerminalMinutes ?? 0;
+  return driveMinutes + parkingBufferMinutes + transferToTerminalMinutes;
+}
+
 function getStressScore(
   type: 'parking' | 'rideshare' | 'transit',
   option: ParkingOption | RideshareOption | TransitOption | TransitJourney,
@@ -91,7 +99,7 @@ function getStressScore(
   const directnessBoost = getDirectnessBoost(option, type);
   const availability = option.availability || 0;
   const duration = type === 'parking'
-    ? (option as ParkingOption).distance
+    ? getParkingTotalMinutes(option as ParkingOption)
     : type === 'rideshare'
       ? (option as RideshareOption).duration
       : (option as TransitJourney).totalDuration;
@@ -238,13 +246,17 @@ export function rankRecommendations(
         ? calculateOfficialParkingCost(parking, parkingDuration)
         : calculateOffAirportParkingCost(parking, parkingDuration);
 
+      const totalDuration = getParkingTotalMinutes(parking);
+
       let score = 100 - cost;
-      score -= parking.distance * 2;
+      score -= totalDuration * 2;
       score += parking.availability;
       score -= parkingWaitPenalty;
 
       const reasons = [];
-      if (parking.distance < 5) reasons.push('Direct terminal access');
+      if ((parking.transferType ?? (parking.type === 'off-airport' ? 'shuttle' : 'walk')) !== 'shuttle') {
+        reasons.push('Direct terminal access');
+      }
       if (parking.type === 'off-airport') reasons.push('Shuttle transfer included');
       if (tripData.type === 'one-way-departure') {
         const parkingHours = parkingDuration / 60;
@@ -267,7 +279,7 @@ export function rankRecommendations(
         score: Math.max(0, score),
         stressScore,
         cost,
-        duration: parking.distance,
+        duration: totalDuration,
         reasons
       });
     });
