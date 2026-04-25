@@ -94,6 +94,14 @@ export type ParkingOption = {
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
   searchQuery?: string; // for marketplace options, the search query to use if direct link is not available 
+  walkingMinutes?: number; // optional override for walking time to terminal, if transferType is 'walk'
+  shuttleMinutes?: number; // optional override for shuttle time to terminal, if transferType is 'shuttle'
+  covered?: boolean;
+  reviewScore?: number; // e.g. from Google reviews, 0-5
+  reviewCount?: number; // number of reviews, for context with reviewScore
+  availabilityScore?: number; // internal score for availability, used in ranking
+  bookingProvider?: string; // e.g. "ParkWhiz", for marketplace options
+  bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options
 };
 
 export type RideshareOption = {

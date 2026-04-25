@@ -505,13 +505,15 @@ export class MockProvider implements DataProvider {
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const airportCode = airport?.id || 'SEA';
 
+    const liveParkingOptions = await getLiveParkingOptions({
+      airportCode,
+      destination,
+    });
+
     const parkingSource =
-      airportCode === 'SEA'
-        ? mockParkingOptions
-        : await getLiveParkingOptions({
-          airportCode,
-          destination,
-        });
+      liveParkingOptions.length > 0
+        ? liveParkingOptions
+        : mockParkingOptions;
 
     return Promise.all(parkingSource.map(async option => {
       const routeDestination = resolveAirportDestinationForRouting(destination);

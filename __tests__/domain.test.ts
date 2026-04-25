@@ -373,7 +373,11 @@ describe('Recommendation Ranking', () => {
 
   test('Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names', async () => {
     const provider = new MockProvider();
-    const transitJourneys = await provider.getTransitOptions('Monroe, WA 98272', 'Seattle-Tacoma International Airport');
+    const transitJourneys = await provider.getTransitOptions(
+      'Monroe, WA 98272',
+      'Seattle-Tacoma International Airport',
+      new Date().toISOString()
+    );
 
     expect(transitJourneys.length).toBeGreaterThan(0);
     expect(transitJourneys.every(journey => journey.name.startsWith('Drive to'))).toBe(true);

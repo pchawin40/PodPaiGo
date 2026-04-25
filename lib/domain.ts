@@ -73,7 +73,7 @@ function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOpt
     ? transitJourney.totalDuration
     : transitJourney.duration;
   const timeBoost = journeyDuration <= 60 ? 15 : journeyDuration <= 90 ? 10 : 5;
-  
+
   return Math.max(5, 25 - transferPenalty + segmentBoost + timeBoost);
 }
 
@@ -250,7 +250,6 @@ export function rankRecommendations(
   transitJourneys: Array<TransitOption | TransitJourney>,
   tsaEstimate: TsaEstimate
 ): RankedRecommendation[] {
-  const tripDuration = calculateTripDuration(tripData);
   const parkingDuration = calculateParkingDuration(tripData);
   const recommendations: RankedRecommendation[] = [];
   const useParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip';
@@ -286,6 +285,14 @@ export function rankRecommendations(
       if (parking.trustStatus === 'verified-source') reasons.push('Verified source');
       if (parking.trustStatus === 'live') reasons.push('Real-time estimate');
       if (cost < 50) reasons.push('Budget-friendly');
+
+      if (parking.covered) reasons.push('Covered parking');
+      if (parking.reviewScore && parking.reviewScore >= 4.4) reasons.push('Strong reviews');
+      if (parking.availabilityScore && parking.availabilityScore >= 80) reasons.push('High parking availability');
+      if (parking.shuttleMinutes && parking.shuttleMinutes <= 12) reasons.push(`${parking.shuttleMinutes} min shuttle`);
+      if (parking.walkingMinutes && parking.walkingMinutes <= 5) reasons.push(`${parking.walkingMinutes} min walk`);
+      if (parking.bestFor?.length) reasons.push(parking.bestFor[0]);
+
       if (reasons.length === 0) reasons.push('Available option');
 
       const stressScore = getStressScore('parking', parking, cost);
@@ -343,7 +350,7 @@ export function rankRecommendations(
     score -= totalDuration;
     score += transit.availability ?? 0;
     score -= transitWaitPenalty;
-    
+
     const isUnrealistic = totalDuration > 120 || transit.trustStatus === 'fallback';
     if (isUnrealistic) {
       score -= 40;
@@ -353,7 +360,7 @@ export function rankRecommendations(
     if (totalDuration > 180) {
       score -= 100;
     }
-    
+
     // Penalize too many transfers
     if (transfers > 2) {
       score -= 30;
@@ -368,7 +375,7 @@ export function rankRecommendations(
     if (hasLightRail) reasons.push('Includes light rail');
     if (transit.trustStatus === 'verified-source') reasons.push('Verified source');
     if (cost < 10) reasons.push('Affordable total cost');
-    
+
     // Add segment breakdown to reasons
     const driveSegments = 'segments' in transit && Array.isArray(transit.segments)
       ? transit.segments.filter(s => s.mode === 'drive')
@@ -377,7 +384,7 @@ export function rankRecommendations(
       const totalDriveTime = driveSegments.reduce((sum, s) => sum + s.duration, 0);
       reasons.push(`Drive ${totalDriveTime} min to transit`);
     }
-    
+
     if (reasons.length === 0) reasons.push('Transit option available');
 
     const stressScore = getStressScore('transit', transit, cost);

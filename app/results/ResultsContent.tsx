@@ -460,8 +460,8 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
   const parkWhizUrl = `https://www.parkwhiz.com/search/?destination=${encodeURIComponent(airportSearchName)}`;
 
   // Marketplace estimates (clearly labeled estimated)
-  const spotHeroEst = isReserved ? 39 : isGeneral ? 35 : isWally ? 30 : isMaster ? 31 : null;
-  const wayEst = isReserved ? 36 : isGeneral ? 34 : isWally ? 28 : isMaster ? 29 : null;
+  const spotHeroEst = null;
+  const wayEst = null;
 
   const rows: BookingSourceRow[] = [
     mkRow({

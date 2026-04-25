@@ -12,6 +12,7 @@ import {
   isDepartureLeg,
   rankRecommendations
 } from './domain';
+import { enrichParkingWithGooglePlaces } from './live/googlePlacesParking';
 
 function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
   const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
@@ -239,6 +240,10 @@ export class RecommendationEngine {
     if (!allowCarOptions && allowTransit) {
       transit = transit.filter((t) => !hasDriveSegment(t));
       transit = [...transit, ...buildTransitOnlyJourneys(tripData.origin, tripData.destination)];
+    }
+
+    if (allowCarOptions && parking.length > 0) {
+      parking = await enrichParkingWithGooglePlaces(parking);
     }
 
     const tripDuration = calculateTripDuration(tripData);

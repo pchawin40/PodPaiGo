@@ -24,7 +24,15 @@ export const mockParkingOptions: ParkingOption[] = [
     assumptions: [
       'Daily rate is a baseline estimate; verify during booking',
       'Availability is historical/illustrative (not live)'
-    ]
+    ],
+    walkingMinutes: 3,
+    shuttleMinutes: 0,
+    covered: true,
+    reviewScore: 4.2,
+    reviewCount: 1800,
+    availabilityScore: 78,
+    bookingProvider: 'Port of Seattle',
+    bestFor: ['Closest Walk', 'Lowest Stress', 'Best if Running Late'],
   },
   {
     id: 'sea-general',
@@ -47,7 +55,15 @@ export const mockParkingOptions: ParkingOption[] = [
     assumptions: [
       'Daily rate is a baseline estimate; verify during booking',
       'Availability is historical/illustrative (not live)'
-    ]
+    ],
+    walkingMinutes: 5,
+    shuttleMinutes: 0,
+    covered: true,
+    reviewScore: 4.1,
+    reviewCount: 2600,
+    availabilityScore: 62,
+    bookingProvider: 'Port of Seattle',
+    bestFor: ['Covered', 'Official parking'],
   },
   {
     id: 'off-airport-wallypark',
@@ -58,9 +74,9 @@ export const mockParkingOptions: ParkingOption[] = [
     transferType: 'shuttle',
     // Rough daily-rate placeholder for ranking only.
     price: 32,
-    priceDisplay: 'from-per-day',
-    priceUnit: 'per-day',
-    priceNote: 'Estimated daily rate — check live price',
+    priceDisplay: 'check-live',
+    priceUnit: undefined,
+    priceNote: 'Open provider to see live prices. Prices may be lower than this estimate.',
     distance: 12,
     availability: 90,
     trustStatus: 'estimated',
@@ -72,7 +88,15 @@ export const mockParkingOptions: ParkingOption[] = [
       'Pricing varies by date/time and promos',
       'Shuttle service included',
       'Check live price before booking'
-    ]
+    ], 
+    walkingMinutes: 2,
+    shuttleMinutes: 12,
+    covered: true,
+    reviewScore: 4.4,
+    reviewCount: 2100,
+    availabilityScore: 88,
+    bookingProvider: 'WallyPark',
+    bestFor: ['Best value', 'Best Weather', 'Best Reviews'],
   },
   {
     id: 'off-airport-masterpark',
@@ -96,7 +120,15 @@ export const mockParkingOptions: ParkingOption[] = [
       'Pricing varies by date/time and promos',
       'Shuttle service included',
       'Check live price before booking'
-    ]
+    ],
+    walkingMinutes: 2,
+    shuttleMinutes: 12,
+    covered: true,
+    reviewScore: 4.5,
+    reviewCount: 3100,
+    availabilityScore: 88,
+    bookingProvider: 'MasterPark',
+    bestFor: ['Best Reviews', 'Best for Families', 'Best Value'],
   },
 ];
 

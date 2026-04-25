@@ -63,7 +63,11 @@ describe('RecommendationEngine airport-specific filtering', () => {
     const rec = await RecommendationEngine.generateRecommendations(tripData);
 
     // Expect at least one SEA-specific provider in parking or rideshare or transit
-    const providerStringChecks = rec.parking.concat(rec.rideshare).concat(rec.transit);
+    const providerStringChecks = [
+      ...rec.parking,
+      ...rec.rideshare,
+      ...rec.transit,
+    ];
     const foundSeaSpecific = providerStringChecks.some(opt => {
       const combinedFields = [opt.name, opt.sourceName, opt.sourceLink, opt.mapLink].filter(Boolean).join(' ').toLowerCase();
       return seaSpecificStrings.some(seaStr => combinedFields.includes(seaStr));

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
 
 function formatMoney(n: number) {
@@ -19,24 +20,87 @@ export default function ParkingSmartPick({
   options: ParkingOption[];
   tripData: TripData | null;
 }) {
+  const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null); // For closing popovers when clicking outside
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        detailRef.current &&
+        !detailRef.current.contains(event.target as Node)
+      ) {
+        setOpenDetail(null);
+      }
+    }
+
+    if (openDetail) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [openDetail]);
+
   if (!options?.length) return null;
 
   const days = estimateDays(tripData);
   const official = options.find((p) => p.type === 'official');
-  const sorted = [...options].sort((a, b) => {
-    const aScore =
-      (a.price || 999) +
-      ((a.transferToTerminalMinutes || 10) * 2) -
-      (a.trustStatus === 'live' ? 10 : 0) -
-      (a.trustStatus === 'verified-source' ? 6 : 0);
 
-    const bScore =
-      (b.price || 999) +
-      ((b.transferToTerminalMinutes || 10) * 2) -
-      (b.trustStatus === 'live' ? 10 : 0) -
-      (b.trustStatus === 'verified-source' ? 6 : 0);
+  const smartPickCandidates = options.filter((p) => {
+    const id = String(p.id || '').toLowerCase();
+    const name = String(p.name || '').toLowerCase();
 
-    return aScore - bScore;
+    const isGenericMarketplace =
+      id.includes('spothero') ||
+      id.includes('way') ||
+      id.includes('parkwhiz') ||
+      id.includes('airportparkingreservations') ||
+      id.includes('cheapairportparking') ||
+      id.includes('google-parking-search');
+
+    const hasRealLotSignal =
+      !!p.reviewScore ||
+      name.includes('wally') ||
+      name.includes('masterpark') ||
+      name.includes('reserved') ||
+      name.includes('general') ||
+      name.includes('garage');
+
+    return !isGenericMarketplace && hasRealLotSignal;
+  });
+
+  const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : options;
+
+  const sorted = [...candidateOptions].sort((a, b) => {
+    const score = (p: ParkingOption) => {
+      const price = p.price || 999;
+      const transfer = p.shuttleMinutes ?? p.transferToTerminalMinutes ?? 10;
+      const walk = p.walkingMinutes ?? 5;
+      const reviews = p.reviewScore ? (5 - p.reviewScore) * 8 : 8;
+      const availability = p.availabilityScore ?? p.availability ?? 50;
+      const coveredPenalty = p.covered ? -4 : 4;
+      const trustBonus =
+        p.trustStatus === 'live' ? -10 :
+          p.trustStatus === 'verified-source' ? -6 :
+            0;
+      const reviewBonus = p.reviewScore ? -12 : 0;
+      const liveBonus = p.trustStatus === 'live' ? -8 : 0;
+
+      return (
+        price +
+        transfer * 1.8 +
+        walk * 0.8 +
+        reviews -
+        availability * 0.12 +
+        coveredPenalty +
+        trustBonus +
+        reviewBonus +
+        liveBonus
+      );
+    };
+
+    return score(a) - score(b);
   });
 
   const best = sorted[0];
@@ -65,12 +129,90 @@ export default function ParkingSmartPick({
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
               Best value
             </span>
+
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
               {best.transferType === 'shuttle' ? 'Shuttle' : 'Walk'}
             </span>
+
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
               {best.trustStatus === 'live' ? 'Live listing' : 'Verified link'}
             </span>
+
+            {best.covered && (
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
+                Covered
+              </span>
+            )}
+
+            {best.reviewScore && (
+              <div className="relative inline-flex">
+                <button
+                  type="button"
+                  onClick={() => setOpenDetail(openDetail === 'reviews' ? null : 'reviews')}
+                  className="select-none rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700 hover:bg-zinc-200"
+                >
+                  ⭐ {best.reviewScore} ({best.reviewCount?.toLocaleString() || 0})
+                </button>
+
+                {openDetail === 'reviews' && (
+                  <div
+                    ref={detailRef}
+                    className="absolute left-0 top-9 z-20 w-72 rounded-xl border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-lg">
+                    <div className="font-semibold text-zinc-900">Review confidence</div>
+                    <div className="mt-1">
+                      {best.reviewScore}/5 from about {best.reviewCount?.toLocaleString() || 0} reviews.
+                    </div>
+                    <div className="mt-2 text-xs text-zinc-500">
+                      Estimate based on public listing-style data. Verify recent reviews before booking.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {best.availabilityScore && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenDetail(
+                      openDetail === 'availability' ? null : 'availability'
+                    )
+                  }
+                  className="select-none rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700 hover:bg-zinc-200"
+                >
+                  {best.availabilityScore >= 80
+                    ? 'High availability'
+                    : best.availabilityScore >= 60
+                      ? 'Medium availability'
+                      : 'Low availability'}
+                </button>
+
+                {openDetail === 'availability' && (
+                  <div
+                    ref={detailRef}
+                    className="absolute right-0 top-12 z-20 w-72 rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
+                  >
+                    <div className="font-semibold text-zinc-900">
+                      Availability confidence
+                    </div>
+
+                    <div className="mt-2 text-sm text-zinc-700">
+                      Score: {best.availabilityScore}/100
+                    </div>
+
+                    <div className="mt-2 text-sm text-zinc-600">
+                      Based on listing activity, estimated capacity,
+                      and provider confidence.
+                    </div>
+
+                    <div className="mt-2 text-sm text-zinc-600">
+                      Actual space may change by arrival time.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="mt-4 text-2xl font-bold text-zinc-900">
@@ -80,7 +222,9 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-1 text-sm text-zinc-600">
-            {best.transferToTerminalMinutes || 10} min to terminal
+            {best.transferType === 'shuttle'
+              ? `${best.shuttleMinutes ?? best.transferToTerminalMinutes ?? 10} min shuttle`
+              : `${best.walkingMinutes ?? best.transferToTerminalMinutes ?? 5} min walk`}
             {savings ? ` · Save about ${formatMoney(savings)} vs official parking` : ''}
           </div>
 

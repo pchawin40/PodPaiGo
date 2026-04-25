@@ -1,5 +1,6 @@
 import { ParkingOption } from '../types';
 import { getAirportById } from '../airports/catalog';
+import { mockParkingOptions } from '../../data/mockData';
 
 type ParkingMarketplace = {
   id: string;
@@ -10,13 +11,6 @@ type ParkingMarketplace = {
 };
 
 const PARKING_MARKETPLACES: ParkingMarketplace[] = [
-  {
-    id: 'official',
-    name: 'Official Airport Parking',
-    trustStatus: 'verified-source',
-    sourceName: 'Airport official site',
-    url: '',
-  },
   {
     id: 'spothero',
     name: 'SpotHero',
@@ -38,28 +32,27 @@ const PARKING_MARKETPLACES: ParkingMarketplace[] = [
     sourceName: 'ParkWhiz',
     url: 'https://www.parkwhiz.com/airport-parking/',
   },
-  {
-    id: 'airportparkingreservations',
-    name: 'AirportParkingReservations',
-    trustStatus: 'estimated',
-    sourceName: 'AirportParkingReservations',
-    url: 'https://www.airportparkingreservations.com/',
-  },
-  {
-    id: 'cheapairportparking',
-    name: 'Cheap Airport Parking',
-    trustStatus: 'estimated',
-    sourceName: 'Cheap Airport Parking',
-    url: 'https://www.cheapairportparking.org/',
-  },
-  {
-    id: 'google-parking-search',
-    name: 'Google Parking Search',
-    trustStatus: 'fallback',
-    sourceName: 'Google Maps/Search',
-    url: '',
-  },
 ];
+
+// Normalize lot names by lowercasing and removing non-alphanumeric characters to help deduplication
+function normalizeLotName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Dedupe parking options based on normalized lot names to avoid showing multiple similar options from different sources
+function dedupeParkingOptions(options: ParkingOption[]): ParkingOption[] {
+  const seen = new Set<string>();
+
+  return options.filter((option) => {
+    const key = normalizeLotName(option.name);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function googleSearchUrl(query: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
@@ -69,10 +62,26 @@ function googleMapsSearchUrl(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
+function scoreGoogleParkingOption(p: ParkingOption): number {
+  const reviewScore = p.reviewScore ?? 0;
+  const reviewCount = p.reviewCount ?? 0;
+  const transferMinutes = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
+  const estimatedPrice = p.price ?? 40;
+  const availabilityScore = p.availabilityScore ?? p.availability ?? 50;
+
+  return (
+    reviewScore * 20 +
+    Math.min(reviewCount / 100, 30) +
+    availabilityScore * 0.15 -
+    transferMinutes -
+    estimatedPrice * 0.25
+  );
+}
+
 async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOption[]> {
   const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
-  const airportSearchName = `${airport.label} (${airport.id}) parking`;
+  const airportSearchName = `${airport.label} ${airport.id} airport parking lots`;
 
   if (!key) return [];
 
@@ -110,31 +119,67 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
   const data = await res.json();
   const places = Array.isArray(data.places) ? data.places : [];
 
-  return places.slice(0, 8).map((place: any): ParkingOption => ({
-    id: `${airport.id.toLowerCase()}-google-${place.id}`,
-    name: place.displayName?.text || `${airport.id} Parking`,
-    type: 'off-airport',
-    price: 30,
-    priceDisplay: 'check-live',
-    priceNote: 'Live Google listing. Open listing to confirm current price, shuttle, coupons, and availability.',
-    searchQuery: `${airport.label} ${airport.id} airport parking`,
-    distance: 10,
-    availability: 80,
-    trustStatus: 'live',
-    sourceName: 'Google Places',
-    sourceLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
-    mapLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
-    routeDestination: place.formattedAddress || airport.routingAddress,
-    lastUpdated: new Date().toISOString(),
-    parkingBufferMinutes: 15,
-    transferToTerminalMinutes: 12,
-    transferType: 'shuttle',
-    assumptions: [
-      'Live parking listing from Google Places.',
-      place.rating ? `Google rating: ${place.rating} (${place.userRatingCount || 0} reviews)` : 'No Google rating available.',
-      'Live price/coupon not pulled yet.',
-    ],
-  }));
+  return places
+    .slice(0, 12)
+    .map((place: any): ParkingOption => {
+      const rating = typeof place.rating === 'number' ? place.rating : undefined;
+      const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : undefined;
+
+      const name = place.displayName?.text || `${airport.id} Parking`;
+      const lowerName = name.toLowerCase();
+
+      const isOfficial =
+        lowerName.includes(`${airport.id.toLowerCase()} parking garage`) ||
+        lowerName.includes('terminal parking') ||
+        lowerName.includes('official') ||
+        lowerName.includes('airport garage');
+
+      const isCovered =
+        lowerName.includes('garage') ||
+        lowerName.includes('covered') ||
+        lowerName.includes('wally') ||
+        lowerName.includes('masterpark');
+
+      return {
+        id: `${airport.id.toLowerCase()}-google-${place.id}`,
+        name,
+        type: isOfficial ? 'official' : 'off-airport',
+        price: 30,
+        priceDisplay: 'check-live',
+        priceNote: 'Live Google listing. Open listing to confirm current price, shuttle, coupons, and availability.',
+        searchQuery: `${airport.label} ${airport.id} airport parking`,
+        distance: 10,
+        availability: 80,
+        trustStatus: 'live',
+        sourceName: 'Google Places',
+        sourceLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
+        mapLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
+        routeDestination: place.formattedAddress || airport.routingAddress,
+        lastUpdated: new Date().toISOString(),
+        parkingBufferMinutes: 15,
+        transferToTerminalMinutes: 12,
+        transferType: 'shuttle',
+        assumptions: [
+          'Live parking listing from Google Places.',
+          place.rating ? `Google rating: ${place.rating} (${place.userRatingCount || 0} reviews)` : 'No Google rating available.',
+          'Live price/coupon not pulled yet.',
+        ],
+        walkingMinutes: isOfficial ? 5 : 2,
+        shuttleMinutes: isOfficial ? 0 : 12,
+        covered: isCovered,
+        reviewScore: rating,
+        reviewCount,
+        availabilityScore: place.businessStatus === 'OPERATIONAL' ? 80 : 45,
+        bookingProvider: 'Google Places',
+        bestFor: [
+          rating && rating >= 4.4 ? 'Best Reviews' : '',
+          isCovered ? 'Best Weather' : '',
+          isOfficial ? 'Closest Walk' : 'Compare Live Price',
+        ].filter(Boolean),
+      };
+    })
+    .sort((a: ParkingOption, b: ParkingOption) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
+    .slice(0, 6);
 }
 
 export async function getLiveParkingOptions(args: {
@@ -185,5 +230,32 @@ export async function getLiveParkingOptions(args: {
     };
   });
 
-  return [...liveGoogleOptions, ...marketplaceOptions];
+  const shouldUseSeaCuratedLots = airport.id === 'SEA';
+
+  const curatedSeaLots: ParkingOption[] = shouldUseSeaCuratedLots
+    ? mockParkingOptions.map((p): ParkingOption => ({
+      ...p,
+      trustStatus: p.trustStatus === 'verified-source' ? 'verified-source' : 'estimated',
+      assumptions: [
+        ...p.assumptions,
+        'Curated SEA parking lot used as a reliable MVP fallback.',
+      ],
+    }))
+    : [];
+
+  void marketplaceOptions;
+
+  return dedupeParkingOptions([
+    ...curatedSeaLots,
+    ...liveGoogleOptions,
+  ]).sort((a, b) => {
+    const rank = (p: any) => {
+      if (p.type === 'official') return 1;
+      if (p.name.toLowerCase().includes('wally')) return 2;
+      if (p.name.toLowerCase().includes('master')) return 3;
+      return 4;
+    };
+
+    return rank(a) - rank(b);
+  });
 }

@@ -144,4 +144,18 @@ test.describe('Results page QA', () => {
   test.skip('uses improved high-risk wording', async () => {
     // TODO: Re-enable after production UI has stable selectors/test ids.
   });
+
+  // Note: The "Review details" text is only visible after clicking the star badge, so we check that in the next test.
+  test('smart parking pick review badge opens details', async ({ page }) => {
+    await page.goto(
+      resultsUrl({
+        departureDate: futureDate(1),
+        departureTime: '23:30',
+      })
+    );
+
+    await page.getByRole('button', { name: /⭐/ }).first().click();
+
+    await expect(page.getByText('Review confidence')).toBeVisible();
+  });
 });
