@@ -213,6 +213,16 @@ export default function ParkingSmartPick({
                 )}
               </div>
             )}
+
+            {best.priceConfidence && (
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
+                {best.priceConfidence === 'high'
+                  ? 'High price confidence'
+                  : best.priceConfidence === 'medium'
+                    ? 'Medium price confidence'
+                    : 'Low price confidence'}
+              </span>
+            )}
           </div>
 
           <div className="mt-4 text-2xl font-bold text-zinc-900">

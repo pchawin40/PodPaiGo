@@ -59,6 +59,15 @@ export type PriceDisplay =
 
 export type PriceUnit = 'total' | 'per-day';
 
+export type ParkingPriceSource =
+  | 'official-rate'
+  | 'direct-lot-rate'
+  | 'marketplace-link'
+  | 'google-places'
+  | 'estimated';
+
+export type PriceConfidence = 'high' | 'medium' | 'low';
+
 export type ParkingOption = {
   id: string;
   name: string;
@@ -82,6 +91,8 @@ export type ParkingOption = {
   priceUnit?: PriceUnit;
   /** Extra context shown next to pricing (e.g. "Check live price", "Mock data"). */
   priceNote?: string;
+  priceSource?: ParkingPriceSource;
+  priceConfidence?: PriceConfidence;
   distance: number; // in minutes
   availability: number; // percentage
   trustStatus: TrustStatus;
