@@ -51,6 +51,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loadingPredictions, setLoadingPredictions] = useState(false);
+  const [hasTouchedInput, setHasTouchedInput] = useState(false);
 
   const [recentOrigins, setRecentOrigins] = useState<string[]>(() =>
     typeof window === 'undefined' ? [] : getRecentOrigins()
@@ -116,6 +117,8 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
   // Fetch predictions based on input value, debounce to avoid setState in effect
   useEffect(() => {
+    if (!hasTouchedInput) return;
+
     if (!autocompleteService.current || !apiKeyPresent || inputValue.trim().length < 3) {
       setLoadingPredictions(false);
       // Delay clearing suggestions in next tick to avoid hook conflicts
@@ -144,7 +147,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     }, 250);
 
     return () => clearTimeout(timeoutId);
-  }, [inputValue, apiKeyPresent]);
+  }, [inputValue, apiKeyPresent, hasTouchedInput]);
 
   const onSelectPrediction = (prediction: Prediction) => {
     setInputValue(prediction.description);
@@ -156,6 +159,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   };
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setHasTouchedInput(true);
     setInputValue(e.target.value);
     onChange(e.target.value);
     setIsOpen(true);
@@ -268,7 +272,10 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         value={inputValue}
         onChange={onInputChange}
         onKeyDown={onKeyDown}
-        onFocus={() => setIsOpen(true)}
+        onFocus={() => {
+          setHasTouchedInput(true);
+          setIsOpen(true);
+        }}
         onBlur={() => setTimeout(() => setIsOpen(false), 150)}
         placeholder={placeholder}
         className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -299,9 +306,8 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
                 onMouseDown={(e) => e.preventDefault()} // prevent blur before click
                 onClick={() => onSelectPrediction(prediction)}
                 tabIndex={-1}
-                className={`cursor-pointer px-4 py-3 text-sm ${
-                  selected ? 'bg-blue-600 text-white' : 'text-zinc-900 hover:bg-zinc-100'
-                }`}
+                className={`cursor-pointer px-4 py-3 text-sm ${selected ? 'bg-blue-600 text-white' : 'text-zinc-900 hover:bg-zinc-100'
+                  }`}
               >
                 {prediction.description}
               </div>
