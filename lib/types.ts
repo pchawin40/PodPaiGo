@@ -93,6 +93,7 @@ export type ParkingOption = {
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
+  searchQuery?: string; // for marketplace options, the search query to use if direct link is not available 
 };
 
 export type RideshareOption = {

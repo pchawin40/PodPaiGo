@@ -508,7 +508,7 @@ export class MockProvider implements DataProvider {
     const parkingSource =
       airportCode === 'SEA'
         ? mockParkingOptions
-        : getLiveParkingOptions({
+        : await getLiveParkingOptions({
           airportCode,
           destination,
         });

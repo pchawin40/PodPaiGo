@@ -13,6 +13,7 @@ import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import ParkingBookingComparison from './ParkingBookingComparison';
 import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
+import ParkingSmartPick from './ParkingSmartPick';
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
 
@@ -81,6 +82,24 @@ function confidenceFromTrust(trust: TrustStatus): { label: string; className: st
     default:
       return { label: 'Low confidence', className: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
   }
+}
+
+async function copyTextThenOpen(text: string, url: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function typeLabel(type: RankedRecommendation['type']): string {
@@ -718,6 +737,11 @@ function OptionCard({
   sort: SortTab;
 }) {
   const opt: any = item.option;
+
+  const airportCode = ((tripData as any)?.airportCode || 'SEA').toUpperCase();
+  const airport = getAirportById(airportCode) || getAirportById('SEA')!;
+  const safeParkingSearchQuery = `${airport.label} ${airport.id} airport parking`;
+
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
 
   const sourceLink = opt.sourceLink || null;
@@ -904,14 +928,18 @@ function OptionCard({
                                 </div>
                               </td>
                               <td className="py-3">
-                                <a
-                                  href={r.link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    copyTextThenOpen(
+                                      opt.searchQuery || safeParkingSearchQuery,
+                                      r.link
+                                    )
+                                  }
                                   className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
                                 >
-                                  {r.ctaLabel}
-                                </a>
+                                  {r.ctaLabel === 'Check live' ? 'Copy + open' : r.ctaLabel}
+                                </button>
                               </td>
                             </tr>
                           );
@@ -926,7 +954,20 @@ function OptionCard({
         </div>
 
         <div className="flex shrink-0 flex-row gap-2 sm:flex-col sm:items-stretch">
-          {sourceLink && (
+          {sourceLink && item.type === 'parking' ? (
+            <button
+              type="button"
+              onClick={() =>
+                copyTextThenOpen(
+                  opt.searchQuery || safeParkingSearchQuery,
+                  sourceLink
+                )
+              }
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Copy search + open
+            </button>
+          ) : sourceLink ? (
             <a
               href={sourceLink}
               target="_blank"
@@ -937,7 +978,7 @@ function OptionCard({
                 ? 'Find taxi'
                 : 'View / Book'}
             </a>
-          )}
+          ) : null}
           {routeLink && (
             <a
               href={routeLink}
@@ -1826,6 +1867,15 @@ export default function ResultsContent() {
         <div className="mt-6">
           <SortTabs value={sort} onChange={setSort} />
         </div>
+
+        {showParkingProviders && recommendation.parking.length > 0 && (
+          <div className="mt-6">
+            <ParkingSmartPick
+              options={recommendation.parking}
+              tripData={tripData}
+            />
+          </div>
+        )}
 
         {/* Options */}
         <div className="mt-4 grid grid-cols-1 gap-4">
