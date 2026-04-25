@@ -211,7 +211,7 @@ export default function TripFlow() {
       const yyyyMmDd = now.toISOString().slice(0, 10);
 
       // If date already set keep it; otherwise default to today for all intents
-      let nextDate = s.date || yyyyMmDd;
+      const nextDate = s.date || yyyyMmDd;
 
       // Default time behavior depends on intent
       let nextTime = s.time; // preserve if already provided

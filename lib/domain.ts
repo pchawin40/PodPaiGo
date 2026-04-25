@@ -2,7 +2,7 @@ import { TripData, ParkingOption, RideshareOption, TransitOption, TransitJourney
 
 
 /**
- * Domain logic for GateWise - pure functions for calculations and recommendations
+ * Domain logic for PodPaiGo - pure functions for calculations and recommendations
  */
 
 // Time utilities
@@ -19,6 +19,22 @@ export function addMinutes(date: Date, minutes: number): Date {
 
 export function formatTime(date: Date): string {
   return date.toTimeString().slice(0, 5);
+}
+
+export function formatDurationLong(totalMinutes: number): string {
+  const minutes = Math.max(0, Math.round(totalMinutes));
+
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+
+  const parts: string[] = [];
+
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
+
+  return parts.join(' ');
 }
 
 function getTrustPenalty(trustStatus: TrustStatus): number {

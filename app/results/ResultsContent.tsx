@@ -749,22 +749,22 @@ function OptionCard({
 
     if (timing.status === 'good') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-      return mins != null
-        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${mins} min cushion`
-        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+    return mins != null
+      ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
+      : `Leave by ${leaveBy} · reach terminal around ${reach}`;
     }
 
     if (timing.status === 'tight') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-      return mins != null
-        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} cushion`
-        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+    return mins != null
+      ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
+      : `Leave by ${leaveBy} · reach terminal around ${reach}`;
     }
 
     // too-late
     const shortBy = typeof timing.shortByMinutes === 'number' ? timing.shortByMinutes : null;
     return shortBy != null
-      ? `High risk timing — needed to leave by ${leaveBy} · missed safe leave time by ${formatMinutes(shortBy)}`
+      ? `High risk timing — needed to leave by ${leaveBy} to reach terminal around ${reach} (short by ${shortBy} min)`
       : `High risk timing — needed to leave by ${leaveBy} to reach terminal around ${reach}`;
   })();
 

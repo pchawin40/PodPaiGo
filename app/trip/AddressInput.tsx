@@ -1,21 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 
 type AddressSuggestion = {
   displayName: string;
 };
-
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(handle);
-  }, [value, delayMs]);
-
-  return debounced;
-}
 
 async function reverseGeocode(lat: number, lon: number, signal: AbortSignal): Promise<string | null> {
   try {
@@ -58,35 +47,61 @@ async function searchAddresses(query: string, signal: AbortSignal): Promise<Addr
   }
 }
 
+const LOCAL_STORAGE_KEY = 'podpaigo-recent-origins';
+const MAX_RECENTS = 5;
+
+function getRecentOrigins(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentOrigin(origin: string) {
+  if (typeof window === 'undefined') return;
+  if (!origin || origin.trim().length < 5) return;
+  try {
+    const recents = getRecentOrigins();
+    const newRecents = [origin.trim(), ...recents.filter((r) => r !== origin.trim())];
+    if (newRecents.length > MAX_RECENTS) newRecents.splice(MAX_RECENTS);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newRecents));
+  } catch {
+    // ignore
+  }
+}
+
 export function AddressInput({
   label,
   value,
   onChange,
   placeholder,
-  autoDetectOnMount = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  autoDetectOnMount?: boolean;
 }) {
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
 
-  const [query, setQuery] = useState(value);
-  const debouncedQuery = useDebouncedValue(query, 250);
+  // Initialize query directly from prop
+  const [query, setQuery] = useState(value || '');
+
+  // recent origins initialized lazily
+  const [recentOrigins, setRecentOrigins] = useState<string[]>(() =>
+    typeof window === 'undefined' ? [] : getRecentOrigins()
+  );
 
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(false);
+  // keyboard navigation index, -1 means no selection
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
-  // Keep internal query in sync with external value changes.
-  useEffect(() => {
-    setQuery(value);
-  }, [value]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const canUseGeo = useMemo(() => typeof navigator !== 'undefined' && !!navigator.geolocation, []);
 
@@ -117,6 +132,11 @@ export function AddressInput({
 
       onChange(readable || `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
       setIsOpen(false);
+      // Save to recent origins
+      if (readable) {
+        saveRecentOrigin(readable);
+        setRecentOrigins(getRecentOrigins());
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to get location';
       setLocateError(message);
@@ -125,43 +145,72 @@ export function AddressInput({
     }
   };
 
-  useEffect(() => {
-    // Auto-detect on first mount if requested and the field is blank.
-    if (!autoDetectOnMount) return;
-    if (mountedRef.current) return;
-    mountedRef.current = true;
-
-    if (!value) {
-      // Fire and forget.
-      detectLocation();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoDetectOnMount]);
-
+  // Debounced query effect for address suggestions
   useEffect(() => {
     abortRef.current?.abort();
 
-    if (debouncedQuery.trim().length < 3) {
-      setSuggestions([]);
-      return;
+    if (query.trim().length < 3) {
+      // Instead of clearing synchronously, clear in next tick
+      const handle = setTimeout(() => {
+        setSuggestions([]);
+      }, 0);
+      return () => clearTimeout(handle);
     }
 
     const controller = new AbortController();
     abortRef.current = controller;
 
-    searchAddresses(debouncedQuery, controller.signal).then((res) => {
+    async function fetchSuggestions() {
+      const res = await searchAddresses(query, controller.signal);
       setSuggestions(res);
-    });
+      setIsOpen(true);
+      setHighlightedIndex(-1);
+    }
+
+    fetchSuggestions();
 
     return () => controller.abort();
-  }, [debouncedQuery]);
+  }, [query]);
+
+  // Keyboard navigation handler
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isOpen) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((hi) => Math.min(hi + 1, suggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((hi) => Math.max(hi - 1, 0));
+    } else if (e.key === 'Enter') {
+      if (highlightedIndex >= 0 && highlightedIndex < suggestions.length) {
+        e.preventDefault();
+        const selected = suggestions[highlightedIndex];
+        onChange(selected.displayName);
+        setQuery(selected.displayName);
+        setIsOpen(false);
+        saveRecentOrigin(selected.displayName);
+        setRecentOrigins(getRecentOrigins());
+        setHighlightedIndex(-1);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+    }
+  };
+
+  // Click recent origin entry
+  const onRecentClick = (value: string) => {
+    onChange(value);
+    setQuery(value);
+    setIsOpen(false);
+  };
 
   return (
     <div className="space-y-2">
       <div className="flex items-end justify-between gap-3">
-        <label className="block text-sm font-medium text-zinc-800">
-          {label}
-        </label>
+        <label className="block text-sm font-medium text-zinc-800">{label}</label>
 
         <button
           type="button"
@@ -181,42 +230,77 @@ export function AddressInput({
             setQuery(next);
             onChange(next);
             setIsOpen(true);
+            setHighlightedIndex(-1);
           }}
           onFocus={() => setIsOpen(true)}
           onBlur={() => {
             // Allow click selection.
-            window.setTimeout(() => setIsOpen(false), 120);
+            window.setTimeout(() => setIsOpen(false), 150);
           }}
+          onKeyDown={onKeyDown}
           placeholder={placeholder}
-          className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none ring-0 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          aria-autocomplete="list"
+          aria-expanded={isOpen}
+          aria-controls="address-suggestion-list"
+          role="combobox"
+          className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
 
         {isOpen && suggestions.length > 0 && (
-          <div className="absolute z-10 mt-2 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg">
-            {suggestions.map((s) => (
-              <button
-                key={s.displayName}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onChange(s.displayName);
-                  setQuery(s.displayName);
-                  setIsOpen(false);
-                }}
-                className="block w-full px-4 py-3 text-left text-sm text-zinc-800 hover:bg-zinc-50"
-              >
-                {s.displayName}
-              </button>
-            ))}
-          </div>
+          <ul
+            id="address-suggestion-list"
+            role="listbox"
+            className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg"
+          >
+            {suggestions.map((s, idx) => {
+              const selected = idx === highlightedIndex;
+              return (
+                <li
+                  key={s.displayName}
+                  role="option"
+                  aria-selected={selected}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    onChange(s.displayName);
+                    setQuery(s.displayName);
+                    setIsOpen(false);
+                    saveRecentOrigin(s.displayName);
+                    setRecentOrigins(getRecentOrigins());
+                    setHighlightedIndex(-1);
+                  }}
+                  className={`cursor-pointer px-4 py-3 text-sm text-zinc-900 hover:bg-zinc-100 ${
+                    selected ? 'bg-blue-600 text-white' : ''
+                  }`}
+                  tabIndex={-1}
+                >
+                  {s.displayName}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 
-      {locateError && (
-        <p className="text-xs text-zinc-500">
-          {locateError}
-        </p>
+      {recentOrigins.length > 0 && !isOpen && (
+        <div className="rounded-xl border border-zinc-200 bg-white p-3">
+          <div className="text-xs font-medium text-zinc-700 mb-2">Recent origins</div>
+          <ul className="flex flex-wrap gap-2">
+            {recentOrigins.map((origin) => (
+              <li key={origin}>
+                <button
+                  type="button"
+                  onClick={() => onRecentClick(origin)}
+                  className="rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs text-zinc-800 hover:bg-zinc-200"
+                >
+                  {origin}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
+
+      {locateError && <p className="text-xs text-zinc-500">{locateError}</p>}
 
       <p className="text-xs text-zinc-500">
         Tip: start typing an address, or use your current location.
