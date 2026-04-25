@@ -2,7 +2,7 @@ import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, Flight
 import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { seaTacAirport } from './airports';
 import { getAirportById } from './airports/catalog';
-
+import { getLiveParkingOptions } from './providers/parkingAggregator';
 
 // Startup log for server-side API key presence (do not log the key itself)
 try {
@@ -429,7 +429,10 @@ export class MockProvider implements DataProvider {
   private routeCache = new Map<string, TrafficEstimate>();
 
   constructor() {
-    const trafficProviderType = process.env.TRAFFIC_PROVIDER || 'live';
+    const trafficProviderType =
+      process.env.NODE_ENV === 'test'
+        ? 'mock'
+        : process.env.TRAFFIC_PROVIDER || 'live';
     this.trafficProvider = trafficProviderType === 'live' ? new LiveTrafficProvider() : new MockTrafficProvider();
   }
 
@@ -505,20 +508,10 @@ export class MockProvider implements DataProvider {
     const parkingSource =
       airportCode === 'SEA'
         ? mockParkingOptions
-        : [
-          {
-            id: 'generic-parking',
-            name: `${airportCode} Airport Parking`,
-            type: 'official' as const,
-            price: 25,
-            distance: 10,
-            availability: 80,
-            parkingBufferMinutes: 10,
-            transferToTerminalMinutes: 5,
-            transferType: 'walk' as const,
-            assumptions: ['Generic fallback airport parking'],
-          },
-        ];
+        : getLiveParkingOptions({
+          airportCode,
+          destination,
+        });
 
     return Promise.all(parkingSource.map(async option => {
       const routeDestination = resolveAirportDestinationForRouting(destination);
