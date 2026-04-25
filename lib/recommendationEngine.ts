@@ -13,6 +13,71 @@ import {
   rankRecommendations
 } from './domain';
 
+function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
+  const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return ['seatac', 'sea-tac', 'seattle-tacoma', 'sound transit', 'northgate', 'wallypark', 'masterpark']
+    .some((s) => text.includes(s));
+}
+
+function genericParkingFallback(airportCode: string, destination: string): ParkingOption[] {
+  return [{
+    id: 'generic-parking',
+    name: `${airportCode} Airport Parking`,
+    type: 'official',
+    price: 40,
+    distance: 10,
+    availability: 80,
+    trustStatus: 'estimated',
+    routeOrigin: '',
+    routeDestination: destination,
+    lastUpdated: new Date().toISOString(),
+    parkingBufferMinutes: 10,
+    transferToTerminalMinutes: 5,
+    transferType: 'walk',
+    sourceName: 'Generic airport parking search',
+    sourceLink: `https://www.google.com/search?q=${encodeURIComponent(`${airportCode} airport parking`)}`,
+    mapLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${airportCode} airport parking`)}`,
+    assumptions: ['Generic fallback parking option for non-SEA airports.'],
+  }];
+}
+
+function genericRideshareFallback(): RideshareOption[] {
+  const now = new Date().toISOString();
+
+  return [
+    {
+      id: 'uber',
+      name: 'Uber',
+      price: 30,
+      duration: 20,
+      availability: 90,
+      trustStatus: 'estimated',
+      sourceName: 'Uber',
+      sourceLink: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',
+      mapLink: 'https://www.google.com/maps',
+      lastUpdated: now,
+      assumptions: ['Generic fallback rideshare option.'],
+    },
+    {
+      id: 'lyft',
+      name: 'Lyft',
+      price: 30,
+      duration: 20,
+      availability: 90,
+      trustStatus: 'estimated',
+      sourceName: 'Lyft',
+      sourceLink: 'https://lyft.com/ride',
+      mapLink: 'https://www.google.com/maps',
+      lastUpdated: now,
+      assumptions: ['Generic fallback rideshare option.'],
+    },
+  ];
+}
+
 function buildTripDateTime(tripData: TripData): string {
   if (tripData.type === 'one-way-arrival') {
     return `${tripData.arrivalDate}T${tripData.arrivalTime}`;
@@ -133,7 +198,7 @@ export class RecommendationEngine {
     const allowRideshare = transportAvailability === 'car' || transportAvailability === 'rideshare' || transportAvailability === 'all';
     const allowTransit = transportAvailability === 'car' || transportAvailability === 'rideshare' || transportAvailability === 'transit' || transportAvailability === 'all';
 
-    const [parking, rideshare, rawTransit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
+    let [parking, rideshare, rawTransit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
       allowCarOptions
         ? this.provider.getParkingOptions(tripData.origin, tripData.destination, tripDateTime)
         : Promise.resolve([]),
@@ -150,6 +215,24 @@ export class RecommendationEngine {
     ]);
 
     let transit: TransitOption[] = rawTransit as any;
+
+    const airportCode = (tripData.airportCode || 'SEA').toUpperCase();
+
+    if (airportCode !== 'SEA') {
+      parking = parking.filter((p) => !isSeaTacOnlyOption(p));
+      rideshare = rideshare.filter((r) => !isSeaTacOnlyOption(r));
+      transit = transit.filter((t) => !isSeaTacOnlyOption(t));
+
+      if (allowCarOptions && parking.length === 0) {
+        parking = genericParkingFallback(airportCode, tripData.destination);
+      }
+
+      if (allowRideshare && rideshare.length === 0) {
+        rideshare = genericRideshareFallback();
+      }
+
+      transit = [];
+    }
 
     // If the user doesn't have a car today, remove park-and-ride style trips (drive segments)
     // and provide transit-only options.

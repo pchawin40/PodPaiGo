@@ -10,7 +10,7 @@ import {
   calculateLeaveByTime,
   rankRecommendations
 } from '../lib/domain';
-import { TripData, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from '../lib/types';
+import { TripData, ParkingOption, RideshareOption, TransitOption, TsaEstimate } from '../lib/types';
 import { MockProvider } from '../lib/providers';
 
 describe('Time Utilities', () => {

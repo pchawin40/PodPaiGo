@@ -8,6 +8,7 @@ function resultsUrl(params: Record<string, string>) {
     type: 'one-way-departure',
     origin,
     destination: 'Central Terminal',
+    airport: 'SEA',
     intent: 'flying-out',
     transport: 'all',
     bags: 'no',
@@ -20,14 +21,23 @@ function resultsUrl(params: Record<string, string>) {
   return `/results?${search.toString()}`;
 }
 
-function futureDate(daysFromNow = 1) {
+function localDate(daysFromNow = 0) {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
-  return date.toISOString().slice(0, 10);
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+
+  return `${y}-${m}-${d}`;
+}
+
+function futureDate(daysFromNow = 1) {
+  return localDate(daysFromNow);
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10);
+  return localDate(0);
 }
 
 function timeMinutesFromNow(minutesFromNow: number) {

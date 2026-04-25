@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AddressInput } from './AddressInput';
 import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType } from '../../lib/types';
 import { getSeatacRideshareDropoffNote, resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
+import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 
 type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
 
@@ -22,6 +23,7 @@ type FormState = {
   securityOption: SecurityOption;
   flightType: FlightType;
   cabin: CabinClass;
+  airportCode: string; // for seatac-specific logic; can be derived from origin but allow user override if needed
 };
 
 function formatLocalDateInputValue(date: Date): string {
@@ -135,6 +137,7 @@ export default function TripFlow() {
     securityOption: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
+    airportCode: 'SEA', // default to SeaTac
   });
 
   const intent = state.intent;
@@ -265,12 +268,17 @@ export default function TripFlow() {
     if (next.length > 0) return;
 
     const tripType = intentToTripType(state.intent!);
-    const destination = seatacZone?.destination || 'Central Terminal';
+    const selectedAirport = getAirportById(state.airportCode) || getAirportById('SEA')!;
+    const destination =
+      selectedAirport.id === 'SEA'
+        ? seatacZone?.destination || selectedAirport.destinationName
+        : selectedAirport.destinationName;
 
     const params = new URLSearchParams();
     params.set('type', tripType);
     params.set('origin', state.origin);
     params.set('destination', destination);
+    params.set('airport', selectedAirport.id);
     params.set('intent', state.intent!);
     params.set('transport', state.transportAvailability);
 
@@ -428,7 +436,21 @@ export default function TripFlow() {
 
               <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <div className="text-sm font-medium text-zinc-900">What can you use today?</div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-zinc-800">Airport</label>
+                    <select
+                      value={state.airportCode}
+                      onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      {AIRPORTS_CATALOG.map((airport) => (
+                        <option key={airport.id} value={airport.id}>
+                          {airport.id} — {airport.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mt-6 text-sm font-medium text-zinc-900">What can you use today?</div>
                   <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {(
                       [
@@ -647,7 +669,9 @@ export default function TripFlow() {
                 <div className="md:col-span-2">
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                     <div className="text-sm font-medium text-zinc-900">Destination</div>
-                    <div className="mt-1 text-base font-semibold text-zinc-900">SeaTac Airport</div>
+                    <div className="mt-1 text-base font-semibold text-zinc-900">
+                      {(getAirportById(state.airportCode) || getAirportById('SEA')!)?.destinationName}
+                    </div>
                     <div className="mt-1 text-sm text-zinc-600">
                       {seatacZone?.note ? seatacZone.note : 'We’ll route you to the correct check-in area.'}
                     </div>

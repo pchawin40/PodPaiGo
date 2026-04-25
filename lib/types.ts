@@ -10,48 +10,43 @@ export type SecurityOption = 'standard' | 'precheck' | 'clear' | 'clear-precheck
 export type FlightType = 'domestic' | 'international';
 export type CabinClass = 'economy' | 'premium';
 
+type BaseTripData = {
+  origin: string;
+  destination: string;
+  airportCode?: string;
+  transportAvailability?: TransportAvailability;
+};
+
 export type TripData =
-  | {
+  | (BaseTripData & {
       type: 'one-way-departure';
-      origin: string;
-      destination: string;
       departureDate: string;
       departureTime: string;
       parkingDuration?: number; // in minutes, optional user override
-      transportAvailability?: TransportAvailability;
       checkingBags?: boolean;
       securityOption?: SecurityOption;
       flightType?: FlightType;
       cabin?: CabinClass;
       checkedInAtAirport?: boolean; // default: true
-    }
-  | {
+    })
+  | (BaseTripData & {
       type: 'one-way-arrival';
-      origin: string;
-      destination: string;
       arrivalDate: string;
       arrivalTime: string;
-      transportAvailability?: TransportAvailability;
-    }
-  | {
+    })
+  | (BaseTripData & {
       type: 'round-trip';
-      origin: string;
-      destination: string;
       departureDate: string;
       departureTime: string;
       returnDate: string;
       returnTime: string;
       parkingDuration?: number; // in minutes, optional user override
-      transportAvailability?: TransportAvailability;
-    }
-  | {
+    })
+  | (BaseTripData & {
       type: 'dropoff-pickup';
-      origin: string;
-      destination: string;
       airportTripDate: string;
       airportTripTime: string;
-      transportAvailability?: TransportAvailability;
-    };
+    });
 
 export type TrustStatus = 'live' | 'verified-source' | 'estimated' | 'fallback';
 

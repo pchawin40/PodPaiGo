@@ -12,6 +12,7 @@ import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import ParkingBookingComparison from './ParkingBookingComparison';
 import { AddressInput } from '../trip/AddressInput';
+import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
 
@@ -1064,6 +1065,7 @@ export default function ResultsContent() {
     const type = searchParams.get('type') as TripData['type'] | null;
     const origin = searchParams.get('origin') || '';
     const destination = searchParams.get('destination') || '';
+    const airportCode = searchParams.get('airport') || 'SEA'; // default to SEA if not provided
     const parkingDurationStr = searchParams.get('parkingDuration');
     const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
 
@@ -1124,6 +1126,10 @@ export default function ResultsContent() {
       if (airportTripDate && airportTripTime && origin && destination) {
         data = { type, origin, destination, airportTripDate, airportTripTime, transportAvailability };
       }
+    }
+
+    if (data) { // Ensure airport code is included in trip data for consistent processing, even if not explicitly in URL params for some trip types
+      data = { ...data, airportCode } as TripData;
     }
 
     if (data) {
@@ -1243,6 +1249,10 @@ export default function ResultsContent() {
       params.set('type', newTripData.type);
       params.set('origin', newTripData.origin);
       params.set('destination', newTripData.destination);
+      if ((newTripData as any).airportCode) {
+        params.set('airport', (newTripData as any).airportCode);
+      }
+
       if ((newTripData as any).transportAvailability) {
         params.set('transport', (newTripData as any).transportAvailability);
       }
@@ -1658,11 +1668,14 @@ export default function ResultsContent() {
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <div className="text-sm font-medium text-zinc-500">SeaTac</div>
+              <div className="text-sm font-medium text-zinc-500">
+                {searchParams.get('airport') || 'SEA'}
+              </div>
+
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
                 {noViableFlyingOut
                   ? 'No reliable option gets you airport-ready on time'
-                  : (intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime)
+                  : intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime
                     ? `You should leave at ${formatTimeFriendly(bestViableLeaveByTime)}`
                     : recommendation.leaveByTime
                       ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
@@ -1674,8 +1687,9 @@ export default function ResultsContent() {
                   Best available attempt leaves at {formatTimeFriendly(bestTooLateSummary.bestLatestSafeLeave)} and reaches terminal around {formatTimeFriendly(bestTooLateSummary.recommendedBy || bestTooLateSummary.bestArrival)}.
                 </div>
               )}
+
               <p className="mt-2 text-sm text-zinc-600">
-                {seatacZone?.note ? seatacZone.note : 'SeaTac Airport'}
+                {tripData.destination}
                 {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
                 {airlineOrFlight ? ` • ${airlineOrFlight}` : ''}
                 {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip')
@@ -1721,11 +1735,14 @@ export default function ResultsContent() {
               <div className="text-xs font-medium text-zinc-500">Origin</div>
               <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
             </div>
+
             <div className="rounded-xl bg-zinc-50 p-4">
               <div className="text-xs font-medium text-zinc-500">Destination</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-900">SeaTac Airport</div>
-              <div className="mt-1 text-xs text-zinc-600">{tripData.destination}</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-900">
+                {tripData.destination}
+              </div>
             </div>
+
             <div className="rounded-xl bg-zinc-50 p-4">
               <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
               <div className="mt-1 text-sm font-semibold text-zinc-900">
@@ -1737,7 +1754,9 @@ export default function ResultsContent() {
                     <>
                       <span>Live traffic data · Updated just now</span>
                       {recommendation.trafficEstimate.staticDuration && (
-                        <div className="text-xs text-zinc-600">Typical: {Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)}-{Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)} min</div>
+                        <div className="text-xs text-zinc-600">
+                          Typical: {Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)}-{Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)} min
+                        </div>
                       )}
                     </>
                   ) : (
@@ -1772,7 +1791,13 @@ export default function ResultsContent() {
             </div>
 
             <div className="mt-5">
-              <EditTripForm initialData={editingData} onSubmit={handleRecalculate} onCancel={cancelEditing} intent={intent} />
+              <EditTripForm
+                initialData={editingData}
+                onSubmit={handleRecalculate}
+                onCancel={cancelEditing}
+                intent={intent}
+                airportCode={searchParams.get('airport') || 'SEA'}
+              />
             </div>
           </div>
         )}
@@ -1983,13 +2008,16 @@ function EditTripForm({
   onSubmit,
   onCancel,
   intent,
+  airportCode,
 }: {
   initialData: TripData;
   onSubmit: (data: TripData) => void;
   onCancel: () => void;
   intent: string;
+  airportCode: string;
 }) {
   const [origin, setOrigin] = useState(initialData.origin);
+  const [selectedAirportCode, setSelectedAirportCode] = useState(airportCode || 'SEA');
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>(
     initialData.transportAvailability || 'all'
   );
@@ -2113,13 +2141,16 @@ function EditTripForm({
 
     const parkingDuration = parkingDurationHours ? Math.round(Number(parkingDurationHours) * 60) : undefined;
 
+    const selectedAirport = getAirportById(selectedAirportCode) || getAirportById('SEA')!;
+    const destination = selectedAirport.destinationName;
+
     let data: TripData;
 
     if (initialData.type === 'one-way-departure') {
       data = {
         type: initialData.type,
         origin,
-        destination: initialData.destination,
+        destination,
         departureDate,
         departureTime,
         parkingDuration,
@@ -2133,7 +2164,7 @@ function EditTripForm({
       data = {
         type: initialData.type,
         origin,
-        destination: initialData.destination,
+        destination,
         airportTripDate,
         airportTripTime,
         transportAvailability,
@@ -2142,7 +2173,7 @@ function EditTripForm({
       data = {
         type: initialData.type,
         origin,
-        destination: initialData.destination,
+        destination,
         arrivalDate,
         arrivalTime,
         transportAvailability,
@@ -2151,7 +2182,7 @@ function EditTripForm({
       data = {
         type: initialData.type,
         origin,
-        destination: initialData.destination,
+        destination,
         departureDate,
         departureTime,
         returnDate,
@@ -2160,6 +2191,8 @@ function EditTripForm({
         transportAvailability,
       };
     }
+
+    (data as any).airportCode = selectedAirport.id;
 
     onSubmit(data);
   };
@@ -2184,6 +2217,20 @@ function EditTripForm({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-zinc-800">Airport</label>
+            <select
+              value={selectedAirportCode}
+              onChange={(e) => setSelectedAirportCode(e.target.value)}
+              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              {AIRPORTS_CATALOG.map((airport) => (
+                <option key={airport.id} value={airport.id}>
+                  {airport.id} — {airport.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="text-sm font-medium text-zinc-900">What can you use today?</div>
           <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(
