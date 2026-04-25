@@ -270,9 +270,9 @@ export default function TripFlow() {
     const tripType = intentToTripType(state.intent!);
     const selectedAirport = getAirportById(state.airportCode) || getAirportById('SEA')!;
     const destination =
-      selectedAirport.id === 'SEA'
-        ? seatacZone?.destination || selectedAirport.destinationName
-        : selectedAirport.destinationName;
+      selectedAirport.id === 'SEA' && seatacZone?.destination
+        ? seatacZone.destination
+        : selectedAirport.routingAddress;
 
     const params = new URLSearchParams();
     params.set('type', tripType);

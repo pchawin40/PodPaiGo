@@ -384,7 +384,11 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
   const isGeneral = id === 'sea-general' || name.includes('general');
   const isWally = id.includes('wally') || name.includes('wally');
   const isMaster = id.includes('master') || name.includes('master');
-  const isOfficialSea = String(parking?.type || '') === 'official';
+  const airportCode = ((tripData as any)?.airportCode || 'SEA').toUpperCase();
+  const airport = getAirportById(airportCode) || getAirportById('SEA')!;
+  const airportSearchName = `${airport.label} (${airport.id}) parking`;
+
+  const isOfficialAirport = String(parking?.type || '') === 'official';
 
   const days = estimateParkingDays(tripData);
 
@@ -415,16 +419,15 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
     };
   };
 
-  // Direct/official row (always)
-  const directProvider = isOfficialSea
-    ? 'Official SEA'
+  const directProvider = isOfficialAirport
+    ? `Official ${airport.id}`
     : isWally
       ? 'WallyPark (Direct)'
       : isMaster
         ? 'MasterPark (Direct)'
         : `${parking?.name || 'Lot'} (Direct)`;
 
-  const directNotes = isOfficialSea
+  const directNotes = isOfficialAirport
     ? 'Official source'
     : 'Direct booking';
 
@@ -433,10 +436,9 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
     ? 'live'
     : (directPricePerDay != null ? 'estimated' : 'check-live');
 
-  // Provider destination URLs (best-effort, no guarantee of date-prefill)
-  const spotHeroUrl = `https://spothero.com/search?search=${encodeURIComponent('Seattle-Tacoma International Airport (SEA) parking')}`;
-  const wayUrl = 'https://www.way.com/parking/airports/sea/seattle-tacoma-international-airport-parking';
-  const parkWhizUrl = `https://www.parkwhiz.com/search/?destination=${encodeURIComponent('Seattle-Tacoma International Airport')}`;
+  const spotHeroUrl = `https://spothero.com/search?search=${encodeURIComponent(airportSearchName)}`;
+  const wayUrl = `https://www.way.com/parking/search?query=${encodeURIComponent(airportSearchName)}`;
+  const parkWhizUrl = `https://www.parkwhiz.com/search/?destination=${encodeURIComponent(airportSearchName)}`;
 
   // Marketplace estimates (clearly labeled estimated)
   const spotHeroEst = isReserved ? 39 : isGeneral ? 35 : isWally ? 30 : isMaster ? 31 : null;
@@ -445,11 +447,11 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
   const rows: BookingSourceRow[] = [
     mkRow({
       provider: directProvider,
-      type: isOfficialSea ? 'official source' : 'direct booking',
+      type: isOfficialAirport ? 'official source' : 'direct booking',
       trust: 'high',
       notes: directNotes,
-      link: String(parking?.sourceLink || googleMapsSearchLink(String(parking?.name || 'SEA parking'))),
-      ctaLabel: isOfficialSea ? 'Book official' : 'Check live',
+      link: String(parking?.sourceLink || airport.officialParkingUrl || googleMapsSearchLink(airportSearchName)),
+      ctaLabel: isOfficialAirport ? 'Book official' : 'Check live',
       pricePerDay: directPricePerDay,
       priceDisplay: directPriceDisplay,
     }),
@@ -958,7 +960,7 @@ function OptionCard({
               <div className="mt-2 space-y-1 text-sm text-zinc-700">
                 <div>Flight departs: {formatTimeFriendly(timing.flightDeparts)}</div>
                 <div>Recommended inside-airport arrival by: {formatTimeFriendly(timing.recommendedInsideArrivalBy)}</div>
-                <div>Option travel time: {timing.optionTravelMinutes} min</div>
+                <div>Option travel time: {formatMinutes(timing.optionTravelMinutes)}</div>
                 <div>Latest safe leave time: {formatTimeFriendly(timing.latestSafeLeaveTime)}</div>
                 {typeof timing.shortByMinutes === 'number' ? (
                   <div>Missed by: {timing.shortByMinutes} min</div>
@@ -981,7 +983,7 @@ function OptionCard({
             <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
               <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
               <div className="mt-2 space-y-1 text-sm text-zinc-700">
-                <div>Drive: {typeof opt.distance === 'number' ? opt.distance : 0} min</div>
+                <div>Drive: {formatMinutes(typeof opt.distance === 'number' ? opt.distance : 0)}</div>
                 <div>Park/check-in: {typeof opt.parkingBufferMinutes === 'number' ? opt.parkingBufferMinutes : 0} min</div>
                 <div>
                   {(opt.transferType === 'shuttle'
@@ -1508,28 +1510,33 @@ export default function ResultsContent() {
     return t.latestSafeLeaveTime || null;
   }, [intent, tripData, viableOptions]);
 
+  const currentAirportCode = ((tripData as any)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
+
   const extraParkingProviders = useMemo(
-    () => [
-      {
-        id: 'seatac-official',
-        name: PROVIDER_LINKS.seatacOfficialParking.label,
-        trustStatus: 'verified-source' as const,
-        priceDisplay: 'check-live' as const,
-        priceNote: 'Rates vary by length of stay and availability',
-        sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
-        sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
-      },
-      {
-        id: 'airport-parking-res',
-        name: PROVIDER_LINKS.airportParkingReservationsSea.label,
-        trustStatus: 'estimated' as const,
-        priceDisplay: 'check-live' as const,
-        priceNote: 'Search nearby lots and compare',
-        sourceName: PROVIDER_LINKS.airportParkingReservationsSea.sourceName,
-        sourceLink: PROVIDER_LINKS.airportParkingReservationsSea.url,
-      },
-    ],
-    []
+    () =>
+      currentAirportCode === 'SEA'
+        ? [
+          {
+            id: 'seatac-official',
+            name: PROVIDER_LINKS.seatacOfficialParking.label,
+            trustStatus: 'verified-source' as const,
+            priceDisplay: 'check-live' as const,
+            priceNote: 'Rates vary by length of stay and availability',
+            sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
+            sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
+          },
+          {
+            id: 'airport-parking-res',
+            name: PROVIDER_LINKS.airportParkingReservationsSea.label,
+            trustStatus: 'estimated' as const,
+            priceDisplay: 'check-live' as const,
+            priceNote: 'Search nearby lots and compare',
+            sourceName: PROVIDER_LINKS.airportParkingReservationsSea.sourceName,
+            sourceLink: PROVIDER_LINKS.airportParkingReservationsSea.url,
+          },
+        ]
+        : [],
+    [currentAirportCode]
   );
 
   const extraRideProviders = useMemo(
@@ -1557,27 +1564,40 @@ export default function ResultsContent() {
   );
 
   const extraTransitProviders = useMemo(
-    () => [
-      {
-        id: 'soundtransit-planner',
-        name: 'Sound Transit Trip Planner',
-        trustStatus: 'verified-source' as const,
-        priceDisplay: 'check-live' as const,
-        priceNote: 'Official schedules & fares',
-        sourceName: PROVIDER_LINKS.soundTransitPlanner.sourceName,
-        sourceLink: PROVIDER_LINKS.soundTransitPlanner.url,
-      },
-      {
-        id: 'google-maps-transit',
-        name: 'Google Maps Transit Directions',
-        trustStatus: 'estimated' as const,
-        priceDisplay: 'check-live' as const,
-        priceNote: 'Route planning + live advisories',
-        sourceName: PROVIDER_LINKS.googleMaps.sourceName,
-        sourceLink: PROVIDER_LINKS.googleMaps.url,
-      },
-    ],
-    []
+    () =>
+      currentAirportCode === 'SEA'
+        ? [
+          {
+            id: 'soundtransit-planner',
+            name: 'Sound Transit Trip Planner',
+            trustStatus: 'verified-source' as const,
+            priceDisplay: 'check-live' as const,
+            priceNote: 'Official schedules & fares',
+            sourceName: PROVIDER_LINKS.soundTransitPlanner.sourceName,
+            sourceLink: PROVIDER_LINKS.soundTransitPlanner.url,
+          },
+          {
+            id: 'google-maps-transit',
+            name: 'Google Maps Transit Directions',
+            trustStatus: 'estimated' as const,
+            priceDisplay: 'check-live' as const,
+            priceNote: 'Route planning + live advisories',
+            sourceName: PROVIDER_LINKS.googleMaps.sourceName,
+            sourceLink: PROVIDER_LINKS.googleMaps.url,
+          },
+        ]
+        : [
+          {
+            id: 'google-maps-transit',
+            name: 'Google Maps Transit Directions',
+            trustStatus: 'estimated' as const,
+            priceDisplay: 'check-live' as const,
+            priceNote: 'Route planning + live advisories',
+            sourceName: PROVIDER_LINKS.googleMaps.sourceName,
+            sourceLink: PROVIDER_LINKS.googleMaps.url,
+          },
+        ],
+    [currentAirportCode]
   );
 
   if (loading) {
@@ -1746,7 +1766,7 @@ export default function ResultsContent() {
             <div className="rounded-xl bg-zinc-50 p-4">
               <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
               <div className="mt-1 text-sm font-semibold text-zinc-900">
-                {recommendation.trafficEstimate ? `${recommendation.trafficEstimate.duration} min` : '—'}
+                {recommendation.trafficEstimate ? formatMinutes(recommendation.trafficEstimate.duration) : '—'}
               </div>
               <div className="mt-1 text-xs text-zinc-600">
                 {recommendation.trafficEstimate ? (
@@ -1755,7 +1775,7 @@ export default function ResultsContent() {
                       <span>Live traffic data · Updated just now</span>
                       {recommendation.trafficEstimate.staticDuration && (
                         <div className="text-xs text-zinc-600">
-                          Typical: {Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)}-{Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration)} min
+                          Typical: {formatMinutes(Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}-{formatMinutes(Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}
                         </div>
                       )}
                     </>

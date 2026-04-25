@@ -1,6 +1,8 @@
 import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate } from './types';
 import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { seaTacAirport } from './airports';
+import { getAirportById } from './airports/catalog';
+
 
 // Startup log for server-side API key presence (do not log the key itself)
 try {
@@ -20,9 +22,18 @@ const transitHubs = [
   { name: 'Angle Lake Station', driveTimeFactor: 55, transitTime: 60, isParkAndRide: true },
 ];
 
-function resolveSeatacDestinationForRouting(destinationKey: string): string {
+function resolveAirportDestinationForRouting(destinationKey: string): string {
   const lower = destinationKey.toLowerCase();
-  const isSeatac =
+
+  if (lower.includes('jfk') || lower.includes('john f. kennedy')) {
+    return 'John F. Kennedy International Airport (JFK), Queens, NY 11430';
+  }
+
+  if (lower.includes('lax') || lower.includes('los angeles international')) {
+    return 'Los Angeles International Airport (LAX), 1 World Way, Los Angeles, CA 90045';
+  }
+
+  if (
     lower.includes('central terminal') ||
     lower.includes('north satellite') ||
     lower.includes('south satellite') ||
@@ -30,9 +41,8 @@ function resolveSeatacDestinationForRouting(destinationKey: string): string {
     lower.includes('satellite') ||
     lower.includes('sea-tac') ||
     lower.includes('seatac') ||
-    lower.includes('airport');
-
-  if (isSeatac) {
+    lower.includes('seattle-tacoma')
+  ) {
     return 'Seattle-Tacoma International Airport (SEA), 17801 International Blvd, SeaTac, WA 98158';
   }
 
@@ -154,7 +164,7 @@ function logGoogleRoutesCache(event: 'HIT' | 'MISS' | 'IN-FLIGHT', cacheKey: str
 export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 
-  private async geocodeLatLng(address: string): Promise<{lat:number, lng:number} | null> {
+  private async geocodeLatLng(address: string): Promise<{ lat: number, lng: number } | null> {
     try {
       if (!this.serverKey) return null;
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.serverKey}`;
@@ -481,7 +491,7 @@ export class MockProvider implements DataProvider {
   }
 
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
-    const routeDestination = resolveSeatacDestinationForRouting(destination);
+    const routeDestination = resolveAirportDestinationForRouting(destination);
     return this.trafficProvider.getTrafficEstimate(origin, routeDestination, dateTime);
   }
 
@@ -489,8 +499,29 @@ export class MockProvider implements DataProvider {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const routeOrigins = origin;
 
-    return Promise.all(mockParkingOptions.map(async option => {
-      const routeDestination = `${option.name}, SeaTac, WA`;
+    const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
+    const airportCode = airport?.id || 'SEA';
+
+    const parkingSource =
+      airportCode === 'SEA'
+        ? mockParkingOptions
+        : [
+          {
+            id: 'generic-parking',
+            name: `${airportCode} Airport Parking`,
+            type: 'official' as const,
+            price: 25,
+            distance: 10,
+            availability: 80,
+            parkingBufferMinutes: 10,
+            transferToTerminalMinutes: 5,
+            transferType: 'walk' as const,
+            assumptions: ['Generic fallback airport parking'],
+          },
+        ];
+
+    return Promise.all(parkingSource.map(async option => {
+      const routeDestination = resolveAirportDestinationForRouting(destination);
       const shouldLiveRoute = option.type === 'official';
       const routeEstimate = shouldLiveRoute
         ? await this.getRouteEstimate(origin, routeDestination, dateTime, true)
@@ -527,7 +558,7 @@ export class MockProvider implements DataProvider {
 
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const routeDestination = resolveSeatacDestinationForRouting(destination);
+    const routeDestination = resolveAirportDestinationForRouting(destination);
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
     const baseDuration = routeEstimate.duration + 5;
 
@@ -560,7 +591,7 @@ export class MockProvider implements DataProvider {
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const routeDestinationAirport = resolveSeatacDestinationForRouting(destination);
+    const routeDestinationAirport = resolveAirportDestinationForRouting(destination);
 
     const hubRoutes = transitHubs.map(hub => {
       const routeDestinationHub = `${hub.name}, Seattle, WA`;
@@ -643,19 +674,31 @@ export class MockProvider implements DataProvider {
     };
   }
 
-  async getTsaEstimate(terminal: string): Promise<TsaEstimate> {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    // TODO: Replace with a live TSA wait time service.
-    // For now, use SeaTac airport data
-    return await seaTacAirport.getTsaEstimate(terminal);
+  async getTsaEstimate(destination: string): Promise<TsaEstimate> {
+    const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
+    const code = airport?.id || 'SEA';
+
+    if (code === 'SEA') {
+      return seaTacAirport.getTsaEstimate(destination);
+    }
+
+    return {
+      destination: code,
+      waitTime: 20,
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: `${code} Generic TSA`,
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Fallback TSA estimate'],
+    };
   }
 
   async getAirportInfo(terminal: string): Promise<LocationInfo> {
     await new Promise((resolve) => setTimeout(resolve, 100));
     // TODO: Replace with an airport facilities API.
-    return mockLocationInfo[terminal] || { 
-      destination: terminal, 
-      name: `${terminal} at SeaTac`, 
+    return mockLocationInfo[terminal] || {
+      destination: terminal,
+      name: `${terminal} Airport`,
       services: ['Parking', 'Shuttles', 'Lounges'],
       trustStatus: 'verified-source',
       sourceName: 'Port of Seattle',
