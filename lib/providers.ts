@@ -105,7 +105,7 @@ export interface TrafficProvider {
 }
 
 export interface ParkingProvider {
-  getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]>;
+  getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]>;
 }
 
 export interface FlightProvider {
@@ -123,7 +123,7 @@ export interface AirportInfoProvider {
 export interface DataProvider extends TrafficProvider, ParkingProvider, FlightProvider, TsaProvider, AirportInfoProvider {
   getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]>;
   getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]>;
-  getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]>;
+  getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]>;
 }
 
 export class MockTrafficProvider implements TrafficProvider {
@@ -424,6 +424,29 @@ export class LiveTrafficProvider implements TrafficProvider {
   }
 }
 
+function buildParkingDateRange(dateTime: string, parkingDurationMinutes?: number): {
+  checkInDate?: string;
+  checkOutDate?: string;
+} {
+  const start = new Date(dateTime);
+  if (isNaN(start.getTime())) return {};
+
+  const duration = parkingDurationMinutes ?? 24 * 60;
+  const end = new Date(start.getTime() + duration * 60_000);
+
+  const toYYYYMMDD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  return {
+    checkInDate: toYYYYMMDD(start),
+    checkOutDate: toYYYYMMDD(end),
+  };
+}
+
 export class MockProvider implements DataProvider {
   private trafficProvider: TrafficProvider;
   private routeCache = new Map<string, TrafficEstimate>();
@@ -498,16 +521,20 @@ export class MockProvider implements DataProvider {
     return this.trafficProvider.getTrafficEstimate(origin, routeDestination, dateTime);
   }
 
-  async getParkingOptions(origin: string, destination: string, dateTime: string): Promise<ParkingOption[]> {
+  async getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]> {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const routeOrigins = origin;
 
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const airportCode = airport?.id || 'SEA';
 
+    const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
+
     const liveParkingOptions = await getLiveParkingOptions({
       airportCode,
       destination,
+      checkInDate: parkingDates.checkInDate,
+      checkOutDate: parkingDates.checkOutDate,
     });
 
     const parkingSource =

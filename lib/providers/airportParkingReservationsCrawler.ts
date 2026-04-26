@@ -6,6 +6,7 @@ export type AirportParkingReservationLot = {
   bookingUrl: string;
   rawSnippet?: string;
   lastChecked: string;
+  isSoldOut?: boolean;
 };
 
 function nowIso() {
@@ -69,17 +70,47 @@ function extractNearbyPrices(html: string): AirportParkingReservationLot[] {
     .sort((a, b) => (a.price ?? 999) - (b.price ?? 999));
 }
 
-export async function crawlAirportParkingReservationsSea(): Promise<AirportParkingReservationLot[]> {
-  const url =
-    'https://airportparkingreservations.com/sea/airport-parking';
+type AprSearchArgs = {
+  checkInDate?: string;   // YYYY-MM-DD
+  checkOutDate?: string;  // YYYY-MM-DD
+};
+
+function formatAprDate(dateString: string): string {
+  const date = new Date(`${dateString}T12:00:00`);
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function buildAprSeaUrl(args?: AprSearchArgs): string {
+  if (!args?.checkInDate || !args?.checkOutDate) {
+    return 'https://airportparkingreservations.com/sea/airport-parking';
+  }
+
+  const params = new URLSearchParams({
+    checkindate: formatAprDate(args.checkInDate),
+    checkoutdate: formatAprDate(args.checkOutDate),
+  });
+
+  return `https://airportparkingreservations.com/search/SEA?${params.toString()}`;
+}
+
+export async function crawlAirportParkingReservationsSea(args?: AprSearchArgs): Promise<AirportParkingReservationLot[]> {
+  const url = buildAprSeaUrl(args);
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 PodPaiGoBot/0.1 (+https://podpaigo.com)',
         Accept: 'text/html,application/xhtml+xml',
       },
-    });
+    }).finally(() => clearTimeout(timeout));
 
     if (!res.ok) return [];
 
@@ -88,7 +119,8 @@ export async function crawlAirportParkingReservationsSea(): Promise<AirportParki
     return extractNearbyPrices(html)
       .sort((a, b) => (a.price ?? 999) - (b.price ?? 999))
       .slice(0, 12);
-  } catch {
+  } catch (error) {
+    console.warn('APR crawler failed:', error);
     return [];
   }
 }

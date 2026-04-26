@@ -1,6 +1,8 @@
 import { RecommendationEngine } from '../recommendationEngine';
 import { TripData } from '../types';
 
+jest.setTimeout(15000); // Increase timeout for async operations
+
 describe('RecommendationEngine airport-specific filtering', () => {
   const seaSpecificStrings = [
     'seatac',

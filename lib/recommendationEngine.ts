@@ -201,7 +201,12 @@ export class RecommendationEngine {
 
     let [parking, rideshare, rawTransit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
       allowCarOptions
-        ? this.provider.getParkingOptions(tripData.origin, tripData.destination, tripDateTime)
+        ? this.provider.getParkingOptions(
+          tripData.origin,
+          tripData.destination,
+          tripDateTime,
+          calculateParkingDuration(tripData)
+        )
         : Promise.resolve([]),
       allowRideshare
         ? this.provider.getRideshareOptions(tripData.origin, tripData.destination, tripDateTime)

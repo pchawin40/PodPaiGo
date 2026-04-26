@@ -4,6 +4,7 @@ import { mockParkingOptions } from '../../data/mockData';
 import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
 import { crawlAirportParkingReservationsSea } from './airportParkingReservationsCrawler';
+import { checkAprLotAvailability } from './aprLotAvailability';
 
 type ParkingMarketplace = {
   id: string;
@@ -93,7 +94,10 @@ function isAprOption(p: ParkingOption): boolean {
   return p.bookingProvider === 'AirportParkingReservations' || p.sourceName === 'AirportParkingReservations';
 }
 
-function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkingReservationsSea>>[number]): ParkingOption {
+function aprLotToParkingOption(
+  lot: Awaited<ReturnType<typeof crawlAirportParkingReservationsSea>>[number],
+  availabilityStatus: 'available' | 'unavailable' | 'unknown' = 'unknown'
+): ParkingOption {
   const lower = lot.lotName.toLowerCase();
   const covered = lower.includes('covered') || lot.rawSnippet?.toLowerCase().includes('covered') || false;
 
@@ -105,14 +109,14 @@ function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkin
     priceDisplay: lot.price ? 'from-per-day' : 'check-live',
     priceUnit: lot.priceUnit ?? undefined,
     priceNote: lot.price
-      ? 'Live/best available rate found from AirportParkingReservations. Verify final checkout price before booking.'
-      : 'Open AirportParkingReservations to confirm live price.',
+      ? 'Listed APR rate. Open deal to confirm selected-date availability and final checkout price.'
+      : 'Open AirportParkingReservations to confirm price and availability.',
     priceSource: 'marketplace-link',
     priceConfidence: lot.price ? 'medium' : 'low',
     bookingProvider: 'AirportParkingReservations',
     distance: 12,
-    availability: 75,
-    trustStatus: 'live',
+    availability: availabilityStatus === 'available' ? 85 : 35,
+    trustStatus: availabilityStatus === 'available' ? 'live' : 'estimated',
     sourceName: 'AirportParkingReservations',
     sourceLink: lot.bookingUrl,
     mapLink: googleMapsSearchUrl(`${lot.lotName} SeaTac`),
@@ -123,13 +127,16 @@ function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkin
     walkingMinutes: 2,
     shuttleMinutes: 12,
     covered,
-    availabilityScore: 75,
+    availabilityScore: availabilityStatus === 'available' ? 85 : 35,
     assumptions: [
       'Parsed from AirportParkingReservations SEA airport parking page.',
       lot.rawSnippet || 'Rate and lot metadata should be verified before booking.',
+      availabilityStatus === 'available'
+        ? 'APR availability check passed for selected dates.'
+        : 'APR availability could not be confirmed automatically; open APR to verify.',
     ],
     bestFor: [
-      'Live Deal',
+      'Listed Deal',
       lot.price && lot.price < 20 ? 'Great Deal' : '',
       lot.price && lot.price < 18 ? 'Cheapest' : '',
       covered ? 'Covered' : '',
@@ -302,7 +309,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
           bestFor: [
             rating && rating >= 4.4 ? 'Best Reviews' : '',
             isCovered ? 'Best Weather' : '',
-            isOfficial ? 'Closest Walk' : 'Compare Live Deal',
+            isOfficial ? 'Closest Walk' : 'Compare Listed Deal',
           ].filter(Boolean),
         };
       })
@@ -316,19 +323,56 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
 export async function getLiveParkingOptions(args: {
   airportCode: string;
   destination: string;
+  checkInDate?: string;
+  checkOutDate?: string;
 }): Promise<ParkingOption[]> {
   const airport = getAirportById(args.airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
   const liveGoogleOptions = await getGoogleParkingPlaces(args.airportCode);
 
-  const aprOptions =
+  console.log('APR AGGREGATOR START', {
+    airportId: airport.id,
+    checkInDate: args.checkInDate,
+    checkOutDate: args.checkOutDate,
+  });
+
+  console.log('APR STATIC CRAWL START');
+
+  const aprLotsRaw =
     airport.id === 'SEA'
-      ? (await crawlAirportParkingReservationsSea())
-        .map(aprLotToParkingOption)
-        .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
-        .slice(0, 4)
+      ? await crawlAirportParkingReservationsSea()
       : [];
+
+  console.log('APR STATIC CRAWL DONE', {
+    count: aprLotsRaw.length,
+    names: aprLotsRaw.map((lot) => lot.lotName),
+  });
+
+  console.log('APR STATIC LOTS FOUND', aprLotsRaw.map((lot) => lot.lotName));
+
+  const aprLotsWithAvailability = await Promise.all(
+    aprLotsRaw.map(async (lot) => {
+      const availability = await checkAprLotAvailability({
+        lotName: lot.lotName,
+        checkInDate: args.checkInDate,
+        checkOutDate: args.checkOutDate,
+      });
+
+      console.log('APR AVAILABILITY RESULT', {
+        lotName: lot.lotName,
+        availability,
+      });
+
+      return { lot, availability };
+    })
+  );
+
+  const aprOptions = aprLotsWithAvailability
+    .filter((x) => x.availability.status !== 'unavailable')
+    .map((x) => aprLotToParkingOption(x.lot, x.availability.status))
+    .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
+    .slice(0, 8);
 
   const marketplaceOptions = PARKING_MARKETPLACES.map((provider): ParkingOption => {
     const isOfficial = provider.id === 'official';
@@ -386,20 +430,18 @@ export async function getLiveParkingOptions(args: {
 
   const discoveredLots = dedupeParkingOptions(liveGoogleOptions);
 
-  const fallbackLots = discoveredLots.length >= 4
-    ? []
-    : curatedSeaLots.filter((curated) => {
-      const curatedName = curated.name.toLowerCase();
-      return !discoveredLots.some((live) => {
-        const liveName = live.name.toLowerCase();
-        return (
-          liveName.includes('wally') && curatedName.includes('wally') ||
-          liveName.includes('master') && curatedName.includes('master') ||
-          liveName.includes('general') && curatedName.includes('general') ||
-          liveName.includes('reserved') && curatedName.includes('reserved')
-        );
-      });
+  const fallbackLots = curatedSeaLots.filter((curated) => {
+    const curatedName = curated.name.toLowerCase();
+    return !discoveredLots.some((live) => {
+      const liveName = live.name.toLowerCase();
+      return (
+        liveName.includes('wally') && curatedName.includes('wally') ||
+        liveName.includes('master') && curatedName.includes('master') ||
+        liveName.includes('general') && curatedName.includes('general') ||
+        liveName.includes('reserved') && curatedName.includes('reserved')
+      );
     });
+  });
 
   return dedupeParkingOptions([
     ...fallbackLots.filter((p) => p.type === 'official'),

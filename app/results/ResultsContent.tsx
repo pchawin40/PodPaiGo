@@ -1054,7 +1054,13 @@ function OptionCard({
                 }
                 className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
               >
-                {item.type === 'parking' ? 'Check price' : 'View'}
+                {item.type === 'parking'
+                  ? opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
+                    ? 'View deal'
+                    : opt.type === 'official'
+                      ? 'Book official'
+                      : 'Check price'
+                  : 'View'}
               </button>
             ) : null
           ) : (
@@ -1067,7 +1073,11 @@ function OptionCard({
                   }
                   className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Copy search + open
+                  {opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
+                    ? 'View deal'
+                    : opt.type === 'official'
+                      ? 'Book official'
+                      : 'Copy search + open'}
                 </button>
               ) : sourceLink ? (
                 <a
@@ -1843,32 +1853,42 @@ export default function ResultsContent() {
     };
   })();
 
-  const smartPickParkingOptions = sortedOptions
-    .filter((opt) => opt.type === 'parking')
-    .map((opt) => opt.option as any);
-
   const visibleResultOptions =
     intent === 'flying-out' && tripData.type === 'one-way-departure'
       ? viableOptions
       : sortedOptions;
 
   const parkingOptionsOnly = visibleResultOptions.filter((o) => o.type === 'parking');
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Parking UI Debug]', {
+      totalVisibleResultOptions: visibleResultOptions.length,
+      parkingOptionsOnly: parkingOptionsOnly.map((o) => ({
+        name: (o.option as any).name,
+        sourceName: (o.option as any).sourceName,
+        bookingProvider: (o.option as any).bookingProvider,
+        price: (o.option as any).price,
+        cost: o.cost,
+      })),
+    });
+  }
+
+  const sortedParkingForCurrentTab = [...parkingOptionsOnly].sort((a, b) => {
+    if (sort === 'cheapest') return (a.cost - b.cost) || (a.duration - b.duration);
+    if (sort === 'fastest') return (a.duration - b.duration) || (a.cost - b.cost);
+    return (b.stressScore - a.stressScore) || (a.duration - b.duration) || (a.cost - b.cost);
+  });
+
+  const smartPickRankedOption = sortedParkingForCurrentTab[0] || null;
+  const smartPickOption = (smartPickRankedOption?.option as any) || null;
+
+  const smartPickParkingOptions = sortedParkingForCurrentTab.map((opt) => opt.option as any);
+
+  const sortedParkingForAlternatives = sortedParkingForCurrentTab;
+
   const rideshareOptionsOnly = visibleResultOptions.filter((o) => o.type === 'rideshare');
   const transitOptionsOnly = visibleResultOptions.filter((o) => o.type === 'transit');
 
-  const cheapestParking = [...parkingOptionsOnly].sort((a, b) => a.cost - b.cost)[0] || null;
-  const lowestStress = [...parkingOptionsOnly].sort((a, b) => b.stressScore - a.stressScore)[0] || null;
-  const bestValue = [...parkingOptionsOnly].sort((a, b) => {
-    const liveBonusA = (a.option as any).bookingProvider === 'AirportParkingReservations' ? -8 : 0;
-    const liveBonusB = (b.option as any).bookingProvider === 'AirportParkingReservations' ? -8 : 0;
-
-    return (a.cost + a.duration * 0.15 + liveBonusA) - (b.cost + b.duration * 0.15 + liveBonusB);
-  })[0] || null;
-
-  const smartPickRankedOption =
-    bestValue || cheapestParking || lowestStress || parkingOptionsOnly[0] || null;
-
-  const smartPickOption = (smartPickRankedOption?.option as any) || null;
   const smartPickKey = parkingKey(smartPickOption);
 
   const isSameAsSmartPick = (option: any): boolean => {
@@ -1876,12 +1896,7 @@ export default function ResultsContent() {
     return Boolean(smartPickKey && otherKey && smartPickKey === otherKey);
   };
 
-  const rawRecommendedPicks = [bestValue, cheapestParking, lowestStress]
-    .filter(Boolean)
-    .filter((item, index, arr) => {
-      const key = parkingKey((item!.option as any));
-      return arr.findIndex((x) => parkingKey((x!.option as any)) === key) === index;
-    }) as RankedRecommendation[];
+  const rawRecommendedPicks = sortedParkingForAlternatives.slice(1, 4);
 
   let recommendedPicks = rawRecommendedPicks.filter(
     (item) => !isSameAsSmartPick(item.option as any)
@@ -1897,13 +1912,13 @@ export default function ResultsContent() {
           !isSameAsSmartPick(o.option)
         );
       })
-      .sort(
-        (a, b) =>
-          ((b.score || 0) + (b.stressScore || 0)) -
-          ((a.score || 0) + (a.stressScore || 0))
-      );
+      .sort((a, b) => {
+        if (sort === 'cheapest') return (a.cost - b.cost) || (a.duration - b.duration);
+        if (sort === 'fastest') return (a.duration - b.duration) || (a.cost - b.cost);
+        return (b.stressScore - a.stressScore) || (a.duration - b.duration) || (a.cost - b.cost);
+      });
 
-    recommendedPicks = [...recommendedPicks, ...extras].slice(0, 2);
+    recommendedPicks = [...recommendedPicks, ...extras].slice(0, 3);
   }
 
   const recommendedKeys = new Set([
@@ -1911,9 +1926,10 @@ export default function ResultsContent() {
     ...recommendedPicks.map((o) => parkingKey((o.option as any))),
   ].filter(Boolean));
 
-  const visibleMoreParkingCount = 0;
+  const visibleMoreParkingCount = 6;
 
-  const remainingParking = parkingOptionsOnly.filter((o) => {
+  const remainingParking = visibleResultOptions.filter((o) => {
+    if (o.type !== 'parking') return false;
     const key = parkingKey((o.option as any));
     return !recommendedKeys.has(key) && !isSameAsSmartPick(o.option as any);
   });

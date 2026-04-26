@@ -75,7 +75,9 @@ export default function ParkingSmartPick({
     const id = String(p.id || '').toLowerCase();
     const name = String(p.name || '').toLowerCase();
 
-    const isAprLiveLot = p.bookingProvider === 'AirportParkingReservations';
+    const isAprLiveLot =
+      p.bookingProvider === 'AirportParkingReservations' &&
+      (p.availabilityScore ?? 0) >= 50;
 
     const isGenericMarketplace =
       id.includes('spothero') ||
@@ -139,7 +141,13 @@ export default function ParkingSmartPick({
           p.priceConfidence === 'medium' ? 8 :
             0;
 
-      return review + liveBonus + confidenceBonus - price * 1.8 - transfer * 1.1;
+      const aprUnknownPenalty =
+        p.bookingProvider === 'AirportParkingReservations' &&
+          (p.availabilityScore ?? 0) < 50
+          ? 50
+          : 0;
+
+      return review + liveBonus + confidenceBonus - price * 1.8 - transfer * 1.1 - aprUnknownPenalty;
     };
 
     return valueScore(b) - valueScore(a);

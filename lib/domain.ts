@@ -361,7 +361,7 @@ export function rankRecommendations(
       }
       if (parking.availability > 80) reasons.push('High availability');
       if (parking.trustStatus === 'verified-source') reasons.push('Verified source');
-      if (parking.bookingProvider === 'AirportParkingReservations') reasons.push('Live APR price');
+      if (parking.bookingProvider === 'AirportParkingReservations') reasons.push('Listed APR rate');
       if (parking.priceConfidence === 'high') reasons.push('High price confidence');
       if (parking.priceConfidence === 'medium') reasons.push('Medium price confidence');
       if (cost < 50) reasons.push('Budget-friendly');
