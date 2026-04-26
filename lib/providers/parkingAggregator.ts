@@ -3,6 +3,7 @@ import { getAirportById } from '../airports/catalog';
 import { mockParkingOptions } from '../../data/mockData';
 import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
+import { crawlAirportParkingReservationsSea } from './airportParkingReservationsCrawler';
 
 type ParkingMarketplace = {
   id: string;
@@ -80,16 +81,62 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
   );
 }
 
+function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkingReservationsSea>>[number]): ParkingOption {
+  const lower = lot.lotName.toLowerCase();
+  const covered = lower.includes('covered') || lot.rawSnippet?.toLowerCase().includes('covered') || false;
+
+  return {
+    id: `sea-apr-${lower.replace(/[^a-z0-9]+/g, '-')}`,
+    name: lot.lotName,
+    type: 'off-airport',
+    price: lot.price ?? 30,
+    priceDisplay: lot.price ? 'from-per-day' : 'check-live',
+    priceUnit: lot.priceUnit ?? undefined,
+    priceNote: lot.price
+      ? 'Live/best available rate found from AirportParkingReservations. Verify final checkout price before booking.'
+      : 'Open AirportParkingReservations to confirm live price.',
+    priceSource: 'marketplace-link',
+    priceConfidence: lot.price ? 'medium' : 'low',
+    bookingProvider: 'AirportParkingReservations',
+    distance: 12,
+    availability: 75,
+    trustStatus: 'live',
+    sourceName: 'AirportParkingReservations',
+    sourceLink: lot.bookingUrl,
+    mapLink: googleMapsSearchUrl(`${lot.lotName} SeaTac`),
+    lastUpdated: lot.lastChecked,
+    parkingBufferMinutes: 15,
+    transferToTerminalMinutes: 12,
+    transferType: 'shuttle',
+    walkingMinutes: 2,
+    shuttleMinutes: 12,
+    covered,
+    availabilityScore: 75,
+    assumptions: [
+      'Parsed from AirportParkingReservations SEA airport parking page.',
+      lot.rawSnippet || 'Rate and lot metadata should be verified before booking.',
+    ],
+    bestFor: [
+      'Cheapest',
+      covered ? 'Covered' : '',
+      'Compare Live Price',
+    ].filter(Boolean),
+  };
+}
+
 function resolveLotKeyFromName(name: string): string | null {
   const lower = name.toLowerCase();
 
   if (lower.includes('wally')) return 'wallypark';
-  if (lower.includes('master')) return 'masterpark';
-  if (lower.includes('doug fox')) return 'doug fox';
-  if (lower.includes('park n jet') || lower.includes('park and jet')) return 'park n jet';
+  if (lower.includes('masterpark') || lower.includes('master park') || lower.includes('master')) return 'masterpark';
+  if (lower.includes('doug fox') || lower.includes('doug')) return 'doug fox';
+  if (lower.includes('park n jet') || lower.includes('park and jet') || lower.includes('parknjet')) return 'park n jet';
   if (lower.includes('ajax')) return 'ajax';
   if (lower.includes('jiffy')) return 'jiffy';
   if (lower.includes('mvp')) return 'mvp';
+  if (lower.includes('extra car')) return 'extra car';
+  if (lower.includes('shuttlepark') || lower.includes('shuttle park')) return 'shuttlepark';
+  if (lower.includes('seatacpark') || lower.includes('seatac park')) return 'seatacpark';
 
   return null;
 }
@@ -127,7 +174,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
             latitude: airport.geoLocation.lat,
             longitude: airport.geoLocation.lng,
           },
-          radius: 8000,
+          radius: 12000,
         },
       },
     }),
@@ -145,12 +192,22 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
         return (
           name.includes('parking') ||
           name.includes('park') ||
+          name.includes('garage') ||
           name.includes('wally') ||
           name.includes('master') ||
-          name.includes('garage')
+          name.includes('doug') ||
+          name.includes('ajax') ||
+          name.includes('jiffy') ||
+          name.includes('mvp') ||
+          name.includes('shuttle') ||
+          name.includes('extra car') ||
+          name.includes('seatacpark') ||
+          name.includes('seatac park') ||
+          name.includes('park n jet') ||
+          name.includes('park and jet')
         );
       })
-      .slice(0, 20)
+      .slice(0, 40)
       .map(async (place: any): Promise<ParkingOption> => {
         const rating = typeof place.rating === 'number' ? place.rating : undefined;
         const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : undefined;
@@ -197,7 +254,9 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
           priceNote,
           priceSource: dynamicPricing?.status === 'found' ? 'direct-lot-rate' : staticPricing.priceSource,
           priceConfidence,
-          bookingProvider: staticPricing.bookingProvider,
+          bookingProvider: dynamicPricing?.status === 'found' || dynamicPricing?.status === 'fallback'
+            ? staticPricing.bookingProvider
+            : staticPricing.bookingProvider,
           trustStatus: 'live',
           sourceName: 'Google Places',
           searchQuery: `${airport.label} ${airport.id} airport parking`,
@@ -238,7 +297,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
 
   return mapped
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
-    .slice(0, 10);
+    .slice(0, 12);
 }
 
 export async function getLiveParkingOptions(args: {
@@ -249,6 +308,11 @@ export async function getLiveParkingOptions(args: {
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
   const liveGoogleOptions = await getGoogleParkingPlaces(args.airportCode);
+
+  const aprOptions =
+    airport.id === 'SEA'
+      ? (await crawlAirportParkingReservationsSea()).map(aprLotToParkingOption)
+      : [];
 
   const marketplaceOptions = PARKING_MARKETPLACES.map((provider): ParkingOption => {
     const isOfficial = provider.id === 'official';
@@ -322,13 +386,17 @@ export async function getLiveParkingOptions(args: {
     });
 
   return dedupeParkingOptions([
+    ...aprOptions,
     ...discoveredLots,
     ...fallbackLots,
   ]).sort((a, b) => {
-    const rank = (p: any) => {
+    const rank = (p: ParkingOption) => {
+      const name = p.name.toLowerCase();
+
+      if (p.priceSource === 'marketplace-link' && p.bookingProvider === 'AirportParkingReservations') return 0;
       if (p.type === 'official') return 1;
-      if (p.name.toLowerCase().includes('wally')) return 2;
-      if (p.name.toLowerCase().includes('master')) return 3;
+      if (name.includes('wally')) return 2;
+      if (name.includes('master')) return 3;
       return 4;
     };
 

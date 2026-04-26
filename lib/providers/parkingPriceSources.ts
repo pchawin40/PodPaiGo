@@ -4,6 +4,9 @@ export type ParkingPriceSourceConfig = {
   urls: string[];
   fallbackPrice?: number;
   fallbackUnit?: 'per-day' | 'total';
+
+  // NEW:
+  crawlEnabled?: boolean;
 };
 
 export const SEA_PRICE_SOURCES: ParkingPriceSourceConfig[] = [
@@ -15,7 +18,11 @@ export const SEA_PRICE_SOURCES: ParkingPriceSourceConfig[] = [
     ],
     fallbackPrice: 32,
     fallbackUnit: 'per-day',
+
+    // blocked by Incapsula
+    crawlEnabled: false,
   },
+
   {
     lotKey: 'masterpark',
     label: 'MasterPark SEA',
@@ -24,12 +31,19 @@ export const SEA_PRICE_SOURCES: ParkingPriceSourceConfig[] = [
     ],
     fallbackPrice: 34,
     fallbackUnit: 'per-day',
+
+    // page loads but no reliable public price
+    crawlEnabled: false,
   },
+
   {
     lotKey: 'airportparkingreservations',
     label: 'AirportParkingReservations SEA',
     urls: [
-      'https://www.airportparkingreservations.com/airportparking/seattle_tacoma_international_airport_parking.html',
+      'https://airportparkingreservations.com/sea/airport-parking',
     ],
+
+    // keep trying later
+    crawlEnabled: true,
   },
 ];
