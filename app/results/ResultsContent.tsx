@@ -877,6 +877,24 @@ function OptionCard({
                 {price.badge}
               </div>
             )}
+
+            {item.type === 'parking' &&
+              Array.isArray(opt.bestFor) &&
+              opt.bestFor.slice(0, 3).map((tag: string) => (
+                <div
+                  key={tag}
+                  className={
+                    'rounded-full border px-2.5 py-1 text-xs font-medium ' +
+                    (tag === 'Great Deal' || tag === 'Cheapest'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : tag === 'Live Price'
+                        ? 'border-blue-200 bg-blue-50 text-blue-800'
+                        : 'border-zinc-200 bg-white text-zinc-700')
+                  }
+                >
+                  {tag}
+                </div>
+              ))}
           </div>
           {timingSummary && (
             <div className={

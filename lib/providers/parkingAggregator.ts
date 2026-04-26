@@ -129,9 +129,10 @@ function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkin
       lot.rawSnippet || 'Rate and lot metadata should be verified before booking.',
     ],
     bestFor: [
-      'Cheapest',
+      'Live Price',
+      lot.price && lot.price < 20 ? 'Great Deal' : '',
+      lot.price && lot.price < 18 ? 'Cheapest' : '',
       covered ? 'Covered' : '',
-      'Compare Live Price',
     ].filter(Boolean),
   };
 }
