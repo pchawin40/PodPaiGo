@@ -39,7 +39,7 @@ test('export results pdf', async ({ page }) => {
   await page.waitForLoadState('networkidle');
 
   await expect(
-    page.getByText('Strong alternatives to your Smart Parking Pick.', { exact: true })
+    page.getByText('Other strong choices based on price, timing, and convenience.', { exact: true })
   ).toBeVisible({ timeout: 30000 });
 
   await page.emulateMedia({ media: 'print' });

@@ -784,12 +784,14 @@ function leaveByCushionText(minutesUntilLeaveBy: number | null | undefined): str
 }
 
 function OptionCard({
+  compact = false,
   item,
   rank,
   tripData,
   intent,
   sort,
 }: {
+  compact?: boolean;
   item: RankedRecommendation;
   rank: number;
   tripData: TripData | null;
@@ -868,9 +870,12 @@ function OptionCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-base font-semibold text-zinc-900">{opt.name}</div>
-            <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
-              {typeLabel(item.type)}
-            </div>
+
+            {!compact && (
+              <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
+                {typeLabel(item.type)}
+              </div>
+            )}
             {rank === 1 &&
               sort === 'easiest' &&
               timing.status !== 'too-late' &&
@@ -916,7 +921,7 @@ function OptionCard({
                 </div>
               ))}
           </div>
-          {timingSummary && (
+          {timingSummary && !compact && (
             <div className={
               'mt-2 text-xs ' +
               (timing.status === 'too-late' ? 'text-red-800' : timing.status === 'tight' ? 'text-amber-900' : 'text-emerald-800')
@@ -936,20 +941,22 @@ function OptionCard({
             </div>
           )}
 
-          {price.secondary && (
+          {price.secondary && !compact && (
             <div className="mt-2 text-xs text-zinc-500">{price.secondary}</div>
           )}
 
-          <div className="mt-4">
-            <div className="text-sm font-medium text-zinc-900">Why this option</div>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-              {item.reasons.slice(0, 3).map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          </div>
+          {!compact && (
+            <div className="mt-4">
+              <div className="text-sm font-medium text-zinc-900">Why this option</div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+                {item.reasons.slice(0, 3).map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-          {item.type === 'parking' && (
+          {item.type === 'parking' && !compact && (
             <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm font-medium text-zinc-900">Compare booking sources</div>
@@ -1036,106 +1043,125 @@ function OptionCard({
         </div>
 
         <div className="flex shrink-0 flex-row gap-2 sm:flex-col sm:items-stretch">
-          {sourceLink && item.type === 'parking' ? (
-            <button
-              type="button"
-              onClick={() =>
-                copyTextThenOpen(
-                  opt.searchQuery || safeParkingSearchQuery,
-                  sourceLink
-                )
-              }
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Copy search + open
-            </button>
-          ) : sourceLink ? (
-            <a
-              href={sourceLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              {item.type === 'rideshare' && (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
-                ? 'Find taxi'
-                : 'View / Book'}
-            </a>
-          ) : null}
-          {routeLink && (
-            <a
-              href={routeLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-            >
-              Route
-            </a>
+          {compact ? (
+            sourceLink ? (
+              <button
+                type="button"
+                onClick={() =>
+                  item.type === 'parking'
+                    ? copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
+                    : window.open(sourceLink, '_blank', 'noopener,noreferrer')
+                }
+                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                {item.type === 'parking' ? 'Check price' : 'View'}
+              </button>
+            ) : null
+          ) : (
+            <>
+              {sourceLink && item.type === 'parking' ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
+                  }
+                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Copy search + open
+                </button>
+              ) : sourceLink ? (
+                <a
+                  href={sourceLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {item.type === 'rideshare' &&
+                    (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
+                    ? 'Find taxi'
+                    : 'View / Book'}
+                </a>
+              ) : null}
+
+              {routeLink && (
+                <a
+                  href={routeLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                >
+                  Route
+                </a>
+              )}
+            </>
           )}
         </div>
       </div>
 
-      <details className="mt-4">
-        <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">Details & evidence</summary>
-        <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
-          {timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' && (
-            <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
-              <div className="text-sm font-medium text-zinc-900">Flight timing check</div>
-              <div className="mt-2 space-y-1 text-sm text-zinc-700">
-                <div>Flight departs: {formatTimeFriendly(timing.flightDeparts)}</div>
-                <div>Recommended inside-airport arrival by: {formatTimeFriendly(timing.recommendedInsideArrivalBy)}</div>
-                <div>Option travel time: {formatMinutes(timing.optionTravelMinutes)}</div>
-                <div>Latest safe leave time: {formatTimeFriendly(timing.latestSafeLeaveTime)}</div>
-                {typeof timing.shortByMinutes === 'number' ? (
-                  <div>Missed by: {timing.shortByMinutes} min</div>
-                ) : null}
-              </div>
-              {Array.isArray(timing.assumptions) && timing.assumptions.length > 0 && (
-                <>
-                  <div className="mt-3 text-sm font-medium text-zinc-900">Buffer assumptions</div>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-                    {timing.assumptions.slice(0, 6).map((a) => (
-                      <li key={a}>{a}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          )}
-
-          {item.type === 'parking' && (
-            <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
-              <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
-              <div className="mt-2 space-y-1 text-sm text-zinc-700">
-                <div>Drive: {formatMinutes(typeof opt.distance === 'number' ? opt.distance : 0)}</div>
-                <div>Park/check-in: {typeof opt.parkingBufferMinutes === 'number' ? opt.parkingBufferMinutes : 0} min</div>
-                <div>
-                  {(opt.transferType === 'shuttle'
-                    ? 'Shuttle to terminal'
-                    : opt.transferType === 'airport-garage'
-                      ? 'Garage to terminal'
-                      : 'Walk to terminal')}
-                  : {typeof opt.transferToTerminalMinutes === 'number' ? opt.transferToTerminalMinutes : 0} min
+      {!compact && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">Details & evidence</summary>
+          <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+            {timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' && (
+              <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
+                <div className="text-sm font-medium text-zinc-900">Flight timing check</div>
+                <div className="mt-2 space-y-1 text-sm text-zinc-700">
+                  <div>Flight departs: {formatTimeFriendly(timing.flightDeparts)}</div>
+                  <div>Recommended inside-airport arrival by: {formatTimeFriendly(timing.recommendedInsideArrivalBy)}</div>
+                  <div>Option travel time: {formatMinutes(timing.optionTravelMinutes)}</div>
+                  <div>Latest safe leave time: {formatTimeFriendly(timing.latestSafeLeaveTime)}</div>
+                  {typeof timing.shortByMinutes === 'number' ? (
+                    <div>Missed by: {timing.shortByMinutes} min</div>
+                  ) : null}
                 </div>
-                <div className="pt-1 font-medium text-zinc-900">Total: {formatMinutes(item.duration)}</div>
+                {Array.isArray(timing.assumptions) && timing.assumptions.length > 0 && (
+                  <>
+                    <div className="mt-3 text-sm font-medium text-zinc-900">Buffer assumptions</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+                      {timing.assumptions.slice(0, 6).map((a) => (
+                        <li key={a}>{a}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
-            </div>
-          )}
-          <div><span className="font-medium">Source:</span> {opt.sourceName}</div>
-          {opt.lastUpdated && (
-            <div className="mt-1"><span className="font-medium">Updated:</span> {new Date(opt.lastUpdated).toLocaleString()}</div>
-          )}
-          {Array.isArray(opt.assumptions) && opt.assumptions.length > 0 && (
-            <>
-              <div className="mt-3 font-medium">Assumptions</div>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                {opt.assumptions.slice(0, 6).map((a: string) => (
-                  <li key={a}>{a}</li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      </details>
+            )}
+
+            {item.type === 'parking' && !compact && (
+              <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
+                <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
+                <div className="mt-2 space-y-1 text-sm text-zinc-700">
+                  <div>Drive: {formatMinutes(typeof opt.distance === 'number' ? opt.distance : 0)}</div>
+                  <div>Park/check-in: {typeof opt.parkingBufferMinutes === 'number' ? opt.parkingBufferMinutes : 0} min</div>
+                  <div>
+                    {(opt.transferType === 'shuttle'
+                      ? 'Shuttle to terminal'
+                      : opt.transferType === 'airport-garage'
+                        ? 'Garage to terminal'
+                        : 'Walk to terminal')}
+                    : {typeof opt.transferToTerminalMinutes === 'number' ? opt.transferToTerminalMinutes : 0} min
+                  </div>
+                  <div className="pt-1 font-medium text-zinc-900">Total: {formatMinutes(item.duration)}</div>
+                </div>
+              </div>
+            )}
+            <div><span className="font-medium">Source:</span> {opt.sourceName}</div>
+            {opt.lastUpdated && (
+              <div className="mt-1"><span className="font-medium">Updated:</span> {new Date(opt.lastUpdated).toLocaleString()}</div>
+            )}
+            {Array.isArray(opt.assumptions) && opt.assumptions.length > 0 && (
+              <>
+                <div className="mt-3 font-medium">Assumptions</div>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {opt.assumptions.slice(0, 6).map((a: string) => (
+                    <li key={a}>{a}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -1877,7 +1903,7 @@ export default function ResultsContent() {
           ((a.score || 0) + (a.stressScore || 0))
       );
 
-    recommendedPicks = [...recommendedPicks, ...extras].slice(0, 3);
+    recommendedPicks = [...recommendedPicks, ...extras].slice(0, 2);
   }
 
   const recommendedKeys = new Set([
@@ -1885,7 +1911,7 @@ export default function ResultsContent() {
     ...recommendedPicks.map((o) => parkingKey((o.option as any))),
   ].filter(Boolean));
 
-  const visibleMoreParkingCount = 2;
+  const visibleMoreParkingCount = 0;
 
   const remainingParking = parkingOptionsOnly.filter((o) => {
     const key = parkingKey((o.option as any));
@@ -1932,6 +1958,10 @@ export default function ResultsContent() {
                   : ''}
               </p>
 
+              <div className="mt-2 text-xs text-zinc-500">
+                Live traffic + airport timing + parking pricing analyzed
+              </div>
+
               {seatacZone && (
                 <div className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
                   Suggested SEA check-in area:{' '}
@@ -1950,7 +1980,7 @@ export default function ResultsContent() {
                     ))}
                   </div>
                   {heroAirportTiming.airportTimingIsLimitingFactor && (
-                    <div className="mt-2 text-xs text-amber-900">Airport timing is the limiting factor.</div>
+                    <div className="mt-2 text-xs text-amber-900">Recommended airport arrival time matters more than traffic today.</div>
                   )}
                 </div>
               )}
@@ -2160,15 +2190,16 @@ export default function ResultsContent() {
               {recommendedPicks.length > 0 && (
                 <section>
                   <div className="mb-3">
-                    <h2 className="text-lg font-semibold text-zinc-900">Recommended picks</h2>
+                    <h2 className="text-lg font-semibold text-zinc-900">Best Alternatives</h2>
                     <p className="mt-1 text-sm text-zinc-600">
-                      Strong alternatives to your Smart Parking Pick.
+                      Other strong choices based on price, timing, and convenience.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 gap-4">
                     {recommendedPicks.map((opt, idx) => (
                       <OptionCard
+                        compact
                         key={`recommended-${opt.type}-${(opt.option as any).id || idx}`}
                         item={opt}
                         rank={idx + 1}
@@ -2197,7 +2228,7 @@ export default function ResultsContent() {
                         onClick={() => setShowMoreParking((v) => !v)}
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {showMoreParking ? 'Show fewer' : `See ${hiddenParking.length} more parking deals`}
+                        {showMoreParking ? 'Hide parking options' : `Show ${hiddenParking.length} more parking options`}
                       </button>
                     )}
                   </div>
@@ -2205,6 +2236,7 @@ export default function ResultsContent() {
                   <div className="grid grid-cols-1 gap-4">
                     {displayedParking.map((opt, idx) => (
                       <OptionCard
+                        compact
                         key={`parking-${opt.type}-${(opt.option as any).id || idx}`}
                         item={opt}
                         rank={idx + 1}
@@ -2218,7 +2250,7 @@ export default function ResultsContent() {
               )}
 
               {rideshareOptionsOnly.length > 0 && (
-                <section className="mt-8">
+                <section className="mt-6">
                   <button
                     type="button"
                     onClick={() => setShowRideshare((v) => !v)}
@@ -2229,7 +2261,9 @@ export default function ResultsContent() {
                       <div className="mt-1 text-sm text-zinc-600">Uber, Lyft, taxi, and pickup options.</div>
                     </div>
                     <div className="text-sm font-medium text-blue-700">
-                      {showRideshare ? 'Hide' : `Show ${rideshareOptionsOnly.length}`}
+                      {showRideshare
+                        ? 'Hide rideshare'
+                        : `Show rideshare (${rideshareOptionsOnly.length})`}
                     </div>
                   </button>
 
@@ -2237,6 +2271,7 @@ export default function ResultsContent() {
                     <div className="mt-4 grid grid-cols-1 gap-4">
                       {rideshareOptionsOnly.map((opt, idx) => (
                         <OptionCard
+                          compact
                           key={`ride-${opt.type}-${(opt.option as any).id || idx}`}
                           item={opt}
                           rank={idx + 1}
@@ -2251,7 +2286,7 @@ export default function ResultsContent() {
               )}
 
               {transitOptionsOnly.length > 0 && (
-                <section className="mt-8">
+                <section className="mt-6">
                   <button
                     type="button"
                     onClick={() => setShowTransit((v) => !v)}
@@ -2262,7 +2297,9 @@ export default function ResultsContent() {
                       <div className="mt-1 text-sm text-zinc-600">Park-and-ride, light rail, and transit options.</div>
                     </div>
                     <div className="text-sm font-medium text-blue-700">
-                      {showTransit ? 'Hide' : `Show ${transitOptionsOnly.length}`}
+                      {showTransit
+                        ? 'Hide transit'
+                        : `Show transit (${transitOptionsOnly.length})`}
                     </div>
                   </button>
 
@@ -2270,6 +2307,7 @@ export default function ResultsContent() {
                     <div className="mt-4 grid grid-cols-1 gap-4">
                       {transitOptionsOnly.map((opt, idx) => (
                         <OptionCard
+                          compact
                           key={`transit-${opt.type}-${(opt.option as any).id || idx}`}
                           item={opt}
                           rank={idx + 1}
@@ -2343,10 +2381,17 @@ export default function ResultsContent() {
           )}
 
           {showRideProviders && (
-            <PricingLinksSection
-              title="Ride providers"
-              items={rideProviderItems}
-            />
+            <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+              <summary className="cursor-pointer px-5 py-4 text-base font-semibold text-zinc-900">
+                Need rideshare instead? Show ride prices
+              </summary>
+              <div className="px-5 pb-5">
+                <PricingLinksSection
+                  title="Ride providers"
+                  items={rideProviderItems}
+                />
+              </div>
+            </details>
           )}
 
           <div className={showParkingProviders && showRideProviders ? 'lg:col-span-2' : undefined}>

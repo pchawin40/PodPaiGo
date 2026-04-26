@@ -166,12 +166,14 @@ export default function ParkingSmartPick({
       : null;
 
   const displayLeaveByTime = leaveByTime
-  ? formatTimeFriendly(leaveByTime)
-  : null;
+    ? formatTimeFriendly(leaveByTime)
+    : null;
 
   const ctaLabel =
     best.trustStatus === 'live'
-      ? 'Reserve now'
+      ? savings
+        ? `Reserve Spot • Save ${formatMoneyWhole(savings)}`
+        : 'Reserve Spot'
       : best.priceDisplay === 'check-live'
         ? 'View rates'
         : 'Check price';
@@ -248,6 +250,10 @@ export default function ParkingSmartPick({
             ) : (
               <>Recommended because it balances price, convenience, and booking confidence.</>
             )}
+          </div>
+
+          <div className="mt-2 text-xs font-medium text-emerald-700">
+            Popular SEA traveler choice today
           </div>
         </div>
 
