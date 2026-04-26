@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
 
 function formatMoney(n: number) {
-  return `$${Math.round(n)}`;
+  const rounded = Math.round(n * 100) / 100;
+  return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`;
 }
 
 function estimateDays(tripData: TripData | null) {
@@ -45,7 +46,6 @@ export default function ParkingSmartPick({
   if (!options?.length) return null;
 
   const days = estimateDays(tripData);
-  const official = options.find((p) => p.type === 'official');
 
   const smartPickCandidates = options.filter((p) => {
     const id = String(p.id || '').toLowerCase();
@@ -75,17 +75,71 @@ export default function ParkingSmartPick({
 
   const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : options;
 
-  // For now, just take the first one as the "smart pick". In the future, we could do a more complex ranking here.
-  const sorted = candidateOptions;
+  const cheapestOfficial = [...options]
+    .filter((p) => p.type === 'official')
+    .sort((a, b) => (a.price ?? 999) - (b.price ?? 999))[0];
 
-  const best = sorted[0];
-  const alternatives = sorted.slice(1, 4);
+  const cheapest = [...candidateOptions].sort(
+    (a, b) => (a.price ?? 999) - (b.price ?? 999)
+  )[0];
 
-  const bestTotal = best.price * days;
-  const officialTotal = official ? official.price * days : null;
+  const lowestStress = [...candidateOptions].sort((a, b) => {
+    const stressScore = (p: ParkingOption) => {
+      const isWalk = p.transferType !== 'shuttle';
+      const transfer = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
+      const confidence =
+        p.priceConfidence === 'high' ? 20 :
+          p.priceConfidence === 'medium' ? 10 :
+            0;
+
+      return (
+        (isWalk ? 40 : 0) +
+        confidence +
+        (p.covered ? 10 : 0) -
+        transfer * 2 -
+        (p.price ?? 999) * 0.25
+      );
+    };
+
+    return stressScore(b) - stressScore(a);
+  })[0];
+
+  const bestValue = [...candidateOptions].sort((a, b) => {
+    const valueScore = (p: ParkingOption) => {
+      const price = p.price ?? 999;
+      const transfer = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
+      const review = p.reviewScore ? p.reviewScore * 8 : 0;
+      const liveBonus = p.trustStatus === 'live' ? 12 : 0;
+      const confidenceBonus =
+        p.priceConfidence === 'high' ? 12 :
+          p.priceConfidence === 'medium' ? 8 :
+            0;
+
+      return review + liveBonus + confidenceBonus - price * 1.8 - transfer * 1.1;
+    };
+
+    return valueScore(b) - valueScore(a);
+  })[0];
+
+  const best = bestValue || cheapest || lowestStress || candidateOptions[0];
+
+  const alternatives = [cheapest, lowestStress, cheapestOfficial]
+    .filter(Boolean)
+    .filter((p, idx, arr) => arr.findIndex((x) => x?.id === p?.id) === idx)
+    .filter((p) => p?.id !== best?.id)
+    .slice(0, 3) as ParkingOption[];
+
+  const bestTotal = (best.price ?? 0) * days;
+  const officialTotal = cheapestOfficial ? (cheapestOfficial.price ?? 0) * days : null;
+
   const savings =
     officialTotal && officialTotal > bestTotal
       ? officialTotal - bestTotal
+      : null;
+
+  const savingsPercent =
+    savings && officialTotal
+      ? Math.round((savings / officialTotal) * 100)
       : null;
 
   return (
@@ -104,6 +158,12 @@ export default function ParkingSmartPick({
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
               Best overall
             </span>
+
+            {savings && (
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+                Save {formatMoney(savings)} vs official
+              </span>
+            )}
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
               {best.transferType === 'shuttle' ? 'Shuttle' : 'Walk'}
@@ -216,7 +276,18 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-3 text-sm text-zinc-700">
-            Recommended because it balances price, convenience, and booking confidence.
+            {savings ? (
+              <>
+                Recommended because it saves about{' '}
+                <span className="font-semibold text-emerald-800">
+                  {formatMoney(savings)}
+                </span>{' '}
+                {savingsPercent ? `(${savingsPercent}%) ` : ''}
+                versus official airport parking while keeping timing reasonable.
+              </>
+            ) : (
+              <>Recommended because it balances price, convenience, and booking confidence.</>
+            )}
           </div>
         </div>
 
