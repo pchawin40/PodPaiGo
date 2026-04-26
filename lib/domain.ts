@@ -254,6 +254,30 @@ export function rankRecommendations(
   const recommendations: RankedRecommendation[] = [];
   const useParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip';
 
+  const transportPreference = (tripData as any).transportAvailability || 'all';
+
+  const modePreferenceAdjustment = (type: 'parking' | 'rideshare' | 'transit'): number => {
+    if (transportPreference === 'car') {
+      if (type === 'parking') return 22;
+      if (type === 'transit') return -18;
+      return -6;
+    }
+
+    if (transportPreference === 'rideshare') {
+      if (type === 'rideshare') return 22;
+      if (type === 'parking') return -16;
+      return -6;
+    }
+
+    if (transportPreference === 'transit') {
+      if (type === 'transit') return 28;
+      if (type === 'parking') return -30;
+      return -18;
+    }
+
+    return 0;
+  };
+
   if (useParking) {
     const parkingWaitPenalty = tsaEstimate.waitTime * 0.5;
     parkingOptions.forEach(parking => {
@@ -267,6 +291,8 @@ export function rankRecommendations(
       score -= totalDuration * 2;
       score += parking.availability;
       score -= parkingWaitPenalty;
+
+      score += modePreferenceAdjustment('parking');
 
       if (parking.priceConfidence === 'high') score += 18;
       if (parking.priceConfidence === 'medium') score += 8;
@@ -333,6 +359,8 @@ export function rankRecommendations(
     score += rideshare.availability;
     score -= arrivalWaitPenalty;
 
+    score += modePreferenceAdjustment('rideshare');
+
     const reasons = [];
     if (rideshare.duration < 30) reasons.push('Quick ride');
     if (rideshare.availability > 80) reasons.push('High availability');
@@ -367,6 +395,8 @@ export function rankRecommendations(
     score -= totalDuration;
     score += transit.availability ?? 0;
     score -= transitWaitPenalty;
+
+    score += modePreferenceAdjustment('transit');
 
     const isUnrealistic = totalDuration > 120 || transit.trustStatus === 'fallback';
     if (isUnrealistic) {
