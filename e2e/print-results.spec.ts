@@ -38,9 +38,9 @@ test('export results pdf', async ({ page }) => {
 
   await page.waitForLoadState('networkidle');
 
-  await expect(page.getByText(/smart parking pick/i)).toBeVisible({
-    timeout: 30000,
-  });
+  await expect(
+    page.getByText('Strong alternatives to your Smart Parking Pick.', { exact: true })
+  ).toBeVisible({ timeout: 30000 });
 
   await page.emulateMedia({ media: 'print' });
 

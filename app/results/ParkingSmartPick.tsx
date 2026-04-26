@@ -8,6 +8,26 @@ function formatMoney(n: number) {
   return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`;
 }
 
+// For savings display, we want to round to whole dollars to avoid implying false precision
+function formatMoneyWhole(n: number) {
+  const rounded = Math.round(n);
+  return `$${rounded.toLocaleString()}`;
+}
+
+function formatTimeFriendly(time24: string) {
+  const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
+  if (!m) return time24;
+
+  let hours = Number(m[1]);
+  const minutes = m[2];
+
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+
+  return `${hours}:${minutes} ${ampm}`;
+}
+
 function estimateDays(tripData: TripData | null) {
   const mins = (tripData as any)?.parkingDuration;
   if (!mins) return 1;
@@ -17,9 +37,13 @@ function estimateDays(tripData: TripData | null) {
 export default function ParkingSmartPick({
   options,
   tripData,
+  selectedOption,
+  leaveByTime,
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
+  selectedOption?: ParkingOption | null;
+  leaveByTime?: string | null;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null); // For closing popovers when clicking outside
@@ -121,13 +145,12 @@ export default function ParkingSmartPick({
     return valueScore(b) - valueScore(a);
   })[0];
 
-  const best = bestValue || cheapest || lowestStress || candidateOptions[0];
-
-  const alternatives = [cheapest, lowestStress, cheapestOfficial]
-    .filter(Boolean)
-    .filter((p, idx, arr) => arr.findIndex((x) => x?.id === p?.id) === idx)
-    .filter((p) => p?.id !== best?.id)
-    .slice(0, 3) as ParkingOption[];
+  const best =
+    selectedOption ||
+    bestValue ||
+    cheapest ||
+    lowestStress ||
+    candidateOptions[0];
 
   const bestTotal = (best.price ?? 0) * days;
   const officialTotal = cheapestOfficial ? (cheapestOfficial.price ?? 0) * days : null;
@@ -141,6 +164,17 @@ export default function ParkingSmartPick({
     savings && officialTotal
       ? Math.round((savings / officialTotal) * 100)
       : null;
+
+  const displayLeaveByTime = leaveByTime
+  ? formatTimeFriendly(leaveByTime)
+  : null;
+
+  const ctaLabel =
+    best.trustStatus === 'live'
+      ? 'Reserve now'
+      : best.priceDisplay === 'check-live'
+        ? 'View rates'
+        : 'Check price';
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -156,12 +190,12 @@ export default function ParkingSmartPick({
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
-              Best overall
+              Best Overall
             </span>
 
             {savings && (
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
-                Save {formatMoney(savings)} vs official
+                Save {formatMoneyWhole(savings)}
               </span>
             )}
 
@@ -170,92 +204,12 @@ export default function ParkingSmartPick({
             </span>
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-              {best.trustStatus === 'live' ? 'Live listing' : 'Verified link'}
+              {best.trustStatus === 'live' ? 'Live Price' : 'Verified Link'}
             </span>
 
             {best.covered && (
               <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
                 Covered
-              </span>
-            )}
-
-            {best.reviewScore && (
-              <div className="relative inline-flex">
-                <button
-                  type="button"
-                  onClick={() => setOpenDetail(openDetail === 'reviews' ? null : 'reviews')}
-                  className="select-none rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700 hover:bg-zinc-200"
-                >
-                  ⭐ {best.reviewScore} ({best.reviewCount?.toLocaleString() || 0})
-                </button>
-
-                {openDetail === 'reviews' && (
-                  <div
-                    ref={detailRef}
-                    className="absolute left-0 top-9 z-20 w-72 rounded-xl border border-zinc-200 bg-white p-3 text-sm text-zinc-700 shadow-lg">
-                    <div className="font-semibold text-zinc-900">Review confidence</div>
-                    <div className="mt-1">
-                      {best.reviewScore}/5 from about {best.reviewCount?.toLocaleString() || 0} reviews.
-                    </div>
-                    <div className="mt-2 text-xs text-zinc-500">
-                      Estimate based on public listing-style data. Verify recent reviews before booking.
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {best.availabilityScore && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenDetail(
-                      openDetail === 'availability' ? null : 'availability'
-                    )
-                  }
-                  className="select-none rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700 hover:bg-zinc-200"
-                >
-                  {best.availabilityScore >= 80
-                    ? 'High availability'
-                    : best.availabilityScore >= 60
-                      ? 'Medium availability'
-                      : 'Low availability'}
-                </button>
-
-                {openDetail === 'availability' && (
-                  <div
-                    ref={detailRef}
-                    className="absolute right-0 top-12 z-20 w-72 rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
-                  >
-                    <div className="font-semibold text-zinc-900">
-                      Availability confidence
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-700">
-                      Score: {best.availabilityScore}/100
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-600">
-                      Based on listing activity, estimated capacity,
-                      and provider confidence.
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-600">
-                      Actual space may change by arrival time.
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {best.priceConfidence && (
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-                {best.priceConfidence === 'high'
-                  ? 'High price confidence'
-                  : best.priceConfidence === 'medium'
-                    ? 'Medium price confidence'
-                    : 'Low price confidence'}
               </span>
             )}
           </div>
@@ -272,18 +226,24 @@ export default function ParkingSmartPick({
             {best.transferType === 'shuttle'
               ? `${best.shuttleMinutes ?? best.transferToTerminalMinutes ?? 10} min shuttle`
               : `${best.walkingMinutes ?? best.transferToTerminalMinutes ?? 5} min walk`}
-            {savings ? ` · Save about ${formatMoney(savings)} vs official parking` : ''}
+            {savings ? ` · ${formatMoneyWhole(savings)} cheaper than official parking` : ''}
           </div>
+
+          {displayLeaveByTime && (
+            <div className="mt-2 text-sm font-semibold text-emerald-700">
+              Leave by {displayLeaveByTime} to arrive on time
+            </div>
+          )}
 
           <div className="mt-3 text-sm text-zinc-700">
             {savings ? (
               <>
-                Recommended because it saves about{' '}
+                Save {' '}
                 <span className="font-semibold text-emerald-800">
-                  {formatMoney(savings)}
+                  {formatMoneyWhole(savings)}
                 </span>{' '}
                 {savingsPercent ? `(${savingsPercent}%) ` : ''}
-                versus official airport parking while keeping timing reasonable.
+                vs official parking with similar timing.
               </>
             ) : (
               <>Recommended because it balances price, convenience, and booking confidence.</>
@@ -298,44 +258,10 @@ export default function ParkingSmartPick({
             rel="noopener noreferrer"
             className="inline-flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
           >
-            Reserve / Check price
+            {ctaLabel}
           </a>
         )}
       </div>
-
-      {alternatives.length > 0 && (
-        <div className="mt-5 border-t border-zinc-100 pt-4">
-          <div className="text-sm font-semibold text-zinc-900">
-            Quick alternatives
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {alternatives.map((p) => (
-              <a
-                key={p.id}
-                href={p.sourceLink || p.mapLink || '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-xl border border-zinc-200 p-3 hover:bg-zinc-50"
-              >
-                <div className="truncate text-sm font-medium text-zinc-900">
-                  {p.name}
-                </div>
-                <div className="mt-1 text-sm text-zinc-600">
-                  {p.priceDisplay === 'check-live' && (!p.price || p.price <= 0)
-                    ? 'Check live price'
-                    : p.priceUnit === 'total'
-                      ? formatMoney(p.price)
-                      : `${formatMoney(p.price)}/day`}
-                </div>
-                <div className="mt-1 text-xs text-blue-700">
-                  View option →
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   );
 }

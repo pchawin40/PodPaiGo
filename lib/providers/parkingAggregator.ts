@@ -129,7 +129,7 @@ function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkin
       lot.rawSnippet || 'Rate and lot metadata should be verified before booking.',
     ],
     bestFor: [
-      'Live Price',
+      'Live Deal',
       lot.price && lot.price < 20 ? 'Great Deal' : '',
       lot.price && lot.price < 18 ? 'Cheapest' : '',
       covered ? 'Covered' : '',
@@ -302,7 +302,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
           bestFor: [
             rating && rating >= 4.4 ? 'Best Reviews' : '',
             isCovered ? 'Best Weather' : '',
-            isOfficial ? 'Closest Walk' : 'Compare Live Price',
+            isOfficial ? 'Closest Walk' : 'Compare Live Deal',
           ].filter(Boolean),
         };
       })

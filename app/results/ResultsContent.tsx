@@ -26,6 +26,23 @@ function formatMoneyCents(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+function parkingKey(v: any): string {
+  const raw = String(v?.id || v?.name || '')
+    .toLowerCase()
+    .replace(/parking/g, '')
+    .replace(/official/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+  if (raw.includes('doubletree')) return 'doubletree';
+  if (raw.includes('wally')) return 'wallypark';
+  if (raw.includes('master')) return 'masterpark';
+  if (raw.includes('jiffy')) return 'jiffy';
+  if (raw.includes('general')) return 'officialgeneral';
+  if (raw.includes('reserved')) return 'officialreserved';
+
+  return raw;
+}
+
 function formatMinutes(min: number): string {
   if (min < 60) return `${min} min`;
 
@@ -854,11 +871,14 @@ function OptionCard({
             <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
               {typeLabel(item.type)}
             </div>
-            {rank === 1 && sort === 'easiest' && timing.status !== 'too-late' && (
-              <div className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
-                Recommended
-              </div>
-            )}
+            {rank === 1 &&
+              sort === 'easiest' &&
+              timing.status !== 'too-late' &&
+              item.type !== 'parking' && (
+                <div className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                  Recommended
+                </div>
+              )}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -1137,6 +1157,10 @@ export default function ResultsContent() {
     return sortParam === 'cheapest' || sortParam === 'fastest' || sortParam === 'easiest' ? sortParam : 'easiest';
   });
   const [showTooLate, setShowTooLate] = useState(false);
+
+  const [showMoreParking, setShowMoreParking] = useState(false);
+  const [showRideshare, setShowRideshare] = useState(false);
+  const [showTransit, setShowTransit] = useState(false);
 
   const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
   const intent = searchParams.get('intent') || '';
@@ -1797,6 +1821,81 @@ export default function ResultsContent() {
     .filter((opt) => opt.type === 'parking')
     .map((opt) => opt.option as any);
 
+  const visibleResultOptions =
+    intent === 'flying-out' && tripData.type === 'one-way-departure'
+      ? viableOptions
+      : sortedOptions;
+
+  const parkingOptionsOnly = visibleResultOptions.filter((o) => o.type === 'parking');
+  const rideshareOptionsOnly = visibleResultOptions.filter((o) => o.type === 'rideshare');
+  const transitOptionsOnly = visibleResultOptions.filter((o) => o.type === 'transit');
+
+  const cheapestParking = [...parkingOptionsOnly].sort((a, b) => a.cost - b.cost)[0] || null;
+  const lowestStress = [...parkingOptionsOnly].sort((a, b) => b.stressScore - a.stressScore)[0] || null;
+  const bestValue = [...parkingOptionsOnly].sort((a, b) => {
+    const liveBonusA = (a.option as any).bookingProvider === 'AirportParkingReservations' ? -8 : 0;
+    const liveBonusB = (b.option as any).bookingProvider === 'AirportParkingReservations' ? -8 : 0;
+
+    return (a.cost + a.duration * 0.15 + liveBonusA) - (b.cost + b.duration * 0.15 + liveBonusB);
+  })[0] || null;
+
+  const smartPickRankedOption =
+    bestValue || cheapestParking || lowestStress || parkingOptionsOnly[0] || null;
+
+  const smartPickOption = (smartPickRankedOption?.option as any) || null;
+  const smartPickKey = parkingKey(smartPickOption);
+
+  const isSameAsSmartPick = (option: any): boolean => {
+    const otherKey = parkingKey(option);
+    return Boolean(smartPickKey && otherKey && smartPickKey === otherKey);
+  };
+
+  const rawRecommendedPicks = [bestValue, cheapestParking, lowestStress]
+    .filter(Boolean)
+    .filter((item, index, arr) => {
+      const key = parkingKey((item!.option as any));
+      return arr.findIndex((x) => parkingKey((x!.option as any)) === key) === index;
+    }) as RankedRecommendation[];
+
+  let recommendedPicks = rawRecommendedPicks.filter(
+    (item) => !isSameAsSmartPick(item.option as any)
+  );
+
+  if (recommendedPicks.length < 3) {
+    const extras = parkingOptionsOnly
+      .filter((o) => {
+        const key = parkingKey(o.option);
+
+        return (
+          !recommendedPicks.some((r) => parkingKey(r.option) === key) &&
+          !isSameAsSmartPick(o.option)
+        );
+      })
+      .sort(
+        (a, b) =>
+          ((b.score || 0) + (b.stressScore || 0)) -
+          ((a.score || 0) + (a.stressScore || 0))
+      );
+
+    recommendedPicks = [...recommendedPicks, ...extras].slice(0, 3);
+  }
+
+  const recommendedKeys = new Set([
+    smartPickKey,
+    ...recommendedPicks.map((o) => parkingKey((o.option as any))),
+  ].filter(Boolean));
+
+  const visibleMoreParkingCount = 2;
+
+  const remainingParking = parkingOptionsOnly.filter((o) => {
+    const key = parkingKey((o.option as any));
+    return !recommendedKeys.has(key) && !isSameAsSmartPick(o.option as any);
+  });
+
+  const initiallyVisibleParking = remainingParking.slice(0, visibleMoreParkingCount);
+  const hiddenParking = remainingParking.slice(visibleMoreParkingCount);
+  const displayedParking = showMoreParking ? remainingParking : initiallyVisibleParking;
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-8">
@@ -1832,6 +1931,14 @@ export default function ResultsContent() {
                   ? ` • TSA ${recommendation.tsaEstimate.waitTime}m`
                   : ''}
               </p>
+
+              {seatacZone && (
+                <div className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  Suggested SEA check-in area:{' '}
+                  <span className="font-medium">{seatacZone.destination}</span>
+                  {seatacZone.note ? <span> · {seatacZone.note}</span> : null}
+                </div>
+              )}
 
               {heroAirportTiming && (
                 <div className="mt-4 rounded-xl bg-zinc-50 p-4">
@@ -1948,6 +2055,8 @@ export default function ResultsContent() {
             <ParkingSmartPick
               options={smartPickParkingOptions}
               tripData={tripData}
+              leaveByTime={recommendation.leaveByTime}
+              selectedOption={smartPickOption}
             />
           </div>
         )}
@@ -2048,28 +2157,131 @@ export default function ResultsContent() {
             </div>
           ) : (
             <>
-              {(intent === 'flying-out' && tripData.type === 'one-way-departure')
-                ? viableOptions.map((opt, idx) => (
-                  <OptionCard
-                    key={`${opt.type}-${(opt.option as any).id || idx}`}
-                    item={opt}
-                    rank={idx + 1}
-                    tripData={tripData}
-                    intent={intent}
-                    sort={sort}
-                  />
-                ))
-                : sortedOptions.map((opt, idx) => (
-                  <OptionCard
-                    key={`${opt.type}-${(opt.option as any).id || idx}`}
-                    item={opt}
-                    rank={idx + 1}
-                    tripData={tripData}
-                    intent={intent}
-                    sort={sort}
-                  />
-                ))}
+              {recommendedPicks.length > 0 && (
+                <section>
+                  <div className="mb-3">
+                    <h2 className="text-lg font-semibold text-zinc-900">Recommended picks</h2>
+                    <p className="mt-1 text-sm text-zinc-600">
+                      Strong alternatives to your Smart Parking Pick.
+                    </p>
+                  </div>
 
+                  <div className="grid grid-cols-1 gap-4">
+                    {recommendedPicks.map((opt, idx) => (
+                      <OptionCard
+                        key={`recommended-${opt.type}-${(opt.option as any).id || idx}`}
+                        item={opt}
+                        rank={idx + 1}
+                        tripData={tripData}
+                        intent={intent}
+                        sort={sort}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {remainingParking.length > 0 && (
+                <section className="mt-8">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-zinc-900">More parking options</h2>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        Additional live and baseline parking choices.
+                      </p>
+                    </div>
+
+                    {hiddenParking.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowMoreParking((v) => !v)}
+                        className="text-sm font-medium text-blue-700 hover:text-blue-800"
+                      >
+                        {showMoreParking ? 'Show fewer' : `See ${hiddenParking.length} more parking deals`}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {displayedParking.map((opt, idx) => (
+                      <OptionCard
+                        key={`parking-${opt.type}-${(opt.option as any).id || idx}`}
+                        item={opt}
+                        rank={idx + 1}
+                        tripData={tripData}
+                        intent={intent}
+                        sort={sort}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {rideshareOptionsOnly.length > 0 && (
+                <section className="mt-8">
+                  <button
+                    type="button"
+                    onClick={() => setShowRideshare((v) => !v)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm hover:bg-zinc-50"
+                  >
+                    <div>
+                      <div className="text-lg font-semibold text-zinc-900">Rideshare</div>
+                      <div className="mt-1 text-sm text-zinc-600">Uber, Lyft, taxi, and pickup options.</div>
+                    </div>
+                    <div className="text-sm font-medium text-blue-700">
+                      {showRideshare ? 'Hide' : `Show ${rideshareOptionsOnly.length}`}
+                    </div>
+                  </button>
+
+                  {showRideshare && (
+                    <div className="mt-4 grid grid-cols-1 gap-4">
+                      {rideshareOptionsOnly.map((opt, idx) => (
+                        <OptionCard
+                          key={`ride-${opt.type}-${(opt.option as any).id || idx}`}
+                          item={opt}
+                          rank={idx + 1}
+                          tripData={tripData}
+                          intent={intent}
+                          sort={sort}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {transitOptionsOnly.length > 0 && (
+                <section className="mt-8">
+                  <button
+                    type="button"
+                    onClick={() => setShowTransit((v) => !v)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm hover:bg-zinc-50"
+                  >
+                    <div>
+                      <div className="text-lg font-semibold text-zinc-900">Transit</div>
+                      <div className="mt-1 text-sm text-zinc-600">Park-and-ride, light rail, and transit options.</div>
+                    </div>
+                    <div className="text-sm font-medium text-blue-700">
+                      {showTransit ? 'Hide' : `Show ${transitOptionsOnly.length}`}
+                    </div>
+                  </button>
+
+                  {showTransit && (
+                    <div className="mt-4 grid grid-cols-1 gap-4">
+                      {transitOptionsOnly.map((opt, idx) => (
+                        <OptionCard
+                          key={`transit-${opt.type}-${(opt.option as any).id || idx}`}
+                          item={opt}
+                          rank={idx + 1}
+                          tripData={tripData}
+                          intent={intent}
+                          sort={sort}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {intent === 'flying-out' && tripData.type === 'one-way-departure' && tooLateOptions.length > 0 && viableOptions.length > 0 && (
                 <div className="pt-1">
@@ -2113,7 +2325,17 @@ export default function ResultsContent() {
             <div>
               <PricingLinksSection
                 title="Parking providers"
-                items={[...(recommendation.parking as any), ...extraParkingProviders]}
+                items={[
+                  ...[...(recommendation.parking as any), ...extraParkingProviders].filter((p) => {
+                    const key = parkingKey(p);
+
+                    return ![
+                      smartPickOption,
+                      ...(recommendedPicks || []).map((x) => x.option),
+                      ...(remainingParking || []).map((x) => x.option),
+                    ].some((shown) => parkingKey(shown) === key);
+                  }),
+                ]}
               />
               {/* Parking booking comparison (compact, expandable) */}
               <ParkingBookingComparison parkingOptions={[...(recommendation.parking as any), ...extraParkingProviders]} tripData={tripData} />
