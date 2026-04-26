@@ -75,60 +75,8 @@ export default function ParkingSmartPick({
 
   const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : options;
 
-  const sorted = [...candidateOptions].sort((a, b) => {
-    const score = (p: ParkingOption) => {
-      const price = p.price || 999;
-      const transfer = p.shuttleMinutes ?? p.transferToTerminalMinutes ?? 10;
-      const walk = p.walkingMinutes ?? 5;
-      const reviews = p.reviewScore ? (5 - p.reviewScore) * 8 : 8;
-      const availability = p.availabilityScore ?? p.availability ?? 50;
-      const coveredPenalty = p.covered ? -4 : 4;
-
-      const trustBonus =
-        p.trustStatus === 'live' ? -10 :
-          p.trustStatus === 'verified-source' ? -6 :
-            0;
-
-      const priceConfidenceBonus =
-        p.priceConfidence === 'high' ? -8 :
-          p.priceConfidence === 'medium' ? -4 :
-            p.priceConfidence === 'low' ? 6 :
-              0;
-
-      const liveAprBonus =
-        p.bookingProvider === 'AirportParkingReservations' ? -24 : 0;
-
-      const officialConvenienceBonus =
-        p.type === 'official' ? -8 : 0;
-
-      const cheapDealBonus =
-        price <= 20 ? -20 :
-          price <= 30 ? -10 :
-            0;
-
-      const unknownAprPenalty =
-        p.bookingProvider === 'AirportParkingReservations' && !p.reviewScore
-          ? 4
-          : 0;
-
-      return (
-        price * 1.6 +
-        transfer * 1.4 +
-        walk * 0.8 +
-        reviews -
-        availability * 0.12 +
-        coveredPenalty +
-        trustBonus +
-        priceConfidenceBonus +
-        liveAprBonus +
-        officialConvenienceBonus +
-        cheapDealBonus +
-        unknownAprPenalty
-      );
-    };
-
-    return score(a) - score(b);
-  });
+  // For now, just take the first one as the "smart pick". In the future, we could do a more complex ranking here.
+  const sorted = candidateOptions;
 
   const best = sorted[0];
   const alternatives = sorted.slice(1, 4);
@@ -154,7 +102,7 @@ export default function ParkingSmartPick({
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
-              Best value
+              Best overall
             </span>
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">

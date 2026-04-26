@@ -254,25 +254,29 @@ export function rankRecommendations(
   const recommendations: RankedRecommendation[] = [];
   const useParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip';
 
-  const transportPreference = (tripData as any).transportAvailability || 'all';
+  const transportPreference =
+    (tripData as any).transportAvailability || 'all';
 
-  const modePreferenceAdjustment = (type: 'parking' | 'rideshare' | 'transit'): number => {
+  // Mode preference adjustment function
+  const modePreferenceAdjustment = (
+    type: 'parking' | 'rideshare' | 'transit'
+  ): number => {
     if (transportPreference === 'car') {
-      if (type === 'parking') return 22;
-      if (type === 'transit') return -18;
-      return -6;
+      if (type === 'parking') return 45;
+      if (type === 'rideshare') return 8;
+      if (type === 'transit') return -40;
     }
 
     if (transportPreference === 'rideshare') {
-      if (type === 'rideshare') return 22;
-      if (type === 'parking') return -16;
-      return -6;
+      if (type === 'rideshare') return 35;
+      if (type === 'parking') return -15;
+      if (type === 'transit') return -10;
     }
 
     if (transportPreference === 'transit') {
-      if (type === 'transit') return 28;
-      if (type === 'parking') return -30;
-      return -18;
+      if (type === 'transit') return 40;
+      if (type === 'parking') return -35;
+      if (type === 'rideshare') return -10;
     }
 
     return 0;
@@ -287,20 +291,53 @@ export function rankRecommendations(
 
       const totalDuration = getParkingTotalMinutes(parking);
 
-      let score = 100 - cost;
+      let score = 100 - (cost * 0.45);
       score -= totalDuration * 2;
       score += parking.availability;
       score -= parkingWaitPenalty;
 
       score += modePreferenceAdjustment('parking');
 
+      // Scoring adjustments based on parking attributes
+      if (parking.price <= 20) score += 18;
+      if (parking.price <= 30) score += 8;
+
+      // Trust + convenience
+      if (parking.type === 'official') score += 28;
+      if (parking.covered) score += 8;
+
+      // Reviews
+      if ((parking.reviewCount ?? 0) > 300) score += 10;
+      if ((parking.reviewScore ?? 0) >= 4.4) score += 10;
+
+      // Known brand boost
+      const lowerParkingName = parking.name.toLowerCase();
+      if (lowerParkingName.includes('wally')) score += 14;
+      if (lowerParkingName.includes('master')) score += 12;
+      if (lowerParkingName.includes('jiffy')) score += 8;
+
+      // Cheap unknown lot guardrail
+      if (
+        parking.price <= 15 &&
+        !parking.reviewScore &&
+        parking.type !== 'official'
+      ) {
+        score -= 12;
+      }
+
+      // Shuttle friction
+      if ((parking.shuttleMinutes ?? 0) > 15) score -= 10;
+
+      // Confidence and source bonuses/penalties
       if (parking.priceConfidence === 'high') score += 18;
       if (parking.priceConfidence === 'medium') score += 8;
       if (parking.priceConfidence === 'low') score -= 8;
 
+      // Source bonuses
       if (parking.priceSource === 'official-rate') score += 14;
       if (parking.bookingProvider === 'AirportParkingReservations') score += 6;
 
+      // Penalties for less desirable parking attributes
       if (
         parking.bookingProvider === 'AirportParkingReservations' &&
         !parking.reviewScore &&
@@ -397,6 +434,9 @@ export function rankRecommendations(
     score -= transitWaitPenalty;
 
     score += modePreferenceAdjustment('transit');
+
+    if (totalDuration >= 90) score -= 20;
+    if (totalDuration >= 110) score -= 20;
 
     const isUnrealistic = totalDuration > 120 || transit.trustStatus === 'fallback';
     if (isUnrealistic) {

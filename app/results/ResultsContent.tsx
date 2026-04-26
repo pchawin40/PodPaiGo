@@ -1482,23 +1482,57 @@ export default function ResultsContent() {
       });
     }
 
-    // easiest
+    // easiest / recommended
     return arr.sort((a, b) => {
       const sa = statusFor(a);
       const sb = statusFor(b);
 
-      const penaltyA = sa === 'too-late' ? 40 : sa === 'tight' ? 6 : 0;
-      const penaltyB = sb === 'too-late' ? 40 : sb === 'tight' ? 6 : 0;
+      const penaltyA = sa === 'too-late' ? 80 : sa === 'tight' ? 12 : 0;
+      const penaltyB = sb === 'too-late' ? 80 : sb === 'tight' ? 12 : 0;
 
-      const effectiveA = a.stressScore - penaltyA;
-      const effectiveB = b.stressScore - penaltyB;
+      const modeBonus = (x: RankedRecommendation): number => {
+        const transport = (tripData as any)?.transportAvailability || 'all';
+
+        if (transport === 'car') {
+          if (x.type === 'parking') return 35;
+          if (x.type === 'transit') return -30;
+          if (x.type === 'rideshare') return 5;
+        }
+
+        if (transport === 'rideshare') {
+          if (x.type === 'rideshare') return 30;
+          if (x.type === 'parking') return -15;
+          if (x.type === 'transit') return -10;
+        }
+
+        if (transport === 'transit') {
+          if (x.type === 'transit') return 35;
+          if (x.type === 'parking') return -30;
+          if (x.type === 'rideshare') return -15;
+        }
+
+        return 0;
+      };
+
+      const effectiveA =
+        a.score * 0.7 +
+        a.stressScore * 0.3 +
+        modeBonus(a) -
+        penaltyA;
+
+      const effectiveB =
+        b.score * 0.7 +
+        b.stressScore * 0.3 +
+        modeBonus(b) -
+        penaltyB;
 
       const diff = effectiveB - effectiveA;
-      if (Math.abs(diff) < 6) {
-        return compareByTimingFirst(a, b) || (b.stressScore - a.stressScore) || (a.cost - b.cost);
+
+      if (Math.abs(diff) < 8) {
+        return compareByTimingFirst(a, b) || (b.score - a.score) || (a.cost - b.cost);
       }
 
-      return diff || (b.stressScore - a.stressScore) || (a.cost - b.cost);
+      return diff;
     });
   }, [rankedOptions, sort, intent, tripData, recommendation?.leaveByTime]);
 
@@ -1741,6 +1775,10 @@ export default function ResultsContent() {
     };
   })();
 
+  const smartPickParkingOptions = sortedOptions
+    .filter((opt) => opt.type === 'parking')
+    .map((opt) => opt.option as any);
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-8">
@@ -1887,10 +1925,10 @@ export default function ResultsContent() {
           <SortTabs value={sort} onChange={setSort} />
         </div>
 
-        {showParkingProviders && recommendation.parking.length > 0 && (
+        {showParkingProviders && smartPickParkingOptions.length > 0 && (
           <div className="mt-6">
             <ParkingSmartPick
-              options={recommendation.parking}
+              options={smartPickParkingOptions}
               tripData={tripData}
             />
           </div>
