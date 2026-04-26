@@ -77,7 +77,7 @@ function confidenceFromTrust(trust: TrustStatus): { label: string; className: st
     case 'live':
       return { label: 'Live', className: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
     case 'estimated':
-      return { label: 'Estimated', className: 'bg-amber-50 text-amber-900 border-amber-200' };
+      return { label: 'Medium confidence', className: 'bg-amber-50 text-amber-900 border-amber-200' };
     case 'fallback':
     default:
       return { label: 'Low confidence', className: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
@@ -134,6 +134,16 @@ function formatProviderPrice(it: any): { primary: string; secondary?: string } {
   const unit = it.priceUnit as string | undefined;
 
   if (kind === 'check-live') {
+    if (typeof it.price === 'number' && it.price > 0) {
+      return {
+        primary:
+          it.priceUnit === 'per-day'
+            ? `${formatMoney(it.price)}/day`
+            : formatMoney(it.price),
+        secondary: it.priceNote,
+      };
+    }
+
     return { primary: 'Check live price', secondary: it.priceNote };
   }
 
@@ -275,6 +285,19 @@ function optionPriceSummary(option: any, computedTotal: number, tripData: TripDa
   const unit = option?.priceUnit as string | undefined;
 
   if (kind === 'check-live') {
+    if (typeof option?.price === 'number' && option.price > 0) {
+      return {
+        primary:
+          option.priceUnit === 'per-day'
+            ? `${formatMoney(option.price)}/day`
+            : formatMoney(option.price),
+        secondary: option?.priceNote,
+        badge: option.priceConfidence === 'medium'
+          ? 'Baseline price'
+          : undefined,
+      };
+    }
+
     return {
       primary: 'Check live price',
       secondary: option?.priceNote,
@@ -292,14 +315,14 @@ function optionPriceSummary(option: any, computedTotal: number, tripData: TripDa
       return {
         primary: `From ${formatMoney(option.price)}/day`,
         secondary: `Est. trip total: ${formatMoney(tripTotal)} for ${days} day(s) · Check final price with provider`,
-        badge: 'Estimated',
+        badge: undefined,
       };
     }
 
     return {
       primary: `From ${formatMoney(option.price)}/day`,
       secondary: option?.priceNote,
-      badge: 'Estimated',
+      badge: undefined,
     };
   }
 
@@ -315,7 +338,7 @@ function optionPriceSummary(option: any, computedTotal: number, tripData: TripDa
     return {
       primary: `Est. ${formatMoney(computedTotal)}`,
       secondary: option?.priceNote,
-      badge: 'Estimated',
+      badge: undefined,
     };
   }
 
@@ -450,10 +473,16 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
     ? 'Official source'
     : 'Direct booking';
 
-  const directPricePerDay = (parking?.priceUnit === 'per-day' && typeof parking?.price === 'number') ? parking.price : null;
-  const directPriceDisplay: 'estimated' | 'check-live' | 'live' = parking?.priceDisplay === 'live'
-    ? 'live'
-    : (directPricePerDay != null ? 'estimated' : 'check-live');
+  const directPricePerDay =
+    typeof parking?.price === 'number' && parking.price > 0 && parking?.priceUnit !== 'total'
+      ? parking.price
+      : null;
+  const directPriceDisplay: 'estimated' | 'check-live' | 'live' =
+    parking?.trustStatus === 'live' && parking?.priceConfidence === 'high'
+      ? 'live'
+      : directPricePerDay != null
+        ? 'estimated'
+        : 'check-live';
 
   const spotHeroUrl = `https://spothero.com/search?search=${encodeURIComponent(airportSearchName)}`;
   const wayUrl = `https://www.way.com/parking/search?query=${encodeURIComponent(airportSearchName)}`;
@@ -723,6 +752,16 @@ function timingBadge(status: TimingStatus): { label: string; className: string }
   return { label: 'High risk timing', className: 'bg-red-50 text-red-800 border-red-200' };
 }
 
+function leaveByCushionText(minutesUntilLeaveBy: number | null | undefined): string {
+  if (typeof minutesUntilLeaveBy !== 'number') return '';
+
+  // If leave-by is many hours away, don't call it a "buffer".
+  // This usually means a future-date trip, not extra airport cushion.
+  if (minutesUntilLeaveBy > 12 * 60) return '';
+
+  return ` · ${formatMinutes(minutesUntilLeaveBy)} buffer`;
+}
+
 function OptionCard({
   item,
   rank,
@@ -777,16 +816,12 @@ function OptionCard({
 
     if (timing.status === 'good') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-      return mins != null
-        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
-        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+      return `Leave by ${leaveBy} · reach terminal around ${reach}${leaveByCushionText(mins)}`;
     }
 
     if (timing.status === 'tight') {
       const mins = typeof timing.minutesUntilLeaveBy === 'number' ? timing.minutesUntilLeaveBy : null;
-      return mins != null
-        ? `Leave by ${leaveBy} · reach terminal around ${reach} · ${formatMinutes(mins)} buffer`
-        : `Leave by ${leaveBy} · reach terminal around ${reach}`;
+      return `Leave by ${leaveBy} · reach terminal around ${reach}${leaveByCushionText(mins)}`;
     }
 
     // too-late
@@ -876,7 +911,7 @@ function OptionCard({
             <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm font-medium text-zinc-900">Compare booking sources</div>
-                <div className="text-xs text-zinc-500">No live prices shown (estimates are labeled).</div>
+                <div className="text-xs text-zinc-500">Known/baseline prices are labeled; confirm final rate before booking.</div>
               </div>
 
               {(() => {

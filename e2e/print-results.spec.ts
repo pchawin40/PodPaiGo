@@ -49,9 +49,4 @@ test('export results pdf', async ({ page }) => {
     format: 'Letter',
     printBackground: true,
   });
-
-  await page.screenshot({
-    path: 'artifacts/results-full.png',
-    fullPage: true,
-  });
 });

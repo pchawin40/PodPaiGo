@@ -226,9 +226,11 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-4 text-2xl font-bold text-zinc-900">
-            {best.priceDisplay === 'check-live'
+            {best.priceDisplay === 'check-live' && (!best.price || best.price <= 0)
               ? 'Check live price'
-              : `${formatMoney(best.price)}/day`}
+              : best.priceUnit === 'total'
+                ? formatMoney(best.price)
+                : `${formatMoney(best.price)}/day`}
           </div>
 
           <div className="mt-1 text-sm text-zinc-600">
@@ -274,9 +276,11 @@ export default function ParkingSmartPick({
                   {p.name}
                 </div>
                 <div className="mt-1 text-sm text-zinc-600">
-                  {p.priceDisplay === 'check-live'
+                  {p.priceDisplay === 'check-live' && (!p.price || p.price <= 0)
                     ? 'Check live price'
-                    : `${formatMoney(p.price)}/day`}
+                    : p.priceUnit === 'total'
+                      ? formatMoney(p.price)
+                      : `${formatMoney(p.price)}/day`}
                 </div>
                 <div className="mt-1 text-xs text-blue-700">
                   View option →
