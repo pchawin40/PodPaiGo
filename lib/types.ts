@@ -55,7 +55,8 @@ export type PriceDisplay =
   | 'estimated'
   | 'mock'
   | 'check-live'
-  | 'from-per-day';
+  | 'from-per-day'
+  | 'unavailable';
 
 export type PriceUnit = 'total' | 'per-day';
 
@@ -113,6 +114,8 @@ export type ParkingOption = {
   availabilityScore?: number; // internal score for availability, used in ranking
   bookingProvider?: string; // e.g. "ParkWhiz", for marketplace options
   bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options
+  availabilityStatus?: 'available' | 'unavailable' | 'unknown'; // simplified availability for UI display 
+  isAvailable?: boolean; // legacy field, true if availabilityStatus is 'available'
 };
 
 export type RideshareOption = {

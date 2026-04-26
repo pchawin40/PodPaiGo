@@ -2374,7 +2374,7 @@ export default function ResultsContent() {
         </div>
 
         {/* Pricing links */}
-        <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="mt-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           {showParkingProviders && (
             <div>
               <PricingLinksSection
@@ -2398,7 +2398,7 @@ export default function ResultsContent() {
 
           {showRideProviders && (
             <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
-              <summary className="cursor-pointer px-5 py-4 text-base font-semibold text-zinc-900">
+              <summary className="w-full cursor-pointer px-5 py-4 text-base font-medium text-zinc-900">
                 Need rideshare instead? Show ride prices
               </summary>
               <div className="px-5 pb-5">

@@ -121,6 +121,8 @@ export default function TripFlow() {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [errors, setErrors] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [highlightedField, setHighlightedField] = useState<string | null>(null);
 
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
@@ -210,7 +212,9 @@ export default function TripFlow() {
   const onContinue = () => {
     const next = validate(1);
     setErrors(next);
+
     if (next.length > 0) return;
+    setFieldErrors({});
 
     // Friendly defaults when entering step 2.
     setState((s) => {
@@ -265,7 +269,29 @@ export default function TripFlow() {
 
     const next = validate(2);
     setErrors(next);
-    if (next.length > 0) return;
+
+    const nextFieldErrors: Record<string, string> = {};
+    if (!state.origin.trim()) nextFieldErrors.origin = 'Enter your starting address.';
+    if (!state.time) nextFieldErrors.time = 'Select your flight or trip time.';
+    if (!state.date) nextFieldErrors.date = 'Select your trip date.';
+
+    setFieldErrors(nextFieldErrors);
+
+    const firstMissing = Object.keys(nextFieldErrors)[0];
+
+    if (next.length > 0) {
+      if (firstMissing) {
+        setHighlightedField(firstMissing);
+        document.getElementById(`${firstMissing}-field`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+        setTimeout(() => setHighlightedField(null), 1800);
+      }
+      return;
+    }
+
+    setFieldErrors({});
 
     const tripType = intentToTripType(state.intent!);
     const selectedAirport = getAirportById(state.airportCode) || getAirportById('SEA')!;
@@ -627,17 +653,31 @@ export default function TripFlow() {
                   </div>
                 )}
 
-                <div>
+                <div id="date-field">
                   <label className="block text-sm font-medium text-zinc-800">Date</label>
                   <input
                     type="date"
                     value={state.date}
-                    onChange={(e) => setState((s) => ({ ...s, date: e.target.value }))}
-                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    onChange={(e) => {
+                      setState((s) => ({ ...s, date: e.target.value }));
+                      setFieldErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.date;
+                        return next;
+                      });
+                    }}
+                    className={
+                      'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                      (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
+                      (highlightedField === 'date' ? 'animate-pulse' : '')
+                    }
                   />
+                  {fieldErrors.date && (
+                    <div className="mt-2 text-sm text-red-700">{fieldErrors.date}</div>
+                  )}
                 </div>
 
-                <div>
+                <div id="time-field">
                   <label className="block text-sm font-medium text-zinc-800">
                     {intentCopy(intent).timeLabel}
                   </label>
@@ -647,23 +687,52 @@ export default function TripFlow() {
                     onChange={(e) => {
                       setTimeTouched(true);
                       setState((s) => ({ ...s, time: e.target.value }));
+                      setFieldErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.time;
+                        return next;
+                      });
                     }}
-                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className={
+                      'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                      (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
+                      (highlightedField === 'time' ? 'animate-pulse' : '')
+                    }
                     aria-label="Trip time"
                   />
-                  {/* Intent-specific placeholder/helper for time when blank */}
-                  {state.time === '' && intent === 'flying-out' && (
+                  {fieldErrors.time ? (
+                    <div className="mt-2 text-sm text-red-700">{fieldErrors.time}</div>
+                  ) : state.time === '' && intent === 'flying-out' ? (
                     <div className="mt-2 text-xs text-zinc-500">Select flight departure time</div>
-                  )}
+                  ) : null}
                 </div>
 
-                <div className="md:col-span-2">
-                  <AddressInput
-                    label="Origin address"
-                    value={state.origin}
-                    onChange={(origin) => setState((s) => ({ ...s, origin }))}
-                    placeholder="Start typing your address"
-                  />
+                <div id="origin-field" className="md:col-span-2">
+                  <div
+                    className={
+                      'rounded-2xl ' +
+                      (fieldErrors.origin ? 'ring-4 ring-red-100 ' : '') +
+                      (highlightedField === 'origin' ? 'animate-pulse' : '')
+                    }
+                  >
+                    <AddressInput
+                      label="Origin address"
+                      value={state.origin}
+                      onChange={(origin) => {
+                        setState((s) => ({ ...s, origin }));
+                        setFieldErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.origin;
+                          return next;
+                        });
+                      }}
+                      placeholder="Start typing your address"
+                    />
+                  </div>
+
+                  {fieldErrors.origin && (
+                    <div className="mt-2 text-sm text-red-700">{fieldErrors.origin}</div>
+                  )}
                 </div>
 
                 <div className="md:col-span-2">

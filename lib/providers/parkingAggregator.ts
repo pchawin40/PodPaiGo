@@ -106,11 +106,21 @@ function aprLotToParkingOption(
     name: lot.lotName,
     type: 'off-airport',
     price: lot.price ?? 30,
-    priceDisplay: lot.price ? 'from-per-day' : 'check-live',
+    priceDisplay:
+      availabilityStatus === 'unavailable'
+        ? 'unavailable'
+        : lot.price
+          ? 'from-per-day'
+          : 'check-live',
+    priceNote:
+      availabilityStatus === 'unavailable'
+        ? 'Unavailable for selected dates.'
+        : lot.price
+          ? 'Listed APR rate. Open deal to confirm selected-date availability and final checkout price.'
+          : 'Open AirportParkingReservations to confirm price and availability.',
+    availabilityStatus,
+    isAvailable: availabilityStatus !== 'unavailable',
     priceUnit: lot.priceUnit ?? undefined,
-    priceNote: lot.price
-      ? 'Listed APR rate. Open deal to confirm selected-date availability and final checkout price.'
-      : 'Open AirportParkingReservations to confirm price and availability.',
     priceSource: 'marketplace-link',
     priceConfidence: lot.price ? 'medium' : 'low',
     bookingProvider: 'AirportParkingReservations',
@@ -369,7 +379,20 @@ export async function getLiveParkingOptions(args: {
   );
 
   const aprOptions = aprLotsWithAvailability
-    .filter((x) => x.availability.status !== 'unavailable')
+    .filter((x) => {
+      const lotName = x.lot.lotName.toLowerCase();
+
+      // Hide lots we can explicitly check unless they are confirmed available.
+      const requiresConfirmedAvailability =
+        lotName.includes('doubletree');
+
+      if (requiresConfirmedAvailability) {
+        return x.availability.status === 'available';
+      }
+
+      // Keep other APR lots unless confirmed unavailable.
+      return x.availability.status !== 'unavailable';
+    })
     .map((x) => aprLotToParkingOption(x.lot, x.availability.status))
     .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
     .slice(0, 8);

@@ -30,7 +30,15 @@ export default function ParkingBookingComparison({ parkingOptions, tripData }: {
   }
 
   // Offsite lots - for each one, add direct site + marketplace rows
-  const offsites = parkingOptions.filter(p => p.type === 'off-airport');
+  const offsites = parkingOptions.filter((p) => {
+    const unavailable =
+      p.availabilityStatus === 'unavailable' ||
+      p.isAvailable === false ||
+      p.priceDisplay === 'unavailable' ||
+      String(p.priceNote || '').toLowerCase().includes('sold out');
+
+    return p.type === 'off-airport' && !unavailable;
+  });
   offsites.forEach(p => {
     const baseProviderName = p.name;
     const directPrice = p.priceDisplay === 'from-per-day' ? (p.price ? `From $${p.price}/day` : 'Check live') : (p.priceDisplay === 'estimated' ? `Est. $${p.price}` : 'Check live');
@@ -47,36 +55,49 @@ export default function ParkingBookingComparison({ parkingOptions, tripData }: {
   }
 
   return (
-    <details className="mt-3 rounded-xl border border-zinc-200 bg-white shadow-sm">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-900">Compare booking options</summary>
+    <details className="w-full rounded-2xl border border-zinc-200 bg-white shadow-sm">
+      <summary className="w-full cursor-pointer px-5 py-4 text-base font-medium text-zinc-900">
+        Compare booking options
+      </summary>
       <div className="px-4 pb-4">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-zinc-500">
-                <th className="py-2">Provider</th>
-                <th className="py-2">Price</th>
-                <th className="w-[320px] py-2">Notes</th>
-                <th className="py-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.provider} className="border-t border-zinc-100">
-                  <td className="py-3 font-medium text-zinc-900">{r.provider}</td>
-                  <td className="py-3 text-zinc-900">{r.price}</td>
-                  <td className="py-3 text-zinc-700">{r.notes}</td>
-                  <td className="py-3 text-right">
-                    {r.link ? (
-                      <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700">Open</a>
-                    ) : (
-                      <span className="text-xs text-zinc-600">Last checked unavailable</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-3">
+          <div className="space-y-2">
+            {rows.map((r) => (
+              <div
+                key={r.provider}
+                className="flex flex-col gap-3 rounded-xl border border-zinc-100 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-zinc-900">
+                    {r.provider}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
+                      {r.price}
+                    </span>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+                      {r.notes}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="shrink-0">
+                  {r.link ? (
+                    <a
+                      href={r.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
+                    >
+                      Open
+                    </a>
+                  ) : (
+                    <span className="text-xs text-zinc-500">Unavailable</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </details>
