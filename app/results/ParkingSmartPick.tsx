@@ -51,21 +51,24 @@ export default function ParkingSmartPick({
     const id = String(p.id || '').toLowerCase();
     const name = String(p.name || '').toLowerCase();
 
+    const isAprLiveLot = p.bookingProvider === 'AirportParkingReservations';
+
     const isGenericMarketplace =
       id.includes('spothero') ||
       id.includes('way') ||
       id.includes('parkwhiz') ||
-      id.includes('airportparkingreservations') ||
       id.includes('cheapairportparking') ||
       id.includes('google-parking-search');
 
     const hasRealLotSignal =
+      isAprLiveLot ||
       !!p.reviewScore ||
       name.includes('wally') ||
       name.includes('masterpark') ||
       name.includes('reserved') ||
       name.includes('general') ||
-      name.includes('garage');
+      name.includes('garage') ||
+      name.includes('parking');
 
     return !isGenericMarketplace && hasRealLotSignal;
   });
@@ -80,23 +83,47 @@ export default function ParkingSmartPick({
       const reviews = p.reviewScore ? (5 - p.reviewScore) * 8 : 8;
       const availability = p.availabilityScore ?? p.availability ?? 50;
       const coveredPenalty = p.covered ? -4 : 4;
+
       const trustBonus =
         p.trustStatus === 'live' ? -10 :
           p.trustStatus === 'verified-source' ? -6 :
             0;
-      const reviewBonus = p.reviewScore ? -12 : 0;
-      const liveBonus = p.trustStatus === 'live' ? -8 : 0;
+
+      const priceConfidenceBonus =
+        p.priceConfidence === 'high' ? -8 :
+          p.priceConfidence === 'medium' ? -4 :
+            p.priceConfidence === 'low' ? 6 :
+              0;
+
+      const liveAprBonus =
+        p.bookingProvider === 'AirportParkingReservations' ? -24 : 0;
+
+      const officialConvenienceBonus =
+        p.type === 'official' ? -8 : 0;
+
+      const cheapDealBonus =
+        price <= 20 ? -20 :
+          price <= 30 ? -10 :
+            0;
+
+      const unknownAprPenalty =
+        p.bookingProvider === 'AirportParkingReservations' && !p.reviewScore
+          ? 4
+          : 0;
 
       return (
-        price +
-        transfer * 1.8 +
+        price * 1.6 +
+        transfer * 1.4 +
         walk * 0.8 +
         reviews -
         availability * 0.12 +
         coveredPenalty +
         trustBonus +
-        reviewBonus +
-        liveBonus
+        priceConfidenceBonus +
+        liveAprBonus +
+        officialConvenienceBonus +
+        cheapDealBonus +
+        unknownAprPenalty
       );
     };
 
