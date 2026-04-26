@@ -81,6 +81,18 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
   );
 }
 
+function scoreAprParkingOption(p: ParkingOption): number {
+  const price = p.price ?? 999;
+  const shuttle = p.shuttleMinutes ?? p.transferToTerminalMinutes ?? 15;
+  const coveredBonus = p.covered ? 2 : 0;
+
+  return price + shuttle * 0.75 - coveredBonus;
+}
+
+function isAprOption(p: ParkingOption): boolean {
+  return p.bookingProvider === 'AirportParkingReservations' || p.sourceName === 'AirportParkingReservations';
+}
+
 function aprLotToParkingOption(lot: Awaited<ReturnType<typeof crawlAirportParkingReservationsSea>>[number]): ParkingOption {
   const lower = lot.lotName.toLowerCase();
   const covered = lower.includes('covered') || lot.rawSnippet?.toLowerCase().includes('covered') || false;
@@ -311,7 +323,10 @@ export async function getLiveParkingOptions(args: {
 
   const aprOptions =
     airport.id === 'SEA'
-      ? (await crawlAirportParkingReservationsSea()).map(aprLotToParkingOption)
+      ? (await crawlAirportParkingReservationsSea())
+        .map(aprLotToParkingOption)
+        .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
+        .slice(0, 4)
       : [];
 
   const marketplaceOptions = PARKING_MARKETPLACES.map((provider): ParkingOption => {
@@ -386,20 +401,24 @@ export async function getLiveParkingOptions(args: {
     });
 
   return dedupeParkingOptions([
+    ...fallbackLots.filter((p) => p.type === 'official'),
     ...aprOptions,
     ...discoveredLots,
-    ...fallbackLots,
+    ...fallbackLots.filter((p) => p.type !== 'official'),
   ]).sort((a, b) => {
     const rank = (p: ParkingOption) => {
       const name = p.name.toLowerCase();
 
-      if (p.priceSource === 'marketplace-link' && p.bookingProvider === 'AirportParkingReservations') return 0;
-      if (p.type === 'official') return 1;
+      if (p.type === 'official') return 0;
+      if (isAprOption(p)) return 1;
       if (name.includes('wally')) return 2;
       if (name.includes('master')) return 3;
       return 4;
     };
 
-    return rank(a) - rank(b);
+    const rankDiff = rank(a) - rank(b);
+    if (rankDiff !== 0) return rankDiff;
+
+    return (a.price ?? 999) - (b.price ?? 999);
   });
 }

@@ -268,6 +268,21 @@ export function rankRecommendations(
       score += parking.availability;
       score -= parkingWaitPenalty;
 
+      if (parking.priceConfidence === 'high') score += 18;
+      if (parking.priceConfidence === 'medium') score += 8;
+      if (parking.priceConfidence === 'low') score -= 8;
+
+      if (parking.priceSource === 'official-rate') score += 14;
+      if (parking.bookingProvider === 'AirportParkingReservations') score += 6;
+
+      if (
+        parking.bookingProvider === 'AirportParkingReservations' &&
+        !parking.reviewScore &&
+        !parking.covered
+      ) {
+        score -= 10;
+      }
+
       const reasons = [];
       if ((parking.transferType ?? (parking.type === 'off-airport' ? 'shuttle' : 'walk')) !== 'shuttle') {
         reasons.push('Direct terminal access');
@@ -283,7 +298,9 @@ export function rankRecommendations(
       }
       if (parking.availability > 80) reasons.push('High availability');
       if (parking.trustStatus === 'verified-source') reasons.push('Verified source');
-      if (parking.trustStatus === 'live') reasons.push('Real-time estimate');
+      if (parking.bookingProvider === 'AirportParkingReservations') reasons.push('Live APR price');
+      if (parking.priceConfidence === 'high') reasons.push('High price confidence');
+      if (parking.priceConfidence === 'medium') reasons.push('Medium price confidence');
       if (cost < 50) reasons.push('Budget-friendly');
 
       if (parking.covered) reasons.push('Covered parking');

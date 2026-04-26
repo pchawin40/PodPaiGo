@@ -56,7 +56,7 @@ export default function ParkingBookingComparison({ parkingOptions, tripData }: {
               <tr className="text-left text-xs text-zinc-500">
                 <th className="py-2">Provider</th>
                 <th className="py-2">Price</th>
-                <th className="py-2">Notes</th>
+                <th className="w-[320px] py-2">Notes</th>
                 <th className="py-2">Action</th>
               </tr>
             </thead>
@@ -66,7 +66,7 @@ export default function ParkingBookingComparison({ parkingOptions, tripData }: {
                   <td className="py-3 font-medium text-zinc-900">{r.provider}</td>
                   <td className="py-3 text-zinc-900">{r.price}</td>
                   <td className="py-3 text-zinc-700">{r.notes}</td>
-                  <td className="py-3">
+                  <td className="py-3 text-right">
                     {r.link ? (
                       <a href={r.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700">Open</a>
                     ) : (

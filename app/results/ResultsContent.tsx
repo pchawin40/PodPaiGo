@@ -22,6 +22,10 @@ function formatMoney(n: number): string {
   return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`;
 }
 
+function formatMoneyCents(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
 function formatMinutes(min: number): string {
   if (min < 60) return `${min} min`;
 
@@ -391,10 +395,6 @@ function googleMapsSearchLink(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
-function googleWebSearchLink(query: string): string {
-  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-}
-
 function buildLocalDateTime(dateString: string, timeString: string): Date | null {
   // Construct a local Date reliably (avoids timezone quirks of Date.parse on YYYY-MM-DD strings).
   const mDate = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -422,8 +422,6 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
   const id = String(parking?.id || '').toLowerCase();
   const name = String(parking?.name || '').toLowerCase();
 
-  const isReserved = id === 'sea-reserved' || name.includes('reserved');
-  const isGeneral = id === 'sea-general' || name.includes('general');
   const isWally = id.includes('wally') || name.includes('wally');
   const isMaster = id.includes('master') || name.includes('master');
   const airportCode = ((tripData as any)?.airportCode || 'SEA').toUpperCase();
@@ -445,7 +443,12 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
     priceDisplay: 'estimated' | 'check-live' | 'live';
   }): BookingSourceRow => {
     const trustMeta = bookingTrustMeta(r.trust);
-    const estimatedTripTotal = typeof r.pricePerDay === 'number' ? r.pricePerDay * days : null;
+
+    const estimatedTripTotal =
+      typeof r.pricePerDay === 'number'
+        ? Math.round(r.pricePerDay * days * 100) / 100
+        : null;
+
     return {
       provider: r.provider,
       type: r.type,
@@ -474,15 +477,16 @@ function buildBookingSourceRows(parking: any, tripData: TripData | null): Bookin
     : 'Direct booking';
 
   const directPricePerDay =
-    typeof parking?.price === 'number' && parking.price > 0 && parking?.priceUnit !== 'total'
+    typeof parking?.price === 'number' && parking.price > 0
       ? parking.price
       : null;
+
   const directPriceDisplay: 'estimated' | 'check-live' | 'live' =
-    parking?.trustStatus === 'live' && parking?.priceConfidence === 'high'
+    parking?.trustStatus === 'live' || parking?.bookingProvider === 'AirportParkingReservations'
       ? 'live'
-      : directPricePerDay != null
-        ? 'estimated'
-        : 'check-live';
+      : parking?.priceDisplay === 'live'
+        ? 'live'
+        : (directPricePerDay != null ? 'estimated' : 'check-live');
 
   const spotHeroUrl = `https://spothero.com/search?search=${encodeURIComponent(airportSearchName)}`;
   const wayUrl = `https://www.way.com/parking/search?query=${encodeURIComponent(airportSearchName)}`;
@@ -920,14 +924,14 @@ function OptionCard({
 
                 return (
                   <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-sm">
+                    <table className="w-full table-fixed text-sm">
                       <thead>
                         <tr className="text-left text-xs text-zinc-500">
-                          <th className="py-2">Provider</th>
-                          <th className="py-2">Price</th>
-                          <th className="py-2">Trust</th>
-                          <th className="py-2">Notes</th>
-                          <th className="py-2">CTA</th>
+                          <th className="w-[26%] py-2">Provider</th>
+                          <th className="w-[18%] py-2">Price</th>
+                          <th className="w-[14%] py-2">Trust</th>
+                          <th className="w-[30%] py-2">Notes</th>
+                          <th className="w-[12%] py-2 text-right">CTA</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -935,18 +939,15 @@ function OptionCard({
                           const priceCell = r.pricePerDay == null
                             ? 'Check live'
                             : r.priceDisplay === 'live'
-                              ? `${formatMoney(r.pricePerDay)}/day`
+                              ? `Live ${formatMoneyCents(r.pricePerDay)}/day`
                               : `Est. ${formatMoney(r.pricePerDay)}/day`;
 
                           const typeLabel = r.type;
-                          const notes = r.estimatedTripTotal != null
-                            ? `${r.notes} · Est. total: ${formatMoney(r.estimatedTripTotal)} for ${days} day(s)`
-                            : r.notes;
 
                           return (
                             <tr key={r.provider} className="border-t border-zinc-100">
-                              <td className="py-3 font-medium text-zinc-900">{r.provider}</td>
-                              <td className="py-3 text-zinc-900">{priceCell}</td>
+                              <td className="break-words py-3 font-medium text-zinc-900">{r.provider}</td>
+                              <td className="break-words py-3 text-zinc-900">{priceCell}</td>
                               <td className="py-3">
                                 <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + r.trustClassName}>
                                   {r.trustLabel}
@@ -959,10 +960,18 @@ function OptionCard({
                                       {typeLabel}
                                     </span>
                                   </div>
-                                  <div>{notes}</div>
+                                  <div className="text-xs text-zinc-700 space-y-1">
+                                    <div>{r.notes}</div>
+                                    {r.estimatedTripTotal != null && (
+                                      <div>
+                                        <span className="font-medium">Trip total:</span>{" "}
+                                        {formatMoneyCents(r.estimatedTripTotal)} for {days} day(s)
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </td>
-                              <td className="py-3">
+                              <td className="py-3 text-right">
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1588,32 +1597,7 @@ export default function ResultsContent() {
 
   const currentAirportCode = ((tripData as any)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
 
-  const extraParkingProviders = useMemo(
-    () =>
-      currentAirportCode === 'SEA'
-        ? [
-          {
-            id: 'seatac-official',
-            name: PROVIDER_LINKS.seatacOfficialParking.label,
-            trustStatus: 'verified-source' as const,
-            priceDisplay: 'check-live' as const,
-            priceNote: 'Rates vary by length of stay and availability',
-            sourceName: PROVIDER_LINKS.seatacOfficialParking.sourceName,
-            sourceLink: PROVIDER_LINKS.seatacOfficialParking.url,
-          },
-          {
-            id: 'airport-parking-res',
-            name: PROVIDER_LINKS.airportParkingReservationsSea.label,
-            trustStatus: 'estimated' as const,
-            priceDisplay: 'check-live' as const,
-            priceNote: 'Search nearby lots and compare',
-            sourceName: PROVIDER_LINKS.airportParkingReservationsSea.sourceName,
-            sourceLink: PROVIDER_LINKS.airportParkingReservationsSea.url,
-          },
-        ]
-        : [],
-    [currentAirportCode]
-  );
+  const extraParkingProviders = useMemo(() => [], []);
 
   const extraRideProviders = useMemo(
     () => [
