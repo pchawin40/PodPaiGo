@@ -12,7 +12,6 @@ import {
   isDepartureLeg,
   rankRecommendations
 } from './domain';
-import { enrichParkingWithGooglePlaces } from './live/googlePlacesParking';
 
 function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
   const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
@@ -196,8 +195,10 @@ export class RecommendationEngine {
     const transportAvailability = resolveTransportAvailability(tripData);
 
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
-    const allowRideshare = transportAvailability === 'car' || transportAvailability === 'rideshare' || transportAvailability === 'all';
-    const allowTransit = transportAvailability === 'car' || transportAvailability === 'rideshare' || transportAvailability === 'transit' || transportAvailability === 'all';
+    const allowRideshare =
+      transportAvailability === 'rideshare' || transportAvailability === 'all';
+    const allowTransit =
+      transportAvailability === 'transit' || transportAvailability === 'all';
 
     let [parking, rideshare, rawTransit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
       allowCarOptions
@@ -247,9 +248,9 @@ export class RecommendationEngine {
       transit = [...transit, ...buildTransitOnlyJourneys(tripData.origin, tripData.destination)];
     }
 
-    if (allowCarOptions && parking.length > 0) {
-      parking = await enrichParkingWithGooglePlaces(parking);
-    }
+    // if (allowCarOptions && parking.length > 0) {
+    //   parking = await enrichParkingWithGooglePlaces(parking);
+    // }
 
     const tripDuration = calculateTripDuration(tripData);
     const parkingDuration = calculateParkingDuration(tripData);

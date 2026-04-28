@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { TripData, Recommendation } from '../../../lib/types';
 import { RecommendationEngine } from '../../../lib/recommendationEngine';
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {

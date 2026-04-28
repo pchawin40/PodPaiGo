@@ -5,12 +5,12 @@ import { getAirportById } from './airports/catalog';
 import { getLiveParkingOptions } from './providers/parkingAggregator';
 
 // Startup log for server-side API key presence (do not log the key itself)
-try {
-  const _present = !!process.env.GOOGLE_MAPS_SERVER_API_KEY;
-  console.log('Google Maps server key detected:', _present ? 'yes' : 'no');
-} catch (e) {
-  // ignore
-}
+// try {
+//   const _present = !!process.env.GOOGLE_MAPS_SERVER_API_KEY;
+//   console.log('Google Maps server key detected:', _present ? 'yes' : 'no');
+// } catch (e) {
+//   // ignore
+// }
 
 // Data-driven approach to determine transit hubs for non-direct rail origins
 
@@ -128,7 +128,6 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
 
 export class MockTrafficProvider implements TrafficProvider {
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     const route = normalizeTrafficRoute(origin, destination);
     // Mock traffic data
     return mockTrafficEstimates[route] || {
@@ -146,7 +145,7 @@ export class MockTrafficProvider implements TrafficProvider {
 // Simple in-memory cache for route estimates
 const ROUTE_CACHE = new Map<string, { ts: number; estimate: TrafficEstimate }>();
 const ROUTE_INFLIGHT = new Map<string, Promise<TrafficEstimate>>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 function hashCacheKey(input: string): string {
   // Non-cryptographic hash for log correlation without leaking address strings.
@@ -268,10 +267,10 @@ export class LiveTrafficProvider implements TrafficProvider {
         const text = await res.text();
 
         // Safe debug logging (no key)
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Google Routes API HTTP status:', res.status);
-          console.log('Google Routes API response snippet:', text ? text.slice(0, 500) : '[empty]');
-        }
+        // if (process.env.NODE_ENV === 'development') {
+        //   console.log('Google Routes API HTTP status:', res.status);
+        //   console.log('Google Routes API response snippet:', text ? text.slice(0, 500) : '[empty]');
+        // }
 
         if (!text) {
           throw new Error('Empty response from Routes API');
@@ -409,7 +408,9 @@ export class LiveTrafficProvider implements TrafficProvider {
     } catch (error: any) {
       // Log safe status message if available
       const safeMsg = error?.message || (error?.error?.message) || String(error);
-      console.warn('Live traffic API failed, falling back to mock:', safeMsg);
+      if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
+        console.warn('Live traffic API failed, falling back to mock:', safeMsg);
+      }
 
       return mockTrafficEstimates[routeKey] || {
         route: routeKey,
@@ -522,7 +523,6 @@ export class MockProvider implements DataProvider {
   }
 
   async getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     const routeOrigins = origin;
 
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
@@ -579,7 +579,6 @@ export class MockProvider implements DataProvider {
   }
 
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     const routeDestination = resolveAirportDestinationForRouting(destination);
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
     const baseDuration = routeEstimate.duration + 5;
@@ -612,7 +611,6 @@ export class MockProvider implements DataProvider {
   }
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     const routeDestinationAirport = resolveAirportDestinationForRouting(destination);
 
     const hubRoutes = transitHubs.map(hub => {
@@ -679,7 +677,6 @@ export class MockProvider implements DataProvider {
   }
 
   async getFlightInfo(destination: string, dateTime: string): Promise<FlightInfo> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     // TODO: Replace with a live flight data integration.
     const hit = mockFlightInfo[destination];
     if (hit) return hit;
@@ -716,7 +713,6 @@ export class MockProvider implements DataProvider {
   }
 
   async getAirportInfo(terminal: string): Promise<LocationInfo> {
-    await new Promise((resolve) => setTimeout(resolve, 100));
     // TODO: Replace with an airport facilities API.
     return mockLocationInfo[terminal] || {
       destination: terminal,

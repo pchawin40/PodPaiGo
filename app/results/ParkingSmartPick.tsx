@@ -28,10 +28,56 @@ function formatTimeFriendly(time24: string) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+function parseLocalDate(dateString: string): Date | null {
+  const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return new Date(year, month - 1, day);
+}
+
+function getAprLivePrice(option: any, aprLivePrices: Record<string, number>): number | null {
+  const sourceLink = option?.sourceLink;
+  if (!sourceLink) return null;
+  const livePrice = aprLivePrices[sourceLink];
+  return typeof livePrice === 'number' && livePrice > 0 ? livePrice : null;
+}
+
+function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
+  const livePrice = getAprLivePrice(option, aprLivePrices);
+  if (livePrice == null) return option;
+
+  return {
+    ...option,
+    price: livePrice,
+    priceDisplay: 'from-per-day',
+    priceUnit: 'per-day',
+    trustStatus: 'live',
+    priceNote: 'APR listed price',
+    bestFor: Array.from(new Set(['APR listed price', ...(option.bestFor || [])])),
+  };
+}
+
 function estimateDays(tripData: TripData | null) {
-  const mins = (tripData as any)?.parkingDuration;
-  if (!mins) return 1;
-  return Math.max(1, Math.ceil(mins / 60 / 24));
+  if (!tripData) return 1;
+  if ((tripData.type === 'one-way-departure' || tripData.type === 'round-trip') && (tripData as any).parkingDuration) {
+    const minutes = (tripData as any).parkingDuration as number;
+    const hours = minutes / 60;
+    return Math.max(1, Math.ceil(hours / 24));
+  }
+
+  if (tripData?.type === 'round-trip') {
+    const start = parseLocalDate(tripData.departureDate);
+    const end = parseLocalDate(tripData.returnDate);
+    if (start && end) {
+      const delta = end.getTime() - start.getTime();
+      return Math.max(1, Math.ceil(delta / (1000 * 60 * 60 * 24)));
+    }
+  }
+
+  return 1;
 }
 
 export default function ParkingSmartPick({
@@ -39,14 +85,21 @@ export default function ParkingSmartPick({
   tripData,
   selectedOption,
   leaveByTime,
+  aprLivePrices = {},
+  aprLiveChecking = false,
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
   selectedOption?: ParkingOption | null;
   leaveByTime?: string | null;
+  aprLivePrices?: Record<string, number>;
+  aprLiveChecking?: boolean;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null); // For closing popovers when clicking outside
+
+  const optionsWithAprLivePrice = options.map((option) => withAprLivePrice(option, aprLivePrices));
+  const selectedOptionWithAprLivePrice = selectedOption ? withAprLivePrice(selectedOption, aprLivePrices) : undefined;
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -71,7 +124,7 @@ export default function ParkingSmartPick({
 
   const days = estimateDays(tripData);
 
-  const smartPickCandidates = options.filter((p) => {
+  const smartPickCandidates = optionsWithAprLivePrice.filter((p) => {
     const id = String(p.id || '').toLowerCase();
     const name = String(p.name || '').toLowerCase();
 
@@ -99,9 +152,9 @@ export default function ParkingSmartPick({
     return !isGenericMarketplace && hasRealLotSignal;
   });
 
-  const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : options;
+  const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : optionsWithAprLivePrice;
 
-  const cheapestOfficial = [...options]
+  const cheapestOfficial = [...optionsWithAprLivePrice]
     .filter((p) => p.type === 'official')
     .sort((a, b) => (a.price ?? 999) - (b.price ?? 999))[0];
 
@@ -153,12 +206,34 @@ export default function ParkingSmartPick({
     return valueScore(b) - valueScore(a);
   })[0];
 
-  const best =
-    selectedOption ||
-    bestValue ||
+  function normalizeSmartPickPrice(option: any) {
+    const isApr =
+      option?.bookingProvider === 'AirportParkingReservations' ||
+      option?.sourceName === 'AirportParkingReservations';
+
+    if (!isApr) return option;
+
+    const dailyPrice = Number(option?.price);
+
+    if (dailyPrice > 0) {
+      return {
+        ...option,
+        price: dailyPrice,
+        priceDisplay: 'from-per-day',
+        priceUnit: 'per-day',
+      };
+    }
+
+    return option;
+  }
+
+  const best = normalizeSmartPickPrice(
+    selectedOptionWithAprLivePrice ||
     cheapest ||
+    bestValue ||
     lowestStress ||
-    candidateOptions[0];
+    candidateOptions[0]
+  );
 
   const bestTotal = (best.price ?? 0) * days;
   const officialTotal = cheapestOfficial ? (cheapestOfficial.price ?? 0) * days : null;
@@ -178,12 +253,10 @@ export default function ParkingSmartPick({
     : null;
 
   const ctaLabel =
-    best.trustStatus === 'live'
-      ? savings
-        ? `Reserve Spot • Save ${formatMoneyWhole(savings)}`
-        : 'Reserve Spot'
-      : best.priceDisplay === 'check-live'
-        ? 'View rates'
+    best.bookingProvider === 'AirportParkingReservations'
+      ? 'View deal'
+      : best.type === 'official'
+        ? 'Book official'
         : 'Check price';
 
   return (
@@ -225,7 +298,7 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-4 text-2xl font-bold text-zinc-900">
-            {best.priceDisplay === 'check-live' && (!best.price || best.price <= 0)
+            {typeof best.price !== 'number' || best.price <= 0
               ? 'Check live price'
               : best.priceUnit === 'total'
                 ? formatMoney(best.price)

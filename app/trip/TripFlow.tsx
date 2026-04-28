@@ -18,6 +18,8 @@ type FormState = {
   origin: string;
   date: string;
   time: string;
+  parkingCheckOutDate: string;
+  parkingCheckOutTime: string;
   parkingDurationHours: string;
   checkingBags: boolean;
   securityOption: SecurityOption;
@@ -31,6 +33,27 @@ function formatLocalDateInputValue(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function parseLocalDate(dateString: string): Date | null {
+  const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatDateInputValue(date: Date): string {
+  return formatLocalDateInputValue(date);
+}
+
+function addDays(dateString: string, days: number): string {
+  const parsed = parseLocalDate(dateString);
+  if (!parsed) return dateString;
+  parsed.setDate(parsed.getDate() + days);
+  return formatLocalDateInputValue(parsed);
 }
 
 function intentToTripType(intent: Intent): TripType {
@@ -134,6 +157,8 @@ export default function TripFlow() {
     origin: '',
     date: '',
     time: '',
+    parkingCheckOutDate: '',
+    parkingCheckOutTime: '',
     parkingDurationHours: '',
     checkingBags: false,
     securityOption: 'standard',
@@ -170,14 +195,16 @@ export default function TripFlow() {
     if (!state.intent) next.push('Please choose what you’re doing today.');
     if (!state.origin.trim()) next.push('Origin is required.');
 
-    // Date and time required
+    // Parking check-in/check-out required for date-range flows
     if (!state.date) {
-      next.push('Date is required.');
+      next.push('Parking check-in date is required.');
     }
 
-    if (!state.time) {
+    if (state.intent !== 'parking-trip' && !state.time) {
       next.push('Time is required.');
     }
+
+    // Optional check-out date
 
     // If both present, validate combined datetime against now
     if (state.date && state.time) {
@@ -187,6 +214,14 @@ export default function TripFlow() {
         next.push('Invalid date or time');
       } else if (combined.getTime() < now.getTime()) {
         next.push('Trip time cannot be in the past.');
+      }
+    }
+
+    if (state.date && state.parkingCheckOutDate) {
+      const checkIn = parseLocalDate(state.date);
+      const checkOut = parseLocalDate(state.parkingCheckOutDate);
+      if (checkIn && checkOut && checkOut.getTime() < checkIn.getTime()) {
+        next.push('Parking check-out date must be on or after check-in date.');
       }
     }
 
@@ -252,6 +287,10 @@ export default function TripFlow() {
         ...s,
         date: nextDate,
         time: nextTime,
+        parkingCheckOutDate:
+          (s.parkingCheckOutDate && s.parkingCheckOutDate !== s.date)
+            ? s.parkingCheckOutDate
+            : addDays(nextDate, 7),
       };
     });
 
@@ -272,8 +311,8 @@ export default function TripFlow() {
 
     const nextFieldErrors: Record<string, string> = {};
     if (!state.origin.trim()) nextFieldErrors.origin = 'Enter your starting address.';
-    if (!state.time) nextFieldErrors.time = 'Select your flight or trip time.';
-    if (!state.date) nextFieldErrors.date = 'Select your trip date.';
+    if (state.intent !== 'parking-trip' && !state.time) nextFieldErrors.time = 'Select your flight or trip time.';
+    if (!state.date) nextFieldErrors.date = 'Select your parking check-in date.';
 
     setFieldErrors(nextFieldErrors);
 
@@ -314,7 +353,11 @@ export default function TripFlow() {
 
     if (tripType === 'one-way-departure') {
       params.set('departureDate', state.date);
-      params.set('departureTime', state.time);
+      params.set('departureTime', state.time || '12:00');
+      params.set('parkingCheckInDate', state.date);
+      if (state.parkingCheckOutDate) {
+        params.set('parkingCheckOutDate', state.parkingCheckOutDate);
+      }
 
       // Flying-out only: airport readiness assumptions
       if (state.intent === 'flying-out') {
@@ -324,11 +367,27 @@ export default function TripFlow() {
         params.set('cabin', state.cabin);
       }
 
-      if (state.parkingDurationHours) {
+      if (state.parkingCheckOutDate) {
+        const checkIn = new Date(`${state.date}T${state.time || '12:00'}`);
+        const checkOut = new Date(
+          `${state.parkingCheckOutDate}T${state.parkingCheckOutTime || state.time || '12:00'}`
+        );
+
+        if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
+          const minutes = Math.max(
+            24 * 60,
+            Math.round((checkOut.getTime() - checkIn.getTime()) / 60000)
+          );
+
+          params.set('parkingDuration', String(minutes));
+        }
+      } else if (state.parkingDurationHours) {
         const minutes = Math.round(Number(state.parkingDurationHours) * 60);
         if (Number.isFinite(minutes) && minutes > 0) {
           params.set('parkingDuration', String(minutes));
         }
+      } else {
+        params.set('parkingDuration', String(24 * 60));
       }
     } else {
       // dropoff-pickup
@@ -654,12 +713,23 @@ export default function TripFlow() {
                 )}
 
                 <div id="date-field">
-                  <label className="block text-sm font-medium text-zinc-800">Date</label>
+                  <label className="block text-sm font-medium text-zinc-800">
+                    {(intent === 'flying-out' || intent === 'parking-trip')
+                      ? 'Parking check-in date'
+                      : 'Date'}
+                  </label>
                   <input
                     type="date"
                     value={state.date}
                     onChange={(e) => {
-                      setState((s) => ({ ...s, date: e.target.value }));
+                      setState((s) => ({
+                        ...s,
+                        date: e.target.value,
+                        parkingCheckOutDate:
+                          (!s.parkingCheckOutDate || s.parkingCheckOutDate === s.date)
+                            ? addDays(e.target.value, 7)
+                            : s.parkingCheckOutDate,
+                      }));
                       setFieldErrors((prev) => {
                         const next = { ...prev };
                         delete next.date;
@@ -707,6 +777,61 @@ export default function TripFlow() {
                   ) : null}
                 </div>
 
+                {(intent === 'flying-out' || intent === 'parking-trip') && (
+                  <>
+                    <div id="parking-checkout-field">
+                      <label className="block text-sm font-medium text-zinc-800">
+                        Return / parking check-out date
+                        <span className="ml-1 text-xs font-normal text-zinc-500">
+                          Optional
+                        </span>
+                      </label>
+
+                      <input
+                        type="date"
+                        value={state.parkingCheckOutDate}
+                        onChange={(e) => {
+                          setState((s) => ({
+                            ...s,
+                            parkingCheckOutDate: e.target.value,
+                          }));
+
+                          setFieldErrors((prev) => {
+                            const next = { ...prev };
+                            delete next.parkingCheckOutDate;
+                            return next;
+                          });
+                        }}
+                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+
+                      <div className="mt-2 text-xs text-zinc-500">
+                        Leave blank if one-way or return date unknown.
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-800">
+                        Return arrival time
+                        <span className="ml-1 text-xs font-normal text-zinc-500">
+                          Optional
+                        </span>
+                      </label>
+
+                      <input
+                        type="time"
+                        value={state.parkingCheckOutTime}
+                        onChange={(e) =>
+                          setState((s) => ({
+                            ...s,
+                            parkingCheckOutTime: e.target.value,
+                          }))
+                        }
+                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+                    </div>
+                  </>
+                )}
                 <div id="origin-field" className="md:col-span-2">
                   <div
                     className={

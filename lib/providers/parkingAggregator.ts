@@ -3,8 +3,8 @@ import { getAirportById } from '../airports/catalog';
 import { mockParkingOptions } from '../../data/mockData';
 import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
-import { crawlAirportParkingReservationsSea } from './airportParkingReservationsCrawler';
-import { checkAprLotAvailability } from './aprLotAvailability';
+import { checkAprLotsAvailability } from './aprLotAvailability';
+import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 
 type ParkingMarketplace = {
   id: string;
@@ -95,7 +95,14 @@ function isAprOption(p: ParkingOption): boolean {
 }
 
 function aprLotToParkingOption(
-  lot: Awaited<ReturnType<typeof crawlAirportParkingReservationsSea>>[number],
+  lot: {
+    lotName: string;
+    bookingUrl: string;
+    price: number | null;
+    priceUnit: 'per-day' | null;
+    rawSnippet?: string;
+    lastChecked: string;
+  },
   availabilityStatus: 'available' | 'unavailable' | 'unknown' = 'unknown'
 ): ParkingOption {
   const lower = lot.lotName.toLowerCase();
@@ -113,20 +120,20 @@ function aprLotToParkingOption(
           ? 'from-per-day'
           : 'check-live',
     priceNote:
-      availabilityStatus === 'unavailable'
-        ? 'Unavailable for selected dates.'
+      availabilityStatus === 'available'
+        ? 'APR listed starting rate. Availability check passed, but final selected-date price may differ at checkout.'
         : lot.price
-          ? 'Listed APR rate. Open deal to confirm selected-date availability and final checkout price.'
-          : 'Open AirportParkingReservations to confirm price and availability.',
+          ? 'APR listed starting rate. Selected-date price and availability may differ; confirm on AirportParkingReservations.'
+          : 'Open AirportParkingReservations to confirm selected-date price and availability.',
     availabilityStatus,
     isAvailable: availabilityStatus !== 'unavailable',
     priceUnit: lot.priceUnit ?? undefined,
     priceSource: 'marketplace-link',
-    priceConfidence: lot.price ? 'medium' : 'low',
+    priceConfidence: availabilityStatus === 'available' ? 'medium' : 'low',
     bookingProvider: 'AirportParkingReservations',
     distance: 12,
     availability: availabilityStatus === 'available' ? 85 : 35,
-    trustStatus: availabilityStatus === 'available' ? 'live' : 'estimated',
+    trustStatus: 'estimated',
     sourceName: 'AirportParkingReservations',
     sourceLink: lot.bookingUrl,
     mapLink: googleMapsSearchUrl(`${lot.lotName} SeaTac`),
@@ -146,7 +153,7 @@ function aprLotToParkingOption(
         : 'APR availability could not be confirmed automatically; open APR to verify.',
     ],
     bestFor: [
-      'Listed Deal',
+      availabilityStatus === 'available' ? 'APR availability check passed' : 'Starting Rate',
       lot.price && lot.price < 20 ? 'Great Deal' : '',
       lot.price && lot.price < 18 ? 'Cheapest' : '',
       covered ? 'Covered' : '',
@@ -339,44 +346,66 @@ export async function getLiveParkingOptions(args: {
   const airport = getAirportById(args.airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
-  const liveGoogleOptions = await getGoogleParkingPlaces(args.airportCode);
+  // Keep recommendations fast. Google Places + APR crawling should run in background jobs,
+  // not on every /api/recommendations request.
+  const liveGoogleOptions: ParkingOption[] = [];
 
-  console.log('APR AGGREGATOR START', {
-    airportId: airport.id,
-    checkInDate: args.checkInDate,
-    checkOutDate: args.checkOutDate,
-  });
-
-  console.log('APR STATIC CRAWL START');
-
-  const aprLotsRaw =
-    airport.id === 'SEA'
-      ? await crawlAirportParkingReservationsSea()
-      : [];
-
-  console.log('APR STATIC CRAWL DONE', {
-    count: aprLotsRaw.length,
-    names: aprLotsRaw.map((lot) => lot.lotName),
-  });
-
-  console.log('APR STATIC LOTS FOUND', aprLotsRaw.map((lot) => lot.lotName));
-
-  const aprLotsWithAvailability = await Promise.all(
-    aprLotsRaw.map(async (lot) => {
-      const availability = await checkAprLotAvailability({
-        lotName: lot.lotName,
+  const cachedAprLots =
+    airport.id === 'SEA' && args.checkInDate && args.checkOutDate
+      ? await getCachedAprLotsForDateRange({
+        airportCode: airport.id,
         checkInDate: args.checkInDate,
         checkOutDate: args.checkOutDate,
-      });
+      })
+      : [];
 
-      console.log('APR AVAILABILITY RESULT', {
-        lotName: lot.lotName,
-        availability,
-      });
+  const aprLotsRaw = cachedAprLots.map((lot) => ({
+    lotName: lot.lotName,
+    bookingUrl: lot.bookingUrl,
+    price: lot.livePrice ?? null,
+    priceUnit: 'per-day' as const,
+    rawSnippet: 'Loaded from cached APR database snapshot.',
+    lastChecked: lot.fetchedAt,
+    source: 'airportparkingreservations' as const,
+  }));
 
-      return { lot, availability };
-    })
-  );
+  console.log('[parkingAggregator aprLotsRaw]', aprLotsRaw.map((lot) => ({
+    name: lot.lotName,
+    price: lot.price,
+    rawSnippet: lot.rawSnippet,
+  })));
+
+  const aprLotsToCheck = aprLotsRaw.slice(0, 0);
+  const aprLotsUnchecked = aprLotsRaw;
+
+  const availabilityByUrl = await checkAprLotsAvailability({
+    lots: aprLotsToCheck.map((lot) => ({
+      lotName: lot.lotName,
+      bookingUrl: lot.bookingUrl,
+    })),
+  });
+
+  const aprLotsWithAvailability = [
+    ...aprLotsToCheck.map((lot) => ({
+      lot,
+      availability:
+        availabilityByUrl[lot.bookingUrl] ?? {
+          available: true,
+          status: 'unknown' as const,
+          livePrice: null,
+          lotId: null,
+        },
+    })),
+    ...aprLotsUnchecked.map((lot) => ({
+      lot,
+      availability: {
+        available: true,
+        status: 'unknown' as const,
+        livePrice: null,
+        lotId: null,
+      },
+    })),
+  ];
 
   const aprOptions = aprLotsWithAvailability
     .filter((x) => {
@@ -393,7 +422,25 @@ export async function getLiveParkingOptions(args: {
       // Keep other APR lots unless confirmed unavailable.
       return x.availability.status !== 'unavailable';
     })
-    .map((x) => aprLotToParkingOption(x.lot, x.availability.status))
+    .map((x) => {
+      const option = aprLotToParkingOption(x.lot, x.availability.status);
+
+      return {
+        ...option,
+        price: x.availability.livePrice ?? option.price,
+        priceUnit: 'per-day',
+        priceDisplay: 'from-per-day',
+        priceNote: x.availability.livePrice
+          ? 'Selected-date APR price found. Verify final checkout price before booking.'
+          : option.priceNote,
+        priceConfidence: x.availability.livePrice ? 'medium' : option.priceConfidence,
+        bestFor: [
+          x.availability.livePrice ? 'Selected-date price' : 'Starting Rate',
+          option.price && option.price < 20 ? 'Great Deal' : '',
+          option.covered ? 'Covered' : '',
+        ].filter(Boolean),
+      };
+    })
     .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
     .slice(0, 8);
 

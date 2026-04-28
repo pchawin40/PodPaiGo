@@ -15,6 +15,8 @@ type BaseTripData = {
   destination: string;
   airportCode?: string;
   transportAvailability?: TransportAvailability;
+  parkingCheckInDate?: string;
+  parkingCheckOutDate?: string;
 };
 
 export type TripData =

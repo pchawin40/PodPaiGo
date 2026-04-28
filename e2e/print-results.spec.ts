@@ -14,20 +14,28 @@ function futureDate(daysFromNow = 1) {
   return `${y}-${m}-${d}`;
 }
 
+// Generates a URL for the results page with specified search parameters.
 function resultsUrl() {
+  const departureDate = futureDate(1);
+  const parkingCheckOutDate = futureDate(7);
+
   const search = new URLSearchParams({
     type: 'one-way-departure',
     origin,
     destination: 'Central Terminal',
     airport: 'SEA',
     intent: 'flying-out',
-    transport: 'all',
+    transport: 'car',
     bags: 'no',
     security: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
-    departureDate: futureDate(1),
+    departureDate,
     departureTime: '20:00',
+    parkingCheckInDate: departureDate,
+    parkingCheckOutDate,
+    parkingDuration: String(6 * 24 * 60),
+    sort: 'cheapest',
   });
 
   return `/results?${search.toString()}`;
@@ -36,11 +44,11 @@ function resultsUrl() {
 test('export results pdf', async ({ page }) => {
   await page.goto(resultsUrl());
 
-  await page.waitForLoadState('networkidle');
-
   await expect(
-    page.getByText('Other strong choices based on price, timing, and convenience.', { exact: true })
+    page.getByText('Best Alternatives', { exact: true })
   ).toBeVisible({ timeout: 30000 });
+
+  await page.waitForTimeout(1500);
 
   await page.emulateMedia({ media: 'print' });
 

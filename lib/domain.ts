@@ -283,7 +283,7 @@ export function rankRecommendations(
   };
 
   if (useParking) {
-    const parkingWaitPenalty = tsaEstimate.waitTime * 0.5;
+    const parkingWaitPenalty = (tsaEstimate?.waitTime ?? 25) * 0.5;
     parkingOptions.forEach(parking => {
       const cost = parking.type === 'official'
         ? calculateOfficialParkingCost(parking, parkingDuration)
@@ -361,7 +361,7 @@ export function rankRecommendations(
       }
       if (parking.availability > 80) reasons.push('High availability');
       if (parking.trustStatus === 'verified-source') reasons.push('Verified source');
-      if (parking.bookingProvider === 'AirportParkingReservations') reasons.push('Listed APR rate');
+      if (parking.bookingProvider === 'AirportParkingReservations') reasons.push('Selected-date price');
       if (parking.priceConfidence === 'high') reasons.push('High price confidence');
       if (parking.priceConfidence === 'medium') reasons.push('Medium price confidence');
       if (cost < 50) reasons.push('Budget-friendly');
