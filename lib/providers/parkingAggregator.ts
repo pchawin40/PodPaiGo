@@ -5,6 +5,7 @@ import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
 import { checkAprLotsAvailability } from './aprLotAvailability';
 import { getCachedAprLotsForDateRange } from '../db/parkingCache';
+import { debugLog } from '../utils/debug';
 
 type GooglePlace = {
   id?: string;
@@ -188,13 +189,13 @@ function resolveLotKeyFromName(name: string): string | null {
   return null;
 }
 
-async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOption[]> {
+async function getGoogleParkingPlaces(args: {
+  airportCode?: string;
+  destination: string;
+}): Promise<ParkingOption[]> {
   const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
-  const airport = getAirportById(airportCode) || getAirportById('SEA')!;
-  const airportSearchName =
-    airport.id === 'SEA'
-      ? 'airport parking near Seattle-Tacoma International Airport'
-      : `airport parking near ${airport.label} ${airport.id}`;
+  const airport = getAirportById(args.airportCode || '') || getAirportById('SEA')!;
+  const parkingSearchName = `parking near ${args.destination}`;
 
   if (!key) return [];
 
@@ -214,7 +215,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
       ].join(','),
     },
     body: JSON.stringify({
-      textQuery: airportSearchName,
+      textQuery: parkingSearchName,
       locationBias: {
         circle: {
           center: {
@@ -224,7 +225,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
           radius: 12000,
         },
       },
-    }),
+    })
   });
 
   if (!res.ok) return [];
@@ -306,11 +307,11 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
             : staticPricing.bookingProvider,
           trustStatus: 'live',
           sourceName: 'Google Places',
-          searchQuery: `${airport.label} ${airport.id} airport parking`,
+          searchQuery: parkingSearchName,
           distance: 10,
           availability: 80,
-          sourceLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
-          mapLink: place.googleMapsUri || googleMapsSearchUrl(airportSearchName),
+          sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
+          mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           routeDestination: place.formattedAddress || airport.routingAddress,
           lastUpdated: dynamicPricing?.lastChecked || new Date().toISOString(),
           parkingBufferMinutes: 15,
@@ -348,19 +349,23 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
 }
 
 export async function getLiveParkingOptions(args: {
-  airportCode: string;
+  airportCode?: string;
   destination: string;
   checkInDate?: string;
   checkOutDate?: string;
 }): Promise<ParkingOption[]> {
-  const airport = getAirportById(args.airportCode) || getAirportById('SEA')!;
+  const airportCode = args.airportCode || 'SEA';
+  const airport = getAirportById(airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
   // Keep recommendations fast. Google Places + APR crawling should run in background jobs,
   // not on every /api/recommendations request.
   const liveGoogleOptions =
     process.env.PARKING_DISCOVERY_PROVIDER === 'google'
-      ? await getGoogleParkingPlaces(airport.id)
+      ? await getGoogleParkingPlaces({
+        airportCode: airport.id,
+        destination: args.destination,
+      })
       : [];
 
   const cachedAprLots =
@@ -382,20 +387,37 @@ export async function getLiveParkingOptions(args: {
     source: 'airportparkingreservations' as const,
   }));
 
-  console.log('[parkingAggregator aprLotsRaw]', aprLotsRaw.map((lot) => ({
+  debugLog('[parkingAggregator aprLotsRaw]', aprLotsRaw.map((lot) => ({
     name: lot.lotName,
     price: lot.price,
     rawSnippet: lot.rawSnippet,
   })));
 
-  const aprLotsToCheck = aprLotsRaw.slice(0, 0);
-  const aprLotsUnchecked = aprLotsRaw;
+  const aprSeedLots =
+    airport.id === 'SEA' && aprLotsRaw.length === 0
+      ? [
+        {
+          lotName: 'Skyway Inn Airport Parking',
+          bookingUrl: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
+          price: null,
+          priceUnit: 'per-day' as const,
+          rawSnippet: 'Fallback APR seed lot used when cache is empty.',
+          lastChecked: new Date().toISOString(),
+          source: 'airportparkingreservations' as const,
+        },
+      ]
+      : aprLotsRaw;
+
+  const aprLotsToCheck = aprSeedLots.slice(0, 8);
+  const aprLotsUnchecked = aprSeedLots.slice(8);
 
   const availabilityByUrl = await checkAprLotsAvailability({
     lots: aprLotsToCheck.map((lot) => ({
       lotName: lot.lotName,
       bookingUrl: lot.bookingUrl,
     })),
+    checkInDate: args.checkInDate,
+    checkOutDate: args.checkOutDate,
   });
 
   const aprLotsWithAvailability = [
@@ -496,7 +518,7 @@ export async function getLiveParkingOptions(args: {
     };
   });
 
-  const shouldUseSeaCuratedLots = airport.id === 'SEA';
+  const shouldUseSeaCuratedLots = false;
 
   const curatedSeaLots: ParkingOption[] = shouldUseSeaCuratedLots
     ? mockParkingOptions.map((p): ParkingOption => ({

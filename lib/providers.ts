@@ -430,7 +430,7 @@ export class LiveTrafficProvider implements TrafficProvider {
       const safeMsg =
         error instanceof Error ? error.message : String(error);
       if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
-        console.warn('Live traffic API failed, falling back to mock:', safeMsg);
+        console.error('Live traffic API failed, falling back to mock:', safeMsg);
       }
 
       return mockTrafficEstimates[routeKey] || {

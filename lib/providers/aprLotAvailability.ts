@@ -10,6 +10,8 @@ export type AprAvailabilityResult = {
 
 export async function checkAprLotsAvailability(args: {
     lots: Array<{ lotName: string; bookingUrl: string }>;
+    checkInDate?: string;
+    checkOutDate?: string;
 }): Promise<Record<string, AprAvailabilityResult>> {
     try {
         const baseUrl =
@@ -25,6 +27,8 @@ export async function checkAprLotsAvailability(args: {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 bookingUrls: args.lots.map((lot) => lot.bookingUrl),
+                parkingCheckInDate: args.checkInDate,
+                parkingCheckOutDate: args.checkOutDate,
             }),
             signal: controller.signal,
         }).finally(() => clearTimeout(timeout));

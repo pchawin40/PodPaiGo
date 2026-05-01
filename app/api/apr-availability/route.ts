@@ -6,6 +6,7 @@ import {
 import {
   crawlAirportParkingReservationsSea,
 } from '../../../lib/providers/airportParkingReservationsCrawler';
+import { debugLog } from '@/lib/utils/debug';
 
 export const runtime = 'nodejs';
 
@@ -74,6 +75,14 @@ export async function POST(req: Request) {
 
     const checkInDate = getDateOnly(body?.parkingCheckInDate);
     const checkOutDate = getDateOnly(body?.parkingCheckOutDate);
+
+    debugLog('[APR route request dates]', {
+      parkingCheckInDate: body?.parkingCheckInDate,
+      parkingCheckOutDate: body?.parkingCheckOutDate,
+      checkInDate,
+      checkOutDate,
+      bookingUrls: body?.bookingUrls,
+    });
 
     const bookingUrls = uniqueStrings(
       Array.isArray(body?.bookingUrls)
@@ -191,6 +200,8 @@ export async function POST(req: Request) {
           };
         });
       }
+
+      console.log('[APR liveResults before save]', liveResults);
 
       await saveAprPrices(
         liveResults.map((result) => ({

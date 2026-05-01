@@ -1,3 +1,4 @@
+import { debugLog } from '../utils/debug';
 import { db } from './client';
 
 export type CachedAprPrice = {
@@ -158,7 +159,7 @@ export async function getCachedAprLotsForDateRange(params: {
         [params.airportCode, params.checkInDate, params.checkOutDate],
     );
 
-    console.log('[DB cached APR rows]', result.rows);
+    debugLog('[DB cached APR rows]', result.rows);
 
     const skywayDebug = await db.query(
         `
@@ -177,8 +178,6 @@ export async function getCachedAprLotsForDateRange(params: {
   limit 20
   `
     );
-
-    console.log('[DB skyway all recent]', skywayDebug.rows);
 
     return result.rows;
 }
