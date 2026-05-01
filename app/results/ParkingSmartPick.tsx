@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
 import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
-
+import { parseLocalDate } from '../../lib/tripTime';
 
 function formatMoney(n: number) {
   const rounded = Math.round(n * 100) / 100;
@@ -76,16 +76,6 @@ function parkingRouteText(option: ParkingOption): string {
       : `walk ${option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5} min`;
 
   return [drive, transfer].filter(Boolean).join(' + ');
-}
-
-function parseLocalDate(dateString: string): Date | null {
-  const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (![year, month, day].every(Number.isFinite)) return null;
-  return new Date(year, month - 1, day);
 }
 
 function estimateDays(tripData: TripData | null) {

@@ -121,7 +121,7 @@ async function fetchAprSelectedDatePriceFromPage(
       checkindate,
       checkoutdate,
     }: {
-      lotId: string;
+      lotId: number;
       checkindate: string;
       checkoutdate: string;
     }) => {
@@ -140,6 +140,20 @@ async function fetchAprSelectedDatePriceFromPage(
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID()
           : `${Date.now()}`;
+
+      type AprRateResponse = {
+        parkinglot?: {
+          rate?: number | string;
+          price?: number | string;
+          products?: {
+            data?: Array<{ rate?: number | string }>;
+          };
+        };
+        products?: {
+          data?: Array<{ rate?: number | string }>;
+        };
+        rate?: number | string;
+      };
 
       const res = await fetch(`/parkinglot/${lotId}/search/${token}`, {
         method: 'PUT',
@@ -160,9 +174,10 @@ async function fetchAprSelectedDatePriceFromPage(
 
       const text = await res.text();
 
-      let data: unknown = null;
+      let data: AprRateResponse | null = null;
+
       try {
-        data = JSON.parse(text);
+        data = JSON.parse(text) as AprRateResponse;
       } catch {
         data = null;
       }

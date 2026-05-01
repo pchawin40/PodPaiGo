@@ -6,6 +6,7 @@ import { AddressInput } from './AddressInput';
 import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType } from '../../lib/types';
 import { getSeatacRideshareDropoffNote, resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
+import { parseLocalDate } from '../../lib/tripTime';
 
 type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
 
@@ -35,15 +36,7 @@ function formatLocalDateInputValue(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function parseLocalDate(dateString: string): Date | null {
-  const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (![year, month, day].every(Number.isFinite)) return null;
-  return new Date(year, month - 1, day);
-}
+
 
 function addDays(dateString: string, days: number): string {
   const parsed = parseLocalDate(dateString);

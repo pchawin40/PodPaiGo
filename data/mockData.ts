@@ -1,5 +1,7 @@
 import { LocationInfo, FlightInfo, ParkingOption, RideshareOption, TrafficEstimate, TransitOption } from '../lib/types';
-import { PROVIDER_LINKS, googleMapsSearchLink } from '../lib/providerCatalog';
+import { PROVIDER_LINKS } from '../lib/providerCatalog';
+import { googleMapsSearchLink } from '../lib/maps';
+
 
 export const mockParkingOptions: ParkingOption[] = [
   {
@@ -113,7 +115,7 @@ export const mockParkingOptions: ParkingOption[] = [
     transferType: 'shuttle',
     price: 34,
     priceDisplay: 'from-per-day' as const,
-    priceUnit: 'per-day',
+    priceUnit: 'per-day' as const,
     priceNote: 'Estimated daily rate — check live price',
     priceSource: 'direct-lot-rate',
     priceConfidence: 'medium',

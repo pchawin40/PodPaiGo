@@ -1,7 +1,11 @@
-type AprAvailabilityResult = {
+
+export type AprAvailabilityResult = {
     bookingUrl?: string;
-    livePrice?: number | null;
-    lotId?: number | null;
+    available: boolean;
+    status: 'available' | 'unavailable' | 'unknown';
+    statusCode?: number;
+    livePrice: number | null;
+    lotId: number | null;
 };
 
 export async function checkAprLotsAvailability(args: {
@@ -46,14 +50,6 @@ export async function checkAprLotsAvailability(args: {
         return {};
     }
 }
-
-export type AprAvailabilityResult = {
-    available: boolean;
-    status: 'available' | 'unavailable' | 'unknown';
-    statusCode?: number;
-    livePrice?: number | null;
-    lotId?: number | null;
-};
 
 const APR_LOT_ID_CACHE = new Map<string, number>();
 

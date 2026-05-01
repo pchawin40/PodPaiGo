@@ -77,3 +77,16 @@ export function googleMapsParkingRouteLink(
 
   return googleMapsDirectionsLink(origin, parkingLot, 'driving');
 }
+
+export function costOf(option: { cost?: number }): number {
+  return typeof option.cost === 'number' ? option.cost : 999;
+}
+
+
+export function parkingKeySafe(option: { id?: string; name?: string } | null | undefined): string | null {
+  if (!option?.name) return null;
+  return parkingKey({
+    id: option.id || option.name,
+    name: option.name,
+  });
+}

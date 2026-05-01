@@ -3,6 +3,7 @@ import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFli
 import { seaTacAirport } from './airports';
 import { getAirportById } from './airports/catalog';
 import { getLiveParkingOptions } from './providers/parkingAggregator';
+import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 
 // Startup log for server-side API key presence (do not log the key itself)
 // try {
@@ -283,7 +284,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           throw new Error('Empty response from Routes API');
         }
 
-        let data: unknown = null;
+        let data: RoutesApiResponse | RoutesApiElement[] | null = null;
         try {
           data = JSON.parse(text);
         } catch (e) {
@@ -310,18 +311,30 @@ export class LiveTrafficProvider implements TrafficProvider {
         }
 
         // Support multiple response shapes: array, object.rows, object.matrix.rows
-        let element: unknown = null;
+        let element: RoutesApiElement | null = null;
 
         if (Array.isArray(data) && data.length > 0) {
           // dataset is array of elements
           element = data[0];
         } else {
-          const rows = data?.rows ?? data?.matrix?.rows ?? null;
-          if (!rows || !rows[0] || !rows[0].elements || !rows[0].elements[0]) {
-            throw new Error(`Invalid Routes API response: ${data?.error?.message || 'no rows'}`);
+          const responseData = data as RoutesApiResponse;
+          const rows = responseData.rows ?? responseData.matrix?.rows ?? null;
+
+          if (!rows) {
+            throw new Error(`Invalid Routes API response: ${responseData.error?.message || 'no rows'}`);
           }
-          element = rows[0].elements[0];
+
+          element = rows[0]?.elements?.[0] ?? null;
         }
+
+        if (!element) {
+          throw new Error('Invalid Routes API response: no route element');
+        }
+
+        const durationValue: number | undefined =
+          typeof element.duration === 'object' && element.duration !== null
+            ? element.duration.value
+            : undefined;
 
         // Acceptance logic: treat success when HTTP 200, condition === 'ROUTE_EXISTS', duration present,
         // and status is empty object / missing / or string 'OK'. Treat failure only when explicit errors or condition mismatch.
@@ -335,7 +348,7 @@ export class LiveTrafficProvider implements TrafficProvider {
         let hasDuration = false;
         if (typeof element?.durationMillis === 'number') hasDuration = true;
         else if (element?.duration && typeof element.duration === 'string' && /^\d+s$/.test(element.duration)) hasDuration = true;
-        else if (element?.duration && typeof element.duration.value === 'number') hasDuration = true;
+        else if (element?.duration && typeof durationValue === 'number') hasDuration = true;
         else if (element?.staticDuration) hasDuration = true;
 
         if (!(res.status === 200 && condition === 'ROUTE_EXISTS' && hasDuration && statusAcceptable)) {
@@ -350,8 +363,8 @@ export class LiveTrafficProvider implements TrafficProvider {
         } else if (typeof element.duration === 'string') {
           const m = element.duration.match(/^(\d+)s$/);
           if (m) durationMs = parseInt(m[1], 10) * 1000;
-        } else if (element.duration && typeof element.duration.value === 'number') {
-          durationMs = element.duration.value * 1000;
+        } else if (element.duration && typeof durationValue === 'number') {
+          durationMs = durationValue * 1000;
         } else if (typeof element.staticDuration === 'string') {
           const m = element.staticDuration.match(/^(\d+)s$/);
           if (m) durationMs = parseInt(m[1], 10) * 1000;
@@ -373,8 +386,8 @@ export class LiveTrafficProvider implements TrafficProvider {
           if (m) staticMs = parseInt(m[1], 10) * 1000;
         } else if (typeof element.staticDuration === 'number') {
           staticMs = element.staticDuration;
-        } else if (element.duration && typeof element.duration.value === 'number' && typeof element.durationMillis === 'number') {
-          staticMs = element.duration.value * 1000;
+        } else if (element.duration && typeof durationValue === 'number' && typeof element.durationMillis === 'number') {
+          staticMs = durationValue * 1000;
         }
 
         if (staticMs && durationMs) {

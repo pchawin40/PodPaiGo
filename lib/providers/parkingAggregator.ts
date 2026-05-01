@@ -7,9 +7,13 @@ import { checkAprLotsAvailability } from './aprLotAvailability';
 import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 
 type GooglePlace = {
+  id?: string;
   displayName?: { text?: string };
+  formattedAddress?: string;
+  googleMapsUri?: string;
   rating?: number;
   userRatingCount?: number;
+  businessStatus?: string;
 };
 
 type ParkingMarketplace = {
