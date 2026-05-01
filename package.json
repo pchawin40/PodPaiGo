@@ -6,12 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "lint": "eslint",
+    "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\""
   },
   "dependencies": {
     "next": "16.2.4",
@@ -30,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "jest": "^30.3.0",
+    "nodemon": "^3.1.14",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
     "typescript": "^5"

@@ -14,7 +14,7 @@ import ParkingBookingComparison from './ParkingBookingComparison';
 import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import ParkingSmartPick from './ParkingSmartPick';
-
+import { getAprLivePrice, withAprLivePrice } from '../../lib/parking/aprLivePrice';
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
 
@@ -42,41 +42,8 @@ function formatParkingDailyPrice(option: { price: number; bestFor?: string[]; pr
     : `From ${formatMoney(option.price)}/day`;
 }
 
-function getAprLivePrice(option: any, aprLivePrices: Record<string, number>): number | null {
-  const sourceLink = option?.sourceLink;
-  if (!sourceLink) return null;
-
-  const livePrice = aprLivePrices[sourceLink];
-  return typeof livePrice === 'number' && livePrice > 0 ? livePrice : null;
-}
-
 function isAprOption(option: any): boolean {
   return option?.bookingProvider === 'AirportParkingReservations' && !!option?.sourceLink;
-}
-
-function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
-  const livePrice = getAprLivePrice(option, aprLivePrices);
-
-  if (livePrice == null) return option;
-
-  return {
-    ...option,
-    price: livePrice,
-    priceDisplay: 'from-per-day' as const,
-    priceUnit: 'per-day' as const,
-    trustStatus: 'live',
-    priceNote: 'APR listed price',
-    bestFor: Array.from(
-      new Set(
-        (option.bestFor || []).filter(
-          (tag: string) =>
-            tag !== 'Selected-date price' &&
-            tag !== 'APR listed price' &&
-            tag !== 'Starting Rate'
-        )
-      )
-    ),
-  };
 }
 
 function InlinePriceLoading() {

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
+import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
+
 
 function formatMoney(n: number) {
   const rounded = Math.round(n * 100) / 100;
@@ -28,7 +30,7 @@ function formatTimeFriendly(time24: string) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-function parkingLotDestination(option: any): string {
+function parkingLotDestination(option: ParkingOption): string {
   const routeDestination = String(option.routeDestination || '');
   const name = String(option.name || '');
 
@@ -45,7 +47,7 @@ function parkingLotDestination(option: any): string {
   return routeDestination || `${name}, SeaTac, WA`;
 }
 
-function parkingRouteLink(option: any, tripData: TripData | null): string | null {
+function parkingRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
   const origin = tripData?.origin;
   const parkingLot = parkingLotDestination(option);
 
@@ -63,7 +65,7 @@ function parkingRouteLink(option: any, tripData: TripData | null): string | null
   );
 }
 
-function parkingRouteText(option: any): string {
+function parkingRouteText(option: ParkingOption): string {
   const drive = typeof option.distance === 'number'
     ? `Drive ${option.distance < 60 ? `${option.distance} min` : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`}`
     : null;
@@ -86,32 +88,10 @@ function parseLocalDate(dateString: string): Date | null {
   return new Date(year, month - 1, day);
 }
 
-function getAprLivePrice(option: any, aprLivePrices: Record<string, number>): number | null {
-  const sourceLink = option?.sourceLink;
-  if (!sourceLink) return null;
-  const livePrice = aprLivePrices[sourceLink];
-  return typeof livePrice === 'number' && livePrice > 0 ? livePrice : null;
-}
-
-function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
-  const livePrice = getAprLivePrice(option, aprLivePrices);
-  if (livePrice == null) return option;
-
-  return {
-    ...option,
-    price: livePrice,
-    priceDisplay: 'from-per-day' as const,
-    priceUnit: 'per-day' as const,
-    trustStatus: 'live',
-    priceNote: 'APR listed price',
-    bestFor: Array.from(new Set(['APR listed price', ...(option.bestFor || [])])),
-  };
-}
-
 function estimateDays(tripData: TripData | null) {
   if (!tripData) return 1;
-  if ((tripData.type === 'one-way-departure' || tripData.type === 'round-trip') && (tripData as any).parkingDuration) {
-    const minutes = (tripData as any).parkingDuration as number;
+  if ('parkingDuration' in tripData && tripData.parkingDuration) {
+    const minutes = tripData.parkingDuration;
     const hours = minutes / 60;
     return Math.max(1, Math.ceil(hours / 24));
   }
@@ -134,7 +114,6 @@ export default function ParkingSmartPick({
   selectedOption,
   leaveByTime,
   aprLivePrices = {},
-  aprLiveChecking = false,
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
@@ -254,7 +233,7 @@ export default function ParkingSmartPick({
     return valueScore(b) - valueScore(a);
   })[0];
 
-  function normalizeSmartPickPrice(option: any) {
+  function normalizeSmartPickPrice(option: ParkingOption) {
     const isApr =
       option?.bookingProvider === 'AirportParkingReservations' ||
       option?.sourceName === 'AirportParkingReservations';

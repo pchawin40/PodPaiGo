@@ -1,40 +1,23 @@
 'use client';
 
-import React from 'react';
-import { googleMapsSearchLink } from '../../lib/providerCatalog';
+import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
+import { ParkingOption, TripData } from '../../lib/types';
 
-function getAprLivePrice(option: any, aprLivePrices: Record<string, number>): number | null {
-  const sourceLink = option?.sourceLink;
-  if (!sourceLink) return null;
-  const livePrice = aprLivePrices[sourceLink];
-  return typeof livePrice === 'number' && livePrice > 0 ? livePrice : null;
-}
+type ParkingBookingComparisonProps = {
+  parkingOptions: ParkingOption[];
+  tripData: TripData | null;
+  aprLivePrices?: Record<string, number>;
+  aprLiveChecking?: boolean;
+};
 
-function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
-  const livePrice = getAprLivePrice(option, aprLivePrices);
-  if (livePrice == null) return option;
-
-  return {
-    ...option,
-    price: livePrice,
-    priceDisplay: 'from-per-day' as const,
-    priceUnit: 'per-day' as const,
-    trustStatus: 'live',
-    priceNote: 'APR listed price',
-    bestFor: Array.from(new Set(['APR listed price', ...(option.bestFor || [])])),
-  };
-}
-
-export default function ParkingBookingComparison({ parkingOptions, tripData, aprLivePrices = {}, aprLiveChecking = false }: { parkingOptions: any[]; tripData: any; aprLivePrices?: Record<string, number>; aprLiveChecking?: boolean }) {
+export default function ParkingBookingComparison({
+  parkingOptions,
+  aprLivePrices = {},
+  aprLiveChecking = false,
+}: ParkingBookingComparisonProps) {
   if (!parkingOptions || parkingOptions.length === 0) return null;
 
   const parkingOptionsWithLive = parkingOptions.map((option) => withAprLivePrice(option, aprLivePrices));
-
-  const parkingOptionsWithApr = parkingOptionsWithLive.map((option) => ({
-    option,
-    livePrice: getAprLivePrice(option, aprLivePrices),
-    isApr: option.bookingProvider === 'AirportParkingReservations' && !!option.sourceLink,
-  }));
 
   // Build a list of known booking rows based on providers present.
   // For safety, do not invent live prices.
