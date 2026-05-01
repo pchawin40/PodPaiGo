@@ -17,8 +17,8 @@ function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
   return {
     ...option,
     price: livePrice,
-    priceDisplay: 'from-per-day',
-    priceUnit: 'per-day',
+    priceDisplay: 'from-per-day' as const,
+    priceUnit: 'per-day' as const,
     trustStatus: 'live',
     priceNote: 'APR listed price',
     bestFor: Array.from(new Set(['APR listed price', ...(option.bestFor || [])])),

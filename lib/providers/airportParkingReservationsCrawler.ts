@@ -86,7 +86,7 @@ function extractNearbyPrices(html: string): AirportParkingReservationLot[] {
       source: 'airportparkingreservations',
       lotName,
       price,
-      priceUnit: 'per-day',
+      priceUnit: 'per-day' as const,
       bookingUrl,
       rawSnippet: `${lotName} · ${cells[1] || ''} · ${cells[2] || ''} · $${price}/day`,
       lastChecked: nowIso(),

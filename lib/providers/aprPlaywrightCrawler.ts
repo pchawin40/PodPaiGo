@@ -114,7 +114,15 @@ async function fetchAprSelectedDatePriceFromPage(
   if (!args.checkInDate || !args.checkOutDate) return null;
 
   const result = await page.evaluate(
-    async ({ lotId, checkindate, checkoutdate }) => {
+    async ({
+      lotId,
+      checkindate,
+      checkoutdate,
+    }: {
+      lotId: string;
+      checkindate: string;
+      checkoutdate: string;
+    }) => {
       const getCookie = (name: string) => {
         const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
         return match ? decodeURIComponent(match[1]) : '';
@@ -278,7 +286,7 @@ export async function resolveAprLotsWithBrowser(
           error,
         });
       } finally {
-        await page.close().catch(() => {});
+        await page.close().catch(() => { });
       }
 
       return {
@@ -290,6 +298,6 @@ export async function resolveAprLotsWithBrowser(
 
     return await Promise.all(uniqueUrls.map((url) => resolveOne(url)));
   } finally {
-    await browser.close().catch(() => {});
+    await browser.close().catch(() => { });
   }
 }

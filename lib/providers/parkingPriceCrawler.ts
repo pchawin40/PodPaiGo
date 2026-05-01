@@ -99,7 +99,7 @@ async function extractWithFetch(args: {
       status: 'found',
       lotKey: args.lotKey,
       price: found.price,
-      priceUnit: 'per-day',
+      priceUnit: 'per-day' as const,
       sourceUrl: args.sourceUrl,
       lastChecked: nowIso(),
       confidence: 'medium',

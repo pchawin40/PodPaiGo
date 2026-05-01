@@ -428,8 +428,8 @@ export async function getLiveParkingOptions(args: {
       return {
         ...option,
         price: x.availability.livePrice ?? option.price,
-        priceUnit: 'per-day',
-        priceDisplay: 'from-per-day',
+        priceUnit: 'per-day' as const,
+        priceDisplay: 'from-per-day' as const,
         priceNote: x.availability.livePrice
           ? 'Selected-date APR price found. Verify final checkout price before booking.'
           : option.priceNote,

@@ -62,8 +62,8 @@ function withAprLivePrice(option: any, aprLivePrices: Record<string, number>) {
   return {
     ...option,
     price: livePrice,
-    priceDisplay: 'from-per-day',
-    priceUnit: 'per-day',
+    priceDisplay: 'from-per-day' as const,
+    priceUnit: 'per-day' as const,
     trustStatus: 'live',
     priceNote: 'APR listed price',
     bestFor: Array.from(
@@ -966,8 +966,8 @@ function OptionCard({
     isAprOption(opt)
       ? {
         ...opt,
-        priceDisplay: 'from-per-day',
-        priceUnit: 'per-day',
+        priceDisplay: 'from-per-day' as const,
+        priceUnit: 'per-day' as const,
       }
       : opt,
     isAprOption(opt) && typeof opt.price === 'number' ? opt.price : item.cost,
