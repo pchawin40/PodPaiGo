@@ -6,6 +6,12 @@ import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
 import { checkAprLotsAvailability } from './aprLotAvailability';
 import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 
+type GooglePlace = {
+  displayName?: { text?: string };
+  rating?: number;
+  userRatingCount?: number;
+};
+
 type ParkingMarketplace = {
   id: string;
   name: string;
@@ -224,7 +230,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
 
   const mapped = await Promise.all(
     places
-      .filter((place: any) => {
+      .filter((place: GooglePlace) => {
         const name = String(place.displayName?.text || '').toLowerCase();
         return (
           name.includes('parking') ||
@@ -245,7 +251,7 @@ async function getGoogleParkingPlaces(airportCode: string): Promise<ParkingOptio
         );
       })
       .slice(0, 40)
-      .map(async (place: any): Promise<ParkingOption> => {
+      .map(async (place: GooglePlace): Promise<ParkingOption> => {
         const rating = typeof place.rating === 'number' ? place.rating : undefined;
         const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : undefined;
 

@@ -1,3 +1,9 @@
+type AprAvailabilityResult = {
+    bookingUrl?: string;
+    livePrice?: number | null;
+    lotId?: number | null;
+};
+
 export async function checkAprLotsAvailability(args: {
     lots: Array<{ lotName: string; bookingUrl: string }>;
 }): Promise<Record<string, AprAvailabilityResult>> {
@@ -25,7 +31,7 @@ export async function checkAprLotsAvailability(args: {
         const results = Array.isArray(data.results) ? data.results : [];
 
         return Object.fromEntries(
-            results.map((result: any) => [
+            results.map((result: AprAvailabilityResult) => [
                 result.bookingUrl,
                 {
                     available: true,

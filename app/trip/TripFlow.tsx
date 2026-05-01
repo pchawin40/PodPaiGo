@@ -45,10 +45,6 @@ function parseLocalDate(dateString: string): Date | null {
   return new Date(year, month - 1, day);
 }
 
-function formatDateInputValue(date: Date): string {
-  return formatLocalDateInputValue(date);
-}
-
 function addDays(dateString: string, days: number): string {
   const parsed = parseLocalDate(dateString);
   if (!parsed) return dateString;

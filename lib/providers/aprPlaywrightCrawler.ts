@@ -1,3 +1,5 @@
+import type { Page } from 'playwright';
+
 export type AprBrowserPriceResult = {
   bookingUrl: string;
   lotId: number | null;
@@ -44,7 +46,7 @@ function fallbackLotIdFromAprUrl(url: string): number | null {
   return null;
 }
 
-export async function extractVisibleAprPrice(page: any): Promise<number | null> {
+export async function extractVisibleAprPrice(page: Page): Promise<number | null> {
   return page.evaluate(() => {
     const parseMoney = (value: string | null | undefined) => {
       if (!value) return null;
@@ -71,7 +73,7 @@ export async function extractVisibleAprPrice(page: any): Promise<number | null> 
   });
 }
 
-async function extractAprPageData(page: any): Promise<{
+async function extractAprPageData(page: Page): Promise<{
   lotId: number | null;
   rate: number | null;
 }> {
@@ -104,7 +106,7 @@ async function extractAprPageData(page: any): Promise<{
 }
 
 async function fetchAprSelectedDatePriceFromPage(
-  page: any,
+  page: Page,
   args: {
     lotId: number;
     checkInDate?: string;
@@ -158,7 +160,7 @@ async function fetchAprSelectedDatePriceFromPage(
 
       const text = await res.text();
 
-      let data: any = null;
+      let data: unknown = null;
       try {
         data = JSON.parse(text);
       } catch {

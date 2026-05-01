@@ -77,10 +77,6 @@ function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOpt
   return Math.max(5, 25 - transferPenalty + segmentBoost + timeBoost);
 }
 
-function getTransitWaitPenalty(transit: TransitOption): number {
-  return transit.frequency / 2;
-}
-
 function getTransitJourneyWaitPenalty(transit: TransitOption | TransitJourney): number {
   const transitSegments = 'segments' in transit && transit.segments
     ? transit.segments.filter(s => s.mode !== 'drive' && s.mode !== 'walk')
@@ -255,7 +251,7 @@ export function rankRecommendations(
   const useParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip';
 
   const transportPreference =
-    (tripData as any).transportAvailability || 'all';
+    'transportAvailability' in tripData ? tripData.transportAvailability || 'all' : 'all';
 
   // Mode preference adjustment function
   const modePreferenceAdjustment = (

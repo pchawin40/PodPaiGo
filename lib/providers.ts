@@ -219,7 +219,14 @@ export class LiveTrafficProvider implements TrafficProvider {
         // Prepare computeRouteMatrix request body
         const departureTimeSeconds = Math.max(0, Math.floor(new Date(resolvedDateTime).getTime() / 1000));
 
-        const body: any = {
+        const body: {
+          travelMode: string;
+          routingPreference: string;
+          origins: unknown[];
+          destinations: unknown[];
+          regionCode: string;
+          departureTime: { seconds: number };
+        } = {
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_AWARE',
           origins: [],
@@ -276,7 +283,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           throw new Error('Empty response from Routes API');
         }
 
-        let data: any = null;
+        let data: unknown = null;
         try {
           data = JSON.parse(text);
         } catch (e) {
@@ -303,7 +310,7 @@ export class LiveTrafficProvider implements TrafficProvider {
         }
 
         // Support multiple response shapes: array, object.rows, object.matrix.rows
-        let element: any = null;
+        let element: unknown = null;
 
         if (Array.isArray(data) && data.length > 0) {
           // dataset is array of elements
@@ -405,9 +412,10 @@ export class LiveTrafficProvider implements TrafficProvider {
       } finally {
         ROUTE_INFLIGHT.delete(cacheKey);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Log safe status message if available
-      const safeMsg = error?.message || (error?.error?.message) || String(error);
+      const safeMsg =
+        error instanceof Error ? error.message : String(error);
       if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
         console.warn('Live traffic API failed, falling back to mock:', safeMsg);
       }

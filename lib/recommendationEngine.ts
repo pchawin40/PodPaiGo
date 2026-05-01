@@ -13,6 +13,21 @@ import {
   rankRecommendations
 } from './domain';
 
+type TripDataWithTransport = TripData & {
+  transportAvailability?: TransportAvailability;
+  airportCode?: string;
+};
+
+type TransitOptionWithFrequency = TransitOption & {
+  frequency?: number;
+};
+
+type TransitSegmentLike = {
+  mode?: string;
+};
+
+type TransitSegmentMode = NonNullable<TransitJourney['segments']>[number]['mode'];
+
 function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
   const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
     .filter(Boolean)
@@ -137,7 +152,7 @@ function buildTransitOnlyJourneys(origin: string, destination: string): TransitJ
       const walkToStop = 10;
       const walkToTerminal = 6;
       const totalDuration = walkToStop + t.duration + walkToTerminal;
-      const mode = t.id.toLowerCase().includes('rail')
+      const mode: TransitSegmentMode = t.id.toLowerCase().includes('rail')
         ? 'light-rail'
         : t.id.toLowerCase().includes('bus')
           ? 'bus'
@@ -151,7 +166,13 @@ function buildTransitOnlyJourneys(origin: string, destination: string): TransitJ
         totalCost: t.price,
         segments: [
           { mode: 'walk', name: 'Walk to transit stop', duration: walkToStop, cost: 0 },
-          { mode: mode as any, name: t.name, duration: t.duration, cost: t.price, frequency: (t as any).frequency },
+          {
+            mode,
+            name: t.name,
+            duration: t.duration,
+            cost: t.price,
+            frequency: (t as TransitOptionWithFrequency).frequency,
+          },
           { mode: 'walk', name: 'Walk to terminal', duration: walkToTerminal, cost: 0 },
         ],
         transfers: 0,
@@ -169,14 +190,16 @@ function buildTransitOnlyJourneys(origin: string, destination: string): TransitJ
 }
 
 function resolveTransportAvailability(tripData: TripData): TransportAvailability {
-  const raw = (tripData as any).transportAvailability;
-  return (raw === 'car' || raw === 'rideshare' || raw === 'transit' || raw === 'all') ? raw : 'all';
+  const raw = (tripData as TripDataWithTransport).transportAvailability;
+  return raw === 'car' || raw === 'rideshare' || raw === 'transit' || raw === 'all'
+    ? raw
+    : 'all';
 }
 
 function hasDriveSegment(transit: TransitOption): boolean {
-  const segs = (transit as any)?.segments;
+  const segs = (transit as { segments?: TransitSegmentLike[] }).segments;
   if (!Array.isArray(segs)) return false;
-  return segs.some((s: any) => s?.mode === 'drive');
+  return segs.some((s) => s.mode === 'drive');
 }
 
 // Recommendation engine - testable domain logic
@@ -200,7 +223,15 @@ export class RecommendationEngine {
     const allowTransit =
       transportAvailability === 'transit' || transportAvailability === 'all';
 
-    let [parking, rideshare, rawTransit, tsaEstimate, trafficEstimate, flightInfo, locationInfo] = await Promise.all([
+    const [
+      rawParking,
+      rawRideshare,
+      rawTransit,
+      tsaEstimate,
+      trafficEstimate,
+      flightInfo,
+      locationInfo,
+    ] = await Promise.all([
       allowCarOptions
         ? this.provider.getParkingOptions(
           tripData.origin,
@@ -221,9 +252,11 @@ export class RecommendationEngine {
       this.provider.getAirportInfo(tripData.destination),
     ]);
 
-    let transit: TransitOption[] = rawTransit as any;
+    let parking = rawParking;
+    let rideshare = rawRideshare;
+    let transit = rawTransit;
 
-    const airportCode = (tripData.airportCode || 'SEA').toUpperCase();
+    const airportCode = ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase();
 
     if (airportCode !== 'SEA') {
       parking = parking.filter((p) => !isSeaTacOnlyOption(p));
