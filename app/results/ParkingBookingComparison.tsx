@@ -133,49 +133,50 @@ export default function ParkingBookingComparison({ parkingOptions, tripData, apr
   const sortedRows = [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.provider.localeCompare(b.provider));
 
   return (
-    <details className="w-full rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      <summary className="w-full cursor-pointer px-5 py-4 text-base font-medium text-zinc-900">
+    <details className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
+      <summary className="w-full cursor-pointer px-5 py-4 text-base font-semibold text-zinc-900">
         Compare booking options
       </summary>
-      <div className="px-4 pb-4">
-        <div className="mt-3">
-          <div className="space-y-2">
-            {sortedRows.map((r) => (
-              <div
-                key={r.provider}
-                className="flex flex-col gap-3 rounded-xl border border-zinc-100 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
+
+      <div className="border-t border-zinc-100 px-4 pb-4 pt-3">
+        <div className="space-y-3">
+          {sortedRows.map((r) => (
+            <div
+              key={r.provider}
+              className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-zinc-900">
                     {r.provider}
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-800">
                       {r.price}
                     </span>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+
+                    <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600">
                       {r.notes}
                     </span>
                   </div>
                 </div>
 
-                <div className="shrink-0">
-                  {r.link ? (
-                    <a
-                      href={r.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
-                    >
-                      Open
-                    </a>
-                  ) : (
-                    <span className="text-xs text-zinc-500">Unavailable</span>
-                  )}
-                </div>
+                {r.link ? (
+                  <a
+                    href={r.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    Open
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-xs text-zinc-500">Unavailable</span>
+                )}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
     </details>

@@ -28,6 +28,54 @@ function formatTimeFriendly(time24: string) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+function parkingLotDestination(option: any): string {
+  const routeDestination = String(option.routeDestination || '');
+  const name = String(option.name || '');
+
+  const routeLooksLikeAirport =
+    routeDestination.toLowerCase().includes('seattle-tacoma') ||
+    routeDestination.toLowerCase().includes('seatac') ||
+    routeDestination.toLowerCase().includes('central terminal') ||
+    routeDestination.toLowerCase().includes('17801 international');
+
+  if (name && routeLooksLikeAirport) {
+    return `${name}, SeaTac, WA`;
+  }
+
+  return routeDestination || `${name}, SeaTac, WA`;
+}
+
+function parkingRouteLink(option: any, tripData: TripData | null): string | null {
+  const origin = tripData?.origin;
+  const parkingLot = parkingLotDestination(option);
+
+  if (!parkingLot) return option.mapLink || null;
+
+  if (!origin) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parkingLot)}`;
+  }
+
+  return (
+    `https://www.google.com/maps/dir/?api=1` +
+    `&origin=${encodeURIComponent(origin)}` +
+    `&destination=${encodeURIComponent(parkingLot)}` +
+    `&travelmode=driving`
+  );
+}
+
+function parkingRouteText(option: any): string {
+  const drive = typeof option.distance === 'number'
+    ? `Drive ${option.distance < 60 ? `${option.distance} min` : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`}`
+    : null;
+
+  const transfer =
+    option.transferType === 'shuttle'
+      ? `shuttle ${option.shuttleMinutes ?? option.transferToTerminalMinutes ?? 12} min`
+      : `walk ${option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5} min`;
+
+  return [drive, transfer].filter(Boolean).join(' + ');
+}
+
 function parseLocalDate(dateString: string): Date | null {
   const m = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
@@ -306,9 +354,7 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-1 text-sm text-zinc-600">
-            {best.transferType === 'shuttle'
-              ? `${best.shuttleMinutes ?? best.transferToTerminalMinutes ?? 10} min shuttle`
-              : `${best.walkingMinutes ?? best.transferToTerminalMinutes ?? 5} min walk`}
+            {parkingRouteText(best)}
             {savings ? ` · ${formatMoneyWhole(savings)} cheaper than official parking` : ''}
           </div>
 
@@ -338,16 +384,29 @@ export default function ParkingSmartPick({
           </div>
         </div>
 
-        {best.sourceLink && (
-          <a
-            href={best.sourceLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            {ctaLabel}
-          </a>
-        )}
+        <div className="flex shrink-0 flex-col gap-2">
+          {best.sourceLink && (
+            <a
+              href={best.sourceLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              {ctaLabel}
+            </a>
+          )}
+
+          {parkingRouteLink(best, tripData) && (
+            <a
+              href={parkingRouteLink(best, tripData) || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+            >
+              View route
+            </a>
+          )}
+        </div>
       </div>
     </section>
   );

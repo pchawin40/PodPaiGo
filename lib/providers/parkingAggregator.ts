@@ -348,7 +348,10 @@ export async function getLiveParkingOptions(args: {
 
   // Keep recommendations fast. Google Places + APR crawling should run in background jobs,
   // not on every /api/recommendations request.
-  const liveGoogleOptions: ParkingOption[] = [];
+  const liveGoogleOptions =
+    process.env.PARKING_DISCOVERY_PROVIDER === 'google'
+      ? await getGoogleParkingPlaces(airport.id)
+      : [];
 
   const cachedAprLots =
     airport.id === 'SEA' && args.checkInDate && args.checkOutDate

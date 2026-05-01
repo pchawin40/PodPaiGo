@@ -153,6 +153,33 @@ function formatMinutes(min: number): string {
   return result.trim();
 }
 
+function parkingRouteBreakdown(option: any): string {
+  const drive = option.distance ? `Drive ${formatMinutes(option.distance)}` : null;
+
+  const transfer =
+    option.transferType === 'shuttle'
+      ? `shuttle ${formatMinutes(option.shuttleMinutes ?? option.transferToTerminalMinutes ?? 12)}`
+      : `walk ${formatMinutes(option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5)}`;
+
+  return [drive, transfer].filter(Boolean).join(' + ');
+}
+
+function parkingDailyCost(option: any): string {
+  if (typeof option.price !== 'number' || option.price <= 0) return 'Check live price';
+  return `${formatMoney(option.price)}/day`;
+}
+
+function parkingTripTotalText(option: any, tripData: TripData | null): string | null {
+  if (typeof option.price !== 'number' || option.price <= 0) return null;
+
+  const days = estimateParkingDays(tripData);
+  const total = option.price * days;
+
+  if (days <= 1) return `Est. total: ${formatMoney(total)} for 1 day`;
+
+  return `Est. total: ${formatMoney(total)} for ${days} days`;
+}
+
 function parseHHMMToMinutes(time24: string): number | null {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
   if (!m) return null;
@@ -299,6 +326,18 @@ function PriceLegend() {
   );
 }
 
+function providerIcon(providerName: string): string {
+  const name = providerName.toLowerCase();
+
+  if (name.includes('lyft')) return 'lyft';
+  if (name.includes('uber')) return 'uber';
+  if (name.includes('taxi')) return 'taxi';
+  if (name.includes('sound transit')) return '🚆';
+  if (name.includes('google maps')) return '🗺️';
+
+  return '🚗';
+}
+
 function PricingLinksSection({
   title,
   items,
@@ -309,11 +348,12 @@ function PricingLinksSection({
   if (!items || items.length === 0) return null;
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
         <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
-        <p className="mt-1 text-sm text-zinc-600">Pricing + links (best-effort, may vary).</p>
+        <p className="mt-1 text-sm text-zinc-600">Pricing + links, best-effort and may vary.</p>
       </div>
+
       <div className="divide-y divide-zinc-100">
         {items.map((it: any) => {
           const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
@@ -322,35 +362,71 @@ function PricingLinksSection({
           const kind = it.priceDisplay as string | undefined;
 
           return (
-            <div key={it.id || it.name} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-zinc-900">{it.name}</div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <div className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
-                    {trust.label}
+            <div key={it.id || it.name} className="px-5 py-5">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-bold text-zinc-900">
+                  {providerIcon(it.name)}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-base font-semibold text-zinc-900">
+                        {it.name}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-lg font-bold text-zinc-900">
+                      {price.primary}
+                    </div>
                   </div>
-                  {kind && (
-                    <div className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
-                      {pricingKindLabel(kind)}
+
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                      {trust.label}
+                    </span>
+
+                    {kind && (
+                      <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                        {pricingKindLabel(kind)}
+                      </span>
+                    )}
+                  </div>
+
+                  {price.secondary && (
+                    <div className="mt-2 text-xs leading-relaxed text-zinc-500">
+                      {price.secondary}
                     </div>
                   )}
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    {it.mapLink && (
+                      <a
+                        href={it.mapLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                      >
+                        View route
+                      </a>
+                    )}
+
+                    {link && (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                      >
+                        {it.id === 'soundtransit-planner'
+                          ? 'Open planner'
+                          : title.toLowerCase().includes('transit')
+                            ? 'Open'
+                            : 'View deal'}
+                      </a>
+                    )}
+                  </div>
                 </div>
-                {price.secondary && (
-                  <div className="mt-2 text-xs text-zinc-500">{price.secondary}</div>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-sm font-semibold text-zinc-900">{price.primary}</div>
-                {link && (
-                  <a
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    {it.id === 'soundtransit-planner' ? 'Open planner' : 'Open route'}
-                  </a>
-                )}
               </div>
             </div>
           );
@@ -561,6 +637,24 @@ function estimateParkingDays(tripData: TripData | null): number {
 
 function googleMapsSearchLink(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function googleMapsParkingRouteLink(option: any, origin: string | null, tripData: TripData | null): string | null {
+  const parkingLot = option.routeDestination || option.mapLink || option.name;
+  if (!parkingLot) return null;
+
+  // For the main route button, route to the parking lot first.
+  // The app already shows shuttle/walk from lot → terminal separately.
+  if (!origin) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parkingLot)}`;
+  }
+
+  return (
+    `https://www.google.com/maps/dir/?api=1` +
+    `&origin=${encodeURIComponent(origin)}` +
+    `&destination=${encodeURIComponent(parkingLot)}` +
+    `&travelmode=driving`
+  );
 }
 
 function buildLocalDateTime(dateString: string, timeString: string): Date | null {
@@ -960,7 +1054,10 @@ function OptionCard({
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
 
   const sourceLink = opt.sourceLink || null;
-  const routeLink = routeUrlForOption(opt, tripData?.origin || null);
+  const routeLink =
+    item.type === 'parking'
+      ? googleMapsParkingRouteLink(opt, tripData?.origin || null, tripData)
+      : routeUrlForOption(opt, tripData?.origin || null);
 
   const price = optionPriceSummary(
     isAprOption(opt)
@@ -1065,8 +1162,22 @@ function OptionCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <div className="text-lg font-semibold text-zinc-900">{visiblePrice.primary}</div>
-            <div className="text-sm text-zinc-600">• {formatMinutes(item.duration)}</div>
+            <div className="text-lg font-semibold text-zinc-900">
+              {item.type === 'parking' ? parkingDailyCost(opt) : visiblePrice.primary}
+            </div>
+
+            <div className="text-sm text-zinc-600">
+              {item.type === 'parking'
+                ? `• ${parkingRouteBreakdown(opt)}`
+                : `• ${formatMinutes(item.duration)}`}
+            </div>
+
+            {item.type === 'parking' && parkingTripTotalText(opt, tripData) && (
+              <div className="text-sm font-medium text-zinc-700">
+                • {parkingTripTotalText(opt, tripData)}
+              </div>
+            )}
+
             <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
               {trust.label}
             </div>
@@ -1225,27 +1336,40 @@ function OptionCard({
           )}
         </div>
 
-        <div className="flex shrink-0 flex-row gap-2 sm:flex-col sm:items-stretch">
+        <div className="flex shrink-0 flex-col gap-2 sm:items-stretch">
           {compact ? (
-            sourceLink ? (
-              <button
-                type="button"
-                onClick={() =>
-                  item.type === 'parking'
-                    ? copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
-                    : window.open(sourceLink, '_blank', 'noopener,noreferrer')
-                }
-                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                {item.type === 'parking'
-                  ? opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
-                    ? 'View deal'
-                    : opt.type === 'official'
-                      ? 'Book official'
-                      : 'Check price'
-                  : 'View'}
-              </button>
-            ) : null
+            <div className="flex flex-col gap-2">
+              {sourceLink && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    item.type === 'parking'
+                      ? copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
+                      : window.open(sourceLink, '_blank', 'noopener,noreferrer')
+                  }
+                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {item.type === 'parking'
+                    ? opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
+                      ? 'View deal'
+                      : opt.type === 'official'
+                        ? 'Book official'
+                        : 'Check price'
+                    : 'View'}
+                </button>
+              )}
+
+              {item.type === 'parking' && routeLink && (
+                <a
+                  href={routeLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                >
+                  View route
+                </a>
+              )}
+            </div>
           ) : (
             <>
               {sourceLink && item.type === 'parking' ? (
@@ -1283,7 +1407,7 @@ function OptionCard({
                   rel="noopener noreferrer"
                   className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
                 >
-                  Route
+                  View route
                 </a>
               )}
             </>
@@ -2298,58 +2422,58 @@ export default function ResultsContent() {
                 </div>
               )}
             </div>
+          </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={startEditing}
-                className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-              >
-                Edit trip
-              </button>
-              <Link
-                href="/trip"
-                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                New trip
-              </Link>
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <button
+              type="button"
+              onClick={startEditing}
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Edit trip
+            </button>
+            <Link
+              href="/trip"
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              New trip
+            </Link>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl bg-zinc-50 p-4">
+            <div className="text-xs font-medium text-zinc-500">Origin</div>
+            <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
+          </div>
+
+          <div className="rounded-xl bg-zinc-50 p-4">
+            <div className="text-xs font-medium text-zinc-500">Destination</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-900">
+              {tripData.destination}
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-zinc-50 p-4">
-              <div className="text-xs font-medium text-zinc-500">Origin</div>
-              <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
+          <div className="rounded-xl bg-zinc-50 p-4">
+            <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-900">
+              {recommendation.trafficEstimate ? formatMinutes(recommendation.trafficEstimate.duration) : '—'}
             </div>
-
-            <div className="rounded-xl bg-zinc-50 p-4">
-              <div className="text-xs font-medium text-zinc-500">Destination</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-900">
-                {tripData.destination}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-zinc-50 p-4">
-              <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-900">
-                {recommendation.trafficEstimate ? formatMinutes(recommendation.trafficEstimate.duration) : '—'}
-              </div>
-              <div className="mt-1 text-xs text-zinc-600">
-                {recommendation.trafficEstimate ? (
-                  recommendation.trafficEstimate.trustStatus === 'live' ? (
-                    <>
-                      <span>Live traffic data · Updated just now</span>
-                      {recommendation.trafficEstimate.staticDuration && (
-                        <div className="text-xs text-zinc-600">
-                          Typical: {formatMinutes(Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}-{formatMinutes(Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    `${recommendation.trafficEstimate.congestion} congestion`
-                  )
-                ) : 'No traffic estimate'}
-              </div>
+            <div className="mt-1 text-xs text-zinc-600">
+              {recommendation.trafficEstimate ? (
+                recommendation.trafficEstimate.trustStatus === 'live' ? (
+                  <>
+                    <span>Live traffic data · Updated just now</span>
+                    {recommendation.trafficEstimate.staticDuration && (
+                      <div className="text-xs text-zinc-600">
+                        Typical: {formatMinutes(Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}-{formatMinutes(Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  `${recommendation.trafficEstimate.congestion} congestion`
+                )
+              ) : 'No traffic estimate'}
             </div>
           </div>
         </div>
@@ -2359,80 +2483,88 @@ export default function ResultsContent() {
           <PriceLegend />
         </div>
 
-        {aprLiveChecking && (
-          <div className="sticky top-3 z-40 mt-4 rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-950 shadow-lg">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 h-5 w-5 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700" />
+        {
+          aprLiveChecking && (
+            <div className="sticky top-3 z-40 mt-4 rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-950 shadow-lg">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 h-5 w-5 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700" />
 
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold">Fetching APR listed parking prices</div>
-                <div className="mt-1 text-xs text-blue-800">
-                  Results are shown now using baseline prices. APR listed rates will update automatically when pricing finishes loading.
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">Fetching APR listed parking prices</div>
+                  <div className="mt-1 text-xs text-blue-800">
+                    Results are shown now using baseline prices. APR listed rates will update automatically when pricing finishes loading.
+                  </div>
+                </div>
+
+                <div className="hidden rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 sm:block">
+                  Live update
                 </div>
               </div>
+            </div>
+          )
+        }
 
-              <div className="hidden rounded-full bg-white px-3 py-1 text-xs font-semibold text-blue-700 sm:block">
-                Live update
+        {
+          aprLivePartial && !aprLiveChecking && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
+              <div className="font-semibold">Some live parking prices could not finish loading</div>
+              <div className="mt-1 text-xs text-amber-800">
+                We updated the prices we could fetch quickly. Some lots may still show baseline or starting rates.
               </div>
             </div>
-          </div>
-        )}
-
-        {aprLivePartial && !aprLiveChecking && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
-            <div className="font-semibold">Some live parking prices could not finish loading</div>
-            <div className="mt-1 text-xs text-amber-800">
-              We updated the prices we could fetch quickly. Some lots may still show baseline or starting rates.
-            </div>
-          </div>
-        )}
+          )
+        }
 
         {/* Edit panel */}
-        {isEditing && editingData && (
-          <div id="edit-trip-panel" className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
-                <p className="mt-1 text-sm text-zinc-600">Adjust your timing or origin. We’ll recalculate instantly.</p>
+        {
+          isEditing && editingData && (
+            <div id="edit-trip-panel" className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
+                  <p className="mt-1 text-sm text-zinc-600">Adjust your timing or origin. We’ll recalculate instantly.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  className="text-sm font-medium text-blue-700 hover:text-blue-800"
+                >
+                  Close
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={cancelEditing}
-                className="text-sm font-medium text-blue-700 hover:text-blue-800"
-              >
-                Close
-              </button>
-            </div>
 
-            <div className="mt-5">
-              <EditTripForm
-                initialData={editingData}
-                onSubmit={handleRecalculate}
-                onCancel={cancelEditing}
-                intent={intent}
-                airportCode={searchParams.get('airport') || 'SEA'}
-              />
+              <div className="mt-5">
+                <EditTripForm
+                  initialData={editingData}
+                  onSubmit={handleRecalculate}
+                  onCancel={cancelEditing}
+                  intent={intent}
+                  airportCode={searchParams.get('airport') || 'SEA'}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )
+        }
 
         {/* Sort */}
         <div className="mt-6">
           <SortTabs value={sort} onChange={setSort} />
         </div>
 
-        {showParkingProviders && smartPickParkingOptions.length > 0 && (
-          <div className="mt-6">
-            <ParkingSmartPick
-              options={smartPickParkingOptions}
-              tripData={tripData}
-              leaveByTime={recommendation.leaveByTime}
-              selectedOption={smartPickOption}
-              aprLivePrices={aprLivePrices}
-              aprLiveChecking={aprLiveChecking}
-            />
-          </div>
-        )}
+        {
+          showParkingProviders && smartPickParkingOptions.length > 0 && (
+            <div className="mt-6">
+              <ParkingSmartPick
+                options={smartPickParkingOptions}
+                tripData={tripData}
+                leaveByTime={recommendation.leaveByTime}
+                selectedOption={smartPickOption}
+                aprLivePrices={aprLivePrices}
+                aprLiveChecking={aprLiveChecking}
+              />
+            </div>
+          )
+        }
 
         {/* Options */}
         <div className="mt-4 grid grid-cols-1 gap-4">
@@ -2768,8 +2900,8 @@ export default function ResultsContent() {
             Plan another trip
           </Link>
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 }
 

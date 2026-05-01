@@ -543,8 +543,9 @@ export class MockProvider implements DataProvider {
         : mockParkingOptions;
 
     return Promise.all(parkingSource.map(async option => {
-      const routeDestination = resolveAirportDestinationForRouting(destination);
-      const shouldLiveRoute = option.type === 'official';
+      const airportDestination = resolveAirportDestinationForRouting(destination);
+      const routeDestination = option.routeDestination || airportDestination;
+      const shouldLiveRoute = true;
       const routeEstimate = shouldLiveRoute
         ? await this.getRouteEstimate(origin, routeDestination, dateTime, true)
         : this.estimateRouteDuration(origin, routeDestination, option.id === 'off-airport-1' ? 55 : 60);
