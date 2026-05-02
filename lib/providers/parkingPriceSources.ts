@@ -46,4 +46,10 @@ export const SEA_PRICE_SOURCES: ParkingPriceSourceConfig[] = [
     // keep trying later
     crawlEnabled: true,
   },
+  {
+    lotKey: 'extra car',
+    label: 'Extra Car SEA',
+    urls: ['https://airportparkingreservations.com/lot-extra-car-sea'],
+    crawlEnabled: true,
+  },
 ];

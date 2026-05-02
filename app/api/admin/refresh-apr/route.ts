@@ -11,7 +11,10 @@ export async function GET(request: Request) {
     const lots = await crawlAirportParkingReservationsSea({
         checkInDate,
         checkOutDate,
+        includeSoldOut: true,
     });
+
+    const availableLots = lots.filter((lot) => !lot.isSoldOut);
 
     await saveAprPrices(
         lots.map((lot) => ({
@@ -21,11 +24,21 @@ export async function GET(request: Request) {
             airportCode: 'SEA',
             checkInDate,
             checkOutDate,
-            livePrice: lot.price,
+            livePrice: lot.isSoldOut ? null : lot.price,
+            availabilityStatus: lot.isSoldOut
+                ? 'unavailable'
+                : lot.price
+                    ? 'available'
+                    : 'unknown',
             priceSource: 'apr-tracking',
             ttlHours: 12,
         }))
     );
 
-    return NextResponse.json({ saved: lots.length, checkInDate, checkOutDate, lots });
+    return NextResponse.json({
+        saved: availableLots.length,
+        checkInDate,
+        checkOutDate,
+        lots: availableLots,
+    });
 }

@@ -39,16 +39,25 @@ export async function checkAprLotsAvailability(args: {
         const results = Array.isArray(data.results) ? data.results : [];
 
         return Object.fromEntries(
-            results.map((result: AprAvailabilityResult) => [
-                result.bookingUrl,
-                {
-                    available: true,
-                    status: result.livePrice ? 'available' : 'unknown',
-                    statusCode: 200,
-                    livePrice: result.livePrice ?? null,
-                    lotId: result.lotId ?? null,
-                } satisfies AprAvailabilityResult,
-            ])
+            results.map((result: AprAvailabilityResult) => {
+                const status =
+                    result.status === 'unavailable'
+                        ? 'unavailable'
+                        : result.livePrice
+                            ? 'available'
+                            : 'unknown';
+
+                return [
+                    result.bookingUrl,
+                    {
+                        available: status !== 'unavailable',
+                        status,
+                        statusCode: 200,
+                        livePrice: result.livePrice ?? null,
+                        lotId: result.lotId ?? null,
+                    } satisfies AprAvailabilityResult,
+                ];
+            })
         );
     } catch {
         return {};

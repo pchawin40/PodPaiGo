@@ -36,22 +36,38 @@ function blockedResult(args: { lotKey: string; sourceUrl: string; rawSnippet?: s
 }
 
 function findPriceInText(text: string): { price: number; rawSnippet: string } | null {
-  for (const pattern of PRICE_PATTERNS) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      const price = Number(match[1]);
+  const candidates: { price: number; rawSnippet: string; score: number }[] = [];
 
-      // Avoid obviously bad captures.
+  const patterns = [
+    { regex: /starting\s+from\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s*per\s*day/i, score: 100 },
+    { regex: /\$([0-9]+(?:\.[0-9]{1,2})?)\s*per\s*day/i, score: 80 },
+    { regex: /from\s+\$[0-9]+(?:\.[0-9]{1,2})?\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s*per\s*day/i, score: 120 },
+    { regex: /limited\s+offer[^$]*\$[0-9]+(?:\.[0-9]{1,2})?\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s*per\s*day/i, score: 130 },
+  ];
+
+  for (const { regex, score } of patterns) {
+    const globalRegex = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : `${regex.flags}g`);
+
+    for (const match of text.matchAll(globalRegex)) {
+      const price = Number(match[1]);
       if (Number.isFinite(price) && price >= 3 && price <= 100) {
-        return {
+        candidates.push({
           price,
           rawSnippet: match[0],
-        };
+          score,
+        });
       }
     }
   }
 
-  return null;
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.price - b.price;
+  });
+
+  return candidates[0];
 }
 
 async function extractWithFetch(args: {

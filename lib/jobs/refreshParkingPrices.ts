@@ -26,7 +26,12 @@ export async function refreshParkingPrices() {
     const summary = [];
 
     for (const range of dateRanges) {
-        const lots = await crawlAirportParkingReservationsSea(range);
+        const lots = await crawlAirportParkingReservationsSea({
+            ...range,
+            includeSoldOut: true,
+        });
+
+        const availableLots = lots.filter((lot) => !lot.isSoldOut);
 
         await saveAprPrices(
             lots.map((lot) => ({
@@ -36,7 +41,12 @@ export async function refreshParkingPrices() {
                 airportCode: AIRPORT_CODE,
                 checkInDate: range.checkInDate,
                 checkOutDate: range.checkOutDate,
-                livePrice: lot.price ?? null,
+                livePrice: lot.isSoldOut ? null : lot.price ?? null,
+                availabilityStatus: lot.isSoldOut
+                    ? 'unavailable'
+                    : lot.price
+                        ? 'available'
+                        : 'unknown',
                 priceSource: 'scheduled-refresh',
                 ttlHours: 12,
             })),
@@ -44,7 +54,7 @@ export async function refreshParkingPrices() {
 
         summary.push({
             ...range,
-            lotsSaved: lots.length,
+            lotsSaved: availableLots.length,
         });
     }
 

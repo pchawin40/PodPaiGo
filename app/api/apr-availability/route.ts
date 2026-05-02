@@ -17,7 +17,7 @@ type AprResult = {
   bookingUrl: string;
   lotId: number | null;
   livePrice: number | null;
-  status: 'resolved' | 'timeout' | 'unknown';
+  status: 'resolved' | 'timeout' | 'unavailable' | 'unknown';
   priceSource?: 'lot-page' | 'baseline' | 'cache';
   fetchedAt?: string;
 };
@@ -38,11 +38,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 // APR lot names can be inconsistent and often missing, so we try to infer a display name from the URL or known lot IDs.
 function aprLotNameFromUrl(url: string, lotId?: number | null): string {
   const knownById: Record<number, string> = {
-    226: 'Jiffy Airport Parking',
-    262: 'Extra Car Airport Parking',
-    97: 'Seattle MasterPark Lot B',
-    117: 'Hilton Seattle Airport',
-    1067: 'Skyway Inn Airport Parking',
+    97: 'Extra Car Airport Parking',
+    117: 'MasterPark Lot B',
+    226: 'Skyway Inn Airport Parking',
+    231: 'DoubleTree Seattle Airport',
+    262: 'Jiffy Airport Parking Seattle',
+    1067: 'Hilton Seattle Airport & Conference Center',
   };
 
   if (lotId && knownById[lotId]) return knownById[lotId];
@@ -133,7 +134,11 @@ export async function POST(req: Request) {
           bookingUrl: url,
           lotId: Number(cached.lotId) || null,
           livePrice: cached.livePrice,
-          status: cached.livePrice ? 'resolved' : 'unknown',
+          status: cached.availabilityStatus === 'unavailable'
+            ? 'unavailable'
+            : cached.livePrice
+              ? 'resolved'
+              : 'unknown',
           priceSource: 'cache',
           fetchedAt: cached.fetchedAt,
         };
@@ -153,7 +158,7 @@ export async function POST(req: Request) {
           bookingUrl: r.bookingUrl,
           lotId: r.lotId ?? null,
           livePrice: r.livePrice ?? null,
-          status: r.livePrice ? 'resolved' : 'unknown',
+          status: r.isSoldOut ? 'unavailable' : r.livePrice ? 'resolved' : 'unknown',
           priceSource: r.livePrice ? 'lot-page' : undefined,
         }))
         : null;
@@ -172,6 +177,7 @@ export async function POST(req: Request) {
         liveResults = missingBookingUrls.map((bookingUrl) => {
           const existing = liveResults?.find((r) => r.bookingUrl === bookingUrl);
           if (existing?.livePrice) return existing;
+          if (existing?.status === 'unavailable') return existing;
 
           const urlKey = normalize(bookingUrl);
 
@@ -212,6 +218,11 @@ export async function POST(req: Request) {
           checkInDate,
           checkOutDate,
           livePrice: result.livePrice,
+          availabilityStatus: result.status === 'unavailable'
+            ? 'unavailable'
+            : result.livePrice
+              ? 'available'
+              : 'unknown',
           priceSource: result.priceSource ?? 'apr',
           ttlHours: 12,
         })),

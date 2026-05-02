@@ -4,6 +4,7 @@ export type AprBrowserPriceResult = {
   bookingUrl: string;
   lotId: number | null;
   livePrice: number | null;
+  isSoldOut?: boolean;
 };
 
 type AprSearchArgs = {
@@ -39,7 +40,9 @@ function fallbackLotIdFromAprUrl(url: string): number | null {
   const normalized = url.toLowerCase();
 
   if (normalized.includes('skyway-inn-airport-parking-sea')) return 226;
+  if (normalized.includes('doubletree-hotel-sea')) return 231;
   if (normalized.includes('jiffy-airport-parking-sea')) return 262;
+  if (normalized.includes('hilton-seattle-airport-sea')) return 1067;
   if (normalized.includes('seattle-masterpark-lot-b-sea')) return 117;
   if (normalized.includes('extra-car')) return 97;
 
@@ -48,16 +51,11 @@ function fallbackLotIdFromAprUrl(url: string): number | null {
 
 export async function extractVisibleAprPrice(page: Page): Promise<number | null> {
   return page.evaluate(() => {
-    const parseMoney = (value: string | null | undefined) => {
-      if (!value) return null;
-      const match = value.replace(/,/g, '').match(/\$?\s*([0-9]+(?:\.[0-9]{1,2})?)/);
-      return match?.[1] ? Number(match[1]) : null;
-    };
-
     const bodyText = document.body.innerText.replace(/\s+/g, ' ');
 
     const patterns = [
-      /from\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+per day/i,
+      /from\s+\$[0-9]+(?:\.[0-9]{1,2})?\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+per day/i,
+      /starting\s+from\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+per day/i,
       /\$([0-9]+(?:\.[0-9]{1,2})?)\s+per day/i,
     ];
 
@@ -112,8 +110,10 @@ async function fetchAprSelectedDatePriceFromPage(
     checkInDate?: string;
     checkOutDate?: string;
   }
-): Promise<number | null> {
-  if (!args.checkInDate || !args.checkOutDate) return null;
+): Promise<{ rate: number | null; isSoldOut: boolean }> {
+  if (!args.checkInDate || !args.checkOutDate) {
+    return { rate: null, isSoldOut: false };
+  }
 
   const result = await page.evaluate(
     async ({
@@ -136,12 +136,8 @@ async function fetchAprSelectedDatePriceFromPage(
       }).catch(() => null);
 
       const xsrfToken = getCookie('XSRF-TOKEN');
-      const token =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}`;
-
       type AprRateResponse = {
+        available?: boolean;
         parkinglot?: {
           rate?: number | string;
           price?: number | string;
@@ -153,10 +149,18 @@ async function fetchAprSelectedDatePriceFromPage(
           data?: Array<{ rate?: number | string }>;
         };
         rate?: number | string;
+        data?: Array<{
+          data?: {
+            error?: string;
+            message?: string;
+          };
+          error?: string;
+          message?: string;
+        }>;
       };
 
-      const res = await fetch(`/parkinglot/${lotId}/search/${token}`, {
-        method: 'PUT',
+      const res = await fetch(`/parkinglot/${lotId}/search`, {
+        method: 'POST',
         credentials: 'include',
         headers: {
           accept: 'application/json, text/plain, */*',
@@ -191,11 +195,17 @@ async function fetchAprSelectedDatePriceFromPage(
         null;
 
       const rate = Number(rawRate);
+      const responseText = text.toLowerCase();
+      const isSoldOut =
+        data?.available === false ||
+        responseText.includes('sold_out') ||
+        responseText.includes('sold out');
 
       return {
         status: res.status,
         ok: res.ok,
         rate: Number.isFinite(rate) && rate > 0 ? rate : null,
+        isSoldOut,
         preview: text.slice(0, 300),
       };
     },
@@ -211,10 +221,14 @@ async function fetchAprSelectedDatePriceFromPage(
     status: result?.status,
     ok: result?.ok,
     rate: result?.rate,
+    isSoldOut: result?.isSoldOut,
     preview: result?.preview,
   });
 
-  return result?.rate ?? null;
+  return {
+    rate: result?.rate ?? null,
+    isSoldOut: Boolean(result?.isSoldOut),
+  };
 }
 
 export async function resolveAprLotsWithBrowser(
@@ -235,15 +249,14 @@ export async function resolveAprLotsWithBrowser(
 
       let lotId: number | null = null;
       let livePrice: number | null = null;
+      let isSoldOut = false;
 
       const maybeExtract = (requestUrl: string) => {
         const extracted = extractAprDataFromUrl(requestUrl);
 
+        // Tracking URLs are okay for lot ID, but NOT price.
+        // APR tracking price can be the crossed-out/base price.
         if (extracted.lotId) lotId = extracted.lotId;
-
-        if (extracted.livePrice && extracted.livePrice >= 5 && extracted.livePrice <= 80) {
-          livePrice = extracted.livePrice;
-        }
 
         const searchMatch = requestUrl.match(/parkinglot\/(\d+)\/search/i);
         if (searchMatch?.[1]) lotId = Number(searchMatch[1]);
@@ -265,30 +278,40 @@ export async function resolveAprLotsWithBrowser(
 
         await page.waitForTimeout(4000);
 
-        const visiblePrice = await extractVisibleAprPrice(page);
-        if (visiblePrice && visiblePrice >= 5 && visiblePrice <= 80) {
-          livePrice = visiblePrice;
-        }
-
         const aprPageData = await extractAprPageData(page);
 
         if (aprPageData.lotId) lotId = aprPageData.lotId;
 
         if (!lotId) lotId = fallbackLotIdFromAprUrl(url);
 
-        if (!livePrice && aprPageData.rate && aprPageData.rate >= 5 && aprPageData.rate <= 80) {
-          livePrice = aprPageData.rate;
+        const needsSelectedDatePrice = Boolean(args?.checkInDate && args?.checkOutDate);
+
+        if (!needsSelectedDatePrice) {
+          const visiblePrice = await extractVisibleAprPrice(page);
+          if (visiblePrice && visiblePrice >= 5 && visiblePrice <= 80) {
+            livePrice = visiblePrice;
+          }
+
+          if (!livePrice && aprPageData.rate && aprPageData.rate >= 5 && aprPageData.rate <= 80) {
+            livePrice = aprPageData.rate;
+          }
         }
 
         if (lotId && args?.checkInDate && args?.checkOutDate) {
-          const selectedDatePrice = await fetchAprSelectedDatePriceFromPage(page, {
+          const selectedDateResult = await fetchAprSelectedDatePriceFromPage(page, {
             lotId,
             checkInDate: args.checkInDate,
             checkOutDate: args.checkOutDate,
           });
 
-          if (selectedDatePrice && selectedDatePrice >= 5 && selectedDatePrice <= 80) {
-            livePrice = selectedDatePrice;
+          isSoldOut = selectedDateResult.isSoldOut;
+
+          if (
+            selectedDateResult.rate &&
+            selectedDateResult.rate >= 5 &&
+            selectedDateResult.rate <= 80
+          ) {
+            livePrice = selectedDateResult.rate;
           }
         }
 
@@ -296,6 +319,7 @@ export async function resolveAprLotsWithBrowser(
           url,
           lotId,
           livePrice,
+          isSoldOut,
         });
       } catch (error) {
         console.warn('[APR browser resolve failed]', {
@@ -310,6 +334,7 @@ export async function resolveAprLotsWithBrowser(
         bookingUrl: url,
         lotId,
         livePrice,
+        isSoldOut,
       };
     }
 

@@ -1,3 +1,5 @@
+import { resolveAprLotsWithBrowser } from './aprPlaywrightCrawler';
+
 export type AirportParkingReservationLot = {
   source: 'airportparkingreservations';
   lotName: string;
@@ -13,6 +15,7 @@ export type AirportParkingReservationLot = {
 type AprSearchArgs = {
   checkInDate?: string;
   checkOutDate?: string;
+  includeSoldOut?: boolean;
 };
 
 function nowIso() {
@@ -51,15 +54,7 @@ function buildAprSeaUrl(args?: AprSearchArgs): string {
     checkoutdate: formatAprDate(args.checkOutDate),
   });
 
-  return `https://airportparkingreservations.com/search/SEA?${params.toString()}`;
-}
-
-function priceFromAprTrackingUrl(url: string): number | null {
-  const decoded = decodeURIComponent(url);
-  const match = decoded.match(/(?:^|~)pr([0-9]+(?:\.[0-9]{1,2})?)(?:~|&|$)/);
-  const price = match?.[1] ? Number(match[1]) : null;
-
-  return price && Number.isFinite(price) && price >= 5 && price <= 80 ? price : null;
+  return `https://airportparkingreservations.com/sea/airport-parking?${params.toString()}`;
 }
 
 function extractNearbyPrices(html: string): AirportParkingReservationLot[] {
@@ -115,76 +110,75 @@ async function enrichLotsWithTrackingPrices(
 ): Promise<AirportParkingReservationLot[]> {
   if (!args?.checkInDate || !args?.checkOutDate || lots.length === 0) return lots;
 
-  const { chromium } = await import('playwright');
-  const browser = await chromium.launch({ headless: true });
+  const browserResults = await resolveAprLotsWithBrowser(
+    lots.map((lot) => lot.bookingUrl),
+    args
+  );
 
-  try {
-    const context = await browser.newContext();
-    const enriched: AirportParkingReservationLot[] = [];
+  const resultByUrl = new Map(
+    browserResults.map((result) => [result.bookingUrl, result])
+  );
 
-    for (const lot of lots.slice(0, 8)) {
-      const page = await context.newPage();
-      let trackingPrice: number | null = null;
+  const enriched = lots.slice(0, 8).flatMap((lot) => {
+    const result = resultByUrl.get(lot.bookingUrl);
 
-      page.on('request', (req) => {
-        const url = req.url();
-        const foundPrice = priceFromAprTrackingUrl(url);
-
-        if (foundPrice) {
-          trackingPrice = foundPrice;
-          console.log('[APR tracking price captured]', {
-            lotName: lot.lotName,
-            foundPrice,
-          });
-        }
+    if (result?.isSoldOut) {
+      console.log('[APR merge browser price]', {
+        lotName: lot.lotName,
+        baselinePrice: lot.price,
+        browserPrice: null,
+        lotId: result.lotId ?? null,
+        bookingUrl: lot.bookingUrl,
+        isSoldOut: true,
       });
 
-      try {
-        await page.goto(lot.bookingUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: 10000,
-        });
-
-        // Wait specifically until tracking price appears, not just random 5 sec
-        await page
-          .waitForFunction(() => {
-            return performance
-              .getEntriesByType('resource')
-              .some((entry) => /~pr[0-9]+(\.[0-9]{1,2})?/.test(decodeURIComponent(entry.name)));
-          }, { timeout: 8000 })
-          .catch(() => null);
-
-        // Give request listener a final moment to catch it
-        await page.waitForTimeout(1000);
-
-        const finalPrice = trackingPrice ?? lot.price;
-
-        enriched.push({
+      return args?.includeSoldOut
+        ? [{
           ...lot,
-          price: finalPrice,
-          rawSnippet:
-            trackingPrice && trackingPrice !== lot.price
-              ? `${lot.lotName} · APR tracking price · $${trackingPrice}/day`
-              : lot.rawSnippet,
+          lotId: result.lotId ?? lot.lotId ?? null,
+          price: null,
+          rawSnippet: `${lot.lotName} · APR selected-date sold out`,
           lastChecked: nowIso(),
-        });
-      } catch {
-        enriched.push(lot);
-      } finally {
-        await page.close().catch(() => { });
-      }
+          isSoldOut: true,
+        }]
+        : [];
     }
 
-    console.log('[APR FINAL ENRICHED LOTS]', enriched.map((lot) => ({
-      lotName: lot.lotName,
-      price: lot.price,
-      rawSnippet: lot.rawSnippet,
-    })));
+    const browserPrice =
+      result?.livePrice &&
+        Number.isFinite(result.livePrice) &&
+        result.livePrice >= 5 &&
+        result.livePrice <= 80
+        ? result.livePrice
+        : null;
 
-    return dedupeLots(enriched);
-  } finally {
-    await browser.close().catch(() => { });
-  }
+    console.log('[APR merge browser price]', {
+      lotName: lot.lotName,
+      baselinePrice: lot.price,
+      browserPrice,
+      lotId: result?.lotId ?? null,
+      bookingUrl: lot.bookingUrl,
+      isSoldOut: false,
+    });
+
+    return [{
+      ...lot,
+      lotId: result?.lotId ?? lot.lotId ?? null,
+      price: browserPrice ?? lot.price,
+      rawSnippet: browserPrice
+        ? `${lot.lotName} · APR selected-date browser price · $${browserPrice}/day`
+        : lot.rawSnippet,
+      lastChecked: nowIso(),
+    }];
+  });
+
+  console.log('[APR FINAL ENRICHED LOTS]', enriched.map((lot) => ({
+    lotName: lot.lotName,
+    price: lot.price,
+    rawSnippet: lot.rawSnippet,
+  })));
+
+  return dedupeLots(enriched);
 }
 
 export async function crawlAirportParkingReservationsSea(

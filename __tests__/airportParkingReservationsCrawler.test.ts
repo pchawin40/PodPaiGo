@@ -58,11 +58,11 @@ describe('airport parking reservations raw fetch', () => {
         for (const lot of lots) {
             expect(lot.isSoldOut).not.toBe(true);
         }
-    });
+    }, 45000);
 
     test('prints date-aware APR search html snippet', async () => {
         const url =
-            'https://airportparkingreservations.com/search/SEA?checkindate=May+8%2C+2026&checkoutdate=May+15%2C+2026';
+            'https://airportparkingreservations.com/sea/airport-parking?checkindate=May+8%2C+2026&checkoutdate=May+15%2C+2026';
 
         const res = await fetch(url, {
             headers: {
