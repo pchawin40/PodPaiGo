@@ -121,22 +121,12 @@ function parkingPriceLine(option: AppOption, tripData: TripData | null) {
     option.priceNote?.toLowerCase().includes('apr') ||
     option.priceNote?.toLowerCase().includes('baseline');
 
-  if (looksLikeTripTotal) {
-    const daily = option.price / days;
-
-    return {
-      primary: `${formatMoney(daily)}/day`,
-      secondary: `Est. total: ${formatMoney(option.price)} for ${days} day(s)`,
-    };
-  }
-
-  if (option.priceUnit === 'per-day') {
+  if (looksLikeTripTotal || option.priceUnit === 'per-day') {
     return {
       primary: `${formatMoney(option.price)}/day`,
       secondary: `Est. total: ${formatMoney(option.price * days)} for ${days} day(s)`,
     };
   }
-
   const daily = option.price / days;
 
   return {
@@ -471,14 +461,13 @@ function optionPriceSummary(
 
   if (isAprParking && typeof option?.price === 'number' && option.price > 0) {
     const days = estimateParkingDays(tripData);
-    const daily = option.price / days;
 
     return {
-      primary: `${formatMoney(daily)}/day`,
-      secondary: `Est. total: ${formatMoney(option.price)} for ${days} day(s) · Check final price with provider`,
+      primary: `${formatMoney(option.price)}/day`,
+      secondary: `Est. total: ${formatMoney(option.price * days)} for ${days} day(s) · Check final price with provider`,
     };
   }
-
+  
   if (kind === 'check-live') {
     if (typeof option?.price === 'number' && option.price > 0) {
       return {
