@@ -343,6 +343,7 @@ function PricingLinksSection({
           const price = formatProviderPrice(it);
           const link = bestLink(it);
           const kind = it.priceDisplay as string | undefined;
+          const isTransitSection = title.toLowerCase().includes('transit');
 
           return (
             <div key={it.id || it.name} className="px-5 py-5">
@@ -359,9 +360,11 @@ function PricingLinksSection({
                       </div>
                     </div>
 
-                    <div className="shrink-0 text-lg font-bold text-zinc-900">
-                      {price.primary}
-                    </div>
+                    {!isTransitSection && (
+                      <div className="shrink-0 text-lg font-bold text-zinc-900">
+                        {price.primary}
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -369,14 +372,14 @@ function PricingLinksSection({
                       {trust.label}
                     </span>
 
-                    {kind && (
+                    {kind && !isTransitSection && (
                       <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
                         {pricingKindLabel(kind)}
                       </span>
                     )}
                   </div>
 
-                  {price.secondary && (
+                  {price.secondary && !isTransitSection && (
                     <div className="mt-2 text-xs leading-relaxed text-zinc-500">
                       {price.secondary}
                     </div>
