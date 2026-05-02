@@ -105,6 +105,32 @@ function isAprOption(p: ParkingOption): boolean {
   return p.bookingProvider === 'AirportParkingReservations' || p.sourceName === 'AirportParkingReservations';
 }
 
+function aprLotRouteDestination(lotName: string): string {
+  const lower = lotName.toLowerCase();
+
+  if (lower.includes('jiffy')) {
+    return 'Jiffy Airport Parking Seattle, 18836 International Blvd, SeaTac, WA 98188';
+  }
+
+  if (lower.includes('skyway')) {
+    return 'Skyway Inn Airport Parking, 20045 International Blvd, SeaTac, WA 98198';
+  }
+
+  if (lower.includes('extra car')) {
+    return 'Extra Car Airport Parking, SeaTac, WA';
+  }
+
+  if (lower.includes('hilton')) {
+    return 'Hilton Seattle Airport & Conference Center, 17620 International Blvd, SeaTac, WA 98188';
+  }
+
+  if (lower.includes('masterpark lot b')) {
+    return 'MasterPark Lot B, SeaTac, WA';
+  }
+
+  return `${lotName}, SeaTac, WA`;
+}
+
 function aprLotToParkingOption(
   lot: {
     lotName: string;
@@ -147,7 +173,8 @@ function aprLotToParkingOption(
     trustStatus: 'estimated',
     sourceName: 'AirportParkingReservations',
     sourceLink: lot.bookingUrl,
-    mapLink: googleMapsSearchUrl(`${lot.lotName} SeaTac`),
+    routeDestination: aprLotRouteDestination(lot.lotName),
+    mapLink: googleMapsSearchUrl(aprLotRouteDestination(lot.lotName)),
     lastUpdated: lot.lastChecked,
     parkingBufferMinutes: 15,
     transferToTerminalMinutes: 12,
