@@ -16,8 +16,8 @@ function futureDate(daysFromNow = 1) {
 
 // Generates a URL for the results page with specified search parameters.
 function resultsUrl() {
-  const departureDate = futureDate(1);
-  const parkingCheckOutDate = futureDate(7);
+  const departureDate = futureDate(1); // tomorrow
+  const parkingCheckOutDate = futureDate(8); // week after tomorrow
 
   const search = new URLSearchParams({
     type: 'one-way-departure',
@@ -34,7 +34,7 @@ function resultsUrl() {
     departureTime: '20:00',
     parkingCheckInDate: departureDate,
     parkingCheckOutDate,
-    parkingDuration: String(6 * 24 * 60),
+    parkingDuration: String(7 * 24 * 60),
     sort: 'cheapest',
   });
 
@@ -45,7 +45,11 @@ test('export results pdf', async ({ page }) => {
   await page.goto(resultsUrl());
 
   await expect(
-    page.getByText('Best Alternatives', { exact: true })
+    page.getByText('More parking options', { exact: true })
+  ).toBeVisible({ timeout: 30000 });
+
+  await expect(
+    page.getByText('Smart parking pick', { exact: true })
   ).toBeVisible({ timeout: 30000 });
 
   await page.waitForTimeout(1500);

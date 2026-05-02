@@ -7,6 +7,9 @@ import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType
 import { getSeatacRideshareDropoffNote, resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import { parseLocalDate } from '../../lib/tripTime';
+import { estimateParkingDays } from '../../lib/tripTime';
+import { formatMoney } from '../utils/formatter';
+import { TripData } from '../../lib/types';
 
 type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
 
@@ -36,7 +39,19 @@ function formatLocalDateInputValue(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+export function parkingTripTotalText(
+  option: { price?: number },
+  tripData: TripData | null
+): string | null {
+  if (typeof option.price !== 'number' || option.price <= 0) return null;
 
+  const days = estimateParkingDays(tripData);
+  const total = option.price * days;
+
+  if (days <= 1) return `Est. total: ${formatMoney(total)} for 1 day`;
+
+  return `Est. total: ${formatMoney(total)} for ${days} days`;
+}
 
 function addDays(dateString: string, days: number): string {
   const parsed = parseLocalDate(dateString);
@@ -921,3 +936,5 @@ export default function TripFlow() {
     </div>
   );
 }
+
+

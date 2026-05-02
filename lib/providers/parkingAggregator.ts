@@ -369,7 +369,7 @@ export async function getLiveParkingOptions(args: {
       : [];
 
   const cachedAprLots =
-    airport.id === 'SEA' && args.checkInDate && args.checkOutDate
+    airport.id === 'SEA'
       ? await getCachedAprLotsForDateRange({
         airportCode: airport.id,
         checkInDate: args.checkInDate,
@@ -382,7 +382,9 @@ export async function getLiveParkingOptions(args: {
     bookingUrl: lot.bookingUrl,
     price: lot.livePrice ?? null,
     priceUnit: 'per-day' as const,
-    rawSnippet: 'Loaded from cached APR database snapshot.',
+    rawSnippet: args.checkInDate && args.checkOutDate
+      ? 'Latest cached APR baseline rate. Verify selected-date checkout price before booking.'
+      : 'Latest cached APR baseline rate.',
     lastChecked: lot.fetchedAt,
     source: 'airportparkingreservations' as const,
   }));
@@ -408,17 +410,20 @@ export async function getLiveParkingOptions(args: {
       ]
       : aprLotsRaw;
 
-  const aprLotsToCheck = aprSeedLots.slice(0, 8);
-  const aprLotsUnchecked = aprSeedLots.slice(8);
+  // Keep /api/recommendations fast.
+  // Live APR checks happen separately in /api/apr-availability after the page loads.
+  const aprLotsToCheck: typeof aprSeedLots = [];
+  const aprLotsUnchecked = aprSeedLots;
 
-  const availabilityByUrl = await checkAprLotsAvailability({
-    lots: aprLotsToCheck.map((lot) => ({
-      lotName: lot.lotName,
-      bookingUrl: lot.bookingUrl,
-    })),
-    checkInDate: args.checkInDate,
-    checkOutDate: args.checkOutDate,
-  });
+  const availabilityByUrl: Record<
+    string,
+    {
+      available: boolean;
+      status: 'available' | 'unavailable' | 'unknown';
+      livePrice: number | null;
+      lotId: number | null;
+    }
+  > = {};
 
   const aprLotsWithAvailability = [
     ...aprLotsToCheck.map((lot) => ({
@@ -466,8 +471,8 @@ export async function getLiveParkingOptions(args: {
         priceUnit: 'per-day' as const,
         priceDisplay: 'from-per-day' as const,
         priceNote: x.availability.livePrice
-          ? 'Selected-date APR price found. Verify final checkout price before booking.'
-          : option.priceNote,
+          ? 'APR price found for selected dates. Verify final checkout price before booking.'
+          : 'Latest cached APR baseline rate. Verify selected-date checkout price before booking.',
         priceConfidence: x.availability.livePrice ? 'medium' : option.priceConfidence,
         bestFor: [
           x.availability.livePrice ? 'Selected-date price' : 'Starting Rate',

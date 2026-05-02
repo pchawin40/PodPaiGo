@@ -52,7 +52,6 @@ export async function getCachedAprPrices(params: {
       and check_in_date = $2
       and check_out_date = $3
       and booking_url = any($4::text[])
-      and expires_at > now()
     order by fetched_at desc
     `,
         [
@@ -133,8 +132,8 @@ export type CachedAprLotSnapshot = {
 
 export async function getCachedAprLotsForDateRange(params: {
     airportCode: string;
-    checkInDate: string;
-    checkOutDate: string;
+    checkInDate?: string;
+    checkOutDate?: string;
 }): Promise<CachedAprLotSnapshot[]> {
     const result = await db.query(
         `
@@ -147,37 +146,17 @@ export async function getCachedAprLotsForDateRange(params: {
       fetched_at::text as "fetchedAt"
     from parking_price_snapshots
     where airport_code = $1
-      and check_in_date = $2
-      and check_out_date = $3
-      and expires_at > now()
       and booking_url is not null
+      and price_total is not null
     order by
-       booking_url,
+      booking_url,
       case when source = 'apr-tracking' then 0 else 1 end,
       fetched_at desc
     `,
-        [params.airportCode, params.checkInDate, params.checkOutDate],
+        [params.airportCode],
     );
 
-    debugLog('[DB cached APR rows]', result.rows);
-
-    const skywayDebug = await db.query(
-        `
-  select
-    lot_id,
-    lot_name,
-    price_total,
-    source,
-    check_in_date::text,
-    check_out_date::text,
-    fetched_at::text,
-    expires_at::text
-  from parking_price_snapshots
-  where lower(lot_name) like '%skyway%'
-  order by fetched_at desc
-  limit 20
-  `
-    );
+    debugLog('[DB cached APR rows latest by airport]', result.rows);
 
     return result.rows;
 }

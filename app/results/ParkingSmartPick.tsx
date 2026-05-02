@@ -4,17 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
 import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { parseLocalDate } from '../../lib/tripTime';
-
-function formatMoney(n: number) {
-  const rounded = Math.round(n * 100) / 100;
-  return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`;
-}
-
-// For savings display, we want to round to whole dollars to avoid implying false precision
-function formatMoneyWhole(n: number) {
-  const rounded = Math.round(n);
-  return `$${rounded.toLocaleString()}`;
-}
+import { formatMoney, formatMoneyWhole } from '../utils/formatter';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -321,6 +311,12 @@ export default function ParkingSmartPick({
                 ? formatMoney(best.price)
                 : `${formatMoney(best.price)}/day`}
           </div>
+
+          {typeof best.price === 'number' && best.price > 0 && best.priceUnit !== 'total' && (
+            <div className="mt-1 text-sm font-semibold text-zinc-700">
+              Est. total: {formatMoney(best.price * days)} for {days} day{days === 1 ? '' : 's'}
+            </div>
+          )}
 
           <div className="mt-1 text-sm text-zinc-600">
             {parkingRouteText(best)}
