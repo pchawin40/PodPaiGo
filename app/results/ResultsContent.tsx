@@ -467,26 +467,20 @@ function optionPriceSummary(
     option?.sourceName === 'AirportParkingReservations';
 
   if (isAprParking && typeof option?.price === 'number' && option.price > 0) {
-    const days =
-      tripData && 'parkingDuration' in tripData && tripData.parkingDuration
-        ? Math.max(1, Math.ceil((tripData.parkingDuration as number) / 60 / 24))
-        : 1;
+    const days = estimateParkingDays(tripData);
+    const daily = option.price / days;
 
     return {
-      primary: `${formatMoney(option.price)}/day`,
-      secondary: `Est. trip total: ${formatMoney(option.price * days)} for ${days} day(s) · Check final price with provider`,
-      badge: undefined,
+      primary: `${formatMoney(daily)}/day`,
+      secondary: `Est. total: ${formatMoney(option.price)} for ${days} day(s) · Check final price with provider`,
     };
   }
 
   if (kind === 'check-live') {
     if (typeof option?.price === 'number' && option.price > 0) {
-      const days = estimateParkingDays(tripData);
-      const daily = option.price / days;
-
       return {
-        primary: `${formatMoney(daily)}/day`,
-        secondary: `Est. total: ${formatMoney(option.price)} for ${days} day(s) · Check final price with provider`,
+        primary: formatMoney(option.price),
+        secondary: option?.priceNote,
       };
     }
 
@@ -501,36 +495,9 @@ function optionPriceSummary(
       ? `${formatMoney(option.price)}/day`
       : `From ${formatMoney(option.price)}/day`;
 
-    const secondary = isSelectedAprPrice
-      ? option?.priceNote && option?.priceNote !== 'Selected-date price'
-        ? option.priceNote
-        : undefined
-      : option?.priceNote || (
-        option?.bookingProvider === 'AirportParkingReservations' ? 'Listed APR rate' : undefined
-      );
-
-    const badge = undefined;
-
-    if (tripData && 'parkingDuration' in tripData && tripData.parkingDuration) {
-      const minutes = tripData.parkingDuration as number;
-      const hours = minutes / 60;
-      const days = Math.max(1, Math.ceil(hours / 24));
-
-      const tripTotal =
-        option.priceUnit === 'per-day'
-          ? option.price * days
-          : option.price;
-      return {
-        primary,
-        secondary: `${secondary || ''}${secondary ? ' · ' : ''}Est. trip total: ${formatMoney(tripTotal)} for ${days} day(s) · Check final price with provider`,
-        badge,
-      };
-    }
-
     return {
       primary,
-      secondary,
-      badge,
+      secondary: option?.priceNote,
     };
   }
 
@@ -546,11 +513,9 @@ function optionPriceSummary(
     return {
       primary: `Est. ${formatMoney(computedTotal)}`,
       secondary: option?.priceNote,
-      badge: undefined,
     };
   }
 
-  // Default legacy behavior
   return {
     primary: formatMoney(computedTotal),
     secondary: option?.priceNote,
@@ -1069,6 +1034,11 @@ function OptionCard({
     ? timing.shortByMinutes
     : null;
 
+  const nonParkingPrice =
+    typeof opt.price === 'number' && opt.price > 0
+      ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
+      : visiblePrice.primary;
+
   return (
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
@@ -1099,7 +1069,9 @@ function OptionCard({
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <div className="text-lg font-semibold text-zinc-900">
-              {parkingPrice ? parkingPrice.primary : visiblePrice.primary}
+              {item.type === 'parking'
+                ? parkingPrice?.primary
+                : nonParkingPrice}
             </div>
 
             {parkingTotalText && (
@@ -1114,9 +1086,15 @@ function OptionCard({
                 : `• ${formatMinutes(item.duration)}`}
             </div>
 
-            {(parkingPrice?.secondary || cleanSecondary) && (
+            {item.type === 'parking' && parkingPrice?.secondary && (
               <div className="basis-full text-xs text-zinc-500">
-                {parkingPrice?.secondary || cleanSecondary}
+                {parkingPrice.secondary}
+              </div>
+            )}
+
+            {item.type !== 'parking' && opt.priceNote && (
+              <div className="basis-full text-xs text-zinc-500">
+                {opt.priceNote}
               </div>
             )}
 
