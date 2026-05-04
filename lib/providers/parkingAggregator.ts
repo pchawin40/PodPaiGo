@@ -3,7 +3,7 @@ import { getAirportById } from '../airports/catalog';
 import { mockParkingOptions } from '../../data/mockData';
 import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
-import { checkAprLotsAvailability } from './aprLotAvailability';
+import { getParkWhizParkingOptions } from './parkWhiz';
 import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 import { debugLog } from '../utils/debug';
 
@@ -385,10 +385,24 @@ export async function getLiveParkingOptions(args: {
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
+  const parkWhizOptions =
+    process.env.PARKING_DISCOVERY_PROVIDER === 'parkwhiz' ||
+      process.env.PARKING_DISCOVERY_PROVIDER === 'all'
+      ? await getParkWhizParkingOptions({
+        airportCode: airport.id,
+        checkInDate: args.checkInDate,
+        checkOutDate: args.checkOutDate,
+      }).catch((error) => {
+        console.warn('ParkWhiz parking fetch failed', error);
+        return [];
+      })
+      : [];
+
   // Keep recommendations fast. Google Places + APR crawling should run in background jobs,
   // not on every /api/recommendations request.
   const liveGoogleOptions =
-    process.env.PARKING_DISCOVERY_PROVIDER === 'google'
+    process.env.PARKING_DISCOVERY_PROVIDER === 'google' ||
+      process.env.PARKING_DISCOVERY_PROVIDER === 'all'
       ? await getGoogleParkingPlaces({
         airportCode: airport.id,
         destination: args.destination,
@@ -582,6 +596,7 @@ export async function getLiveParkingOptions(args: {
 
   return dedupeParkingOptions([
     ...fallbackLots.filter((p) => p.type === 'official'),
+    ...parkWhizOptions,
     ...aprOptions,
     ...discoveredLots,
     ...fallbackLots.filter((p) => p.type !== 'official'),
@@ -590,10 +605,11 @@ export async function getLiveParkingOptions(args: {
       const name = p.name.toLowerCase();
 
       if (p.type === 'official') return 0;
-      if (isAprOption(p)) return 1;
-      if (name.includes('wally')) return 2;
-      if (name.includes('master')) return 3;
-      return 4;
+      if (p.bookingProvider === 'ParkWhiz' || p.sourceName === 'ParkWhiz') return 1;
+      if (isAprOption(p)) return 2;
+      if (name.includes('wally')) return 3;
+      if (name.includes('master')) return 4;
+      return 5;
     };
 
     const rankDiff = rank(a) - rank(b);

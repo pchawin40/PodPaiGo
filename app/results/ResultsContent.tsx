@@ -15,7 +15,11 @@ import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePric
 import { formatMinutes, parkingKeySafe } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
-import { parkingTripTotalText } from '../trip/TripFlow';
+import {
+  parkingPriceLine,
+  getParkingTotalPrice,
+  getParkingDailyPrice,
+} from '../../lib/parking/priceDisplay';
 import {
   parkingRouteBreakdown,
   routeUrlForOption,
@@ -101,39 +105,6 @@ type ProviderLinkItem = PriceableOption;
 
 
 type SortTab = 'easiest' | 'cheapest' | 'fastest';
-
-function parkingPriceLine(option: AppOption, tripData: TripData | null) {
-  if (typeof option.price !== 'number' || option.price <= 0) {
-    return { primary: 'Check live price', secondary: null };
-  }
-
-  const days = estimateParkingDays(tripData);
-
-  const isApr =
-    option.bookingProvider === 'AirportParkingReservations' ||
-    option.sourceName === 'AirportParkingReservations';
-
-  const looksLikeTripTotal =
-    isApr ||
-    option.bestFor?.includes('Selected-date price') ||
-    option.bestFor?.includes('APR listed price') ||
-    option.priceNote?.toLowerCase().includes('selected-date') ||
-    option.priceNote?.toLowerCase().includes('apr') ||
-    option.priceNote?.toLowerCase().includes('baseline');
-
-  if (looksLikeTripTotal || option.priceUnit === 'per-day') {
-    return {
-      primary: `${formatMoney(option.price)}/day`,
-      secondary: `Est. total: ${formatMoney(option.price * days)} for ${days} day(s)`,
-    };
-  }
-  const daily = option.price / days;
-
-  return {
-    primary: `${formatMoney(daily)}/day`,
-    secondary: `Est. total: ${formatMoney(option.price)} for ${days} day(s)`,
-  };
-}
 
 function isSelectedDatePrice(option: { bestFor?: string[]; priceNote?: string }) {
   return (
@@ -453,21 +424,41 @@ function optionPriceSummary(
 ): { primary: string; secondary?: string; badge?: string } {
   const kind = option?.priceDisplay as string | undefined;
   const unit = option?.priceUnit as string | undefined;
+  const days = Math.max(1, estimateParkingDays(tripData));
   const isSelectedAprPrice = isSelectedDatePrice(option);
 
   const isAprParking =
     option?.bookingProvider === 'AirportParkingReservations' ||
     option?.sourceName === 'AirportParkingReservations';
 
-  if (isAprParking && typeof option?.price === 'number' && option.price > 0) {
-    const days = estimateParkingDays(tripData);
+  // ParkWhiz / any provider returning selected-trip TOTAL
+  // Example: option.price = 112.48 total for 7 days => $16.07/day
+  if (unit === 'total' && typeof option?.price === 'number' && option.price > 0) {
+    const daily = option.price / days;
 
+    return {
+      primary: `${formatMoney(daily)}/day`,
+      secondary: `Total: ${formatMoney(option.price)} for ${days} day(s)`,
+    };
+  }
+
+  // Provider returning PER-DAY rate
+  // Example: option.price = 30/day => total = 30 * days
+  if (unit === 'per-day' && typeof option?.price === 'number' && option.price > 0) {
+    return {
+      primary: `${formatMoney(option.price)}/day`,
+      secondary: `Est. total: ${formatMoney(option.price * days)} for ${days} day(s)`,
+    };
+  }
+
+  // APR currently behaves like per-day in your app
+  if (isAprParking && typeof option?.price === 'number' && option.price > 0) {
     return {
       primary: `${formatMoney(option.price)}/day`,
       secondary: `Est. total: ${formatMoney(option.price * days)} for ${days} day(s) · Check final price with provider`,
     };
   }
-  
+
   if (kind === 'check-live') {
     if (typeof option?.price === 'number' && option.price > 0) {
       return {
@@ -892,13 +883,6 @@ function leaveByCushionText(minutesUntilLeaveBy: number | null | undefined): str
   return ` · ${formatMinutes(minutesUntilLeaveBy)} buffer`;
 }
 
-function hasTripField<K extends string>(
-  tripData: TripData | null,
-  key: K
-): tripData is TripData & Record<K, unknown> {
-  return !!tripData && key in tripData;
-}
-
 function OptionCard({
   compact = false,
   item,
@@ -955,28 +939,27 @@ function OptionCard({
     }
     : price;
 
-  const parkingTotalText =
-    item.type === 'parking' ? parkingTripTotalText(opt, tripData) : null;
-
-  const cleanSecondary =
-    item.type === 'parking' && parkingTotalText
-      ? visiblePrice.secondary?.replace(/^Check live price\s*·?\s*/i, '')
-      : visiblePrice.secondary;
+  const normalizedParkingOption =
+    item.type === 'parking'
+      ? ({
+        ...(opt as ParkingOption),
+        price:
+          typeof opt.price === 'number' && opt.price > 0
+            ? opt.price
+            : typeof item.cost === 'number' && item.cost > 0 && item.cost < 999
+              ? item.cost
+              : 999,
+      } satisfies ParkingOption)
+      : null;
 
   const parkingPrice =
-    item.type === 'parking'
-      ? parkingPriceLine(
-        {
-          ...opt,
-          price:
-            typeof opt.price === 'number' && opt.price > 0
-              ? opt.price
-              : typeof item.cost === 'number' && item.cost > 0 && item.cost < 999
-                ? item.cost
-                : undefined,
-        },
-        tripData
-      )
+    item.type === 'parking' && normalizedParkingOption
+      ? parkingPriceLine(normalizedParkingOption, tripData)
+      : null;
+
+  const parkingTotalText =
+    item.type === 'parking' && parkingPrice?.secondary
+      ? parkingPrice.secondary
       : null;
 
   const timing = computeTimingStatus({
@@ -1077,12 +1060,6 @@ function OptionCard({
                 ? `• ${parkingRouteBreakdown(opt as ParkingOption)}`
                 : `• ${formatMinutes(item.duration)}`}
             </div>
-
-            {item.type === 'parking' && parkingPrice?.secondary && (
-              <div className="basis-full text-xs text-zinc-500">
-                {parkingPrice.secondary}
-              </div>
-            )}
 
             {item.type !== 'parking' && opt.priceNote && (
               <div className="basis-full text-xs text-zinc-500">
@@ -2237,12 +2214,23 @@ export default function ResultsContent() {
   });
 
   const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
-    const aPrice = (a.option as AppOption).price ?? costOf(a);
-    const bPrice = (b.option as AppOption).price ?? costOf(b);
+    const aOption = a.option as ParkingOption;
+    const bOption = b.option as ParkingOption;
 
-    if (sort === 'cheapest') return (aPrice - bPrice) || (a.duration - b.duration);
-    if (sort === 'fastest') return (a.duration - b.duration) || (costOf(a) - costOf(b));
-    return (b.stressScore - a.stressScore) || (a.duration - b.duration) || (costOf(a) - costOf(b));
+    const aTotal = getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
+    const bTotal = getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
+
+    const aDaily = getParkingDailyPrice(aOption, tripData) ?? aTotal;
+    const bDaily = getParkingDailyPrice(bOption, tripData) ?? bTotal;
+
+    if (sort === 'cheapest') return (aTotal - bTotal) || (a.duration - b.duration);
+    if (sort === 'fastest') return (a.duration - b.duration) || (aTotal - bTotal);
+
+    return (
+      (b.stressScore - a.stressScore) ||
+      (a.duration - b.duration) ||
+      (aDaily - bDaily)
+    );
   });
 
   const smartPickRankedOption = sortedParkingForCurrentTab[0] || null;
@@ -2261,7 +2249,7 @@ export default function ResultsContent() {
 
   const rawRecommendedPicks: RankedRecommendation[] = [];
 
-  let recommendedPicks = rawRecommendedPicks.filter(
+  const recommendedPicks = rawRecommendedPicks.filter(
     (item) => !isSameAsSmartPick(item.option as AppOption)
   );
 

@@ -1,5 +1,6 @@
 import { debugLog } from '../utils/debug';
 import { db } from './client';
+import { ParkingOption } from '../types';
 
 export type CachedAprPrice = {
     bookingUrl: string;
@@ -80,26 +81,37 @@ export async function saveAprPrices(prices: SaveAprPriceInput[]): Promise<void> 
         for (const price of prices) {
             await client.query(
                 `
-        insert into parking_price_snapshots (
-          lot_id,
-          lot_name,
-          airport_code,
-          check_in_date,
-          check_out_date,
-          price_total,
-          price_daily,
-          currency,
-          availability_status,
-          booking_url,
-          source,
-          fetched_at,
-          expires_at
-        )
-        values (
-          $1, $2, $3, $4, $5,
-          $6, $6, 'USD', $7, $8,
-          $9, now(), now() + ($10 || ' hours')::interval
-        )
+insert into parking_price_snapshots (
+  lot_id,
+  lot_name,
+  airport_code,
+  check_in_date,
+  check_out_date,
+  price_total,
+  price_daily,
+  currency,
+  availability_status,
+  booking_url,
+  source,
+  fetched_at,
+  expires_at
+)
+values (
+  $1, $2, $3, $4, $5,
+  $6, $6, 'USD', $7, $8,
+  $9, now(), now() + ($10 || ' hours')::interval
+)
+on conflict (airport_code, booking_url, check_in_date, check_out_date)
+do update set
+  lot_id = excluded.lot_id,
+  lot_name = excluded.lot_name,
+  price_total = excluded.price_total,
+  price_daily = excluded.price_daily,
+  currency = excluded.currency,
+  availability_status = excluded.availability_status,
+  source = excluded.source,
+  fetched_at = excluded.fetched_at,
+  expires_at = excluded.expires_at
         `,
                 [
                     price.lotId,
@@ -166,4 +178,108 @@ export async function getCachedAprLotsForDateRange(params: {
     debugLog('[DB cached APR rows latest by airport]', result.rows);
 
     return result.rows;
+}
+
+
+export type CachedParkWhizQuotes = {
+    options: ParkingOption[];
+    fetchedAt: string;
+    expiresAt: string;
+};
+
+export function buildParkWhizCacheKey(params: {
+    airportCode: string;
+    checkInAt: string;
+    checkOutAt: string;
+    distanceMiles?: number;
+}): string {
+    return [
+        'parkwhiz',
+        params.airportCode.toUpperCase(),
+        params.checkInAt,
+        params.checkOutAt,
+        params.distanceMiles ?? 5,
+    ].join('|');
+}
+
+export async function getCachedParkWhizQuotes(params: {
+    airportCode: string;
+    checkInAt: string;
+    checkOutAt: string;
+    distanceMiles?: number;
+}): Promise<CachedParkWhizQuotes | null> {
+    const cacheKey = buildParkWhizCacheKey(params);
+
+    const result = await db.query(
+        `
+        select
+          options_json as "options",
+          fetched_at::text as "fetchedAt",
+          expires_at::text as "expiresAt"
+        from parkwhiz_quote_snapshots
+        where cache_key = $1
+          and expires_at > now()
+        order by fetched_at desc
+        limit 1
+        `,
+        [cacheKey],
+    );
+
+    if (result.rows.length === 0) return null;
+
+    return {
+        options: result.rows[0].options as ParkingOption[],
+        fetchedAt: result.rows[0].fetchedAt,
+        expiresAt: result.rows[0].expiresAt,
+    };
+}
+
+export async function saveParkWhizQuotes(params: {
+    airportCode: string;
+    checkInAt: string;
+    checkOutAt: string;
+    distanceMiles?: number;
+    options: ParkingOption[];
+    ttlHours?: number;
+}): Promise<void> {
+    const distanceMiles = params.distanceMiles ?? 5;
+
+    const cacheKey = buildParkWhizCacheKey({
+        airportCode: params.airportCode,
+        checkInAt: params.checkInAt,
+        checkOutAt: params.checkOutAt,
+        distanceMiles,
+    });
+
+    await db.query(
+        `
+        insert into parkwhiz_quote_snapshots (
+          airport_code,
+          check_in_at,
+          check_out_at,
+          distance_miles,
+          cache_key,
+          options_json,
+          fetched_at,
+          expires_at
+        )
+        values (
+          $1, $2, $3, $4, $5, $6::jsonb, now(), now() + ($7 || ' hours')::interval
+        )
+        on conflict (cache_key)
+        do update set
+          options_json = excluded.options_json,
+          fetched_at = now(),
+          expires_at = excluded.expires_at
+        `,
+        [
+            params.airportCode.toUpperCase(),
+            params.checkInAt,
+            params.checkOutAt,
+            distanceMiles,
+            cacheKey,
+            JSON.stringify(params.options),
+            params.ttlHours ?? 2,
+        ],
+    );
 }

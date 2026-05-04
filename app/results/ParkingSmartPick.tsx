@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { ParkingOption, TripData } from '../../lib/types';
 import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
-import { parseLocalDate } from '../../lib/tripTime';
-import { formatMoney, formatMoneyWhole } from '../utils/formatter';
+import { formatMoneyWhole } from '../utils/formatter';
+import {
+  getParkingDailyPrice,
+  getParkingTotalPrice,
+  parkingPriceLine,
+} from '../../lib/parking/priceDisplay';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -56,9 +60,14 @@ function parkingRouteLink(option: ParkingOption, tripData: TripData | null): str
 }
 
 function parkingRouteText(option: ParkingOption): string {
-  const drive = typeof option.distance === 'number'
-    ? `Drive ${option.distance < 60 ? `${option.distance} min` : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`}`
-    : null;
+  const drive =
+    typeof option.distance === 'number'
+      ? `Drive ${
+          option.distance < 60
+            ? `${option.distance} min`
+            : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`
+        }`
+      : null;
 
   const transfer =
     option.transferType === 'shuttle'
@@ -66,26 +75,6 @@ function parkingRouteText(option: ParkingOption): string {
       : `walk ${option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5} min`;
 
   return [drive, transfer].filter(Boolean).join(' + ');
-}
-
-function estimateDays(tripData: TripData | null) {
-  if (!tripData) return 1;
-  if ('parkingDuration' in tripData && tripData.parkingDuration) {
-    const minutes = tripData.parkingDuration;
-    const hours = minutes / 60;
-    return Math.max(1, Math.ceil(hours / 24));
-  }
-
-  if (tripData?.type === 'round-trip') {
-    const start = parseLocalDate(tripData.departureDate);
-    const end = parseLocalDate(tripData.returnDate);
-    if (start && end) {
-      const delta = end.getTime() - start.getTime();
-      return Math.max(1, Math.ceil(delta / (1000 * 60 * 60 * 24)));
-    }
-  }
-
-  return 1;
 }
 
 export default function ParkingSmartPick({
@@ -103,17 +92,11 @@ export default function ParkingSmartPick({
   aprLiveChecking?: boolean;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
-  const detailRef = useRef<HTMLDivElement | null>(null); // For closing popovers when clicking outside
-
-  const optionsWithAprLivePrice = options.map((option) => withAprLivePrice(option, aprLivePrices));
-  const selectedOptionWithAprLivePrice = selectedOption ? withAprLivePrice(selectedOption, aprLivePrices) : undefined;
+  const detailRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (
-        detailRef.current &&
-        !detailRef.current.contains(event.target as Node)
-      ) {
+      if (detailRef.current && !detailRef.current.contains(event.target as Node)) {
         setOpenDetail(null);
       }
     }
@@ -129,7 +112,13 @@ export default function ParkingSmartPick({
 
   if (!options?.length) return null;
 
-  const days = estimateDays(tripData);
+  const optionsWithAprLivePrice = options.map((option) =>
+    withAprLivePrice(option, aprLivePrices)
+  ) as ParkingOption[];
+
+  const selectedOptionWithAprLivePrice = selectedOption
+    ? (withAprLivePrice(selectedOption, aprLivePrices) as ParkingOption)
+    : undefined;
 
   const smartPickCandidates = optionsWithAprLivePrice.filter((p) => {
     const id = String(p.id || '').toLowerCase();
@@ -142,12 +131,13 @@ export default function ParkingSmartPick({
     const isGenericMarketplace =
       id.includes('spothero') ||
       id.includes('way') ||
-      id.includes('parkwhiz') ||
       id.includes('cheapairportparking') ||
       id.includes('google-parking-search');
 
     const hasRealLotSignal =
       isAprLiveLot ||
+      p.bookingProvider === 'ParkWhiz' ||
+      p.sourceName === 'ParkWhiz' ||
       !!p.reviewScore ||
       name.includes('wally') ||
       name.includes('masterpark') ||
@@ -159,31 +149,45 @@ export default function ParkingSmartPick({
     return !isGenericMarketplace && hasRealLotSignal;
   });
 
-  const candidateOptions = smartPickCandidates.length > 0 ? smartPickCandidates : optionsWithAprLivePrice;
+  const candidateOptions =
+    smartPickCandidates.length > 0 ? smartPickCandidates : optionsWithAprLivePrice;
 
   const cheapestOfficial = [...optionsWithAprLivePrice]
     .filter((p) => p.type === 'official')
-    .sort((a, b) => (a.price ?? 999) - (b.price ?? 999))[0];
+    .sort(
+      (a, b) =>
+        (getParkingTotalPrice(a, tripData) ?? 999999) -
+        (getParkingTotalPrice(b, tripData) ?? 999999)
+    )[0];
 
   const cheapest = [...candidateOptions].sort(
-    (a, b) => (a.price ?? 999) - (b.price ?? 999)
+    (a, b) =>
+      (getParkingTotalPrice(a, tripData) ?? 999999) -
+      (getParkingTotalPrice(b, tripData) ?? 999999)
   )[0];
 
   const lowestStress = [...candidateOptions].sort((a, b) => {
     const stressScore = (p: ParkingOption) => {
       const isWalk = p.transferType !== 'shuttle';
-      const transfer = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
+      const transfer =
+        p.shuttleMinutes ??
+        p.walkingMinutes ??
+        p.transferToTerminalMinutes ??
+        15;
+
       const confidence =
-        p.priceConfidence === 'high' ? 20 :
-          p.priceConfidence === 'medium' ? 10 :
-            0;
+        p.priceConfidence === 'high'
+          ? 20
+          : p.priceConfidence === 'medium'
+            ? 10
+            : 0;
 
       return (
         (isWalk ? 40 : 0) +
         confidence +
         (p.covered ? 10 : 0) -
         transfer * 2 -
-        (p.price ?? 999) * 0.25
+        (getParkingDailyPrice(p, tripData) ?? 999) * 0.25
       );
     };
 
@@ -192,18 +196,25 @@ export default function ParkingSmartPick({
 
   const bestValue = [...candidateOptions].sort((a, b) => {
     const valueScore = (p: ParkingOption) => {
-      const price = p.price ?? 999;
-      const transfer = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
+      const price = getParkingDailyPrice(p, tripData) ?? 999;
+      const transfer =
+        p.shuttleMinutes ??
+        p.walkingMinutes ??
+        p.transferToTerminalMinutes ??
+        15;
+
       const review = p.reviewScore ? p.reviewScore * 8 : 0;
       const liveBonus = p.trustStatus === 'live' ? 12 : 0;
       const confidenceBonus =
-        p.priceConfidence === 'high' ? 12 :
-          p.priceConfidence === 'medium' ? 8 :
-            0;
+        p.priceConfidence === 'high'
+          ? 12
+          : p.priceConfidence === 'medium'
+            ? 8
+            : 0;
 
       const aprUnknownPenalty =
         p.bookingProvider === 'AirportParkingReservations' &&
-          (p.availabilityScore ?? 0) < 50
+        (p.availabilityScore ?? 0) < 50
           ? 50
           : 0;
 
@@ -213,37 +224,21 @@ export default function ParkingSmartPick({
     return valueScore(b) - valueScore(a);
   })[0];
 
-  function normalizeSmartPickPrice(option: ParkingOption) {
-    const isApr =
-      option?.bookingProvider === 'AirportParkingReservations' ||
-      option?.sourceName === 'AirportParkingReservations';
-
-    if (!isApr) return option;
-
-    const dailyPrice = Number(option?.price);
-
-    if (dailyPrice > 0) {
-      return {
-        ...option,
-        price: dailyPrice,
-        priceDisplay: 'from-per-day' as const,
-        priceUnit: 'per-day' as const,
-      };
-    }
-
-    return option;
-  }
-
-  const best = normalizeSmartPickPrice(
+  const best =
     selectedOptionWithAprLivePrice ||
     cheapest ||
     bestValue ||
     lowestStress ||
-    candidateOptions[0]
-  );
+    candidateOptions[0];
 
-  const bestTotal = (best.price ?? 0) * days;
-  const officialTotal = cheapestOfficial ? (cheapestOfficial.price ?? 0) * days : null;
+  if (!best) return null;
+
+  const bestTotal = getParkingTotalPrice(best, tripData) ?? 0;
+  const officialTotal = cheapestOfficial
+    ? getParkingTotalPrice(cheapestOfficial, tripData)
+    : null;
+
+  const bestPriceDisplay = parkingPriceLine(best, tripData);
 
   const savings =
     officialTotal && officialTotal > bestTotal
@@ -251,13 +246,9 @@ export default function ParkingSmartPick({
       : null;
 
   const savingsPercent =
-    savings && officialTotal
-      ? Math.round((savings / officialTotal) * 100)
-      : null;
+    savings && officialTotal ? Math.round((savings / officialTotal) * 100) : null;
 
-  const displayLeaveByTime = leaveByTime
-    ? formatTimeFriendly(leaveByTime)
-    : null;
+  const displayLeaveByTime = leaveByTime ? formatTimeFriendly(leaveByTime) : null;
 
   const ctaLabel =
     best.bookingProvider === 'AirportParkingReservations'
@@ -274,9 +265,7 @@ export default function ParkingSmartPick({
 
       <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-zinc-900">
-            {best.name}
-          </h2>
+          <h2 className="text-xl font-semibold text-zinc-900">{best.name}</h2>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
@@ -305,16 +294,12 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-4 text-2xl font-bold text-zinc-900">
-            {typeof best.price !== 'number' || best.price <= 0
-              ? 'Check live price'
-              : best.priceUnit === 'total'
-                ? formatMoney(best.price)
-                : `${formatMoney(best.price)}/day`}
+            {bestPriceDisplay.primary}
           </div>
 
-          {typeof best.price === 'number' && best.price > 0 && best.priceUnit !== 'total' && (
+          {bestPriceDisplay.secondary && (
             <div className="mt-1 text-sm font-semibold text-zinc-700">
-              Est. total: {formatMoney(best.price * days)} for {days} day{days === 1 ? '' : 's'}
+              {bestPriceDisplay.secondary}
             </div>
           )}
 
@@ -332,7 +317,7 @@ export default function ParkingSmartPick({
           <div className="mt-3 text-sm text-zinc-700">
             {savings ? (
               <>
-                Save {' '}
+                Save{' '}
                 <span className="font-semibold text-emerald-800">
                   {formatMoneyWhole(savings)}
                 </span>{' '}
