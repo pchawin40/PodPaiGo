@@ -9,6 +9,8 @@ import { debugLog } from '../utils/debug';
 import { getParkingLotsByAirport } from '../parking/inventory';
 import { inventoryLotToParkingOption } from '../parking/inventoryToParkingOption';
 import { enrichInventoryOptionsWithPrices } from '../parking/priceMatcher';
+import { calculateParkingAvailabilityScore } from '../parking/availabilityScore';
+import { normalizeParkingPriceForTrip } from '../parking/parkingPriceNormalizer';
 
 type GooglePlace = {
   id?: string;
@@ -51,6 +53,17 @@ const PARKING_MARKETPLACES: ParkingMarketplace[] = [
     url: 'https://www.parkwhiz.com/airport-parking/',
   },
 ];
+
+function withAvailabilityScore(option: ParkingOption): ParkingOption {
+  const availabilityScore = calculateParkingAvailabilityScore(option);
+
+  return {
+    ...option,
+    availabilityScore,
+    availability: availabilityScore,
+    isAvailable: option.availabilityStatus !== 'unavailable',
+  };
+}
 
 // Normalize lot names by lowercasing and removing non-alphanumeric characters to help deduplication
 function normalizeLotName(name: string): string {
@@ -148,11 +161,11 @@ function aprLotToParkingOption(
   const lower = lot.lotName.toLowerCase();
   const covered = lower.includes('covered') || lot.rawSnippet?.toLowerCase().includes('covered') || false;
 
-  return {
+  const option: ParkingOption = {
     id: `sea-apr-${lower.replace(/[^a-z0-9]+/g, '-')}`,
     name: lot.lotName,
     type: 'off-airport',
-    price: lot.price ?? 30,
+    price: lot.price ?? 0,
     priceDisplay:
       availabilityStatus === 'unavailable'
         ? 'unavailable'
@@ -172,7 +185,7 @@ function aprLotToParkingOption(
     priceConfidence: availabilityStatus === 'available' ? 'medium' : 'low',
     bookingProvider: 'AirportParkingReservations',
     distance: 12,
-    availability: availabilityStatus === 'available' ? 85 : 35,
+    availability: 50,
     trustStatus: 'estimated',
     sourceName: 'AirportParkingReservations',
     sourceLink: lot.bookingUrl,
@@ -185,7 +198,7 @@ function aprLotToParkingOption(
     walkingMinutes: 2,
     shuttleMinutes: 12,
     covered,
-    availabilityScore: availabilityStatus === 'available' ? 85 : 35,
+    availabilityScore: 50,
     assumptions: [
       'Parsed from AirportParkingReservations SEA airport parking page.',
       lot.rawSnippet || 'Rate and lot metadata should be verified before booking.',
@@ -200,6 +213,8 @@ function aprLotToParkingOption(
       covered ? 'Covered' : '',
     ].filter(Boolean),
   };
+
+  return withAvailabilityScore(option);
 }
 
 function resolveLotKeyFromName(name: string): string | null {
@@ -322,7 +337,7 @@ async function getGoogleParkingPlaces(args: {
         const priceNote = dynamicPricing?.priceNote ?? staticPricing.priceNote;
         const priceConfidence = dynamicPricing?.priceConfidence ?? staticPricing.priceConfidence;
 
-        return {
+        const option: ParkingOption = {
           id: `${airport.id.toLowerCase()}-google-${place.id}`,
           name,
           type: isOfficial ? 'official' : 'off-airport',
@@ -330,16 +345,18 @@ async function getGoogleParkingPlaces(args: {
           priceDisplay,
           priceUnit: priceUnit ?? undefined,
           priceNote,
+          availabilityStatus: 'unknown',
+          isAvailable: place.businessStatus !== 'CLOSED_PERMANENTLY',
           priceSource: dynamicPricing?.status === 'found' ? 'direct-lot-rate' : staticPricing.priceSource,
           priceConfidence,
           bookingProvider: dynamicPricing?.status === 'found' || dynamicPricing?.status === 'fallback'
             ? staticPricing.bookingProvider
             : staticPricing.bookingProvider,
-          trustStatus: 'live',
+          trustStatus: dynamicPricing?.status === 'found' ? 'verified-source' : 'estimated',
           sourceName: 'Google Places',
           searchQuery: parkingSearchName,
           distance: 10,
-          availability: 80,
+          availability: 50,
           sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           routeDestination: place.formattedAddress || airport.routingAddress,
@@ -363,15 +380,18 @@ async function getGoogleParkingPlaces(args: {
           covered: isCovered,
           reviewScore: rating,
           reviewCount,
-          availabilityScore: place.businessStatus === 'OPERATIONAL' ? 80 : 45,
+          availabilityScore: 50,
           bestFor: [
             rating && rating >= 4.4 ? 'Best Reviews' : '',
             isCovered ? 'Best Weather' : '',
             isOfficial ? 'Closest Walk' : 'Compare Listed Deal',
           ].filter(Boolean),
         };
+
+        return withAvailabilityScore(option);
       })
   );
+
 
   return mapped
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
@@ -521,11 +541,12 @@ export async function getLiveParkingOptions(args: {
     .map((x) => {
       const option = aprLotToParkingOption(x.lot, x.availability.status);
 
-      return {
+      return withAvailabilityScore({
         ...option,
         price: x.availability.livePrice ?? option.price,
         priceUnit: 'per-day' as const,
-        priceDisplay: 'from-per-day' as const,
+        priceDisplay: x.availability.status === 'unavailable' ? 'unavailable' : 'from-per-day',
+        availabilityStatus: x.availability.status,
         priceNote: x.availability.livePrice
           ? 'APR price found for selected dates. Verify final checkout price before booking.'
           : 'Latest cached APR baseline rate. Verify selected-date checkout price before booking.',
@@ -535,7 +556,7 @@ export async function getLiveParkingOptions(args: {
           option.price && option.price < 20 ? 'Great Deal' : '',
           option.covered ? 'Covered' : '',
         ].filter(Boolean),
-      };
+      });
     })
     .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
     .slice(0, 8);
@@ -560,18 +581,21 @@ export async function getLiveParkingOptions(args: {
         ? googleSearchUrl(`${airportSearchName} cheapest airport parking coupons`)
         : provider.url;
 
-    return {
+    return withAvailabilityScore({
       id: `${airport.id.toLowerCase()}-${provider.id}`,
       name: isOfficial ? `Official ${airport.id} Parking` : `${provider.name} ${airport.id} Parking`,
       type: isOfficial ? 'official' : 'off-airport',
-      price: isOfficial ? 40 : 30,
+      price: 0,
       priceDisplay: 'check-live',
+      priceUnit: undefined,
+      availabilityStatus: 'unknown',
+      priceConfidence: 'low',
       priceNote: isOfficial
         ? 'Open official airport site to check current rates and availability.'
-        : 'Search query can be copied; open provider and paste if destination is not prefilled.',
+        : 'Open provider to confirm current price and availability.',
       searchQuery: airportSearchName,
       distance: 10,
-      availability: 80,
+      availability: 50,
       trustStatus: provider.trustStatus,
       routeDestination: airport.routingAddress,
       sourceName: provider.sourceName,
@@ -586,7 +610,7 @@ export async function getLiveParkingOptions(args: {
         'Use copied search text if provider does not prefill destination.',
         'Estimated option used for ranking until direct pricing integration is available.',
       ],
-    };
+    });
   });
 
   const shouldUseSeaCuratedLots = false;
@@ -601,8 +625,6 @@ export async function getLiveParkingOptions(args: {
       ],
     }))
     : [];
-
-  void marketplaceOptions;
 
   const discoveredLots = dedupeParkingOptions(liveGoogleOptions);
 
@@ -625,22 +647,41 @@ export async function getLiveParkingOptions(args: {
     ...aprOptions,
     ...discoveredLots,
     ...pricedInventoryOptions,
+    ...marketplaceOptions.filter((option) => {
+      const hasRealParkWhiz = parkWhizOptions.some(
+        (p) => p.sourceName === 'ParkWhiz' || p.bookingProvider === 'ParkWhiz'
+      );
+
+      if (
+        hasRealParkWhiz &&
+        (option.sourceName === 'ParkWhiz' || option.bookingProvider === 'ParkWhiz')
+      ) {
+        return false;
+      }
+
+      return true;
+    }),
     ...fallbackLots.filter((p) => p.type !== 'official'),
-  ]).sort((a, b) => {
-    const rank = (p: ParkingOption) => {
-      const name = p.name.toLowerCase();
+  ])
+    .map((option) =>
+      normalizeParkingPriceForTrip(option, args.checkInDate, args.checkOutDate)
+    )
+    .map(withAvailabilityScore)
+    .sort((a, b) => {
+      const rank = (p: ParkingOption) => {
+        const name = p.name.toLowerCase();
 
-      if (p.type === 'official') return 0;
-      if (p.bookingProvider === 'ParkWhiz' || p.sourceName === 'ParkWhiz') return 1;
-      if (isAprOption(p)) return 2;
-      if (name.includes('wally')) return 3;
-      if (name.includes('master')) return 4;
-      return 5;
-    };
+        if (p.type === 'official') return 0;
+        if (p.bookingProvider === 'ParkWhiz' || p.sourceName === 'ParkWhiz') return 1;
+        if (isAprOption(p)) return 2;
+        if (name.includes('wally')) return 3;
+        if (name.includes('master')) return 4;
+        return 5;
+      };
 
-    const rankDiff = rank(a) - rank(b);
-    if (rankDiff !== 0) return rankDiff;
+      const rankDiff = rank(a) - rank(b);
+      if (rankDiff !== 0) return rankDiff;
 
-    return (a.price ?? 999) - (b.price ?? 999);
-  });
+      return (a.price ?? 999) - (b.price ?? 999);
+    });
 }

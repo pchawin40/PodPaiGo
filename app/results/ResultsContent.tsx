@@ -1047,6 +1047,11 @@ function OptionCard({
 }) {
   const opt = withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption;
 
+  const isAprFetching =
+    aprLiveChecking &&
+    item.type === 'parking' &&
+    isAprOption(opt);
+
   const airportCode = getTripAirportCode(tripData);
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
   const safeParkingSearchQuery = `${airport.label} ${airport.id} airport parking`;
@@ -1076,6 +1081,11 @@ function OptionCard({
       ? parkingLotRouteLink
       : routeUrlForOption(opt, tripData?.origin || null);
 
+  const displayPrice =
+    item.type === 'parking' && typeof opt.price === 'number'
+      ? opt.price
+      : item.cost;
+
   const price = optionPriceSummary(
     isAprOption(opt)
       ? {
@@ -1084,7 +1094,7 @@ function OptionCard({
         priceUnit: 'per-day' as const,
       }
       : opt,
-    isAprOption(opt) && typeof opt.price === 'number' ? opt.price : item.cost,
+    displayPrice,
     tripData
   );
 
@@ -1201,9 +1211,11 @@ function OptionCard({
           <div className="mt-2">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-lg font-bold text-zinc-900">
-                {item.type === 'parking'
-                  ? parkingPrice?.primary
-                  : nonParkingPrice}
+                {isAprFetching
+                  ? 'Checking live price…'
+                  : item.type === 'parking'
+                    ? parkingPrice?.primary
+                    : nonParkingPrice}
               </span>
 
               {parkingTotalText && (
@@ -1257,6 +1269,7 @@ function OptionCard({
               {aprLiveChecking &&
                 item.type === 'parking' &&
                 isAprOption(opt) &&
+                isAprFetching &&
                 getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
             </div>
           </div>
@@ -1793,6 +1806,8 @@ export default function ResultsContent() {
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
 
+  const [parkingPricesChecking, setParkingPricesChecking] = useState(false);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editingData, setEditingData] = useState<TripData | null>(null);
 
@@ -2322,6 +2337,44 @@ export default function ResultsContent() {
   }, [currentAirportCode, tripData?.origin]);
 
   useEffect(() => {
+    if (!tripData) return;
+
+    const refresh = async () => {
+      try {
+        const res = await fetch('/api/parking/live-refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            airportCode: tripData.airportCode,
+            destination: tripData.destination,
+            checkInDate: tripData.parkingCheckInDate,
+            checkOutDate: tripData.parkingCheckOutDate,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (data?.parking?.length) {
+          if (Array.isArray(data?.parking) && data.parking.length > 0) {
+            setRecommendation((prev) => {
+              if (!prev) return prev;
+
+              return {
+                ...prev,
+                parking: data.parking,
+              };
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('live parking refresh failed');
+      }
+    };
+
+    refresh();
+  }, [tripData]);
+
+  useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
 
     const aprOptions = recommendation.parking.filter((p) =>
@@ -2396,6 +2449,8 @@ export default function ResultsContent() {
       name: p.name,
     }));
 
+    setParkingPricesChecking(true);
+
     fetch('/api/parking/prices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2436,6 +2491,9 @@ export default function ResultsContent() {
       })
       .catch((error) => {
         console.error('[parking price matches] failed', error);
+      })
+      .finally(() => {
+        setParkingPricesChecking(false);
       });
   }, [tripData, recommendation]);
 
@@ -2737,7 +2795,16 @@ export default function ResultsContent() {
               </p>
 
               <div className="mt-2 text-xs text-zinc-500">
-                Live traffic + airport timing + parking pricing analyzed
+                {aprLiveChecking && parkingPricesChecking && (
+                  <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                    Checking live parking prices and availability…
+                  </div>
+                )}
+
+                <p className="mt-2 text-sm text-zinc-500">
+                  Live traffic + airport timing + parking pricing analyzed
+                </p>
               </div>
 
               {seatacZone && (
@@ -2823,12 +2890,6 @@ export default function ResultsContent() {
         {/* {aprLiveChecking && (
           <div className="sticky top-3 z-40 mt-6 rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-950 shadow-lg">
             Fetching live parking prices...
-          </div>
-        )}
-
-        {aprLivePartial && !aprLiveChecking && (
-          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
-            Some live prices couldn’t be loaded. Showing estimated or cached prices.
           </div>
         )} */}
 
@@ -3165,6 +3226,8 @@ function EditTripForm({
   const [airportTripTime, setAirportTripTime] = useState(
     'airportTripTime' in initialData ? initialData.airportTripTime : ''
   );
+
+  const [refreshingParking, setRefreshingParking] = useState(false);
 
   const [arrivalDate, setArrivalDate] = useState(
     'arrivalDate' in initialData ? initialData.arrivalDate : ''

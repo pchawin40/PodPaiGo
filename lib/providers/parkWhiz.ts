@@ -283,14 +283,17 @@ export async function getParkWhizParkingOptions(args: {
     });
 
     if (cached?.options?.length) {
-        debugLog('[ParkWhiz] cache hit', {
-            airportCode: airport.id,
-            startTime,
-            endTime,
-            count: cached.options.length,
-        });
-
-        return cached.options;
+        return cached.options.map((option) => ({
+            ...option,
+            priceUnit:
+                option.sourceName === 'ParkWhiz' || option.bookingProvider === 'ParkWhiz'
+                    ? 'total'
+                    : option.priceUnit,
+            priceNote:
+                option.sourceName === 'ParkWhiz' || option.bookingProvider === 'ParkWhiz'
+                    ? option.priceNote || 'Live ParkWhiz total for the selected parking dates. Daily display is calculated by the app.'
+                    : option.priceNote,
+        }));
     }
 
     const url = new URL('https://api.parkwhiz.com/v4/quotes/');

@@ -10,6 +10,7 @@ import {
   parkingPriceLine,
 } from '../../lib/parking/priceDisplay';
 import { parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
+import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -169,8 +170,6 @@ export default function ParkingSmartPick({
       p.bookingProvider === 'ParkWhiz' ||
       p.sourceName === 'ParkWhiz' ||
       !!p.reviewScore ||
-      name.includes('wally') ||
-      name.includes('masterpark') ||
       name.includes('reserved') ||
       name.includes('general') ||
       name.includes('garage') ||
@@ -303,6 +302,8 @@ export default function ParkingSmartPick({
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
               Best Overall
             </span>
+
+            <ParkingAvailabilityBadge option={best} />
 
             {savings && (
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
