@@ -15,6 +15,8 @@ import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePric
 import { formatMinutes, parkingKeySafe } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
+import { dedupeParkingLotsByCheapest } from '../../lib/parking/googlePlacesLotResolver';
+import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -1368,6 +1370,101 @@ function OptionCard({
   );
 }
 
+function normalizeParkingNameForDedupe(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(seattle|seatac|sea|airport|parking|lot|self|uncovered|covered|garage|rooftop)\b/g, '')
+    .replace(/\bby\s+/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function parkingProviderPriority(option: AppOption): number {
+  const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
+
+  if (provider.includes('parkwhiz')) return 1;
+  if (provider.includes('airportparkingreservations')) return 2;
+  if (provider.includes('official')) return 3;
+
+  return 4;
+}
+
+function getParkingComparableTotal(option: AppOption, tripData: TripData | null): number | null {
+  if (typeof option.price !== 'number' || option.price <= 0) return null;
+
+  const days = Math.max(1, estimateParkingDays(tripData));
+
+  if (option.priceUnit === 'total') {
+    return option.price;
+  }
+
+  if (option.priceUnit === 'per-day') {
+    return Math.round(option.price * days * 100) / 100;
+  }
+
+  const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
+
+  if (provider.includes('parkwhiz')) {
+    return option.price;
+  }
+
+  if (provider.includes('airportparkingreservations')) {
+    return Math.round(option.price * days * 100) / 100;
+  }
+
+  return Math.round(option.price * days * 100) / 100;
+}
+
+function dedupeParkingRankedOptions(
+  options: RankedRecommendation[],
+  tripData: TripData | null
+): RankedRecommendation[] {
+  const byKey = new Map<string, RankedRecommendation>();
+
+  for (const item of options) {
+    const option = item.option as AppOption;
+
+    const key =
+      normalizeParkingNameForDedupe(option.name || '') ||
+      parkingKeySafe(option) ||
+      option.id ||
+      option.name;
+
+    const current = byKey.get(key);
+
+    if (!current) {
+      byKey.set(key, item);
+      continue;
+    }
+
+    const currentOption = current.option as AppOption;
+
+    const currentTotal = getParkingComparableTotal(currentOption, tripData);
+    const nextTotal = getParkingComparableTotal(option, tripData);
+
+    let winner = current;
+
+    if (currentTotal == null && nextTotal != null) {
+      winner = item;
+    } else if (currentTotal != null && nextTotal != null) {
+      if (nextTotal < currentTotal) {
+        winner = item;
+      } else if (Math.abs(nextTotal - currentTotal) < 0.01) {
+        const currentPriority = parkingProviderPriority(currentOption);
+        const nextPriority = parkingProviderPriority(option);
+
+        if (nextPriority < currentPriority) {
+          winner = item;
+        }
+      }
+    }
+
+    byKey.set(key, winner);
+  }
+
+  return Array.from(byKey.values());
+}
+
 export default function ResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -2199,26 +2296,28 @@ export default function ResultsContent() {
     });
   }
 
-  const parkingOptionsWithAprPrices = parkingOptionsOnly.map((o) => {
-    const updatedOption = withAprLivePrice(o.option as AppOption, aprLivePrices);
-    const updatedCost =
-      o.type === 'parking' && typeof (updatedOption as AppOption).price === 'number'
-        ? (updatedOption as AppOption).price
-        : o.cost;
+  const parkingOptionsWithAprPricesRaw = parkingOptionsOnly.map((o) => {
+    const updatedOption = withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption;
+    const comparableTotal = getParkingComparableTotal(updatedOption, tripData);
 
     return {
       ...o,
       option: updatedOption as ParkingOption,
-      cost: updatedCost ?? o.cost,
+      cost: comparableTotal ?? o.cost,
     } satisfies RankedRecommendation;
   });
+
+  const parkingOptionsWithAprPrices = dedupeParkingRankedOptions(
+    parkingOptionsWithAprPricesRaw,
+    tripData
+  );
 
   const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
     const aOption = a.option as ParkingOption;
     const bOption = b.option as ParkingOption;
 
-    const aTotal = getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
-    const bTotal = getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
+    const aTotal = getParkingComparableTotal(aOption as AppOption, tripData) ?? getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
+    const bTotal = getParkingComparableTotal(bOption as AppOption, tripData) ?? getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
 
     const aDaily = getParkingDailyPrice(aOption, tripData) ?? aTotal;
     const bDaily = getParkingDailyPrice(bOption, tripData) ?? bTotal;
@@ -2233,9 +2332,12 @@ export default function ResultsContent() {
     );
   });
 
-  const smartPickRankedOption = sortedParkingForCurrentTab[0] || null;
-  const smartPickOption = (smartPickRankedOption?.option as ParkingOption) || null;
-  const smartPickParkingOptions = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+  const smartPickParkingOptions = dedupeAndSortParkingOptions(
+    sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
+    tripData
+  );
+
+  const smartPickOption = smartPickParkingOptions[0] || null;
 
   const rideshareOptionsOnly = visibleResultOptions.filter((o) => o.type === 'rideshare');
   const transitOptionsOnly = visibleResultOptions.filter((o) => o.type === 'transit');
@@ -2255,7 +2357,30 @@ export default function ResultsContent() {
 
   const visibleMoreParkingCount = 6;
 
-  const remainingParking = sortedParkingForCurrentTab.slice(1);
+  const remainingParking = smartPickParkingOptions.slice(1).map((parkingOption: ParkingOption) => {
+    const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
+      const rankedKey = parkingKeySafe(ranked.option as AppOption);
+      const parkingKey = parkingKeySafe(parkingOption as AppOption);
+      return rankedKey && parkingKey && rankedKey === parkingKey;
+    });
+
+    return {
+      ...(matchedRanked || {
+        type: 'parking',
+        score: 0,
+        stressScore: 0,
+        reasons: ['Available parking option'],
+        cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999,
+        duration:
+          (typeof parkingOption.distance === 'number' ? parkingOption.distance : 45) +
+          (typeof parkingOption.parkingBufferMinutes === 'number' ? parkingOption.parkingBufferMinutes : 10) +
+          (typeof parkingOption.transferToTerminalMinutes === 'number' ? parkingOption.transferToTerminalMinutes : 10),
+      }),
+      type: 'parking',
+      option: parkingOption,
+      cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999,
+    } as RankedRecommendation;
+  });
 
   const initiallyVisibleParking = remainingParking.slice(0, visibleMoreParkingCount);
   const hiddenParking = remainingParking.slice(visibleMoreParkingCount);
