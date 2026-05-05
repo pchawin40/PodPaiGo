@@ -1,3 +1,5 @@
+import { WeatherImpact } from './weather/types';
+
 export type TripType =
   | 'one-way-departure'
   | 'one-way-arrival'
@@ -239,10 +241,11 @@ export type Recommendation = {
   parking: ParkingOption[];
   rideshare: RideshareOption[];
   transit: TransitOption[];
-  tsaEstimate: TsaEstimate; // Updated to include status
-  leaveByTime?: string | null; // for departures
-  tripDuration?: number; // in minutes for round-trip
+  tsaEstimate: TsaEstimate;
+  weatherImpact?: WeatherImpact | null;
+  leaveByTime?: string | null;
+  tripDuration?: number;
   trafficEstimate?: TrafficEstimate;
   flightInfo?: FlightInfo;
-  locationInfo?: LocationInfo; // renamed from airportInfo
+  locationInfo?: LocationInfo;
 };

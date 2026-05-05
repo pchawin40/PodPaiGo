@@ -12,6 +12,7 @@ import {
   isDepartureLeg,
   rankRecommendations
 } from './domain';
+import { getWeatherImpactForAirport } from './weather/nws';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -258,6 +259,11 @@ export class RecommendationEngine {
 
     const airportCode = ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase();
 
+    const weatherImpact = await getWeatherImpactForAirport({
+      airportCode,
+      targetDateTime: tripDateTime,
+    }).catch(() => null);
+
     if (airportCode !== 'SEA') {
       parking = parking.filter((p) => !isSeaTacOnlyOption(p));
       rideshare = rideshare.filter((r) => !isSeaTacOnlyOption(r));
@@ -308,7 +314,27 @@ export class RecommendationEngine {
       calculatedCost: calculateTransitCost(t, tripData)
     }));
 
-    const sortedParking = parkingWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
+    const sortedParking = parkingWithCosts.sort((a, b) => {
+      const weatherScore = (p: ParkingOption) => {
+        if (!weatherImpact) return 0;
+
+        const adj = weatherImpact.parkingScoreAdjustments;
+        let score = 0;
+
+        if (p.covered) score += adj.coveredBonus;
+        if (p.type === 'official') score += adj.officialGarageBonus;
+        if (p.transferType === 'shuttle') score += adj.shuttlePenalty;
+        if (!p.covered && p.type === 'off-airport') score += adj.uncoveredPenalty;
+
+        return score;
+      };
+
+      return (
+        a.calculatedCost -
+        weatherScore(a) -
+        (b.calculatedCost - weatherScore(b))
+      );
+    });
     const sortedRideshare = rideshareWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
     const sortedTransit = transitWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
 
@@ -321,6 +347,7 @@ export class RecommendationEngine {
       rideshare: sortedRideshare,
       transit: sortedTransit,
       tsaEstimate,
+      weatherImpact,
       leaveByTime,
       tripDuration,
       trafficEstimate,

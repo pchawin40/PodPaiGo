@@ -528,13 +528,13 @@ export default function TripFlow() {
                   </h2>
                   <p className="mt-1 text-sm text-zinc-600">{intentCopy(intent).helper}</p>
                 </div>
-                <button
+                {/* <button
                   type="button"
                   onClick={() => setState((s) => ({ ...s, intent: 'parking-trip' }))}
                   className="text-sm font-medium text-blue-700 hover:text-blue-800"
                 >
                   Parking only
-                </button>
+                </button> */}
               </div>
 
               <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -731,7 +731,7 @@ export default function TripFlow() {
                 )}
 
                 <div className="md:col-span-2 rounded-2xl border border-zinc-200 bg-white p-4">
-                  <div className="text-lg font-semibold text-zinc-900">
+                  <div className="text-sm font-medium text-zinc-900">
                     What time should we plan around?
                   </div>
 

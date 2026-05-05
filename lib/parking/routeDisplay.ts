@@ -133,10 +133,20 @@ export function routeUrlForOption(
 }
 
 export function googleMapsParkingRouteLink(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name'>,
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
   origin: string | null
 ): string | null {
-  const parkingLot = option.routeDestination || option.mapLink || option.name;
+  const hasCoords =
+    typeof option.lat === 'number' &&
+    typeof option.lng === 'number';
+
+  const parkingLot =
+    hasCoords
+      ? `${option.lat},${option.lng}`
+      : option.normalizedAddress ||
+      option.routeDestination ||
+      option.name;
+
   if (!parkingLot) return null;
 
   if (!origin) return googleMapsSearchLink(parkingLot);

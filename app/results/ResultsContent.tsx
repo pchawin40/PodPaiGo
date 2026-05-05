@@ -126,6 +126,30 @@ function formatParkingDailyPrice(option: { price: number; bestFor?: string[]; pr
     : `From ${formatMoney(option.price)}/day`;
 }
 
+function weatherAdjustedParkingSortScore(
+  option: ParkingOption,
+  tripData: TripData | null,
+  weatherImpact?: Recommendation['weatherImpact']
+): number {
+  const totalPrice = getParkingTotalPrice(option, tripData) ?? 999999;
+  const time = parkingTimeBreakdown(option).totalMinutes || 999;
+
+  let weatherPenalty = 0;
+
+  if (weatherImpact) {
+    const adj = weatherImpact.parkingScoreAdjustments;
+
+    if (option.covered) weatherPenalty -= adj.coveredBonus * 3;
+    if (option.type === 'official') weatherPenalty -= adj.officialGarageBonus * 3;
+    if (option.transferType === 'shuttle') weatherPenalty -= adj.shuttlePenalty * 3;
+    if (!option.covered && option.type === 'off-airport') {
+      weatherPenalty -= adj.uncoveredPenalty * 3;
+    }
+  }
+
+  return totalPrice + time * 1.5 + weatherPenalty;
+}
+
 function formatMiniMinutes(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes <= 0) return '0m';
 
@@ -2444,11 +2468,17 @@ export default function ResultsContent() {
 
     if (!checkInDate || !checkOutDate) return;
 
-    const lots = recommendation.parking.map((p) => ({
-      id: p.id,
-      name: p.name,
-    }));
-
+    const lots = [...recommendation.parking]
+      .sort(
+        (a, b) =>
+          weatherAdjustedParkingSortScore(a, tripData, recommendation.weatherImpact) -
+          weatherAdjustedParkingSortScore(b, tripData, recommendation.weatherImpact)
+      )
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+      }));
+      
     setParkingPricesChecking(true);
 
     fetch('/api/parking/prices', {
@@ -2946,6 +2976,7 @@ export default function ResultsContent() {
                 selectedOption={smartPickOption}
                 aprLivePrices={aprLivePrices}
                 aprLiveChecking={aprLiveChecking}
+                weatherImpact={recommendation?.weatherImpact}
               />
             </div>
           )
@@ -3725,3 +3756,4 @@ function EditTripForm({
     </form>
   );
 }
+

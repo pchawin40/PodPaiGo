@@ -11,6 +11,7 @@ import {
 } from '../../lib/parking/priceDisplay';
 import { parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
+import { WeatherImpact } from '@/lib/weather/types';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -53,6 +54,23 @@ function parkingLotDestination(option: ParkingOption): string {
   }
 
   return routeDestination || `${name}, SeaTac, WA`;
+}
+
+function getWeatherScoreAdjustment(
+  option: ParkingOption,
+  weatherImpact?: WeatherImpact | null
+): number {
+  if (!weatherImpact) return 0;
+
+  const adj = weatherImpact.parkingScoreAdjustments;
+  let score = 0;
+
+  if (option.covered) score += adj.coveredBonus;
+  if (option.type === 'official') score += adj.officialGarageBonus;
+  if (option.transferType === 'shuttle') score += adj.shuttlePenalty;
+  if (!option.covered && option.type === 'off-airport') score += adj.uncoveredPenalty;
+
+  return score;
 }
 
 function parkingRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
@@ -108,12 +126,53 @@ function parkingRouteText(option: ParkingOption): string {
   return [drive, transfer].filter(Boolean).join(' + ');
 }
 
+function weatherParkingBadge(
+  option: ParkingOption,
+  weatherImpact?: WeatherImpact | null
+): { label: string; className: string } {
+  if (!weatherImpact) {
+    return {
+      label: 'Weather: normal',
+      className: 'bg-white text-zinc-700 border border-zinc-200',
+    };
+  }
+
+  const { riskLevel, condition } = weatherImpact;
+
+  // Base label
+  let label = 'Weather: normal';
+
+  if (riskLevel === 'medium') label = 'Weather: moderate impact';
+  if (riskLevel === 'high') label = 'Weather: high impact';
+
+  // More contextual override
+  if (riskLevel !== 'low') {
+    if (option.covered) label = 'Best for weather';
+    else if (option.transferType === 'shuttle') label = 'Shuttle may be affected';
+  }
+
+  // Dynamic colors
+  let className =
+    'bg-white text-zinc-700 border border-zinc-200'; // default
+
+  if (riskLevel === 'medium') {
+    className = 'bg-amber-50 text-amber-800 border border-amber-200';
+  }
+
+  if (riskLevel === 'high') {
+    className = 'bg-red-50 text-red-800 border border-red-200';
+  }
+
+  return { label, className };
+}
+
 export default function ParkingSmartPick({
   options,
   tripData,
   selectedOption,
   leaveByTime,
   aprLivePrices = {},
+  weatherImpact,
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
@@ -121,6 +180,7 @@ export default function ParkingSmartPick({
   leaveByTime?: string | null;
   aprLivePrices?: Record<string, number>;
   aprLiveChecking?: boolean;
+  weatherImpact?: WeatherImpact | null;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -214,7 +274,8 @@ export default function ParkingSmartPick({
       return (
         (isWalk ? 40 : 0) +
         confidence +
-        (p.covered ? 10 : 0) -
+        (p.covered ? 10 : 0) +
+        getWeatherScoreAdjustment(p, weatherImpact) -
         transfer * 2 -
         (getParkingDailyPrice(p, tripData) ?? 999) * 0.25
       );
@@ -247,14 +308,59 @@ export default function ParkingSmartPick({
           ? 50
           : 0;
 
-      return review + liveBonus + confidenceBonus - price * 1.8 - transfer * 1.1 - aprUnknownPenalty;
+      return (
+        review +
+        liveBonus +
+        confidenceBonus +
+        getWeatherScoreAdjustment(p, weatherImpact) -
+        price * 1.8 -
+        transfer * 1.1 -
+        aprUnknownPenalty
+      );
     };
 
     return valueScore(b) - valueScore(a);
   })[0];
 
+  const weatherAwareBest = [...candidateOptions].sort((a, b) => {
+    const score = (p: ParkingOption) => {
+      const price = getParkingDailyPrice(p, tripData) ?? 999;
+      const transfer =
+        p.shuttleMinutes ??
+        p.walkingMinutes ??
+        p.transferToTerminalMinutes ??
+        15;
+
+      const review = p.reviewScore ? p.reviewScore * 8 : 0;
+      const confidence =
+        p.priceConfidence === 'high'
+          ? 14
+          : p.priceConfidence === 'medium'
+            ? 8
+            : 0;
+
+      const walkBonus = p.transferType !== 'shuttle' ? 20 : 0;
+      const coveredBonus = p.covered ? 8 : 0;
+      const officialBonus = p.type === 'official' ? 6 : 0;
+
+      return (
+        review +
+        confidence +
+        walkBonus +
+        coveredBonus +
+        officialBonus +
+        getWeatherScoreAdjustment(p, weatherImpact) -
+        price * 1.4 -
+        transfer * 1.2
+      );
+    };
+
+    return score(b) - score(a);
+  })[0];
+
   const best =
     selectedOptionWithAprLivePrice ||
+    weatherAwareBest ||
     cheapest ||
     bestValue ||
     lowestStress ||
@@ -270,6 +376,8 @@ export default function ParkingSmartPick({
   const bestPriceDisplay = parkingPriceLine(best, tripData);
 
   const bestTime = parkingTimeBreakdown(best);
+
+  const weatherBadge = weatherParkingBadge(best, weatherImpact);
 
   const savings =
     officialTotal && officialTotal > bestTotal
@@ -323,6 +431,16 @@ export default function ParkingSmartPick({
               <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
                 Covered
               </span>
+            )}
+
+            <span className={`rounded-full px-2.5 py-1 font-medium ${weatherBadge.className}`}>
+              {weatherBadge.label}
+            </span>
+
+            {weatherImpact && weatherImpact.riskLevel !== 'low' && (
+              <div className="mt-2 text-xs font-medium text-sky-800">
+                Weather factor: {weatherImpact.summary}. Covered or close-in parking gets a boost today.
+              </div>
             )}
           </div>
 
