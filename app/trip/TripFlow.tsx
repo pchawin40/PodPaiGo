@@ -146,7 +146,7 @@ function Card({
 
 export default function TripFlow() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<Step>(2);
   const [errors, setErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
@@ -155,7 +155,7 @@ export default function TripFlow() {
   const [timeTouched, setTimeTouched] = useState(false);
 
   const [state, setState] = useState<FormState>({
-    intent: null,
+    intent: 'flying-out',
     transportAvailability: 'all',
     airlineOrFlight: '',
     origin: '',
@@ -450,7 +450,7 @@ export default function TripFlow() {
                 }
               />
 
-              <Card
+              {/* <Card
                 title="Picking someone up"
                 subtitle="Meeting arrivals? Time your drive, traffic, and pickup."
                 selected={state.intent === 'picking-up'}
@@ -476,9 +476,9 @@ export default function TripFlow() {
                     time: '',
                   }))
                 }
-              />
+              /> */}
 
-              <Card
+              {/* <Card
                 title="Airport parking"
                 subtitle="Compare garage, shuttle lots, and booking options."
                 selected={state.intent === 'parking-trip'}
@@ -490,7 +490,7 @@ export default function TripFlow() {
                     time: '',
                   }))
                 }
-              />
+              /> */}
             </div>
 
             <div className="pt-2">
@@ -511,7 +511,7 @@ export default function TripFlow() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-medium text-zinc-500">Step 2</div>
+                  <div className="text-sm font-medium text-zinc-500">Step 1</div>
                   <h2 className="mt-1 text-xl font-semibold text-zinc-900">
                     {intentCopy(intent).title}
                   </h2>
@@ -519,10 +519,10 @@ export default function TripFlow() {
                 </div>
                 <button
                   type="button"
-                  onClick={onBack}
+                  onClick={() => setState((s) => ({ ...s, intent: 'parking-trip' }))}
                   className="text-sm font-medium text-blue-700 hover:text-blue-800"
                 >
-                  Change
+                  Parking only
                 </button>
               </div>
 
