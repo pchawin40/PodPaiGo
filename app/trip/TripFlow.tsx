@@ -30,6 +30,7 @@ type FormState = {
   flightType: FlightType;
   cabin: CabinClass;
   airportCode: string; // for seatac-specific logic; can be derived from origin but allow user override if needed
+  timeAnchor: 'flight-departure' | 'airport-arrival';
 };
 
 function formatLocalDateInputValue(date: Date): string {
@@ -51,6 +52,10 @@ export function parkingTripTotalText(
   if (days <= 1) return `Est. total: ${formatMoney(total)} for 1 day`;
 
   return `Est. total: ${formatMoney(total)} for ${days} days`;
+}
+
+function isFullDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function addDays(dateString: string, days: number): string {
@@ -102,7 +107,7 @@ function intentCopy(intent: Intent) {
     case 'parking-trip':
       return {
         title: 'Airport parking',
-        timeLabel: 'When do you want to arrive at SeaTac?',
+        timeLabel: 'When do you want to arrive at the airport?',
         helper: 'We’ll compare official garage vs nearby lots and rides.',
         wantsAirline: false,
         wantsParkingDuration: true,
@@ -151,11 +156,14 @@ export default function TripFlow() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
 
+  const [parkingCheckoutTouched, setParkingCheckoutTouched] = useState(false);
+
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
 
   const [state, setState] = useState<FormState>({
-    intent: 'flying-out',
+    intent: 'flying-out', // since you removed step 1
+    timeAnchor: 'flight-departure', // 👈 ADD THIS
     transportAvailability: 'all',
     airlineOrFlight: '',
     origin: '',
@@ -168,9 +176,8 @@ export default function TripFlow() {
     securityOption: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
-    airportCode: 'SEA', // default to SeaTac
+    airportCode: 'SEA', // default airport, not hardcoded app airport
   });
-
   const intent = state.intent;
 
   const ENABLE_AIRPORT_TIMING_FIELDS = false;
@@ -295,9 +302,9 @@ export default function TripFlow() {
         date: nextDate,
         time: nextTime,
         parkingCheckOutDate:
-          (s.parkingCheckOutDate && s.parkingCheckOutDate !== s.date)
-            ? s.parkingCheckOutDate
-            : addDays(nextDate, 7),
+          !parkingCheckoutTouched && isFullDate(nextDate)
+            ? addDays(nextDate, 7)
+            : s.parkingCheckOutDate,
       };
     });
 
@@ -318,7 +325,10 @@ export default function TripFlow() {
 
     const nextFieldErrors: Record<string, string> = {};
     if (!state.origin.trim()) nextFieldErrors.origin = 'Enter your starting address.';
-    if (state.intent !== 'parking-trip' && !state.time) nextFieldErrors.time = 'Select your flight or trip time.';
+    if (!state.time) {
+      next.push('Time is required.');
+    }
+    nextFieldErrors.time = 'Select your flight or trip time.';
     if (!state.date) nextFieldErrors.date = 'Select your parking check-in date.';
 
     setFieldErrors(nextFieldErrors);
@@ -353,6 +363,7 @@ export default function TripFlow() {
     params.set('airport', selectedAirport.id);
     params.set('intent', state.intent!);
     params.set('transport', state.transportAvailability);
+    params.set('timeAnchor', state.timeAnchor);
 
     if (state.airlineOrFlight.trim()) {
       params.set('airlineOrFlight', state.airlineOrFlight.trim());
@@ -410,7 +421,7 @@ export default function TripFlow() {
       <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-            Plan a calmer SeaTac trip
+            Plan a calmer airport trip
           </h1>
           <p className="mt-2 text-zinc-600">
             Tell us what you’re doing — we’ll compare parking, rides, and transit and give you a clear “leave by” time.
@@ -719,6 +730,50 @@ export default function TripFlow() {
                   </div>
                 )}
 
+                <div className="md:col-span-2 rounded-2xl border border-zinc-200 bg-white p-4">
+                  <div className="text-lg font-semibold text-zinc-900">
+                    What time should we plan around?
+                  </div>
+
+                  {/* 1) buttons first */}
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {/* Flight departure button */}
+                    {/* Airport arrival button */}
+                  </div>
+
+                  {/* 2) time input second */}
+                  <div id="time-field" className="mt-4">
+                    <label className="block text-sm font-medium text-zinc-800">
+                      {state.timeAnchor === 'flight-departure'
+                        ? 'Flight departure time'
+                        : 'Airport arrival time'}
+                    </label>
+
+                    <input
+                      type="time"
+                      value={state.time}
+                      onChange={(e) => {
+                        setTimeTouched(true);
+                        setState((s) => ({ ...s, time: e.target.value }));
+                        setFieldErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.time;
+                          return next;
+                        });
+                      }}
+                      className={
+                        'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                        (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
+                        (highlightedField === 'time' ? 'animate-pulse' : '')
+                      }
+                    />
+
+                    {fieldErrors.time && (
+                      <div className="mt-2 text-sm text-red-700">{fieldErrors.time}</div>
+                    )}
+                  </div>
+                </div>
+
                 <div id="date-field">
                   <label className="block text-sm font-medium text-zinc-800">
                     {(intent === 'flying-out' || intent === 'parking-trip')
@@ -733,7 +788,7 @@ export default function TripFlow() {
                         ...s,
                         date: e.target.value,
                         parkingCheckOutDate:
-                          (!s.parkingCheckOutDate || s.parkingCheckOutDate === s.date)
+                          !parkingCheckoutTouched && isFullDate(e.target.value)
                             ? addDays(e.target.value, 7)
                             : s.parkingCheckOutDate,
                       }));
@@ -758,7 +813,9 @@ export default function TripFlow() {
                   ENABLE_AIRPORT_TIMING_FIELDS && (
                     <div id="time-field">
                       <label className="block text-sm font-medium text-zinc-800">
-                        {intentCopy(intent).timeLabel}
+                        {state.timeAnchor === 'flight-departure'
+                          ? 'What time does your flight depart?'
+                          : 'What time do you want to arrive at the airport?'}
                       </label>
                       <input
                         type="time"
@@ -801,6 +858,7 @@ export default function TripFlow() {
                         type="date"
                         value={state.parkingCheckOutDate}
                         onChange={(e) => {
+                          setParkingCheckoutTouched(true);
                           setState((s) => ({
                             ...s,
                             parkingCheckOutDate: e.target.value,

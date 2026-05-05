@@ -89,12 +89,12 @@ type TripDataWithExtras = TripData & {
   airportCode?: string;
   parkingCheckInDate?: string;
   parkingCheckOutDate?: string;
-  checkedInAtAirport?: boolean;
+  timeAnchor?: 'flight-departure' | 'airport-arrival';
   checkingBags?: boolean;
   securityOption?: SecurityOption;
   flightType?: FlightType;
   cabin?: CabinClass;
-  transportAvailability?: TransportAvailability;
+  checkedInAtAirport?: boolean;
   parkingDuration?: number;
 };
 
@@ -966,7 +966,11 @@ function computeTimingStatus(args: {
   }
 
   // Now calculate final values (works for both same-day and future dates)
-  const recommendedInsideArrivalByDt = new Date(depDt.getTime() - buf.bufferMinutes * 60000);
+  const isAirportArrivalAnchor = tripData.timeAnchor === 'airport-arrival';
+
+  const recommendedInsideArrivalByDt = isAirportArrivalAnchor
+    ? depDt
+    : new Date(depDt.getTime() - buf.bufferMinutes * 60000);
   const latestSafeLeaveDt = new Date(recommendedInsideArrivalByDt.getTime() - optionTotalMinutes * 60000);
   const minutesUntilLeaveBy = computeCushionMinutes(latestSafeLeaveDt);
   const missedBy = Math.max(0, Math.ceil((now.getTime() - latestSafeLeaveDt.getTime()) / 60000));
@@ -987,7 +991,9 @@ function computeTimingStatus(args: {
     shortByMinutes: missedBy > 0 ? missedBy : undefined,
     minutesUntilLeaveBy: missedBy === 0 ? Math.max(0, minutesUntilLeaveBy) : undefined,
     youReachTerminalAround: formatHHMMFromDate(recommendedInsideArrivalByDt),
-    assumptions: buf.assumptions,
+    assumptions: isAirportArrivalAnchor
+      ? ['Using your airport arrival/check-in time directly, so airport readiness buffer was skipped.']
+      : buf.assumptions,
     debug: {
       departureDate: tripData.departureDate,
       departureTime: tripData.departureTime,
@@ -1854,6 +1860,11 @@ export default function ResultsContent() {
 
     const intentParam = searchParams.get('intent') || '';
 
+    const timeAnchor =
+      searchParams.get('timeAnchor') === 'airport-arrival'
+        ? 'airport-arrival'
+        : 'flight-departure';
+
     const bagsRaw = (searchParams.get('bags') || 'no').toLowerCase();
     const checkingBags = bagsRaw === 'yes';
     const checkedInRaw = (searchParams.get('checkedInAtAirport') || 'yes').toLowerCase();
@@ -1893,8 +1904,36 @@ export default function ResultsContent() {
 
       if (departureDate && departureTime && origin && destination) {
         data = intentParam === 'flying-out'
-          ? { type, origin, destination, departureDate, departureTime, parkingDuration: computedParkingDuration, parkingCheckInDate, parkingCheckOutDate, transportAvailability, checkingBags, securityOption, flightType, cabin, checkedInAtAirport }
-          : { type, origin, destination, departureDate, departureTime, parkingDuration: computedParkingDuration, parkingCheckInDate, parkingCheckOutDate, transportAvailability, checkedInAtAirport };
+          ? {
+            type,
+            origin,
+            destination,
+            departureDate,
+            departureTime,
+            timeAnchor,
+            parkingDuration: computedParkingDuration,
+            parkingCheckInDate,
+            parkingCheckOutDate,
+            transportAvailability,
+            checkingBags,
+            securityOption,
+            flightType,
+            cabin,
+            checkedInAtAirport,
+          }
+          : {
+            type,
+            origin,
+            destination,
+            departureDate,
+            departureTime,
+            timeAnchor,
+            parkingDuration: computedParkingDuration,
+            parkingCheckInDate,
+            parkingCheckOutDate,
+            transportAvailability,
+            checkedInAtAirport,
+          };
       }
     } else if (type === 'one-way-arrival') {
       const arrivalDate = searchParams.get('arrivalDate') || '';
@@ -2070,6 +2109,12 @@ export default function ResultsContent() {
       if (newTripData.type === 'one-way-departure') {
         params.set('departureDate', newTripData.departureDate);
         params.set('departureTime', newTripData.departureTime);
+
+        const nextTimeAnchor = (newTripData as TripDataWithExtras).timeAnchor;
+
+        if (nextTimeAnchor) {
+          params.set('timeAnchor', nextTimeAnchor);
+        }
         params.set('checkedInAtAirport', (newTripData as TripDataWithExtras).checkedInAtAirport === false ? 'no' : 'yes');
         if (newTripData.parkingDuration) {
           params.set('parkingDuration', newTripData.parkingDuration.toString());

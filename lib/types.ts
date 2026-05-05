@@ -24,12 +24,13 @@ export type TripData =
     type: 'one-way-departure';
     departureDate: string;
     departureTime: string;
-    parkingDuration?: number; // in minutes, optional user override
+    timeAnchor?: 'flight-departure' | 'airport-arrival'; // add this
+    parkingDuration?: number;
     checkingBags?: boolean;
     securityOption?: SecurityOption;
     flightType?: FlightType;
     cabin?: CabinClass;
-    checkedInAtAirport?: boolean; // default: true
+    checkedInAtAirport?: boolean;
   })
   | (BaseTripData & {
     type: 'one-way-arrival';
