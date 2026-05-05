@@ -157,15 +157,36 @@ function parkingTimeParts(option: ParkingOption) {
     parts: [
       { label: 'Drive', minutes: drive },
       { label: 'Park', minutes: park },
-      ...(isShuttle ? [{ label: 'Wait', minutes: shuttleWait }] : []),
-      {
-        label: isShuttle ? 'Shuttle' : isGarage ? 'Garage walk' : 'Walk',
-        minutes: transfer,
-      },
+      ...(isShuttle
+        ? [{ label: 'Shuttle', minutes: shuttleWait + transfer }]
+        : [{ label: isGarage ? 'Garage walk' : 'Walk', minutes: transfer }]
+      ),
       { label: 'Inside airport', minutes: walkInside },
       { label: 'Buffer', minutes: buffer },
     ].filter((p) => p.minutes > 0),
   };
+}
+
+function getTransferLabel(option: ParkingOption): string {
+  const transfer = option.transferToTerminalMinutes ?? 0;
+  const isShuttle = option.transferType === 'shuttle';
+
+  const shuttleWait = isShuttle ? 8 : 0;
+  const totalTransfer = transfer + shuttleWait;
+
+  if (isShuttle) {
+    return `Shuttle ${formatMiniMinutes(totalTransfer)} to terminal`;
+  }
+
+  if (option.transferType === 'airport-garage') {
+    return `Walk ${formatMiniMinutes(transfer)} inside garage`;
+  }
+
+  if (option.transferType === 'walk') {
+    return `Walk ${formatMiniMinutes(transfer)} to terminal`;
+  }
+
+  return `Transfer ${formatMiniMinutes(transfer)}`;
 }
 
 function ParkingTimeSummary({

@@ -18,17 +18,6 @@ type GooglePlace = {
     businessStatus?: string;
 };
 
-function extractBrandKey(name: string): string {
-    const cleaned = normalizeName(name);
-
-    const words = cleaned.split(' ').filter((w) => w.length >= 3);
-
-    if (words.length === 0) return '';
-
-    // take first 2 tokens max → handles "park n fly", "doug fox"
-    return words.slice(0, 2).join(' ');
-}
-
 function isParkingLike(place: GooglePlace): boolean {
     const name = place.displayName?.text?.toLowerCase() ?? '';
 
@@ -37,9 +26,6 @@ function isParkingLike(place: GooglePlace): boolean {
         name.includes('park') ||
         name.includes('garage') ||
         name.includes('valet') ||
-        name.includes('wally') ||
-        name.includes('masterpark') ||
-        name.includes('jiffy') ||
         name.includes('shuttle')
     );
 }
