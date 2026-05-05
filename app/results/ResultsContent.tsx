@@ -7,7 +7,6 @@ import { rankRecommendations } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
-import ParkingBookingComparison from './ParkingBookingComparison';
 import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import ParkingSmartPick from './ParkingSmartPick';
@@ -15,7 +14,6 @@ import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePric
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
-import { dedupeParkingLotsByCheapest } from '../../lib/parking/googlePlacesLotResolver';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import {
   parkingPriceLine,
@@ -388,63 +386,104 @@ function PricingLinksSection({
 }) {
   if (!items || items.length === 0) return null;
 
+  const isRideSection = title.toLowerCase().includes('ride');
+  const isTransitSection = title.toLowerCase().includes('transit');
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
-        <p className="mt-1 text-sm text-zinc-600">Pricing + links, best-effort and may vary.</p>
-      </div>
+    <div className="divide-y divide-zinc-100 bg-white">
+      {items.map((it: ProviderLinkItem) => {
+        const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
+        const price = formatProviderPrice(it);
+        const link = bestLink(it);
+        const kind = it.priceDisplay as string | undefined;
 
-      <div className="divide-y divide-zinc-100">
-        {items.map((it: ProviderLinkItem) => {
-          const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
-          const price = formatProviderPrice(it);
-          const link = bestLink(it);
-          const kind = it.priceDisplay as string | undefined;
-          const isTransitSection = title.toLowerCase().includes('transit');
+        const isTransitUtility =
+          isTransitSection &&
+          (it.id === 'soundtransit-planner' || it.id === 'google-maps-transit');
 
-          return (
-            <div key={it.id || it.name} className="px-5 py-5">
+        const shouldShowPrice = !isTransitUtility;
+
+        const shouldShowPriceKindBadge =
+          kind && !(isTransitSection && kind === 'check-live');
+
+        const primaryPrice =
+          isRideSection && typeof it.price === 'number'
+            ? `Est. ${formatMoney(it.price)}`
+            : price.primary;
+
+        const secondaryPrice =
+          isRideSection
+            ? it.priceNote || 'Prices vary by demand, traffic, and pickup time'
+            : it.priceNote || price.secondary;
+
+        const primaryCta =
+          it.id === 'soundtransit-planner'
+            ? 'Official website'
+            : isTransitSection
+              ? 'View route'
+              : isRideSection
+                ? 'Check live'
+                : 'View deal';
+
+        const sourceAndMapSame = Boolean(link && it.mapLink && link === it.mapLink);
+
+        return (
+          <div key={it.id || it.name} className="px-5 py-4">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
               <div className="flex items-start gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-bold text-zinc-900">
                   {providerIcon(it.name)}
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <div className="text-base font-semibold text-zinc-900">
+                      <div className="text-base font-semibold leading-snug text-zinc-900">
                         {it.name}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                          {trust.label}
+                        </span>
+
+                        {shouldShowPriceKindBadge && (
+                          <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                            {pricingKindLabel(kind)}
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    {!isTransitSection && (
-                      <div className="shrink-0 text-lg font-bold text-zinc-900">
-                        {price.primary}
+                    {shouldShowPrice && (
+                      <div className="shrink-0 text-left sm:text-right">
+                        <div className="text-lg font-bold text-zinc-900">
+                          {primaryPrice}
+                        </div>
+
+                        {isTransitSection && typeof it.price === 'number' && (
+                          <div className="text-xs font-medium text-zinc-500">
+                            fare estimate
+                          </div>
+                        )}
+
+                        {isRideSection && typeof it.price === 'number' && (
+                          <div className="text-xs font-medium text-zinc-500">
+                            ride estimate
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
-                      {trust.label}
-                    </span>
-
-                    {kind && !isTransitSection && (
-                      <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
-                        {pricingKindLabel(kind)}
-                      </span>
-                    )}
-                  </div>
-
-                  {price.secondary && !isTransitSection && (
+                  {secondaryPrice && (
                     <div className="mt-2 text-xs leading-relaxed text-zinc-500">
-                      {price.secondary}
+                      {secondaryPrice}
                     </div>
                   )}
 
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    {it.mapLink && (
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {it.mapLink && !sourceAndMapSame && (
                       <a
                         href={it.mapLink}
                         target="_blank"
@@ -462,21 +501,17 @@ function PricingLinksSection({
                         rel="noopener noreferrer"
                         className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                       >
-                        {it.id === 'soundtransit-planner'
-                          ? 'Open planner'
-                          : title.toLowerCase().includes('transit')
-                            ? 'Open'
-                            : 'View deal'}
+                        {primaryCta}
                       </a>
                     )}
                   </div>
                 </div>
               </div>
             </div>
-          );
-        })}
-      </div>
-    </section>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -895,12 +930,6 @@ function computeTimingStatus(args: {
 
         // Accept recovery only if cushion is plausible (within ±12 hours)
         if (Math.abs(altCushion) <= 12 * 60) {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[ViabilityDebug] Same-day parse recovery applied:', {
-              original: { minutesUntilLeaveBy, depDt: depDt.toString() },
-              recovered: { altCushion, depDt: depAlt.toString() },
-            });
-          }
           depDt = depAlt;
           recommendedInsideArrivalByDt = recommendedAlt;
           latestSafeLeaveDt = leaveAlt;
@@ -922,21 +951,6 @@ function computeTimingStatus(args: {
       : minutesUntilLeaveBy <= 15
         ? 'tight'
         : 'good';
-
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[ViabilityDebug] computeTimingStatus:', {
-      departureDate: tripData.departureDate,
-      departureTime: tripData.departureTime,
-      isFutureDate,
-      todayLocal,
-      depDtLocal: depDt.toString(),
-      nowLocal: now.toString(),
-      minutesUntilLeaveBy,
-      missedBy,
-      status,
-      optionTotalMinutes,
-    });
-  }
 
   return {
     status,
@@ -1090,19 +1104,6 @@ function OptionCard({
 
   const timingSummary = (() => {
     if (timing.status === 'n/a' || !timing.latestSafeLeaveTime || !timing.youReachTerminalAround) return null;
-
-    if (process.env.NODE_ENV === 'development' && timing.debug) {
-      console.log('[AirportTimingDebug]', {
-        nowLocal: timing.debug.nowLocal,
-        departureDate: timing.debug.departureDate,
-        departureTime: timing.debug.departureTime,
-        flightDepartureDateTimeLocal: timing.debug.departureLocal,
-        recommendedInsideAirportArrivalByLocal: timing.debug.recommendedInsideArrivalByLocal,
-        latestSafeLeaveLocal: timing.debug.latestSafeLeaveLocal,
-        cushionMinutes: timing.debug.cushionMinutes,
-        status: timing.status,
-      });
-    }
 
     const leaveBy = formatTimeFriendly(timing.latestSafeLeaveTime);
     const reach = formatTimeFriendly(timing.youReachTerminalAround);
@@ -1647,6 +1648,53 @@ function dedupeParkingRankedOptions(
   return Array.from(byKey.values());
 }
 
+function ProviderDropdownSection({
+  title,
+  subtitle,
+  items,
+  defaultOpen = false,
+}: {
+  title: string;
+  subtitle: string;
+  items: ProviderLinkItem[];
+  defaultOpen?: boolean;
+}) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <details
+      open={defaultOpen}
+      className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:border-zinc-300"
+    >
+      <summary className="cursor-pointer list-none border-b border-zinc-200 bg-zinc-50 px-5 py-4 marker:hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-zinc-900">
+                {title}
+              </h3>
+
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                Compare options
+              </span>
+            </div>
+
+            <p className="mt-1 text-sm text-zinc-600">
+              {subtitle}
+            </p>
+          </div>
+
+          <span className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-xs font-semibold text-zinc-500 transition group-open:rotate-180">
+            ▼
+          </span>
+        </div>
+      </summary>
+
+      <PricingLinksSection title={title} items={items} />
+    </details>
+  );
+}
+
 export default function ResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1662,8 +1710,6 @@ export default function ResultsContent() {
   const [showTooLate, setShowTooLate] = useState(false);
 
   const [showMoreParking, setShowMoreParking] = useState(false);
-  const [showRideshare, setShowRideshare] = useState(false);
-  const [showTransit, setShowTransit] = useState(false);
 
   const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
   const [aprLiveChecking, setAprLiveChecking] = useState(false);
@@ -1792,18 +1838,6 @@ export default function ResultsContent() {
       setShowTooLate(false);
       setRecommendation(null);
       setRankedOptions([]);
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[Recs] URL→TripData', {
-          type: data.type,
-          origin: data.origin,
-          destination: data.destination,
-          departureDate: 'departureDate' in data ? data.departureDate : undefined,
-          departureTime: 'departureTime' in data ? data.departureTime : undefined,
-          airportTripDate: 'airportTripDate' in data ? data.airportTripDate : undefined,
-          airportTripTime: 'airportTripTime' in data ? data.airportTripTime : undefined,
-        });
-      }
 
       fetch('/api/recommendations', {
         method: 'POST',
@@ -2187,25 +2221,6 @@ export default function ResultsContent() {
       }
     }
 
-    if (process.env.NODE_ENV === 'development') {
-      const nowLocal = new Date().toString();
-      const first = timed[0]?.timing;
-      console.log('[ViabilityCounts]', {
-        timestamp: new Date().toISOString(),
-        departureDate: tripData.departureDate,
-        departureTime: tripData.departureTime,
-        nowLocal,
-        departureLocal: first?.debug?.departureLocal,
-        isFutureDate: first?.debug?.isFutureDate,
-        recommendedInsideAirportArrivalByLocal: first?.debug?.recommendedInsideArrivalByLocal,
-        latestSafeLeaveLocal: first?.debug?.latestSafeLeaveLocal,
-        firstStatus: first?.status,
-        viable: viable.length,
-        tooLate: tooLate.length,
-        total: timed.length,
-      });
-    }
-
     return { viableOptions: viable, tooLateOptions: tooLate, bestTooLateSummary: best };
   }, [sortedOptions, intent, tripData]);
 
@@ -2220,8 +2235,6 @@ export default function ResultsContent() {
   }, [intent, tripData, viableOptions]);
 
   const currentAirportCode = ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
-
-  const extraParkingProviders = useMemo<ProviderLinkItem[]>(() => [], []);
 
   const extraRideProviders = useMemo(
     () => [
@@ -2263,6 +2276,7 @@ export default function ResultsContent() {
       priceNote: 'Route planning + live advisories',
       sourceName: PROVIDER_LINKS.googleMaps.sourceName,
       sourceLink: transitLink,
+      mapLink: transitLink,
     };
 
     if (currentAirportCode === 'SEA') {
@@ -2275,8 +2289,8 @@ export default function ResultsContent() {
           priceNote: 'Official schedules & fares',
           sourceName: PROVIDER_LINKS.soundTransitPlanner.sourceName,
           sourceLink: PROVIDER_LINKS.soundTransitPlanner.url,
+          mapLink: transitLink, // keeps your "View route"
         },
-        googleTransit,
       ];
     }
 
@@ -2361,15 +2375,6 @@ export default function ResultsContent() {
 
   const parkingOptions = recommendation.parking ?? [];
 
-  console.log('[FRONTEND recommendation.parking]', parkingOptions.map((p) => ({
-    id: p.id,
-    name: p.name,
-    sourceLink: p.sourceLink,
-    price: p.price,
-    sourceName: p.sourceName,
-    bookingProvider: p.bookingProvider,
-  })));
-
   const parkingOptionsWithLive = parkingOptions.map((p) =>
     withAprLivePrice(p, aprLivePrices)
   );
@@ -2438,7 +2443,7 @@ export default function ResultsContent() {
     };
   })();
 
-  const visibleResultOptions = sortedOptions;
+  const visibleResultOptions = sortedOptions.filter((o) => o.type !== 'parking');
 
   const parkingOptionsOnly = parkingOptionsWithLive.map((p, idx) => {
     const matchedRanked = sortedOptions.find((o) => {
@@ -2463,19 +2468,6 @@ export default function ResultsContent() {
       cost: typeof p.price === 'number' ? p.price : matchedRanked?.cost ?? 999,
     } as RankedRecommendation;
   });
-
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[Parking UI Debug]', {
-      totalVisibleResultOptions: visibleResultOptions.length,
-      parkingOptionsOnly: parkingOptionsOnly.map((o) => ({
-        name: (o.option as AppOption).name,
-        sourceName: (o.option as AppOption).sourceName,
-        bookingProvider: (o.option as AppOption).bookingProvider,
-        price: (withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption).price,
-        cost: o.cost,
-      })),
-    });
-  }
 
   const parkingOptionsWithAprPricesRaw = parkingOptionsOnly.map((o) => {
     const updatedOption = withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption;
@@ -2520,9 +2512,6 @@ export default function ResultsContent() {
 
   const smartPickOption = smartPickParkingOptions[0] || null;
 
-  const rideshareOptionsOnly = visibleResultOptions.filter((o) => o.type === 'rideshare');
-  const transitOptionsOnly = visibleResultOptions.filter((o) => o.type === 'transit');
-
   const smartPickKey = parkingKeySafe(smartPickOption);
 
   const isSameAsSmartPick = (option: AppOption | null | undefined): boolean => {
@@ -2530,7 +2519,7 @@ export default function ResultsContent() {
     return Boolean(smartPickKey && otherKey && smartPickKey === otherKey);
   };
 
-  const rawRecommendedPicks: RankedRecommendation[] = [];
+  const rawRecommendedPicks: RankedRecommendation[] = visibleResultOptions.slice(0, 3);
 
   const recommendedPicks = rawRecommendedPicks.filter(
     (item) => !isSameAsSmartPick(item.option as AppOption)
@@ -2878,33 +2867,6 @@ export default function ResultsContent() {
             </div>
           ) : (
             <>
-              {recommendedPicks.length > 0 && (
-                <section>
-                  <div className="mb-3">
-                    <h2 className="text-lg font-semibold text-zinc-900">Best Alternatives</h2>
-                    <p className="mt-1 text-sm text-zinc-600">
-                      Other strong choices based on price, timing, and convenience.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    {recommendedPicks.map((opt, idx) => (
-                      <OptionCard
-                        aprLivePrices={aprLivePrices}
-                        aprLiveChecking={aprLiveChecking}
-                        compact
-                        key={`recommended-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                        item={opt}
-                        rank={idx + 1}
-                        tripData={tripData}
-                        intent={intent}
-                        sort={sort}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
               {remainingParking.length > 0 && (
                 <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -2941,82 +2903,6 @@ export default function ResultsContent() {
                       />
                     ))}
                   </div>
-                </section>
-              )}
-
-              {rideshareOptionsOnly.length > 0 && (
-                <section className="mt-6">
-                  <button
-                    type="button"
-                    onClick={() => setShowRideshare((v) => !v)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm hover:bg-zinc-50"
-                  >
-                    <div>
-                      <div className="text-lg font-semibold text-zinc-900">Rideshare</div>
-                      <div className="mt-1 text-sm text-zinc-600">Uber, Lyft, taxi, and pickup options.</div>
-                    </div>
-                    <div className="text-sm font-medium text-blue-700">
-                      {showRideshare
-                        ? 'Hide rideshare'
-                        : `Show rideshare (${rideshareOptionsOnly.length})`}
-                    </div>
-                  </button>
-
-                  {showRideshare && (
-                    <div className="mt-4 grid grid-cols-1 gap-4">
-                      {rideshareOptionsOnly.map((opt, idx) => (
-                        <OptionCard
-                          aprLivePrices={aprLivePrices}
-                          aprLiveChecking={aprLiveChecking}
-                          compact
-                          key={`ride-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                          item={opt}
-                          rank={idx + 1}
-                          tripData={tripData}
-                          intent={intent}
-                          sort={sort}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {transitOptionsOnly.length > 0 && (
-                <section className="mt-6">
-                  <button
-                    type="button"
-                    onClick={() => setShowTransit((v) => !v)}
-                    className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm hover:bg-zinc-50"
-                  >
-                    <div>
-                      <div className="text-lg font-semibold text-zinc-900">Transit</div>
-                      <div className="mt-1 text-sm text-zinc-600">Park-and-ride, light rail, and transit options.</div>
-                    </div>
-                    <div className="text-sm font-medium text-blue-700">
-                      {showTransit
-                        ? 'Hide transit'
-                        : `Show transit (${transitOptionsOnly.length})`}
-                    </div>
-                  </button>
-
-                  {showTransit && (
-                    <div className="mt-4 grid grid-cols-1 gap-4">
-                      {transitOptionsOnly.map((opt, idx) => (
-                        <OptionCard
-                          aprLivePrices={aprLivePrices}
-                          aprLiveChecking={aprLiveChecking}
-                          compact
-                          key={`transit-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                          item={opt}
-                          rank={idx + 1}
-                          tripData={tripData}
-                          intent={intent}
-                          sort={sort}
-                        />
-                      ))}
-                    </div>
-                  )}
                 </section>
               )}
 
@@ -3060,35 +2946,21 @@ export default function ResultsContent() {
 
         {/* Pricing links */}
         <div className="mt-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-          {showParkingProviders && (
-            <ParkingBookingComparison
-              parkingOptions={parkingOptionsWithLive}
-              tripData={tripData}
-              aprLivePrices={aprLivePrices}
-              aprLiveChecking={aprLiveChecking}
-            />
-          )}
-
           {showRideProviders && (
-            <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
-              <summary className="w-full cursor-pointer px-5 py-4 text-base font-medium text-zinc-900">
-                Need rideshare instead? Show ride prices
-              </summary>
-              <div className="px-5 pb-5">
-                <PricingLinksSection
-                  title="Ride providers"
-                  items={rideProviderItems}
-                />
-              </div>
-            </details>
+            <ProviderDropdownSection
+              title="Ride providers"
+              subtitle="Compare Uber, Lyft, taxi, and live provider links."
+              items={rideProviderItems}
+              defaultOpen={false}
+            />
           )}
 
-          <div className={showParkingProviders && showRideProviders ? 'lg:col-span-2' : undefined}>
-            <PricingLinksSection
-              title="Transit options"
-              items={[...(transitOptions), ...extraTransitProviders]}
-            />
-          </div>
+          <ProviderDropdownSection
+            title="Transit options"
+            subtitle="Compare route planning, fares, confidence, and links."
+            items={[...(transitOptions), ...extraTransitProviders]}
+            defaultOpen={false}
+          />
         </div>
 
         <div className="mt-10 flex justify-center">

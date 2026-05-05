@@ -4,6 +4,7 @@ import {
     getCachedParkWhizQuotes,
     saveParkWhizQuotes,
 } from '../db/parkingCache';
+import { debugLog } from '../utils/debug';
 
 type ParkWhizAmenity = {
     name?: string;
@@ -282,7 +283,7 @@ export async function getParkWhizParkingOptions(args: {
     });
 
     if (cached?.options?.length) {
-        console.log('[ParkWhiz] cache hit', {
+        debugLog('[ParkWhiz] cache hit', {
             airportCode: airport.id,
             startTime,
             endTime,

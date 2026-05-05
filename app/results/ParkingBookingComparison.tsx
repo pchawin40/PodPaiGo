@@ -117,8 +117,19 @@ export default function ParkingBookingComparison({
 
   return (
     <details className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      <summary className="w-full cursor-pointer px-5 py-4 text-base font-semibold text-zinc-900">
-        Compare booking options
+      <summary className="w-full cursor-pointer bg-zinc-50 px-5 py-4 text-base font-semibold text-zinc-900">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+              Parking prices
+            </div>
+            <div className="mt-1">Compare booking options</div>
+            <div className="mt-1 text-sm font-normal text-zinc-600">
+              Official, direct, and marketplace links with price confidence.
+            </div>
+          </div>
+          <span className="text-sm text-zinc-500">Open</span>
+        </div>
       </summary>
 
       <div className="border-t border-zinc-100 px-4 pb-4 pt-3">
@@ -135,7 +146,7 @@ export default function ParkingBookingComparison({
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-800">
+                    <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold text-white">
                       {r.price}
                     </span>
 
