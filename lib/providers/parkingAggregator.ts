@@ -6,6 +6,9 @@ import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
 import { getParkWhizParkingOptions } from './parkWhiz';
 import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 import { debugLog } from '../utils/debug';
+import { getParkingLotsByAirport } from '../parking/inventory';
+import { inventoryLotToParkingOption } from '../parking/inventoryToParkingOption';
+import { enrichInventoryOptionsWithPrices } from '../parking/priceMatcher';
 
 type GooglePlace = {
   id?: string;
@@ -385,6 +388,18 @@ export async function getLiveParkingOptions(args: {
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
+  const inventoryLots = await getParkingLotsByAirport(airport.id, 8).catch((error) => {
+    console.warn('Parking inventory read failed', error);
+    return [];
+  });
+
+  const inventoryOptions = inventoryLots.map((lot) =>
+    inventoryLotToParkingOption({
+      lot,
+      origin: airport.routingAddress,
+    }),
+  );
+
   const parkWhizOptions =
     process.env.PARKING_DISCOVERY_PROVIDER === 'parkwhiz' ||
       process.env.PARKING_DISCOVERY_PROVIDER === 'all'
@@ -525,6 +540,16 @@ export async function getLiveParkingOptions(args: {
     .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
     .slice(0, 8);
 
+  const pricedProviderOptions = [
+    ...parkWhizOptions,
+    ...aprOptions,
+  ];
+
+  const pricedInventoryOptions = enrichInventoryOptionsWithPrices({
+    inventoryOptions,
+    pricedOptions: pricedProviderOptions,
+  });
+
   const marketplaceOptions = PARKING_MARKETPLACES.map((provider): ParkingOption => {
     const isOfficial = provider.id === 'official';
     const isGoogleSearch = provider.id === 'google-parking-search';
@@ -599,6 +624,7 @@ export async function getLiveParkingOptions(args: {
     ...parkWhizOptions,
     ...aprOptions,
     ...discoveredLots,
+    ...pricedInventoryOptions,
     ...fallbackLots.filter((p) => p.type !== 'official'),
   ]).sort((a, b) => {
     const rank = (p: ParkingOption) => {

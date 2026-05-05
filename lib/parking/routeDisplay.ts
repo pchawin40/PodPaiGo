@@ -156,3 +156,12 @@ export function parkingKeySafe(option: { id?: string; name?: string } | null | u
     name: option.name,
   });
 }
+
+export function hasRealParkingPrice(option: { price?: number; priceDisplay?: string }) {
+  return (
+    typeof option.price === 'number' &&
+    option.price > 0 &&
+    option.price < 500 &&
+    option.priceDisplay !== 'check-live'
+  );
+}

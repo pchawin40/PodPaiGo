@@ -173,6 +173,9 @@ export default function TripFlow() {
 
   const intent = state.intent;
 
+  const ENABLE_AIRPORT_TIMING_FIELDS = false;
+  const showTimingFields = ENABLE_AIRPORT_TIMING_FIELDS || intent !== 'parking-trip';
+
   const seatacZone = useMemo(() => {
     if (!intent) return null;
     const wantsAirline = intentCopy(intent).wantsAirline;
@@ -204,7 +207,7 @@ export default function TripFlow() {
       next.push('Parking check-in date is required.');
     }
 
-    if (state.intent !== 'parking-trip' && !state.time) {
+    if (ENABLE_AIRPORT_TIMING_FIELDS && state.intent !== 'parking-trip' && !state.time) {
       next.push('Time is required.');
     }
 
@@ -719,7 +722,7 @@ export default function TripFlow() {
                 <div id="date-field">
                   <label className="block text-sm font-medium text-zinc-800">
                     {(intent === 'flying-out' || intent === 'parking-trip')
-                      ? 'Parking check-in date'
+                      ? 'Parking start date'
                       : 'Date'}
                   </label>
                   <input
@@ -751,35 +754,38 @@ export default function TripFlow() {
                   )}
                 </div>
 
-                <div id="time-field">
-                  <label className="block text-sm font-medium text-zinc-800">
-                    {intentCopy(intent).timeLabel}
-                  </label>
-                  <input
-                    type="time"
-                    value={state.time}
-                    onChange={(e) => {
-                      setTimeTouched(true);
-                      setState((s) => ({ ...s, time: e.target.value }));
-                      setFieldErrors((prev) => {
-                        const next = { ...prev };
-                        delete next.time;
-                        return next;
-                      });
-                    }}
-                    className={
-                      'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
-                      (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
-                      (highlightedField === 'time' ? 'animate-pulse' : '')
-                    }
-                    aria-label="Trip time"
-                  />
-                  {fieldErrors.time ? (
-                    <div className="mt-2 text-sm text-red-700">{fieldErrors.time}</div>
-                  ) : state.time === '' && intent === 'flying-out' ? (
-                    <div className="mt-2 text-xs text-zinc-500">Select flight departure time</div>
-                  ) : null}
-                </div>
+                {showTimingFields &&
+                  ENABLE_AIRPORT_TIMING_FIELDS && (
+                    <div id="time-field">
+                      <label className="block text-sm font-medium text-zinc-800">
+                        {intentCopy(intent).timeLabel}
+                      </label>
+                      <input
+                        type="time"
+                        value={state.time}
+                        onChange={(e) => {
+                          setTimeTouched(true);
+                          setState((s) => ({ ...s, time: e.target.value }));
+                          setFieldErrors((prev) => {
+                            const next = { ...prev };
+                            delete next.time;
+                            return next;
+                          });
+                        }}
+                        className={
+                          'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                          (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
+                          (highlightedField === 'time' ? 'animate-pulse' : '')
+                        }
+                        aria-label="Trip time"
+                      />
+                      {fieldErrors.time ? (
+                        <div className="mt-2 text-sm text-red-700">{fieldErrors.time}</div>
+                      ) : state.time === '' && intent === 'flying-out' ? (
+                        <div className="mt-2 text-xs text-zinc-500">Select flight departure time</div>
+                      ) : null}
+                    </div>
+                  )}
 
                 {(intent === 'flying-out' || intent === 'parking-trip') && (
                   <>
@@ -814,26 +820,28 @@ export default function TripFlow() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-zinc-800">
-                        Return arrival time
-                        <span className="ml-1 text-xs font-normal text-zinc-500">
-                          Optional
-                        </span>
-                      </label>
+                    {showTimingFields && ENABLE_AIRPORT_TIMING_FIELDS && (
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-800">
+                          Return arrival time
+                          <span className="ml-1 text-xs font-normal text-zinc-500">
+                            Optional
+                          </span>
+                        </label>
 
-                      <input
-                        type="time"
-                        value={state.parkingCheckOutTime}
-                        onChange={(e) =>
-                          setState((s) => ({
-                            ...s,
-                            parkingCheckOutTime: e.target.value,
-                          }))
-                        }
-                        className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      />
-                    </div>
+                        <input
+                          type="time"
+                          value={state.parkingCheckOutTime}
+                          onChange={(e) =>
+                            setState((s) => ({
+                              ...s,
+                              parkingCheckOutTime: e.target.value,
+                            }))
+                          }
+                          className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        />
+                      </div>
+                    )}
                   </>
                 )}
                 <div id="origin-field" className="md:col-span-2">

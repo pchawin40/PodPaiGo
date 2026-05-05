@@ -28,6 +28,7 @@ import {
   parkingRouteBreakdown,
   routeUrlForOption,
   googleMapsParkingRouteLink,
+  hasRealParkingPrice
 } from '../../lib/parking/routeDisplay';
 
 import {
@@ -1076,11 +1077,15 @@ function OptionCard({
       ? ({
         ...(opt as ParkingOption),
         price:
-          typeof opt.price === 'number' && opt.price > 0
-            ? opt.price
-            : typeof item.cost === 'number' && item.cost > 0 && item.cost < 999
+          hasRealParkingPrice(opt)
+            ? opt.price ?? 0
+            : typeof item.cost === 'number' && item.cost > 0 && item.cost < 500
               ? item.cost
-              : 999,
+              : 0,
+        priceDisplay:
+          hasRealParkingPrice(opt)
+            ? opt.priceDisplay
+            : 'check-live',
       } satisfies ParkingOption)
       : null;
 
@@ -1557,6 +1562,59 @@ function OptionCard({
   );
 }
 
+function normalizeParkingBrandName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(seattle|seatac|sea|airport|parking|lot|self|uncovered|covered|garage|rooftop|valet|hotel|inn|at|by)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractBrandKey(name: string): string {
+  const words = normalizeParkingBrandName(name)
+    .split(' ')
+    .filter((word) => word.length >= 3);
+
+  if (words.length === 0) return '';
+
+  return words.slice(0, 2).join(' ');
+}
+
+function isOfficialLikeParking(option: ParkingOption): boolean {
+  const name = String(option.name || '').toLowerCase();
+
+  return (
+    option.type === 'official' ||
+    name.includes('international airport') ||
+    name.includes('airport parking garage') ||
+    name.includes('terminal parking') ||
+    name.includes('over-height') ||
+    name.includes('oversize parking')
+  );
+}
+
+function canonicalizeParkingOptions(options: ParkingOption[]): ParkingOption[] {
+  const seenBrands = new Set<string>();
+  let officialSeen = false;
+
+  return options.filter((option) => {
+    if (isOfficialLikeParking(option)) {
+      if (officialSeen) return false;
+      officialSeen = true;
+      return true;
+    }
+
+    const brand = extractBrandKey(option.name);
+
+    if (!brand) return true;
+    if (seenBrands.has(brand)) return false;
+
+    seenBrands.add(brand);
+    return true;
+  });
+}
+
 function normalizeParkingNameForDedupe(name: string): string {
   return name
     .toLowerCase()
@@ -1714,6 +1772,13 @@ export default function ResultsContent() {
   const [showTooLate, setShowTooLate] = useState(false);
 
   const [showMoreParking, setShowMoreParking] = useState(false);
+
+  const [matchedParkingPrices, setMatchedParkingPrices] = useState<Record<string, {
+    price: number;
+    priceUnit?: PriceUnit;
+    provider?: string;
+    sourceLink?: string;
+  }>>({});
 
   const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
   const [aprLiveChecking, setAprLiveChecking] = useState(false);
@@ -2246,6 +2311,68 @@ export default function ResultsContent() {
       });
   }, [recommendation, tripData]);
 
+  useEffect(() => {
+    if (!tripData || !recommendation?.parking?.length) return;
+
+    const airportCode = getTripAirportCode(tripData);
+
+    const checkInDate =
+      (tripData as TripDataWithExtras).parkingCheckInDate ||
+      (tripData.type === 'one-way-departure' ? tripData.departureDate : '');
+
+    const checkOutDate =
+      (tripData as TripDataWithExtras).parkingCheckOutDate || '';
+
+    if (!checkInDate || !checkOutDate) return;
+
+    const lots = recommendation.parking.map((p) => ({
+      id: p.id,
+      name: p.name,
+    }));
+
+    fetch('/api/parking/prices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        airportCode,
+        checkInDate,
+        checkOutDate,
+        lots,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        const next: Record<string, {
+          price: number;
+          priceUnit?: PriceUnit;
+          provider?: string;
+          sourceLink?: string;
+        }> = {};
+
+        for (const match of data.matches || []) {
+          if (!match.matched || typeof match.price !== 'number') continue;
+
+          const value = {
+            price: match.price,
+            priceUnit: match.priceUnit,
+            provider: match.provider,
+            sourceLink: match.sourceLink,
+          };
+
+          if (match.lotId) next[String(match.lotId)] = value;
+          if (match.lotName) next[String(match.lotName)] = value;
+
+          const brandKey = extractBrandKey(String(match.lotName || ''));
+          if (brandKey) next[brandKey] = value;
+        }
+
+        setMatchedParkingPrices(next);
+      })
+      .catch((error) => {
+        console.error('[parking price matches] failed', error);
+      });
+  }, [tripData, recommendation]);
+
   if (loading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50">
@@ -2268,9 +2395,32 @@ export default function ResultsContent() {
 
   const parkingOptions = recommendation.parking ?? [];
 
-  const parkingOptionsWithLive = parkingOptions.map((p) =>
-    withAprLivePrice(p, aprLivePrices)
-  );
+  const parkingOptionsWithLive = parkingOptions.map((p) => {
+    const aprUpdated = withAprLivePrice(p, aprLivePrices) as ParkingOption;
+    const matched =
+      matchedParkingPrices[String(p.id || '')] ||
+      matchedParkingPrices[String(p.name || '')] ||
+      matchedParkingPrices[extractBrandKey(p.name)];
+
+    if (!matched) return aprUpdated;
+
+    return {
+      ...aprUpdated,
+      price: matched.price,
+      priceUnit: matched.priceUnit || 'per-day',
+      priceDisplay: 'from-per-day',
+      priceNote: `Matched price from ${matched.provider || 'parking provider'}. Confirm final checkout price before booking.`,
+      priceSource: 'provider-match',
+      priceConfidence: 'medium',
+      trustStatus: 'live',
+      sourceName: matched.provider || aprUpdated.sourceName,
+      sourceLink: matched.sourceLink || aprUpdated.sourceLink,
+      bestFor: [
+        ...(aprUpdated.bestFor || []),
+        'Live Price',
+      ],
+    };
+  });
 
   const rideshareOptions = recommendation.rideshare ?? [];
   const transitOptions = recommendation.transit ?? [];
@@ -2390,26 +2540,55 @@ export default function ResultsContent() {
 
     if (sort === 'cheapest') return (aTotal - bTotal) || (a.duration - b.duration);
     if (sort === 'fastest') {
-      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration;
-      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration;
+      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration || 999;
+      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration || 999;
 
       return (aTime - bTime) || (aTotal - bTotal);
     }
 
+    const convenienceScore = (item: RankedRecommendation) => {
+      const option = item.option as ParkingOption;
+      const name = String(option.name || '').toLowerCase();
+
+      let score = 0;
+
+      if (option.type === 'official') score += 100;
+      if (name.includes('parking garage')) score += 80;
+      if (option.transferType === 'walk' || option.transferType === 'airport-garage') score += 50;
+      if (option.covered) score += 25;
+      if (option.trustStatus === 'verified-source' || option.trustStatus === 'live') score += 25;
+      if (option.sourceLink) score += 15;
+
+      const time = parkingTimeBreakdown(option).totalMinutes || item.duration || 999;
+      score -= time * 0.5;
+
+      return score;
+    };
+
     return (
-      (b.stressScore - a.stressScore) ||
-      (a.duration - b.duration) ||
-      (aDaily - bDaily)
+      convenienceScore(b) - convenienceScore(a) ||
+      (a.duration - b.duration)
     );
   });
 
-  const smartPickParkingOptions =
-    sort === 'easiest'
-      ? dedupeAndSortParkingOptions(
-        sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
-        tripData
-      )
-      : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+  const smartPickParkingOptions = (() => {
+    const options =
+      sort === 'easiest'
+        ? dedupeAndSortParkingOptions(
+          sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
+          tripData
+        )
+        : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+
+    const canonical = canonicalizeParkingOptions(options);
+
+    if (sort === 'cheapest') {
+      const priced = canonical.filter((option) => hasRealParkingPrice(option));
+      return priced.length > 0 ? priced : canonical;
+    }
+
+    return canonical;
+  })();
 
   const smartPickOption = smartPickParkingOptions[0] || null;
 
@@ -2422,7 +2601,8 @@ export default function ResultsContent() {
 
   const rawRecommendedPicks: RankedRecommendation[] = visibleResultOptions.slice(0, 3);
 
-  const visibleMoreParkingCount = 6;
+  const visibleMoreParkingCount = 5;
+  const maxParkingDisplayCount = 10;
 
   const remainingParking = smartPickParkingOptions.slice(1).map((parkingOption: ParkingOption) => {
     const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
@@ -2437,7 +2617,7 @@ export default function ResultsContent() {
         score: 0,
         stressScore: 0,
         reasons: ['Available parking option'],
-        cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999,
+        cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999999,
         duration:
           (typeof parkingOption.distance === 'number' ? parkingOption.distance : 45) +
           (typeof parkingOption.parkingBufferMinutes === 'number' ? parkingOption.parkingBufferMinutes : 10) +
@@ -2445,13 +2625,14 @@ export default function ResultsContent() {
       }),
       type: 'parking',
       option: parkingOption,
-      cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999,
+      cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999999,
     } as RankedRecommendation;
   });
 
   const initiallyVisibleParking = remainingParking.slice(0, visibleMoreParkingCount);
-  const hiddenParking = remainingParking.slice(visibleMoreParkingCount);
-  const displayedParking = showMoreParking ? remainingParking : initiallyVisibleParking;
+  const expandedParking = remainingParking.slice(0, maxParkingDisplayCount);
+  const hiddenParking = remainingParking.slice(visibleMoreParkingCount, maxParkingDisplayCount);
+  const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
@@ -2774,13 +2955,13 @@ export default function ResultsContent() {
                       </p>
                     </div>
 
-                    {hiddenParking.length > 0 && (
+                    {false && hiddenParking.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowMoreParking((v) => !v)}
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {showMoreParking ? 'Hide parking options' : `Show ${hiddenParking.length} more parking options`}
+                        {showMoreParking ? 'Show top 5 only' : `Show ${hiddenParking.length} more parking options`}
                       </button>
                     )}
                   </div>
