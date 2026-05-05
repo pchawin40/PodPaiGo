@@ -59,14 +59,31 @@ function parkingRouteLink(option: ParkingOption, tripData: TripData | null): str
   );
 }
 
+function parkingToAirportRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
+  const parkingLot = parkingLotDestination(option);
+
+  if (!parkingLot) return null;
+
+  const destination =
+    tripData?.destination ||
+    option.routeDestination ||
+    'Seattle-Tacoma International Airport, Central Terminal';
+
+  return (
+    `https://www.google.com/maps/dir/?api=1` +
+    `&origin=${encodeURIComponent(parkingLot)}` +
+    `&destination=${encodeURIComponent(destination)}` +
+    `&travelmode=driving`
+  );
+}
+
 function parkingRouteText(option: ParkingOption): string {
   const drive =
     typeof option.distance === 'number'
-      ? `Drive ${
-          option.distance < 60
-            ? `${option.distance} min`
-            : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`
-        }`
+      ? `Drive ${option.distance < 60
+        ? `${option.distance} min`
+        : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`
+      }`
       : null;
 
   const transfer =
@@ -214,7 +231,7 @@ export default function ParkingSmartPick({
 
       const aprUnknownPenalty =
         p.bookingProvider === 'AirportParkingReservations' &&
-        (p.availabilityScore ?? 0) < 50
+          (p.availabilityScore ?? 0) < 50
           ? 50
           : 0;
 
@@ -353,7 +370,18 @@ export default function ParkingSmartPick({
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
             >
-              View route
+              Route to parking
+            </a>
+          )}
+
+          {parkingToAirportRouteLink(best, tripData) && (
+            <a
+              href={parkingToAirportRouteLink(best, tripData) || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+            >
+              Parking to terminal
             </a>
           )}
         </div>

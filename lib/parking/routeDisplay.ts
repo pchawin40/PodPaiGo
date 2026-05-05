@@ -1,6 +1,62 @@
 import { ParkingOption } from '../types';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
 
+export function parkingTimeBreakdown(option: ParkingOption): {
+  label: string;
+  totalMinutes: number;
+  parts: Array<{ label: string; minutes: number }>;
+} {
+  const drive = typeof option.distance === 'number' ? option.distance : 0;
+  const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
+  const shuttleWait =
+    option.transferType === 'shuttle'
+      ? typeof option.shuttleWaitMinutes === 'number'
+        ? option.shuttleWaitMinutes
+        : 8
+      : 0;
+  const transfer =
+    typeof option.transferToTerminalMinutes === 'number'
+      ? option.transferToTerminalMinutes
+      : 0;
+  const walk =
+    typeof option.walkingMinutes === 'number'
+      ? option.walkingMinutes
+      : option.transferType === 'airport-garage'
+        ? 5
+        : 3;
+  const risk =
+    typeof option.bufferRiskMinutes === 'number'
+      ? option.bufferRiskMinutes
+      : option.transferType === 'shuttle'
+        ? 5
+        : 0;
+
+  const parts = [
+    { label: 'Drive', minutes: drive },
+    { label: 'Park/check-in', minutes: park },
+    ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
+    {
+      label:
+        option.transferType === 'shuttle'
+          ? 'Shuttle'
+          : option.transferType === 'airport-garage'
+            ? 'Garage to terminal'
+            : 'Walk to terminal',
+      minutes: transfer,
+    },
+    ...(walk > 0 ? [{ label: 'Walk inside airport', minutes: walk }] : []),
+    ...(risk > 0 ? [{ label: 'Buffer/risk', minutes: risk }] : []),
+  ];
+
+  const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
+
+  return {
+    label: parts.map((p) => `${p.label} ${formatMinutes(p.minutes)}`).join(' + '),
+    totalMinutes,
+    parts,
+  };
+}
+
 export function parkingKey(v: Pick<ParkingOption, 'id' | 'name'>): string {
   const raw = String(v.id || v.name || '')
     .toLowerCase()

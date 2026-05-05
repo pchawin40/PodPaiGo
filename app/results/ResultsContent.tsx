@@ -12,7 +12,7 @@ import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
-import { formatMinutes, parkingKeySafe } from '../../lib/parking/routeDisplay';
+import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeParkingLotsByCheapest } from '../../lib/parking/googlePlacesLotResolver';
@@ -913,9 +913,26 @@ function OptionCard({
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
 
   const sourceLink = opt.sourceLink || null;
-  const routeLink =
+  const parkingLotDestinationForTerminalRoute =
+    String((opt as ParkingOption).name || (opt as ParkingOption).routeDestination || '');
+
+  const parkingLotRouteLink =
     item.type === 'parking'
       ? googleMapsParkingRouteLink(opt as ParkingOption, tripData?.origin || null)
+      : null;
+
+  const parkingToTerminalRouteLink =
+    item.type === 'parking'
+      ? googleMapsDirectionsLink(
+        parkingLotDestinationForTerminalRoute,
+        airport.routingAddress || airport.destinationName || airport.label,
+        'driving'
+      )
+      : null;
+
+  const routeLink =
+    item.type === 'parking'
+      ? parkingLotRouteLink
       : routeUrlForOption(opt, tripData?.origin || null);
 
   const price = optionPriceSummary(
@@ -1246,14 +1263,25 @@ function OptionCard({
                 </button>
               )}
 
-              {item.type === 'parking' && routeLink && (
+              {item.type === 'parking' && parkingLotRouteLink && (
                 <a
-                  href={routeLink}
+                  href={parkingLotRouteLink}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
                 >
-                  View route
+                  Route to parking
+                </a>
+              )}
+
+              {item.type === 'parking' && parkingToTerminalRouteLink && (
+                <a
+                  href={parkingToTerminalRouteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                >
+                  Parking to terminal
                 </a>
               )}
             </div>
@@ -1287,7 +1315,29 @@ function OptionCard({
                 </a>
               ) : null}
 
-              {routeLink && (
+              {item.type === 'parking' && parkingLotRouteLink && (
+                <a
+                  href={parkingLotRouteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                >
+                  Route to parking
+                </a>
+              )}
+
+              {item.type === 'parking' && parkingToTerminalRouteLink && (
+                <a
+                  href={parkingToTerminalRouteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                >
+                  Parking to terminal
+                </a>
+              )}
+
+              {item.type !== 'parking' && routeLink && (
                 <a
                   href={routeLink}
                   target="_blank"
@@ -2265,6 +2315,8 @@ export default function ResultsContent() {
       return rankedKey && parkingKey && rankedKey === parkingKey;
     });
 
+    const breakdown = parkingTimeBreakdown(p as ParkingOption);
+
     return {
       ...(matchedRanked || {
         type: 'parking',
@@ -2272,10 +2324,7 @@ export default function ResultsContent() {
         stressScore: 0,
         reasons: ['Available parking option'],
         cost: typeof p.price === 'number' ? p.price : 999,
-        duration:
-          (typeof p.distance === 'number' ? p.distance : 45) +
-          (typeof p.parkingBufferMinutes === 'number' ? p.parkingBufferMinutes : 10) +
-          (typeof p.transferToTerminalMinutes === 'number' ? p.transferToTerminalMinutes : 10),
+        duration: breakdown.totalMinutes,
       }),
       type: 'parking',
       option: p,

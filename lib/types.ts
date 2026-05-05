@@ -21,34 +21,34 @@ type BaseTripData = {
 
 export type TripData =
   | (BaseTripData & {
-      type: 'one-way-departure';
-      departureDate: string;
-      departureTime: string;
-      parkingDuration?: number; // in minutes, optional user override
-      checkingBags?: boolean;
-      securityOption?: SecurityOption;
-      flightType?: FlightType;
-      cabin?: CabinClass;
-      checkedInAtAirport?: boolean; // default: true
-    })
+    type: 'one-way-departure';
+    departureDate: string;
+    departureTime: string;
+    parkingDuration?: number; // in minutes, optional user override
+    checkingBags?: boolean;
+    securityOption?: SecurityOption;
+    flightType?: FlightType;
+    cabin?: CabinClass;
+    checkedInAtAirport?: boolean; // default: true
+  })
   | (BaseTripData & {
-      type: 'one-way-arrival';
-      arrivalDate: string;
-      arrivalTime: string;
-    })
+    type: 'one-way-arrival';
+    arrivalDate: string;
+    arrivalTime: string;
+  })
   | (BaseTripData & {
-      type: 'round-trip';
-      departureDate: string;
-      departureTime: string;
-      returnDate: string;
-      returnTime: string;
-      parkingDuration?: number; // in minutes, optional user override
-    })
+    type: 'round-trip';
+    departureDate: string;
+    departureTime: string;
+    returnDate: string;
+    returnTime: string;
+    parkingDuration?: number; // in minutes, optional user override
+  })
   | (BaseTripData & {
-      type: 'dropoff-pickup';
-      airportTripDate: string;
-      airportTripTime: string;
-    });
+    type: 'dropoff-pickup';
+    airportTripDate: string;
+    airportTripTime: string;
+  });
 
 export type TrustStatus = 'live' | 'verified-source' | 'estimated' | 'fallback';
 
@@ -118,6 +118,15 @@ export type ParkingOption = {
   bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options
   availabilityStatus?: 'available' | 'unavailable' | 'unknown'; // simplified availability for UI display 
   isAvailable?: boolean; // legacy field, true if availabilityStatus is 'available'
+  googlePlaceId?: string;
+  providerLotId?: string;
+  normalizedName?: string;
+  normalizedAddress?: string;
+  canonicalLotKey?: string;
+  lat?: number;
+  lng?: number;
+  shuttleWaitMinutes?: number;
+  bufferRiskMinutes?: number;
 };
 
 export type RideshareOption = {
