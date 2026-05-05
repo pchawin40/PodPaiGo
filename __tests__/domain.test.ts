@@ -39,7 +39,7 @@ describe('Trip Duration Calculation', () => {
     const tripData: TripData = {
       type: 'round-trip',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
@@ -53,7 +53,7 @@ describe('Trip Duration Calculation', () => {
     const tripData: TripData = {
       type: 'round-trip',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-01',
@@ -139,7 +139,7 @@ describe('Rideshare Cost Calculations', () => {
     const tripData: TripData = {
       type: 'one-way-departure',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       departureDate: '2024-01-01',
       departureTime: '10:00'
     };
@@ -151,7 +151,7 @@ describe('Rideshare Cost Calculations', () => {
     const tripData: TripData = {
       type: 'round-trip',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
@@ -181,7 +181,7 @@ describe('Transit Cost Calculations', () => {
     const tripData: TripData = {
       type: 'one-way-arrival',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       arrivalDate: '2024-01-01',
       arrivalTime: '10:00'
     };
@@ -193,7 +193,7 @@ describe('Transit Cost Calculations', () => {
     const tripData: TripData = {
       type: 'round-trip',
       origin: '98101',
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       departureDate: '2024-01-01',
       departureTime: '10:00',
       returnDate: '2024-01-03',
@@ -208,14 +208,14 @@ describe('Leave-by Time Calculation', () => {
   const tripData: TripData = {
     type: 'one-way-departure',
     origin: '98101',
-    destination: 'Central Terminal',
+    destination: 'Seattle-Tacoma International Airport',
     departureDate: '2024-01-01',
     departureTime: '14:00', // 2:00 PM flight
   };
 
   test('calculateLeaveByTime should calculate departure time correctly', () => {
     const tsaEstimate: TsaEstimate = {
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       waitTime: 20,
       status: 'estimated',
       trustStatus: 'estimated',
@@ -297,7 +297,7 @@ describe('Recommendation Ranking', () => {
   const tripData: TripData = {
     type: 'round-trip',
     origin: '98101',
-    destination: 'Central Terminal',
+    destination: 'Seattle-Tacoma International Airport',
     departureDate: '2024-01-01',
     departureTime: '10:00',
     returnDate: '2024-01-03',
@@ -306,7 +306,7 @@ describe('Recommendation Ranking', () => {
 
   test('rankRecommendations should return ranked recommendations', () => {
     const tsaEstimate: TsaEstimate = {
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       waitTime: 20,
       status: 'estimated',
       trustStatus: 'estimated',
@@ -325,7 +325,7 @@ describe('Recommendation Ranking', () => {
 
   test('rankRecommendations should compute true minimum cost correctly', () => {
     const tsaEstimate: TsaEstimate = {
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       waitTime: 20,
       status: 'estimated',
       trustStatus: 'estimated',
@@ -340,7 +340,7 @@ describe('Recommendation Ranking', () => {
 
   test('rankRecommendations should sort by score descending', () => {
     const tsaEstimate: TsaEstimate = {
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       waitTime: 20,
       status: 'estimated',
       trustStatus: 'estimated',
@@ -356,7 +356,7 @@ describe('Recommendation Ranking', () => {
 
   test('rankRecommendations should include reasons for recommendations', () => {
     const tsaEstimate: TsaEstimate = {
-      destination: 'Central Terminal',
+      destination: 'Seattle-Tacoma International Airport',
       waitTime: 20,
       status: 'estimated',
       trustStatus: 'estimated',

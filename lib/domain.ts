@@ -485,3 +485,22 @@ export function rankRecommendations(
 
   return recommendations.sort((a, b) => b.score - a.score);
 }
+
+export type RecommendationSortMode = 'easiest' | 'cheapest' | 'fastest';
+
+export function sortRankedRecommendations(
+  recommendations: RankedRecommendation[],
+  mode: RecommendationSortMode
+): RankedRecommendation[] {
+  return [...recommendations].sort((a, b) => {
+    if (mode === 'cheapest') {
+      return a.cost - b.cost || a.duration - b.duration || b.stressScore - a.stressScore;
+    }
+
+    if (mode === 'fastest') {
+      return a.duration - b.duration || a.cost - b.cost || b.stressScore - a.stressScore;
+    }
+
+    return b.stressScore - a.stressScore || b.score - a.score || a.duration - b.duration;
+  });
+}

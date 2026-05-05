@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { rankRecommendations } from '../../lib/domain';
+import {
+  rankRecommendations,
+  sortRankedRecommendations,
+  RecommendationSortMode,
+} from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
@@ -104,7 +108,7 @@ type BestTooLateSummary = {
 type ProviderLinkItem = PriceableOption;
 
 
-type SortTab = 'easiest' | 'cheapest' | 'fastest';
+type SortTab = RecommendationSortMode;
 
 function isSelectedDatePrice(option: { bestFor?: string[]; priceNote?: string }) {
   return (
@@ -2037,124 +2041,10 @@ export default function ResultsContent() {
     setEditingData(null);
   };
 
-  const sortedOptions = useMemo(() => {
-    const arr = [...rankedOptions];
-
-    const timingRank = (status: TimingStatus): number => {
-      if (status === 'good') return 0;
-      if (status === 'tight') return 1;
-      if (status === 'too-late') return 2;
-      return 0;
-    };
-
-    const statusFor = (opt: RankedRecommendation): TimingStatus => {
-      return computeTimingStatus({
-        intent,
-        tripData,
-        optionTotalMinutes: opt.duration,
-      }).status;
-    };
-
-    const compareByTimingFirst = (a: RankedRecommendation, b: RankedRecommendation): number => {
-      const sa = statusFor(a);
-      const sb = statusFor(b);
-      return timingRank(sa) - timingRank(sb);
-    };
-
-    if (sort === 'cheapest') {
-      return arr.sort((a, b) => {
-        const sa = statusFor(a);
-        const sb = statusFor(b);
-
-        const penaltyA = sa === 'too-late' ? 500 : sa === 'tight' ? 10 : 0;
-        const penaltyB = sb === 'too-late' ? 500 : sb === 'tight' ? 10 : 0;
-
-        const effectiveA = a.cost + penaltyA;
-        const effectiveB = b.cost + penaltyB;
-
-        // Use timing as a weighted modifier; only break ties more aggressively when costs are close.
-        const diff = effectiveA - effectiveB;
-        if (Math.abs(diff) < 8) {
-          return compareByTimingFirst(a, b) || (costOf(a) - costOf(b)) || (a.duration - b.duration);
-        }
-
-        return diff || (costOf(a) - costOf(b)) || (a.duration - b.duration);
-      });
-    }
-
-    if (sort === 'fastest') {
-      return arr.sort((a, b) => {
-        const sa = statusFor(a);
-        const sb = statusFor(b);
-
-        const penaltyA = sa === 'too-late' ? 300 : sa === 'tight' ? 6 : 0;
-        const penaltyB = sb === 'too-late' ? 300 : sb === 'tight' ? 6 : 0;
-
-        const effectiveA = a.duration + penaltyA;
-        const effectiveB = b.duration + penaltyB;
-
-        const diff = effectiveA - effectiveB;
-        if (Math.abs(diff) < 8) {
-          return compareByTimingFirst(a, b) || (a.duration - b.duration) || (costOf(a) - costOf(b));
-        }
-
-        return diff || (a.duration - b.duration) || (costOf(a) - costOf(b));
-      });
-    }
-
-    // easiest / recommended
-    return arr.sort((a, b) => {
-      const sa = statusFor(a);
-      const sb = statusFor(b);
-
-      const penaltyA = sa === 'too-late' ? 80 : sa === 'tight' ? 12 : 0;
-      const penaltyB = sb === 'too-late' ? 80 : sb === 'tight' ? 12 : 0;
-
-      const modeBonus = (x: RankedRecommendation): number => {
-        const transport = (tripData as TripDataWithExtras)?.transportAvailability || 'all';
-
-        if (transport === 'car') {
-          if (x.type === 'parking') return 35;
-          if (x.type === 'transit') return -30;
-          if (x.type === 'rideshare') return 5;
-        }
-
-        if (transport === 'rideshare') {
-          if (x.type === 'rideshare') return 30;
-          if (x.type === 'parking') return -15;
-          if (x.type === 'transit') return -10;
-        }
-
-        if (transport === 'transit') {
-          if (x.type === 'transit') return 35;
-          if (x.type === 'parking') return -30;
-          if (x.type === 'rideshare') return -15;
-        }
-
-        return 0;
-      };
-
-      const effectiveA =
-        a.score * 0.7 +
-        a.stressScore * 0.3 +
-        modeBonus(a) -
-        penaltyA;
-
-      const effectiveB =
-        b.score * 0.7 +
-        b.stressScore * 0.3 +
-        modeBonus(b) -
-        penaltyB;
-
-      const diff = effectiveB - effectiveA;
-
-      if (Math.abs(diff) < 8) {
-        return compareByTimingFirst(a, b) || (b.score - a.score) || (costOf(a) - costOf(b));
-      }
-
-      return diff;
-    });
-  }, [rankedOptions, sort, intent, tripData]);
+  const sortedOptions = useMemo(
+    () => sortRankedRecommendations(rankedOptions, sort),
+    [rankedOptions, sort]
+  );
 
   const { viableOptions, tooLateOptions, bestTooLateSummary } = useMemo(() => {
     const isFlyingOut = intent === 'flying-out' && tripData?.type === 'one-way-departure';
@@ -2235,6 +2125,9 @@ export default function ResultsContent() {
   }, [intent, tripData, viableOptions]);
 
   const currentAirportCode = ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
+
+  const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
+  const displayDestination = currentAirport.label;
 
   const extraRideProviders = useMemo(
     () => [
@@ -2496,7 +2389,12 @@ export default function ResultsContent() {
     const bDaily = getParkingDailyPrice(bOption, tripData) ?? bTotal;
 
     if (sort === 'cheapest') return (aTotal - bTotal) || (a.duration - b.duration);
-    if (sort === 'fastest') return (a.duration - b.duration) || (aTotal - bTotal);
+    if (sort === 'fastest') {
+      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration;
+      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration;
+
+      return (aTime - bTime) || (aTotal - bTotal);
+    }
 
     return (
       (b.stressScore - a.stressScore) ||
@@ -2505,10 +2403,13 @@ export default function ResultsContent() {
     );
   });
 
-  const smartPickParkingOptions = dedupeAndSortParkingOptions(
-    sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
-    tripData
-  );
+  const smartPickParkingOptions =
+    sort === 'easiest'
+      ? dedupeAndSortParkingOptions(
+        sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
+        tripData
+      )
+      : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
   const smartPickOption = smartPickParkingOptions[0] || null;
 
@@ -2520,10 +2421,6 @@ export default function ResultsContent() {
   };
 
   const rawRecommendedPicks: RankedRecommendation[] = visibleResultOptions.slice(0, 3);
-
-  const recommendedPicks = rawRecommendedPicks.filter(
-    (item) => !isSameAsSmartPick(item.option as AppOption)
-  );
 
   const visibleMoreParkingCount = 6;
 
@@ -2584,7 +2481,7 @@ export default function ResultsContent() {
               )}
 
               <p className="mt-2 text-sm text-zinc-600">
-                {tripData.destination}
+                {displayDestination}
                 {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
                 {airlineOrFlight ? ` • ${airlineOrFlight}` : ''}
                 {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip')
@@ -2647,7 +2544,7 @@ export default function ResultsContent() {
           <div className="rounded-xl bg-zinc-50 p-4">
             <div className="text-xs font-medium text-zinc-500">Destination</div>
             <div className="mt-1 text-sm font-semibold text-zinc-900">
-              {tripData.destination}
+              {displayDestination}
             </div>
           </div>
 
