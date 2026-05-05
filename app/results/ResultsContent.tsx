@@ -123,6 +123,101 @@ function formatParkingDailyPrice(option: { price: number; bestFor?: string[]; pr
     : `From ${formatMoney(option.price)}/day`;
 }
 
+function formatMiniMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '0m';
+
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${mins}m`;
+}
+
+function parkingTimeParts(option: ParkingOption) {
+  const drive = typeof option.distance === 'number' ? option.distance : 0;
+  const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
+  const transfer = typeof option.transferToTerminalMinutes === 'number' ? option.transferToTerminalMinutes : 0;
+
+  const isShuttle = option.transferType === 'shuttle';
+  const isGarage = option.transferType === 'airport-garage';
+
+  const shuttleWait = isShuttle ? 8 : 0;
+  const walkInside = isGarage ? 5 : 2;
+  const buffer = 5;
+
+  const total = drive + park + shuttleWait + transfer + walkInside + buffer;
+
+  return {
+    total,
+    parts: [
+      { label: 'Drive', minutes: drive },
+      { label: 'Park', minutes: park },
+      ...(isShuttle ? [{ label: 'Wait', minutes: shuttleWait }] : []),
+      {
+        label: isShuttle ? 'Shuttle' : isGarage ? 'Garage walk' : 'Walk',
+        minutes: transfer,
+      },
+      { label: 'Inside airport', minutes: walkInside },
+      { label: 'Buffer', minutes: buffer },
+    ].filter((p) => p.minutes > 0),
+  };
+}
+
+function ParkingTimeSummary({
+  option,
+  compact = false,
+}: {
+  option: ParkingOption;
+  compact?: boolean;
+}) {
+  const breakdown = parkingTimeParts(option);
+
+  if (compact) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-semibold text-zinc-900">
+          Total time {formatMiniMinutes(breakdown.total)}
+        </span>
+
+        {breakdown.parts.slice(0, 3).map((part) => (
+          <span
+            key={`${part.label}-${part.minutes}`}
+            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
+          >
+            {part.label} {formatMiniMinutes(part.minutes)}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-xs font-medium text-zinc-500">
+          Total time to terminal
+        </span>
+        <span className="text-base font-bold text-zinc-900">
+          {formatMiniMinutes(breakdown.total)}
+        </span>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {breakdown.parts.map((part) => (
+          <span
+            key={`${part.label}-${part.minutes}`}
+            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
+          >
+            {part.label} {formatMiniMinutes(part.minutes)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function isAprOption(
   option: PriceableOption & { bookingProvider?: string }
 ): boolean {
@@ -971,6 +1066,11 @@ function OptionCard({
       } satisfies ParkingOption)
       : null;
 
+  const parkingBreakdown =
+    item.type === 'parking'
+      ? parkingTimeBreakdown(opt as ParkingOption)
+      : null;
+
   const parkingPrice =
     item.type === 'parking' && normalizedParkingOption
       ? parkingPriceLine(normalizedParkingOption, tripData)
@@ -1061,68 +1161,73 @@ function OptionCard({
               )}
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <div className="text-lg font-semibold text-zinc-900">
-              {item.type === 'parking'
-                ? parkingPrice?.primary
-                : nonParkingPrice}
+          <div className="mt-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-lg font-bold text-zinc-900">
+                {item.type === 'parking'
+                  ? parkingPrice?.primary
+                  : nonParkingPrice}
+              </span>
+
+              {parkingTotalText && (
+                <span className="text-sm font-semibold text-zinc-600">
+                  · {parkingTotalText.replace('Est. total: ', '')}
+                </span>
+              )}
+
+              {item.type !== 'parking' && (
+                <span className="text-sm text-zinc-600">
+                  · {formatMinutes(item.duration)}
+                </span>
+              )}
             </div>
 
-            {parkingTotalText && (
-              <div className="text-sm font-semibold text-zinc-700">
-                • {parkingTotalText}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
+                {trust.label}
               </div>
-            )}
 
-            <div className="text-sm text-zinc-600">
-              {item.type === 'parking'
-                ? `• ${parkingRouteBreakdown(opt as ParkingOption)}`
-                : `• ${formatMinutes(item.duration)}`}
-            </div>
-
-            {item.type !== 'parking' && opt.priceNote && (
-              <div className="basis-full text-xs text-zinc-500">
-                {opt.priceNote}
-              </div>
-            )}
-
-            <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
-              {trust.label}
-            </div>
-            {timingMeta && (
-              <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + timingMeta.className}>
-                {timingMeta.label}
-              </div>
-            )}
-            {price.badge && !((opt.bestFor || []) as string[]).includes(price.badge) && (
-              <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
-                {price.badge}
-              </div>
-            )}
-
-            {item.type === 'parking' &&
-              Array.isArray(opt.bestFor) &&
-              Array.from(new Set(opt.bestFor as string[])).slice(0, 3).map((tag: string) => (
-                <div
-                  key={tag}
-                  className={
-                    'rounded-full border px-2.5 py-1 text-xs font-medium ' +
-                    (tag === 'Great Deal' || tag === 'Cheapest'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : tag === 'Live Price' || tag === 'Selected-date price' || tag === 'APR listed price'
-                        ? 'border-blue-200 bg-blue-50 text-blue-800'
-                        : 'border-zinc-200 bg-white text-zinc-700')
-                  }
-                >
-                  {tag}
+              {timingMeta && (
+                <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + timingMeta.className}>
+                  {timingMeta.label}
                 </div>
-              ))}
+              )}
 
-            {aprLiveChecking &&
-              item.type === 'parking' &&
-              isAprOption(opt) &&
-              getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
+              {price.badge && !((opt.bestFor || []) as string[]).includes(price.badge) && (
+                <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                  {price.badge}
+                </div>
+              )}
+
+              {item.type === 'parking' &&
+                Array.isArray(opt.bestFor) &&
+                Array.from(new Set(opt.bestFor as string[])).slice(0, 2).map((tag: string) => (
+                  <div
+                    key={tag}
+                    className={
+                      'rounded-full border px-2.5 py-1 text-xs font-medium ' +
+                      (tag === 'Great Deal' || tag === 'Cheapest'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : tag === 'Live Price' || tag === 'Selected-date price' || tag === 'APR listed price'
+                          ? 'border-blue-200 bg-blue-50 text-blue-800'
+                          : 'border-zinc-200 bg-white text-zinc-700')
+                    }
+                  >
+                    {tag}
+                  </div>
+                ))}
+
+              {aprLiveChecking &&
+                item.type === 'parking' &&
+                isAprOption(opt) &&
+                getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
+            </div>
           </div>
+
+          {item.type === 'parking' && (
+            <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
+          )}
+
           {timingSummary && !compact && (
             <div className={
               'mt-2 text-xs ' +
@@ -1381,21 +1486,48 @@ function OptionCard({
               </div>
             )}
 
-            {item.type === 'parking' && !compact && (
+            {item.type === 'parking' && !compact && parkingBreakdown && (
               <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
-                <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
-                <div className="mt-2 space-y-1 text-sm text-zinc-700">
-                  <div>Drive: {formatMinutes(typeof opt.distance === 'number' ? opt.distance : 0)}</div>
-                  <div>Park/check-in: {typeof opt.parkingBufferMinutes === 'number' ? opt.parkingBufferMinutes : 0} min</div>
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    {(opt.transferType === 'shuttle'
-                      ? 'Shuttle to terminal'
-                      : opt.transferType === 'airport-garage'
-                        ? 'Garage to terminal'
-                        : 'Walk to terminal')}
-                    : {typeof opt.transferToTerminalMinutes === 'number' ? opt.transferToTerminalMinutes : 0} min
+                    <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      From your origin to being inside the airport terminal.
+                    </div>
                   </div>
-                  <div className="pt-1 font-medium text-zinc-900">Total: {formatMinutes(item.duration)}</div>
+
+                  <div className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                    {formatMinutes(parkingBreakdown.totalMinutes)}
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {parkingBreakdown.parts.map((part) => (
+                    <div
+                      key={`${part.label}-${part.minutes}`}
+                      className="flex items-center justify-between gap-3 text-sm"
+                    >
+                      <div className="text-zinc-700">{part.label}</div>
+                      <div className="font-medium text-zinc-900">
+                        {formatMinutes(part.minutes)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 border-t border-zinc-100 pt-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="font-semibold text-zinc-900">Total to terminal</div>
+                    <div className="font-semibold text-zinc-900">
+                      {formatMinutes(parkingBreakdown.totalMinutes)}
+                    </div>
+                  </div>
+
+                  {opt.transferType === 'shuttle' && (
+                    <div className="mt-2 text-xs leading-relaxed text-zinc-500">
+                      Includes estimated shuttle wait time and a small reliability buffer. Confirm shuttle frequency with the lot before booking.
+                    </div>
+                  )}
                 </div>
               </div>
             )}

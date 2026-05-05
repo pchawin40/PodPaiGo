@@ -91,14 +91,24 @@ export function formatMinutes(min: number): string {
 }
 
 export function parkingRouteBreakdown(option: ParkingOption): string {
-  const drive = option.distance ? `Drive ${formatMinutes(option.distance)}` : null;
+  const breakdown = parkingTimeBreakdown(option);
 
-  const transfer =
-    option.transferType === 'shuttle'
-      ? `shuttle ${formatMinutes(option.shuttleMinutes ?? option.transferToTerminalMinutes ?? 12)}`
-      : `walk ${formatMinutes(option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5)}`;
+  const drive = breakdown.parts.find((p) => p.label === 'Drive');
+  const wait = breakdown.parts.find((p) => p.label === 'Shuttle wait');
+  const transfer = breakdown.parts.find((p) =>
+    ['Shuttle', 'Garage to terminal', 'Walk to terminal'].includes(p.label)
+  );
+  const risk = breakdown.parts.find((p) => p.label === 'Buffer/risk');
 
-  return [drive, transfer].filter(Boolean).join(' + ');
+  return [
+    drive ? `Drive ${formatMinutes(drive.minutes)}` : null,
+    wait ? `wait ${formatMinutes(wait.minutes)}` : null,
+    transfer ? `${transfer.label.toLowerCase()} ${formatMinutes(transfer.minutes)}` : null,
+    risk ? `buffer ${formatMinutes(risk.minutes)}` : null,
+    `total ${formatMinutes(breakdown.totalMinutes)}`,
+  ]
+    .filter(Boolean)
+    .join(' + ');
 }
 
 export function parkingDailyCost(option: ParkingOption, formatMoney: (n: number) => string): string {

@@ -9,6 +9,7 @@ import {
   getParkingTotalPrice,
   parkingPriceLine,
 } from '../../lib/parking/priceDisplay';
+import { parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -22,6 +23,18 @@ function formatTimeFriendly(time24: string) {
   if (hours === 0) hours = 12;
 
   return `${hours}:${minutes} ${ampm}`;
+}
+
+function formatCompactMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '—';
+
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${mins}m`;
 }
 
 function parkingLotDestination(option: ParkingOption): string {
@@ -257,6 +270,8 @@ export default function ParkingSmartPick({
 
   const bestPriceDisplay = parkingPriceLine(best, tripData);
 
+  const bestTime = parkingTimeBreakdown(best);
+
   const savings =
     officialTotal && officialTotal > bestTotal
       ? officialTotal - bestTotal
@@ -320,9 +335,19 @@ export default function ParkingSmartPick({
             </div>
           )}
 
-          <div className="mt-1 text-sm text-zinc-600">
-            {parkingRouteText(best)}
-            {savings ? ` · ${formatMoneyWhole(savings)} cheaper than official parking` : ''}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-700">
+            <span className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
+              {formatCompactMinutes(bestTime.totalMinutes)} total
+            </span>
+
+            {bestTime.parts.slice(0, 4).map((part) => (
+              <span
+                key={`${part.label}-${part.minutes}`}
+                className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
+              >
+                {part.label} {formatCompactMinutes(part.minutes)}
+              </span>
+            ))}
           </div>
 
           {displayLeaveByTime && (
