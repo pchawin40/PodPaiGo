@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { loadGoogleMaps } from '@/lib/googleMapsLoader';
 
 type Prediction = {
   description: string;
@@ -92,7 +93,8 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
-  const apiKeyPresent = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY;
+  const apiKeyPresent = Boolean(apiKey);
 
   const [hasMounted, setHasMounted] = useState(false);
 
@@ -103,57 +105,33 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   // Load Google Maps JS Places Library if not loaded and apiKey present
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (!apiKey) return;
 
-    if (!apiKeyPresent) return;
+    let cancelled = false;
 
-    if (window.google && window.google.maps && window.google.maps.places) {
-      if (!autocompleteService.current) {
-        const places = window.google.maps.places as any;
+    async function initPlaces() {
+      await loadGoogleMaps(apiKey!);
 
+      if (cancelled) return;
+
+      const places = window.google?.maps?.places as any;
+
+      if (places && !autocompleteService.current) {
         autocompleteService.current =
           places.AutocompleteSuggestion
             ? new places.AutocompleteSuggestion()
             : new places.AutocompleteService();
       }
-      return;
     }
 
-    if (document.getElementById('google-maps-script')) {
-      const onLoadHandler = () => {
-        if (window.google && window.google.maps && window.google.maps.places && !autocompleteService.current) {
-          const places = window.google.maps.places as any;
+    initPlaces().catch(() => {
+      console.error('Failed to load Google Maps Places');
+    });
 
-          autocompleteService.current =
-            places.AutocompleteSuggestion
-              ? new places.AutocompleteSuggestion()
-              : new places.AutocompleteService();
-        }
-      };
-      document.getElementById('google-maps-script')?.addEventListener('load', onLoadHandler);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.id = 'google-maps-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google && window.google.maps && window.google.maps.places) {
-        autocompleteService.current = new (window.google.maps.places as any).AutocompleteSuggestion();
-      }
-    };
-    script.onerror = () => {
-      console.error('Failed to load Google Maps script');
-    };
-    document.head.appendChild(script);
-
-    // cleanup on unmount
     return () => {
-      script.onload = null;
-      script.onerror = null;
+      cancelled = true;
     };
-  }, [apiKeyPresent]);
+  }, [apiKey]);
 
   // Fetch predictions based on input value, debounce to avoid setState in effect
   useEffect(() => {

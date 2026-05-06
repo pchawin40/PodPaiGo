@@ -289,6 +289,21 @@ export class RecommendationEngine {
 
     const airportCode = ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase();
 
+    parking =
+      airportCode === 'SEA'
+        ? parking.map((p) =>
+          attachSeaCheckpointRoute(
+            p,
+            resolvedTsaEstimate.bestCheckpoint
+              ? {
+                ...resolvedTsaEstimate.bestCheckpoint,
+                reason: resolvedTsaEstimate.bestCheckpoint.reason || 'Best checkpoint for this trip.',
+              }
+              : undefined
+          )
+        )
+        : parking;
+
     const weatherImpact = await getWeatherImpactForAirport({
       airportCode,
       targetDateTime: tripDateTime,

@@ -19,6 +19,7 @@ import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/p
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
+import ParkingLotsMap from './ParkingLotsMap';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -1946,6 +1947,11 @@ export default function ResultsContent() {
   const [aprLiveChecking, setAprLiveChecking] = useState(false);
   const [aprLivePartial, setAprLivePartial] = useState(false);
 
+  const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
+  const [showMap, setShowMap] = useState(true);
+  const [showMapModal, setShowMapModal] = useState(false);
+
+
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
   const priceMatchKeyRef = useRef('');
@@ -3145,6 +3151,18 @@ export default function ResultsContent() {
         {
           showParkingProviders && smartPickParkingOptions.length > 0 && (
             <div className="mt-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-xl font-bold">Parking options</h2>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMap((v) => !v)}
+                  className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white shadow-xl ring-1 ring-white/20 hover:bg-zinc-800"
+                >
+                  {showMap ? 'Hide map' : 'Show map'}
+                </button>
+              </div>
+
               <ParkingSmartPick
                 options={cheapestSmartPickOptions}
                 tripData={tripData}
@@ -3154,6 +3172,45 @@ export default function ResultsContent() {
                 aprLiveChecking={aprLiveChecking}
                 weatherImpact={recommendation?.weatherImpact}
               />
+              <button
+                type="button"
+                onClick={() => setShowMapModal(true)}
+                className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white shadow-xl hover:bg-zinc-800"
+              >
+                🗺️ Map
+              </button>
+              {showMapModal && (
+                <div className="fixed inset-0 z-[100] bg-black/50 p-3 sm:p-6">
+                  <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+
+                    {/* Header */}
+                    <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-900">Parking map</div>
+                        <div className="text-xs text-zinc-500">Available lots around airport</div>
+                      </div>
+
+                      <button
+                        onClick={() => setShowMapModal(false)}
+                        className="rounded-full border px-3 py-1 text-sm"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    {/* Map */}
+                    <div className="flex-1">
+                      <ParkingLotsMap
+                        airportCode={tripData?.airportCode}
+                        parkingOptions={recommendation.parking}
+                        selectedParkingId={selectedParkingId}
+                        onSelectParking={setSelectedParkingId}
+                      />
+                    </div>
+
+                  </div>
+                </div>
+              )}
             </div>
           )
         }
