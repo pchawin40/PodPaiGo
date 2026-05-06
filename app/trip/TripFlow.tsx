@@ -345,8 +345,8 @@ export default function TripFlow() {
     if (!state.origin.trim()) nextFieldErrors.origin = 'Enter your starting address.';
     if (!state.time) {
       next.push('Time is required.');
+      nextFieldErrors.time = 'Select your flight or trip time.';
     }
-    nextFieldErrors.time = 'Select your flight or trip time.';
     if (!state.date) nextFieldErrors.date = 'Select your parking check-in date.';
 
     setFieldErrors(nextFieldErrors);

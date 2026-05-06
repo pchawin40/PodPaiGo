@@ -21,6 +21,7 @@ import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
+import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -867,48 +868,79 @@ function buildBookingSourceRows(parking: PriceableOption & {
 
 type TimingStatus = 'good' | 'tight' | 'too-late' | 'n/a';
 
-function computeAirportReadyBufferMinutes(tripData: TripData): { bufferMinutes: number; assumptions: string[] } | null {
-  if (tripData.type !== 'one-way-departure') return null;
+function computeAirportReadyBufferMinutes(
+  tripData: TripDataWithExtras | TripData | null
+): { bufferMinutes: number; assumptions: string[] } | null {
+  if (!tripData || tripData.type !== 'one-way-departure') return null;
 
-  const checkingBags = !!tripData.checkingBags;
-  const securityOption = tripData.securityOption || 'standard';
-  const flightType = tripData.flightType || 'domestic';
-  const cabin = tripData.cabin || 'economy';
-  const checkedInAtAirport = tripData.checkedInAtAirport !== false;
+  const flightType = 'flightType' in tripData && tripData.flightType
+    ? tripData.flightType
+    : 'domestic';
 
-  let buffer = 90;
-  if (flightType === 'international') buffer = 180;
-  else if (checkingBags) buffer = 120;
+  const checkingBags = 'checkingBags' in tripData
+    ? !!tripData.checkingBags
+    : false;
 
-  if (securityOption === 'precheck') buffer -= 15;
-  else if (securityOption === 'clear') buffer -= 10;
-  else if (securityOption === 'clear-precheck') buffer -= 25;
+  const securityOption = 'securityOption' in tripData && tripData.securityOption
+    ? tripData.securityOption
+    : 'standard';
 
-  if (cabin === 'premium') buffer -= 5;
+  const cabin = 'cabin' in tripData && tripData.cabin
+    ? tripData.cabin
+    : 'economy';
 
-  // Add 15 minutes if not already checked in
-  if (!checkedInAtAirport) buffer += 15;
-
-  buffer = Math.max(60, buffer);
+  let bufferMinutes =
+    flightType === 'international'
+      ? checkingBags
+        ? 180
+        : 150
+      : checkingBags
+        ? 105
+        : 75;
 
   const assumptions: string[] = [];
-  assumptions.push(flightType === 'international' ? 'International flight' : 'Domestic flight');
-  assumptions.push(checkingBags ? 'Checked bags: Yes' : 'Checked bags: No');
 
-  const secLabel = securityOption === 'precheck'
-    ? 'TSA PreCheck'
-    : securityOption === 'clear'
-      ? 'CLEAR'
-      : securityOption === 'clear-precheck'
-        ? 'CLEAR + PreCheck'
-        : 'Standard TSA';
-  assumptions.push(`Security: ${secLabel}`);
+  assumptions.push(
+    flightType === 'international'
+      ? 'International flight'
+      : 'Domestic flight'
+  );
 
-  assumptions.push(cabin === 'premium' ? 'Cabin: Premium/Business/First' : 'Cabin: Economy');
-  assumptions.push(checkedInAtAirport ? 'Already checked in: Yes' : 'Already checked in: No');
-  assumptions.push(`Airport-ready buffer: ${buffer} min (min 60 min)`);
+  assumptions.push(
+    checkingBags
+      ? 'Checking bags: added airline counter/bag-drop time'
+      : 'No checked bags'
+  );
 
-  return { bufferMinutes: buffer, assumptions };
+  if (securityOption === 'precheck') {
+    bufferMinutes -= 15;
+    assumptions.push('TSA PreCheck: reduced security buffer');
+  } else if (securityOption === 'clear') {
+    bufferMinutes -= 10;
+    assumptions.push('CLEAR: reduced ID/security entry buffer');
+  } else if (securityOption === 'clear-precheck') {
+    bufferMinutes -= 25;
+    assumptions.push('CLEAR + PreCheck: reduced security buffer');
+  } else {
+    assumptions.push('Standard TSA');
+  }
+
+  if (cabin === 'premium') {
+    bufferMinutes -= checkingBags ? 10 : 5;
+    assumptions.push('Premium/Business/First cabin: slightly faster check-in estimate');
+  } else {
+    assumptions.push('Economy cabin');
+  }
+
+  const minimum = flightType === 'international' ? 120 : 60;
+  bufferMinutes = Math.max(minimum, bufferMinutes);
+
+  assumptions.push(`Recommended airport-ready buffer: ${formatMinutes(bufferMinutes)}`);
+
+  return {
+    bufferMinutes,
+    assumptions,
+  };
 }
 
 function formatHHMMFromDate(d: Date): string {
@@ -1008,18 +1040,26 @@ function computeTimingStatus(args: {
         ? 'tight'
         : 'good';
 
+  const youReachTerminalAroundDt = new Date(now.getTime() + optionTotalMinutes * 60000);
+
   return {
     status,
-    flightDeparts: tripData.departureTime,
+    flightDeparts: isAirportArrivalAnchor ? undefined : tripData.departureTime,
     recommendedInsideArrivalBy: formatHHMMFromDate(recommendedInsideArrivalByDt),
     optionTravelMinutes: optionTotalMinutes,
     latestSafeLeaveTime: formatHHMMFromDate(latestSafeLeaveDt),
     shortByMinutes: missedBy > 0 ? missedBy : undefined,
     minutesUntilLeaveBy: missedBy === 0 ? Math.max(0, minutesUntilLeaveBy) : undefined,
-    youReachTerminalAround: formatHHMMFromDate(recommendedInsideArrivalByDt),
+    youReachTerminalAround: formatHHMMFromDate(youReachTerminalAroundDt),
     assumptions: isAirportArrivalAnchor
-      ? ['Using your airport arrival/check-in time directly, so airport readiness buffer was skipped.']
-      : buf.assumptions,
+      ? [
+        'Using your airport arrival/check-in time directly, so airport readiness buffer was skipped.',
+        `Option travel time: ${formatMinutes(optionTotalMinutes)}`,
+      ]
+      : [
+        ...buf.assumptions,
+        `Option travel time: ${formatMinutes(optionTotalMinutes)}`,
+      ],
     debug: {
       departureDate: tripData.departureDate,
       departureTime: tripData.departureTime,
@@ -1066,6 +1106,20 @@ function formatTag(tag: string): string {
 
   // Default: capitalize first letter only
   return tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+
+function getAirportReadyBufferForTiming(params: {
+  timeAnchor?: 'flight-departure' | 'airport-arrival';
+  airportReadinessBufferMinutes?: number | null;
+  fallbackMinutes?: number;
+}) {
+  if (params.timeAnchor === 'airport-arrival') return 0;
+
+  return (
+    params.airportReadinessBufferMinutes ??
+    params.fallbackMinutes ??
+    75
+  );
 }
 
 function OptionCard({
@@ -1928,6 +1982,26 @@ export default function ResultsContent() {
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
 
+  const airportReadiness = useMemo(() => {
+    if (!tripData || tripData.type !== 'one-way-departure') return null;
+
+    return calculateAirportReadinessBuffer({
+      checkingBags: !!tripData.checkingBags,
+      securityOption: tripData.securityOption || 'standard',
+      flightType: tripData.flightType || 'domestic',
+      cabin: tripData.cabin || 'economy',
+    });
+  }, [tripData]);
+
+  const airportReadyBufferMinutes = getAirportReadyBufferForTiming({
+    timeAnchor:
+      tripData?.type === 'one-way-departure'
+        ? tripData.timeAnchor
+        : undefined,
+    airportReadinessBufferMinutes: airportReadiness?.bufferMinutes,
+  });
+
+
   const [parkingPricesChecking, setParkingPricesChecking] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
@@ -2002,29 +2076,36 @@ export default function ResultsContent() {
 
     const intentParam = searchParams.get('intent') || '';
 
-    const timeAnchor =
-      searchParams.get('timeAnchor') === 'airport-arrival'
-        ? 'airport-arrival'
-        : 'flight-departure';
+    const timeAnchorRaw = searchParams.get('timeAnchor');
+    const timeAnchor: 'flight-departure' | 'airport-arrival' =
+      timeAnchorRaw === 'airport-arrival' ? 'airport-arrival' : 'flight-departure';
 
-    const bagsRaw = (searchParams.get('bags') || 'no').toLowerCase();
-    const checkingBags = bagsRaw === 'yes';
+    const checkingBags = (searchParams.get('bags') || 'no').toLowerCase() === 'yes';
     const checkedInRaw = (searchParams.get('checkedInAtAirport') || 'yes').toLowerCase();
     const checkedInAtAirport = checkedInRaw !== 'no';
 
-    const securityRaw = (searchParams.get('security') || 'standard').toLowerCase();
-    const securityOption = isOneOf(securityRaw, ['standard', 'precheck', 'clear', 'clear-precheck'] as const)
+    const securityRaw = searchParams.get('security') || 'standard';
+    const securityOption: SecurityOption = isOneOf(
+      securityRaw,
+      ['standard', 'precheck', 'clear', 'clear-precheck'] as const
+    )
       ? securityRaw
       : 'standard';
 
-    const flightTypeRaw = (searchParams.get('flightType') || 'domestic').toLowerCase();
-    const flightType = isOneOf(flightTypeRaw, ['domestic', 'international'] as const)
-      ? (flightTypeRaw)
+    const flightTypeRaw = searchParams.get('flightType') || 'domestic';
+    const flightType: FlightType = isOneOf(
+      flightTypeRaw,
+      ['domestic', 'international'] as const
+    )
+      ? flightTypeRaw
       : 'domestic';
 
-    const cabinRaw = (searchParams.get('cabin') || 'economy').toLowerCase();
-    const cabin = isOneOf(cabinRaw, ['economy', 'premium'] as const)
-      ? (cabinRaw)
+    const cabinRaw = searchParams.get('cabin') || 'economy';
+    const cabin: CabinClass = isOneOf(
+      cabinRaw,
+      ['economy', 'premium'] as const
+    )
+      ? cabinRaw
       : 'economy';
 
     let data: TripData | null = null;
@@ -2039,8 +2120,11 @@ export default function ResultsContent() {
         const checkOut = parseLocalDate(parkingCheckOutDate);
         if (checkIn && checkOut) {
           const diffMs = checkOut.getTime() - checkIn.getTime();
-          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-          if (diffDays > 0) computedParkingDuration = diffDays;
+          const diffMinutes = Math.round(diffMs / 60000);
+
+          if (diffMinutes > 0) {
+            computedParkingDuration = Math.max(24 * 60, diffMinutes);
+          }
         }
       }
 
@@ -2062,11 +2146,13 @@ export default function ResultsContent() {
             flightType,
             cabin,
             checkedInAtAirport,
+            airportCode,
           }
           : {
             type,
             origin,
             destination,
+            airportCode,
             departureDate,
             departureTime,
             timeAnchor,
@@ -3625,7 +3711,7 @@ function EditTripForm({
     const parkingDuration = parkingDurationHours ? Math.round(Number(parkingDurationHours) * 60) : undefined;
 
     const selectedAirport = getAirportById(selectedAirportCode) || getAirportById('SEA')!;
-    const destination = selectedAirport.destinationName;
+    const destination = selectedAirport.routingAddress || selectedAirport.destinationName;
 
     let data: TripData;
 
@@ -3634,14 +3720,19 @@ function EditTripForm({
         type: initialData.type,
         origin,
         destination,
+        airportCode: selectedAirport.id,
         departureDate,
         departureTime,
+        timeAnchor: (initialData as TripDataWithExtras).timeAnchor || 'flight-departure',
         parkingDuration,
+        parkingCheckInDate: (initialData as TripDataWithExtras).parkingCheckInDate,
+        parkingCheckOutDate: (initialData as TripDataWithExtras).parkingCheckOutDate,
         transportAvailability,
         checkingBags: showAirportTimingControls ? checkingBags : (initialData as TripDataWithExtras).checkingBags,
         securityOption: showAirportTimingControls ? securityOption : (initialData as TripDataWithExtras).securityOption,
         flightType: showAirportTimingControls ? flightType : (initialData as TripDataWithExtras).flightType,
         cabin: showAirportTimingControls ? cabin : (initialData as TripDataWithExtras).cabin,
+        checkedInAtAirport: (initialData as TripDataWithExtras).checkedInAtAirport,
       };
     } else if (initialData.type === 'dropoff-pickup') {
       data = {
@@ -3674,8 +3765,6 @@ function EditTripForm({
         transportAvailability,
       };
     }
-
-    (data as TripDataWithExtras).airportCode = selectedAirport.id;
 
     onSubmit(data);
   };

@@ -39,21 +39,33 @@ function formatCompactMinutes(minutes: number): string {
   return `${mins}m`;
 }
 
-function parkingLotDestination(option: ParkingOption): string {
-  const routeDestination = String(option.routeDestination || '');
-  const name = String(option.name || '');
+function parkingLotDestination(option: ParkingOption, tripData: TripData | null): string {
+  const routeDestination = String(option.routeDestination || '').trim();
+  const name = String(option.name || '').trim();
+  const airportDestination = String(tripData?.destination || '').trim();
+
+  const lowerRouteDestination = routeDestination.toLowerCase();
 
   const routeLooksLikeAirport =
-    routeDestination.toLowerCase().includes('seattle-tacoma') ||
-    routeDestination.toLowerCase().includes('seatac') ||
-    routeDestination.toLowerCase().includes('central terminal') ||
-    routeDestination.toLowerCase().includes('17801 international');
+    lowerRouteDestination.includes('terminal') ||
+    lowerRouteDestination.includes('central terminal') ||
+    lowerRouteDestination.includes('international airport') ||
+    lowerRouteDestination.includes('airport terminal');
 
+  // If routeDestination points to the airport/terminal, don't use it as the parking-lot destination.
+  // Use the actual lot name instead.
   if (name && routeLooksLikeAirport) {
-    return `${name}, SeaTac, WA`;
+    return name;
   }
 
-  return routeDestination || `${name}, SeaTac, WA`;
+  // Best case: lot has a real route destination/address.
+  if (routeDestination) return routeDestination;
+
+  // Fallback: use the parking lot name only. Do NOT append SeaTac, because selected airport may be PAE/BLI/GEG/etc.
+  if (name) return name;
+
+  // Last fallback.
+  return airportDestination;
 }
 
 function getWeatherScoreAdjustment(
@@ -75,7 +87,7 @@ function getWeatherScoreAdjustment(
 
 function parkingRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
   const origin = tripData?.origin;
-  const parkingLot = parkingLotDestination(option);
+  const parkingLot = parkingLotDestination(option, tripData);
 
   if (!parkingLot) return option.mapLink || null;
 
@@ -92,14 +104,11 @@ function parkingRouteLink(option: ParkingOption, tripData: TripData | null): str
 }
 
 function parkingToAirportRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
-  const parkingLot = parkingLotDestination(option);
+  const parkingLot = parkingLotDestination(option, tripData);
 
   if (!parkingLot) return null;
 
-  const destination =
-    tripData?.destination ||
-    option.routeDestination ||
-    'Seattle-Tacoma International Airport, Central Terminal';
+  const destination = tripData?.destination || option.routeDestination || 'Airport terminal';
 
   return (
     `https://www.google.com/maps/dir/?api=1` +
@@ -107,23 +116,6 @@ function parkingToAirportRouteLink(option: ParkingOption, tripData: TripData | n
     `&destination=${encodeURIComponent(destination)}` +
     `&travelmode=driving`
   );
-}
-
-function parkingRouteText(option: ParkingOption): string {
-  const drive =
-    typeof option.distance === 'number'
-      ? `Drive ${option.distance < 60
-        ? `${option.distance} min`
-        : `${Math.floor(option.distance / 60)}h ${option.distance % 60}m`
-      }`
-      : null;
-
-  const transfer =
-    option.transferType === 'shuttle'
-      ? `shuttle ${option.shuttleMinutes ?? option.transferToTerminalMinutes ?? 12} min`
-      : `walk ${option.walkingMinutes ?? option.transferToTerminalMinutes ?? 5} min`;
-
-  return [drive, transfer].filter(Boolean).join(' + ');
 }
 
 function weatherParkingBadge(
@@ -137,7 +129,7 @@ function weatherParkingBadge(
     };
   }
 
-  const { riskLevel, condition } = weatherImpact;
+  const { riskLevel } = weatherImpact;
 
   // Base label
   let label = 'Weather: normal';
@@ -471,7 +463,7 @@ export default function ParkingSmartPick({
 
           {displayLeaveByTime && (
             <div className="mt-2 text-sm font-semibold text-emerald-700">
-              Leave by {displayLeaveByTime} to arrive on time
+              Leave by {displayLeaveByTime} based on your timing choice
             </div>
           )}
 
@@ -491,7 +483,7 @@ export default function ParkingSmartPick({
           </div>
 
           <div className="mt-2 text-xs font-medium text-emerald-700">
-            Popular SEA traveler choice today
+            Smart pick for this airport today
           </div>
         </div>
 
@@ -525,7 +517,7 @@ export default function ParkingSmartPick({
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
             >
-              Parking to terminal
+              Parking to airport
             </a>
           )}
         </div>
