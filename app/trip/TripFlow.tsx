@@ -99,7 +99,7 @@ function intentCopy(intent: Intent) {
     case 'dropping-off':
       return {
         title: 'Dropping someone off',
-        timeLabel: 'When do they need to arrive at SeaTac?',
+        timeLabel: 'When do they need to arrive at the airport?',
         helper: "Use the time they need to be at the airport; we'll estimate when you should leave.",
         wantsAirline: false,
         wantsParkingDuration: false,
@@ -725,7 +725,7 @@ export default function TripFlow() {
                       className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     />
                     <div className="mt-2 text-xs text-zinc-500">
-                      Optional — helps us suggest the right SeaTac check-in area.
+                      Optional — helps us suggest the right check-in area when airport data is available.
                     </div>
                   </div>
                 )}

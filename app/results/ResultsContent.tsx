@@ -14,12 +14,14 @@ import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import ParkingSmartPick from './ParkingSmartPick';
+import AirportGuideCard from './AirportGuideCard';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import ParkingLotsMap from './ParkingLotsMap';
+import AirportTerminalMap from './AirportTerminalMap';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -1948,8 +1950,8 @@ export default function ResultsContent() {
   const [aprLivePartial, setAprLivePartial] = useState(false);
 
   const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
-  const [showMap, setShowMap] = useState(true);
   const [showMapModal, setShowMapModal] = useState(false);
+  const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
 
 
   const aprFetchIdRef = useRef(0);
@@ -2928,7 +2930,7 @@ export default function ResultsContent() {
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
-      <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-8">
+      <main className="flex-1 w-full max-w-5xl mx-auto px-4 pb-24 pt-8">
         {/* Hero */}
         {/* Hero */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -3136,7 +3138,7 @@ export default function ResultsContent() {
                   onSubmit={handleRecalculate}
                   onCancel={cancelEditing}
                   intent={intent}
-                  airportCode={searchParams.get('airport') || 'SEA'}
+                  airportCode={currentAirportCode}
                 />
               </div>
             </div>
@@ -3153,14 +3155,6 @@ export default function ResultsContent() {
             <div className="mt-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold">Parking options</h2>
-
-                <button
-                  type="button"
-                  onClick={() => setShowMap((v) => !v)}
-                  className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white shadow-xl ring-1 ring-white/20 hover:bg-zinc-800"
-                >
-                  {showMap ? 'Hide map' : 'Show map'}
-                </button>
               </div>
 
               <ParkingSmartPick
@@ -3172,13 +3166,28 @@ export default function ResultsContent() {
                 aprLiveChecking={aprLiveChecking}
                 weatherImpact={recommendation?.weatherImpact}
               />
-              <button
-                type="button"
-                onClick={() => setShowMapModal(true)}
-                className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white shadow-xl hover:bg-zinc-800"
-              >
-                🗺️ Map
-              </button>
+              <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
+                <div className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/90 p-1.5 shadow-[0_12px_35px_rgba(15,23,42,0.18)] backdrop-blur-md">
+                  <button
+                    type="button"
+                    onClick={() => setShowMapModal(true)}
+                    className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 active:scale-[0.98]"
+                  >
+                    <span className="text-base leading-none">🗺️</span>
+                    <span>Map</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAirportGuideModal(true)}
+                    className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98]"
+                  >
+                    <span className="text-base leading-none">✈️</span>
+                    <span>Airport</span>
+                  </button>
+                </div>
+              </div>
+
               {showMapModal && (
                 <div className="fixed inset-0 z-[100] bg-black/50 p-3 sm:p-6">
                   <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -3192,7 +3201,7 @@ export default function ResultsContent() {
 
                       <button
                         onClick={() => setShowMapModal(false)}
-                        className="rounded-full border px-3 py-1 text-sm"
+                        className="cursor-pointer rounded-full border px-3 py-1 text-sm"
                       >
                         Close
                       </button>
@@ -3208,6 +3217,36 @@ export default function ResultsContent() {
                       />
                     </div>
 
+                  </div>
+                </div>
+              )}
+
+              {showAirportGuideModal && (
+                <div className="fixed inset-0 z-[100] bg-black/50 p-3 sm:p-6">
+                  <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+                    <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-900">Airport map</div>
+                        <div className="text-xs text-zinc-500">
+                          {currentAirport.id} · Official terminal map and airport guidance
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowAirportGuideModal(false)}
+                        className="cursor-pointer rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-hidden">
+                      <AirportTerminalMap
+                        airportCode={currentAirportCode}
+                        airlineOrFlight={airlineOrFlight}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
