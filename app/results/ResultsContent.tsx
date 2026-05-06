@@ -14,7 +14,7 @@ import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import ParkingSmartPick from './ParkingSmartPick';
-import AirportGuideCard from './AirportGuideCard';
+import FlightStatusBoard from './FlightStatusBoard';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import { parseLocalDate } from '../../lib/tripTime';
@@ -22,6 +22,7 @@ import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
+import AirportFlightBoard from './AirportFlightBoard';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -1952,7 +1953,7 @@ export default function ResultsContent() {
   const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
   const [showMapModal, setShowMapModal] = useState(false);
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
-
+  const [showFlightStatusModal, setShowFlightStatusModal] = useState(false);
 
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
@@ -3167,6 +3168,7 @@ export default function ResultsContent() {
                 weatherImpact={recommendation?.weatherImpact}
               />
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
+                {/* Show Parking Lots Map */}
                 <div className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/90 p-1.5 shadow-[0_12px_35px_rgba(15,23,42,0.18)] backdrop-blur-md">
                   <button
                     type="button"
@@ -3177,6 +3179,7 @@ export default function ResultsContent() {
                     <span>Map</span>
                   </button>
 
+                  {/* Show Airport Indoor Map */}
                   <button
                     type="button"
                     onClick={() => setShowAirportGuideModal(true)}
@@ -3184,6 +3187,16 @@ export default function ResultsContent() {
                   >
                     <span className="text-base leading-none">✈️</span>
                     <span>Airport</span>
+                  </button>
+
+                  {/* Show Flight Trackboard */}
+                  <button
+                    type="button"
+                    onClick={() => setShowFlightStatusModal(true)}
+                    className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-amber-100 px-4 text-sm font-semibold text-amber-950 ring-1 ring-amber-300 transition hover:bg-amber-200 active:scale-[0.98]"
+                  >
+                    <span className="text-base leading-none">🛫</span>
+                    <span>Flight</span>
                   </button>
                 </div>
               </div>
@@ -3246,6 +3259,46 @@ export default function ResultsContent() {
                         airportCode={currentAirportCode}
                         airlineOrFlight={airlineOrFlight}
                       />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showFlightStatusModal && (
+                <div className="fixed inset-0 z-[100] bg-black/50 p-3 sm:p-6">
+                  <div className="mx-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+                    {/* Header */}
+                    <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold text-zinc-900">Flight status</div>
+                        <div className="text-xs text-zinc-500">
+                          Live-style departure, arrival, gate, and terminal updates
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowFlightStatusModal(false)}
+                        className="cursor-pointer rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto bg-zinc-100 p-3 sm:p-4">
+                      <FlightStatusBoard
+                        flightInput={airlineOrFlight || 'AS123'}
+                        airportCode={currentAirportCode}
+                        legType={tripData.type === 'one-way-arrival' ? 'arrival' : 'departure'}
+                      />
+
+                      <div className="mt-4">
+                        <AirportFlightBoard
+                          airportCode={currentAirportCode}
+                          legType={tripData.type === 'one-way-arrival' ? 'arrival' : 'departure'}
+                          highlightFlight={airlineOrFlight || 'AS123'}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
