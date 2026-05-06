@@ -1,10 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AddressInput } from './AddressInput';
 import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType } from '../../lib/types';
-import { getSeatacRideshareDropoffNote, resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
+import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import { parseLocalDate } from '../../lib/tripTime';
 import { estimateParkingDays } from '../../lib/tripTime';
@@ -29,7 +29,7 @@ type FormState = {
   securityOption: SecurityOption;
   flightType: FlightType;
   cabin: CabinClass;
-  airportCode: string; // for seatac-specific logic; can be derived from origin but allow user override if needed
+  airportCode: string; // selected Washington airport for routing and airport guidance
   timeAnchor: 'flight-departure' | 'airport-arrival';
 };
 
@@ -161,6 +161,9 @@ export default function TripFlow() {
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
 
+  // airport catalog
+  const [airports, setAirports] = useState(AIRPORTS_CATALOG);
+
   const [state, setState] = useState<FormState>({
     intent: 'flying-out', // since you removed step 1
     timeAnchor: 'flight-departure', // 👈 ADD THIS
@@ -183,18 +186,33 @@ export default function TripFlow() {
   const ENABLE_AIRPORT_TIMING_FIELDS = false;
   const showTimingFields = ENABLE_AIRPORT_TIMING_FIELDS || intent !== 'parking-trip';
 
-  const seatacZone = useMemo(() => {
-    if (!intent) return null;
-    const wantsAirline = intentCopy(intent).wantsAirline;
-    if (!wantsAirline || !state.airlineOrFlight.trim()) {
+  const selectedAirport = useMemo(() => {
+    return airports.find((a) => a.id === state.airportCode) || airports[0] || AIRPORTS_CATALOG[0];
+  }, [airports, state.airportCode]);
+
+  const airportGuide = useMemo(() => {
+    const wantsAirline = intent ? intentCopy(intent).wantsAirline : false;
+    const airlineOrFlight = state.airlineOrFlight.trim();
+
+    if (selectedAirport.id === 'SEA' && wantsAirline && airlineOrFlight) {
+      const seaTacZone = resolveSeatacCheckinZone(airlineOrFlight);
+
       return {
-        destination: 'Central Terminal' as const,
-        note: 'SeaTac main terminal check-in',
+        destination: seaTacZone.destination,
+        note: seaTacZone.note,
+        rideshareDestinationName: selectedAirport.rideshareDestinationName,
       };
     }
 
-    return resolveSeatacCheckinZone(state.airlineOrFlight);
-  }, [intent, state.airlineOrFlight]);
+    return {
+      destination: selectedAirport.routingAddress,
+      note:
+        selectedAirport.checkinNote ||
+        selectedAirport.genericGuidance ||
+        `Use your airline app or airport display to confirm check-in area for ${selectedAirport.id}.`,
+      rideshareDestinationName: selectedAirport.rideshareDestinationName,
+    };
+  }, [intent, selectedAirport, state.airlineOrFlight]);
 
   const validate = (forStep: Step): string[] => {
     const next: string[] = [];
@@ -350,11 +368,7 @@ export default function TripFlow() {
     setFieldErrors({});
 
     const tripType = intentToTripType(state.intent!);
-    const selectedAirport = getAirportById(state.airportCode) || getAirportById('SEA')!;
-    const destination =
-      selectedAirport.id === 'SEA' && seatacZone?.destination
-        ? seatacZone.destination
-        : selectedAirport.routingAddress;
+    const destination = airportGuide.destination;
 
     const params = new URLSearchParams();
     params.set('type', tripType);
@@ -363,6 +377,9 @@ export default function TripFlow() {
     params.set('airport', selectedAirport.id);
     params.set('intent', state.intent!);
     params.set('transport', state.transportAvailability);
+    params.set('airportName', selectedAirport.label);
+    params.set('airportCheckinNote', airportGuide.note ?? '');
+    params.set('rideshareDestinationName', airportGuide.rideshareDestinationName);
     params.set('timeAnchor', state.timeAnchor);
 
     if (state.airlineOrFlight.trim()) {
@@ -416,12 +433,35 @@ export default function TripFlow() {
     router.push(`/results?${params.toString()}`);
   };
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadAirports() {
+      try {
+        const res = await fetch('/api/airports');
+        const data = await res.json();
+
+        if (active && Array.isArray(data.airports) && data.airports.length > 0) {
+          setAirports(data.airports);
+        }
+      } catch {
+        setAirports(AIRPORTS_CATALOG);
+      }
+    }
+
+    loadAirports();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-            Plan a calmer airport trip
+            Plan a calmer {selectedAirport.id} trip
           </h1>
           <p className="mt-2 text-zinc-600">
             Tell us what you’re doing — we’ll compare parking, rides, and transit and give you a clear “leave by” time.
@@ -546,12 +586,18 @@ export default function TripFlow() {
                       onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
                       className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     >
-                      {AIRPORTS_CATALOG.map((airport) => (
+                      {airports.map((airport) => (
                         <option key={airport.id} value={airport.id}>
                           {airport.id} — {airport.label}
                         </option>
                       ))}
                     </select>
+                    <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                      <div className="font-medium text-zinc-800">
+                        {selectedAirport.id} guidance
+                      </div>
+                      <div className="mt-1">{airportGuide.note}</div>
+                    </div>
                   </div>
                   <div className="mt-6 text-sm font-medium text-zinc-900">What can you use today?</div>
                   <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -920,9 +966,11 @@ export default function TripFlow() {
                       {(getAirportById(state.airportCode) || getAirportById('SEA')!)?.destinationName}
                     </div>
                     <div className="mt-1 text-sm text-zinc-600">
-                      {seatacZone?.note ? seatacZone.note : 'We’ll route you to the correct check-in area.'}
+                      {airportGuide.note || 'We’ll route you to the correct check-in area.'}
                     </div>
-                    <div className="mt-2 text-xs text-zinc-500">{getSeatacRideshareDropoffNote()}</div>
+                    <div className="mt-2 text-xs text-zinc-500">
+                      Rideshare/taxi drop-off: {airportGuide.rideshareDestinationName}
+                    </div>
                   </div>
                 </div>
 

@@ -120,7 +120,3 @@ export function resolveSeatacCheckinZone(airlineOrFlight: string): SeatacCheckin
     flightNumber: parsed.flightNumber,
   };
 }
-
-export function getSeatacRideshareDropoffNote(): string {
-  return 'Rideshare drop-off: Departures drive (upper level)';
-}
