@@ -1,9 +1,9 @@
 import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate } from './types';
 import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
-import { seaTacAirport } from './airports';
 import { getAirportById } from './airports/catalog';
 import { getLiveParkingOptions } from './providers/parkingAggregator';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
+import { getAirportTsaEstimate } from './airports/tsa/provider';
 
 // Startup log for server-side API key presence (do not log the key itself)
 // try {
@@ -719,19 +719,11 @@ export class MockProvider implements DataProvider {
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const code = airport?.id || 'SEA';
 
-    if (code === 'SEA') {
-      return seaTacAirport.getTsaEstimate(destination);
-    }
-
-    return {
-      destination: code,
-      waitTime: 20,
-      status: 'estimated',
-      trustStatus: 'estimated',
-      sourceName: `${code} Generic TSA`,
-      lastUpdated: new Date().toISOString(),
-      assumptions: ['Fallback TSA estimate'],
-    };
+    return getAirportTsaEstimate({
+      airportCode: code,
+      destination,
+      securityOption: 'standard', // temp default (engine overrides later)
+    });
   }
 
   async getAirportInfo(terminal: string): Promise<LocationInfo> {

@@ -39,6 +39,30 @@ function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: s
     .some((s) => text.includes(s));
 }
 
+function resolveSelectedTsaEstimate(
+  tripData: TripData,
+  tsaEstimate: TsaEstimate
+): TsaEstimate {
+  if (tripData.type !== 'one-way-departure') return tsaEstimate;
+
+  const selectedSecurity = tripData.securityOption || 'standard';
+
+  const selectedWait =
+    selectedSecurity === 'clear-precheck'
+      ? tsaEstimate.waitTimes?.clearPrecheck
+      : tsaEstimate.waitTimes?.[selectedSecurity];
+
+  return {
+    ...tsaEstimate,
+    waitTime: selectedWait ?? tsaEstimate.waitTime,
+    selectedLane: selectedSecurity,
+    assumptions: [
+      ...tsaEstimate.assumptions,
+      `Selected security lane: ${selectedSecurity}`,
+    ],
+  };
+}
+
 function genericParkingFallback(airportCode: string, destination: string): ParkingOption[] {
   return [{
     id: 'generic-parking',
@@ -253,6 +277,8 @@ export class RecommendationEngine {
       this.provider.getAirportInfo(tripData.destination),
     ]);
 
+    const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);
+
     let parking = rawParking;
     let rideshare = rawRideshare;
     let transit = rawTransit;
@@ -330,8 +356,7 @@ export class RecommendationEngine {
       };
 
       return (
-        a.calculatedCost -
-        weatherScore(a) -
+        (a.calculatedCost - weatherScore(a)) -
         (b.calculatedCost - weatherScore(b))
       );
     });
@@ -356,7 +381,7 @@ export class RecommendationEngine {
     const leaveByTime = isDepartureLeg(tripData)
       ? calculateLeaveByTime(
         tripData,
-        tsaEstimate,
+        resolvedTsaEstimate,
         trafficEstimate.duration,
         30 + weatherBufferMinutes
       )
@@ -366,7 +391,7 @@ export class RecommendationEngine {
       parking: sortedParking,
       rideshare: sortedRideshare,
       transit: sortedTransit,
-      tsaEstimate,
+      tsaEstimate: resolvedTsaEstimate,
       weatherImpact,
       leaveByTime,
       tripDuration,

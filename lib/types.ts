@@ -225,16 +225,27 @@ export type LocationInfo = { // renamed from AirportInfo
   assumptions: string[];
 };
 
+export type TsaLane = 'standard' | 'precheck' | 'clear' | 'clear-precheck';
+
 export type TsaDataStatus = 'live' | 'estimated' | 'fallback';
 
 export type TsaEstimate = {
-  destination: string; // renamed from terminal
-  waitTime: number; // minutes
+  destination: string;
+  waitTime: number;
+  waitTimes?: TsaWaitTimes;
+  selectedLane?: TsaLane;
   status: TsaDataStatus;
-  lastUpdated?: string; // ISO timestamp
+  lastUpdated?: string;
   trustStatus: TrustStatus;
   sourceName: string;
   assumptions: string[];
+};
+
+export type TsaWaitTimes = {
+  standard: number;
+  precheck: number;
+  clear: number;
+  clearPrecheck: number;
 };
 
 export type Recommendation = {
