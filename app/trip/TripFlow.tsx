@@ -713,23 +713,6 @@ export default function TripFlow() {
                   </div>
                 )}
 
-                {intentCopy(intent).wantsAirline && (
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Airline or flight number (optional)
-                    </label>
-                    <input
-                      value={state.airlineOrFlight}
-                      onChange={(e) => setState((s) => ({ ...s, airlineOrFlight: e.target.value }))}
-                      placeholder="e.g., Alaska, AS 123, DL42"
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    />
-                    <div className="mt-2 text-xs text-zinc-500">
-                      Optional — helps us suggest the right check-in area when airport data is available.
-                    </div>
-                  </div>
-                )}
-
                 <div className="md:col-span-2 rounded-2xl border border-zinc-200 bg-white p-4">
                   <div className="text-sm font-medium text-zinc-900">
                     What time should we plan around?
@@ -943,7 +926,7 @@ export default function TripFlow() {
                   </div>
                 </div>
 
-                {intentCopy(intent).wantsParkingDuration && (
+                {/* {intentCopy(intent).wantsParkingDuration && (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-zinc-800">
                       Parking duration (hours)
@@ -959,7 +942,7 @@ export default function TripFlow() {
                       className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
-                )}
+                )} */}
               </div>
 
               {/* Near-time warning (non-blocking) - only show after user edited/selected time */}
