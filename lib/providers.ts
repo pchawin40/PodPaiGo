@@ -1,9 +1,11 @@
-import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate } from './types';
+import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate, SecurityOption } from './types';
 import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { getAirportById } from './airports/catalog';
 import { getLiveParkingOptions } from './providers/parkingAggregator';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
+
+
 
 // Startup log for server-side API key presence (do not log the key itself)
 // try {
@@ -114,7 +116,7 @@ export interface FlightProvider {
 }
 
 export interface TsaProvider {
-  getTsaEstimate(destination: string): Promise<TsaEstimate>;
+  getTsaEstimate(destination: string, securityOption?: SecurityOption): Promise<TsaEstimate>;
 }
 
 export interface AirportInfoProvider {
@@ -715,14 +717,17 @@ export class MockProvider implements DataProvider {
     };
   }
 
-  async getTsaEstimate(destination: string): Promise<TsaEstimate> {
+  async getTsaEstimate(
+    destination: string,
+    securityOption: SecurityOption = 'standard'
+  ): Promise<TsaEstimate> {
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const code = airport?.id || 'SEA';
 
     return await getAirportTsaEstimate({
       airportCode: code,
       destination,
-      securityOption: 'standard',
+      securityOption,
     });
   }
 

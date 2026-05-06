@@ -1,5 +1,6 @@
 import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { attachSeaCheckpointRoute } from './airports/seaCheckpointRouting';
 import { mockTransitOptions } from '../data/mockData';
 import {
   calculateTripDuration,
@@ -271,7 +272,10 @@ export class RecommendationEngine {
       allowTransit
         ? this.provider.getTransitOptions(tripData.origin, tripData.destination, tripDateTime)
         : Promise.resolve([]),
-      this.provider.getTsaEstimate(tripData.destination),
+      this.provider.getTsaEstimate(
+        tripData.destination,
+        tripData.type === 'one-way-departure' ? tripData.securityOption : 'standard'
+      ),
       this.provider.getTrafficEstimate(tripData.origin, tripData.destination, tripDateTime),
       this.provider.getFlightInfo(tripData.destination, tripDateTime),
       this.provider.getAirportInfo(tripData.destination),

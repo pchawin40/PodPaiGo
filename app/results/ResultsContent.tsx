@@ -1050,6 +1050,22 @@ function leaveByCushionText(minutesUntilLeaveBy: number | null | undefined): str
   return ` · ${formatMinutes(minutesUntilLeaveBy)} buffer`;
 }
 
+function formatTag(tag: string): string {
+  const map: Record<string, string> = {
+    'apr-tracking': 'Airport Parking Reservations',
+    'parkwhiz': 'ParkWhiz',
+    'spothero': 'SpotHero',
+    'way': 'Way.com',
+  };
+
+  if (map[tag.toLowerCase()]) {
+    return map[tag.toLowerCase()];
+  }
+
+  // Default: capitalize first letter only
+  return tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+
 function OptionCard({
   compact = false,
   item,
@@ -1286,7 +1302,7 @@ function OptionCard({
                           : 'border-zinc-200 bg-white text-zinc-700')
                     }
                   >
-                    {tag}
+                    {formatTag(tag)}
                   </div>
                 ))}
 
@@ -1301,6 +1317,25 @@ function OptionCard({
           {item.type === 'parking' && (
             <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
           )}
+
+          {item.type === 'parking' && (() => {
+            const parkingOption = opt as ParkingOption;
+
+            if (!parkingOption.recommendedCheckpoint) return null;
+
+            return (
+              <div className="mt-2 text-xs text-zinc-600">
+                Airport route:{' '}
+                <span className="font-medium text-zinc-800">
+                  {parkingOption.recommendedCheckpoint.name}
+                </span>
+                {' '}· {parkingOption.recommendedCheckpoint.minutes}m TSA
+                {parkingOption.checkpointWalkMinutes
+                  ? ` · ${parkingOption.checkpointWalkMinutes}m inside walk`
+                  : ''}
+              </div>
+            );
+          })()}
 
           {timingSummary && !compact && (
             <div className={
@@ -1850,26 +1885,34 @@ function TsaWaitTimesCard({
   ];
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-600">
-      <span>
-        <span className="font-medium text-zinc-900">TSA:</span>{' '}
-        {lanes.find((lane) => lane.key === selectedLane)?.label ?? 'Standard'}{' '}
-        <span className="font-semibold text-zinc-900">{tsaEstimate.waitTime}m</span>
-      </span>
+    <div className="mt-3 space-y-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-600">
+        <span>
+          <span className="font-medium text-zinc-900">TSA:</span>{' '}
+          {lanes.find((lane) => lane.key === selectedLane)?.label ?? 'Standard'}{' '}
+          <span className="font-semibold text-zinc-900">{tsaEstimate.waitTime}m</span>
+        </span>
 
-      <span className="text-zinc-300">•</span>
+        <span className="text-zinc-300">•</span>
 
-      <span>
-        PreCheck {waitTimes.precheck}m
-      </span>
+        <span>PreCheck {waitTimes.precheck}m</span>
 
-      <span>
-        CLEAR + PreCheck {waitTimes.clearPrecheck}m
-      </span>
+        <span>CLEAR + PreCheck {waitTimes.clearPrecheck}m</span>
 
-      <span className="text-xs text-zinc-400">
-        est.
-      </span>
+        <span className="text-xs text-zinc-400">
+          {tsaEstimate.trustStatus === 'live' ? 'live' : 'est.'}
+        </span>
+      </div>
+
+      {tsaEstimate.bestCheckpoint && (
+        <div className="text-xs text-zinc-500">
+          Use{' '}
+          <span className="font-medium text-zinc-700">
+            {tsaEstimate.bestCheckpoint.name}
+          </span>{' '}
+          · {tsaEstimate.bestCheckpoint.minutes}m · {tsaEstimate.bestCheckpoint.reason}
+        </div>
+      )}
     </div>
   );
 }

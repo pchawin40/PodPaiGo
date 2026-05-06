@@ -130,6 +130,14 @@ export type ParkingOption = {
   lng?: number;
   shuttleWaitMinutes?: number;
   bufferRiskMinutes?: number;
+  recommendedCheckpoint?: {
+    name: string;
+    minutes: number;
+    reason: string;
+  };
+
+  checkpointWalkMinutes?: number;
+  airportInsideRouteNote?: string;
 };
 
 export type RideshareOption = {
