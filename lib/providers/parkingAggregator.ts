@@ -494,12 +494,6 @@ export async function getLiveParkingOptions(args: {
     return [];
   });
 
-  console.log('[inventoryLots]', inventoryLots.map((lot) => ({
-    name: lot.name,
-    source: lot.source,
-    confidence: lot.confidence,
-  })));
-
   const inventoryOptions = inventoryLots.map((lot) =>
     inventoryLotToParkingOption({
       lot,
@@ -789,21 +783,6 @@ export async function getLiveParkingOptions(args: {
       const hasRealParkWhiz = parkWhizOptions.some(
         (p) => p.sourceName === 'ParkWhiz' || p.bookingProvider === 'ParkWhiz'
       );
-
-      console.log('[snapshotOptions]', snapshotOptions.map((p) => ({
-        name: p.name,
-        price: p.price,
-        sourceName: p.sourceName,
-      })));
-
-      console.log('[final parking options before dedupe]', [
-        ...snapshotOptions,
-        ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
-        ...pricedInventoryOptions,
-        ...parkWhizOptions,
-        ...aprOptions,
-        ...discoveredLots,
-      ].map((p) => p.name));
 
       if (
         hasRealParkWhiz &&

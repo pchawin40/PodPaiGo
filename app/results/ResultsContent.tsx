@@ -2489,11 +2489,6 @@ export default function ResultsContent() {
         p.sourceName === 'AirportParkingReservations'
       )
       .slice(0, 5)
-      .sort(
-        (a, b) =>
-          weatherAdjustedParkingSortScore(a, tripData, recommendation.weatherImpact) -
-          weatherAdjustedParkingSortScore(b, tripData, recommendation.weatherImpact)
-      )
       .map((p) => ({
         id: p.id,
         name: p.name,
