@@ -266,19 +266,44 @@ export class RecommendationEngine {
           calculateParkingDuration(tripData)
         )
         : Promise.resolve([]),
+
       allowRideshare
-        ? this.provider.getRideshareOptions(tripData.origin, tripData.destination, tripDateTime)
+        ? this.provider.getRideshareOptions(
+          tripData.origin,
+          tripData.destination,
+          tripDateTime
+        )
         : Promise.resolve([]),
+
       allowTransit
-        ? this.provider.getTransitOptions(tripData.origin, tripData.destination, tripDateTime)
+        ? this.provider.getTransitOptions(
+          tripData.origin,
+          tripData.destination,
+          tripDateTime
+        )
         : Promise.resolve([]),
+
       this.provider.getTsaEstimate(
         tripData.destination,
-        tripData.type === 'one-way-departure' ? tripData.securityOption : 'standard'
+        tripData.type === 'one-way-departure'
+          ? tripData.securityOption || 'standard'
+          : 'standard'
       ),
-      this.provider.getTrafficEstimate(tripData.origin, tripData.destination, tripDateTime),
-      this.provider.getFlightInfo(tripData.destination, tripDateTime),
-      this.provider.getAirportInfo(tripData.destination),
+
+      this.provider.getTrafficEstimate(
+        tripData.origin,
+        tripData.destination,
+        tripDateTime
+      ),
+
+      this.provider.getFlightInfo(
+        tripData.destination,
+        tripDateTime
+      ),
+
+      this.provider.getAirportInfo(
+        tripData.destination
+      ),
     ]);
 
     const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);

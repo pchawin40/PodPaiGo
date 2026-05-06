@@ -4,6 +4,7 @@ import { getAirportById } from './airports/catalog';
 import { getLiveParkingOptions } from './providers/parkingAggregator';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
+import { SeaTacAirportData } from './airports';
 
 
 

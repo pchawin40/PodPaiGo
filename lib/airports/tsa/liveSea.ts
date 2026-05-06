@@ -111,10 +111,28 @@ export async function getLiveSeaTsaWaitTimes(
 
             if (score > bestScore) {
                 bestScore = score;
+
+                let bestLaneLabel = laneLabel(securityOption);
+
+                if (securityOption === 'clear-precheck') {
+                    if (hasCombo) bestLaneLabel = 'CLEAR + PreCheck';
+                    else if (hasPre) bestLaneLabel = 'PreCheck';
+                    else if (hasClear) bestLaneLabel = 'CLEAR';
+                    else bestLaneLabel = 'General';
+                }
+
+                if (securityOption === 'precheck') {
+                    bestLaneLabel = hasPre ? 'PreCheck' : 'General';
+                }
+
+                if (securityOption === 'clear') {
+                    bestLaneLabel = hasClear ? 'CLEAR' : 'General';
+                }
+
                 bestCheckpoint = {
                     name: `Checkpoint ${checkpoint.Name}`,
                     minutes,
-                    reason: `${laneLabel(securityOption)} • fastest available`,
+                    reason: `${bestLaneLabel} • fastest available`,
                 };
             }
         }
@@ -126,18 +144,23 @@ export async function getLiveSeaTsaWaitTimes(
         const clearMedian = median(clear);
         const clearPrecheckMedian = median(clearPrecheck);
 
+        const fastestKnownExpedited = Math.min(
+            precheckMedian ?? Infinity,
+            clearMedian ?? Infinity,
+            clearPrecheckMedian ?? Infinity
+        );
+
         const clearPrecheckEstimate =
-            precheckMedian != null && clearMedian != null
-                ? Math.min(precheckMedian, clearMedian, clearPrecheckMedian ?? Infinity)
-                : clearPrecheckMedian ?? Math.max(3, Math.round(standardMedian * 0.3));
+            Number.isFinite(fastestKnownExpedited)
+                ? Math.max(2, fastestKnownExpedited)
+                : Math.max(2, Math.round(standardMedian * 0.3));
 
         return {
             waitTimes: {
                 standard: standardMedian,
                 precheck: precheckMedian ?? Math.max(5, Math.round(standardMedian * 0.45)),
                 clear: clearMedian ?? Math.max(5, Math.round(standardMedian * 0.6)),
-                clearPrecheck: median(clearPrecheck)
-                    ?? Math.max(2, Math.round((median(precheck) ?? standardMedian) * 0.7)),
+                clearPrecheck: clearPrecheckEstimate,
             },
             bestCheckpoint,
         };
