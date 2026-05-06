@@ -988,7 +988,20 @@ function computeTimingStatus(args: {
 
   // Parse departure date/time. Start with what user provided.
   let depDt = buildLocalDateTime(tripData.departureDate, tripData.departureTime);
-  if (!depDt || isNaN(depDt.getTime())) return { status: 'n/a' };
+
+  const isAirportArrivalAnchor = tripData.timeAnchor === 'airport-arrival';
+
+  const airportReadyBufferMinutes =
+    isAirportArrivalAnchor ? 0 : buf.bufferMinutes;
+
+  if (!depDt) {
+    return {
+      status: 'n/a',
+      flightDeparts: undefined,
+      recommendedInsideArrivalBy: undefined,
+      latestSafeLeaveTime: undefined,
+    };
+  }
 
   const todayLocal = formatLocalYYYYMMDD(now);
   const isFutureDate = tripData.departureDate !== todayLocal;
@@ -1000,15 +1013,23 @@ function computeTimingStatus(args: {
 
   // For same-day flights, apply sanity check to catch parse errors (e.g., "23:30" late-night time incorrectly parsed as next day)
   if (!isFutureDate) {
-    let recommendedInsideArrivalByDt = new Date(depDt.getTime() - buf.bufferMinutes * 60000);
-    let latestSafeLeaveDt = new Date(recommendedInsideArrivalByDt.getTime() - optionTotalMinutes * 60000);
+
+    let recommendedInsideArrivalByDt = isAirportArrivalAnchor
+      ? depDt
+      : new Date(depDt.getTime() - airportReadyBufferMinutes * 60000);
+
+    let latestSafeLeaveDt = new Date(
+      recommendedInsideArrivalByDt.getTime() - optionTotalMinutes * 60000
+    );
     let minutesUntilLeaveBy = computeCushionMinutes(latestSafeLeaveDt);
 
     // Sanity check: if cushion is absurdly large (>12 hours), likely a parse error
     if (minutesUntilLeaveBy > 12 * 60) {
       const depAlt = buildLocalDateTime(todayLocal, tripData.departureTime);
       if (depAlt && !isNaN(depAlt.getTime())) {
-        const recommendedAlt = new Date(depAlt.getTime() - buf.bufferMinutes * 60000);
+        const recommendedAlt = isAirportArrivalAnchor
+          ? depAlt
+          : new Date(depAlt.getTime() - airportReadyBufferMinutes * 60000);
         const leaveAlt = new Date(recommendedAlt.getTime() - optionTotalMinutes * 60000);
         const altCushion = computeCushionMinutes(leaveAlt);
 
@@ -1024,11 +1045,9 @@ function computeTimingStatus(args: {
   }
 
   // Now calculate final values (works for both same-day and future dates)
-  const isAirportArrivalAnchor = tripData.timeAnchor === 'airport-arrival';
-
   const recommendedInsideArrivalByDt = isAirportArrivalAnchor
     ? depDt
-    : new Date(depDt.getTime() - buf.bufferMinutes * 60000);
+    : new Date(depDt.getTime() - airportReadyBufferMinutes * 60000);
   const latestSafeLeaveDt = new Date(recommendedInsideArrivalByDt.getTime() - optionTotalMinutes * 60000);
   const minutesUntilLeaveBy = computeCushionMinutes(latestSafeLeaveDt);
   const missedBy = Math.max(0, Math.ceil((now.getTime() - latestSafeLeaveDt.getTime()) / 60000));
@@ -2453,7 +2472,11 @@ export default function ResultsContent() {
     const buf = computeAirportReadyBufferMinutes(tripData);
     const depMin = parseHHMMToMinutes(tripData.departureTime);
     if (buf && depMin != null) {
-      const recommendedByMin = depMin - buf.bufferMinutes;
+      const recommendedByMin =
+        tripData.timeAnchor === 'airport-arrival'
+          ? depMin
+          : depMin - airportReadyBufferMinutes;
+
       const recommendedBy = minutesToHHMM(recommendedByMin);
 
       let bestShortBy = Infinity;
@@ -2818,7 +2841,11 @@ export default function ResultsContent() {
     const depMin = parseHHMMToMinutes(tripData.departureTime);
     if (!buf || depMin == null) return null;
 
-    const recommendedBy = minutesToHHMM(depMin - buf.bufferMinutes);
+    const recommendedBy = minutesToHHMM(
+      tripData.timeAnchor === 'airport-arrival'
+        ? depMin
+        : depMin - airportReadyBufferMinutes
+    );
 
     const checkingBags = !!(tripData as TripDataWithExtras).checkingBags;
     const flightType = String((tripData as TripDataWithExtras).flightType || 'domestic');
@@ -3532,6 +3559,34 @@ export default function ResultsContent() {
                       />
                     ))}
                   </div>
+                  {airportReadiness && tripData?.timeAnchor === 'flight-departure' && (
+                    <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                      <div className="text-sm font-semibold text-zinc-900">
+                        Airport readiness
+                      </div>
+
+                      <div className="mt-1 text-2xl font-bold text-zinc-900">
+                        {formatMiniMinutes(airportReadiness.bufferMinutes)} before departure
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {airportReadiness.assumptions.map((item) => (
+                          <span
+                            key={item}
+                            className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {tripData?.timeAnchor === 'airport-arrival' && (
+                    <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                      You entered your target airport arrival time, so we are not subtracting extra airport readiness time.
+                    </div>
+                  )}
                 </div>
               )}
             </>
