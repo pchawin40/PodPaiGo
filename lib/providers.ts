@@ -719,10 +719,10 @@ export class MockProvider implements DataProvider {
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const code = airport?.id || 'SEA';
 
-    return getAirportTsaEstimate({
+    return await getAirportTsaEstimate({
       airportCode: code,
       destination,
-      securityOption: 'standard', // temp default (engine overrides later)
+      securityOption: 'standard',
     });
   }
 

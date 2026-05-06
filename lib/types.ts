@@ -234,6 +234,13 @@ export type TsaEstimate = {
   waitTime: number;
   waitTimes?: TsaWaitTimes;
   selectedLane?: TsaLane;
+
+  bestCheckpoint?: {
+    name: string;
+    minutes: number;
+    reason?: string;
+  };
+
   status: TsaDataStatus;
   lastUpdated?: string;
   trustStatus: TrustStatus;
