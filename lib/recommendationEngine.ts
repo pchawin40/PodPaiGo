@@ -338,8 +338,28 @@ export class RecommendationEngine {
     const sortedRideshare = rideshareWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
     const sortedTransit = transitWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
 
+    let weatherBufferMinutes = 0;
+
+    if (weatherImpact) {
+      if (weatherImpact.riskLevel === 'medium') weatherBufferMinutes = 10;
+      if (weatherImpact.riskLevel === 'high') weatherBufferMinutes = 20;
+
+      if (weatherImpact.condition === 'snow' || weatherImpact.condition === 'storm') {
+        weatherBufferMinutes = 25;
+      }
+
+      if ((weatherImpact.windMph ?? 0) >= 30) {
+        weatherBufferMinutes = Math.max(weatherBufferMinutes, 15);
+      }
+    }
+
     const leaveByTime = isDepartureLeg(tripData)
-      ? calculateLeaveByTime(tripData, tsaEstimate, trafficEstimate.duration, 30)
+      ? calculateLeaveByTime(
+        tripData,
+        tsaEstimate,
+        trafficEstimate.duration,
+        30 + weatherBufferMinutes
+      )
       : null;
 
     return {

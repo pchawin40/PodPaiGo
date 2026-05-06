@@ -1852,6 +1852,7 @@ export default function ResultsContent() {
 
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
+  const priceMatchKeyRef = useRef('');
 
   const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
   const intent = searchParams.get('intent') || '';
@@ -2037,6 +2038,20 @@ export default function ResultsContent() {
       setLoading(false);
     }
   }, [searchParams]);
+
+  const weatherToneBg =
+    recommendation?.weatherImpact?.riskLevel === 'high'
+      ? 'bg-red-50'
+      : recommendation?.weatherImpact?.riskLevel === 'medium'
+        ? 'bg-amber-50'
+        : 'bg-zinc-100';
+
+  const weatherTone =
+    recommendation?.weatherImpact?.riskLevel === 'high'
+      ? 'text-red-700'
+      : recommendation?.weatherImpact?.riskLevel === 'medium'
+        ? 'text-amber-700'
+        : 'text-zinc-900';
 
   const handleRecalculate = async (newTripData: TripData) => {
     if (process.env.NODE_ENV === 'development') {
@@ -2469,6 +2484,11 @@ export default function ResultsContent() {
     if (!checkInDate || !checkOutDate) return;
 
     const lots = [...recommendation.parking]
+      .filter((p) =>
+        p.bookingProvider === 'AirportParkingReservations' ||
+        p.sourceName === 'AirportParkingReservations'
+      )
+      .slice(0, 5)
       .sort(
         (a, b) =>
           weatherAdjustedParkingSortScore(a, tripData, recommendation.weatherImpact) -
@@ -2478,7 +2498,19 @@ export default function ResultsContent() {
         id: p.id,
         name: p.name,
       }));
-      
+
+    if (lots.length === 0) return;
+
+    const priceMatchKey = JSON.stringify({
+      airportCode,
+      checkInDate,
+      checkOutDate,
+      lots: lots.map((lot) => lot.name).sort(),
+    });
+
+    if (priceMatchKeyRef.current === priceMatchKey) return;
+    priceMatchKeyRef.current = priceMatchKey;
+
     setParkingPricesChecking(true);
 
     fetch('/api/parking/prices', {
@@ -2525,7 +2557,7 @@ export default function ResultsContent() {
       .finally(() => {
         setParkingPricesChecking(false);
       });
-  }, [tripData, recommendation]);
+  }, [tripData, recommendation?.parking, recommendation?.weatherImpact]);
 
   if (loading) {
     return (
@@ -2744,7 +2776,16 @@ export default function ResultsContent() {
     return canonical;
   })();
 
-  const smartPickOption = smartPickParkingOptions[0] || null;
+  const cheapestSmartPickOptions =
+    sort === 'cheapest'
+      ? [...smartPickParkingOptions].sort((a, b) => {
+        const aPrice = getParkingDailyPrice(a, tripData) ?? 999999;
+        const bPrice = getParkingDailyPrice(b, tripData) ?? 999999;
+        return aPrice - bPrice;
+      })
+      : smartPickParkingOptions;
+
+  const smartPickOption = cheapestSmartPickOptions[0] || null;
 
   const smartPickKey = parkingKeySafe(smartPickOption);
 
@@ -2755,8 +2796,8 @@ export default function ResultsContent() {
 
   const rawRecommendedPicks: RankedRecommendation[] = visibleResultOptions.slice(0, 3);
 
-  const visibleMoreParkingCount = 5;
-  const maxParkingDisplayCount = 10;
+  const visibleMoreParkingCount = 10;
+  const maxParkingDisplayCount = 25;
 
   const remainingParking = smartPickParkingOptions.slice(1).map((parkingOption: ParkingOption) => {
     const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
@@ -2835,6 +2876,40 @@ export default function ResultsContent() {
                 <p className="mt-2 text-sm text-zinc-500">
                   Live traffic + airport timing + parking pricing analyzed
                 </p>
+
+                {/* WEATHER BLOCK */}
+                {recommendation.weatherImpact && (
+                  <div className="mt-3 flex items-center gap-3 text-sm">
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
+                      {recommendation.weatherImpact.condition === 'rain'
+                        ? '🌧️'
+                        : recommendation.weatherImpact.condition === 'snow'
+                          ? '🌨️'
+                          : recommendation.weatherImpact.condition === 'storm'
+                            ? '⛈️'
+                            : recommendation.weatherImpact.condition === 'wind'
+                              ? '🌬️'
+                              : '☀️'}
+                    </div>
+
+                    <div className="flex flex-col">
+                      <span className={`font-medium ${weatherTone}`}>
+                        {recommendation.weatherImpact.summary}
+                        {typeof recommendation.weatherImpact.temperatureF === 'number'
+                          ? ` · ${recommendation.weatherImpact.temperatureF}°F`
+                          : ''}
+                      </span>
+
+                      <span className="text-xs text-zinc-500">
+                        {recommendation.weatherImpact.riskLevel === 'low'
+                          ? 'Normal travel conditions'
+                          : recommendation.weatherImpact.riskLevel === 'medium'
+                            ? 'May impact comfort'
+                            : 'Plan for weather impact'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {seatacZone && (
@@ -2970,7 +3045,7 @@ export default function ResultsContent() {
           showParkingProviders && smartPickParkingOptions.length > 0 && (
             <div className="mt-6">
               <ParkingSmartPick
-                options={smartPickParkingOptions}
+                options={cheapestSmartPickOptions}
                 tripData={tripData}
                 leaveByTime={recommendation.leaveByTime}
                 selectedOption={smartPickOption}
@@ -3113,7 +3188,7 @@ export default function ResultsContent() {
                       </p>
                     </div>
 
-                    {false && hiddenParking.length > 0 && (
+                    {hiddenParking.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowMoreParking((v) => !v)}

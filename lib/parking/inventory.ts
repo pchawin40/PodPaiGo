@@ -105,7 +105,8 @@ export async function saveParkingLots(
 
 export async function getParkingLotsByAirport(
     airportCode: string,
-    radiusMiles = 8,
+    limit = 25,
+    radiusMiles = 25,
 ): Promise<ParkingLotInventoryRow[]> {
     const airport = getAirportById(airportCode.toUpperCase());
 
@@ -163,13 +164,18 @@ export async function getParkingLotsByAirport(
           )
         )
       ) <= $4
-    order by confidence desc, "distanceMiles" asc, is_official desc, name asc
+    order by
+      confidence desc,
+      updated_at desc,
+      name asc
+    limit $5
     `,
         [
             airportCode.toUpperCase(),
             airport.geoLocation.lat,
             airport.geoLocation.lng,
             radiusMiles,
+            limit,
         ],
     );
 

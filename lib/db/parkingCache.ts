@@ -234,6 +234,149 @@ export async function getCachedParkWhizQuotes(params: {
     };
 }
 
+export async function saveParkingPriceSnapshotsFromOptions(params: {
+    airportCode: string;
+    checkInDate: string;
+    checkOutDate: string;
+    source: string;
+    options: ParkingOption[];
+    ttlHours?: number;
+}): Promise<void> {
+    const priced = params.options.filter(
+        (option) => typeof option.price === 'number' && option.price > 0
+    );
+
+    if (priced.length === 0) return;
+
+    const client = await db.connect();
+
+    try {
+        await client.query('begin');
+
+        for (const option of priced) {
+            await client.query(
+                `
+        insert into parking_price_snapshots (
+          lot_id,
+          lot_name,
+          airport_code,
+          check_in_date,
+          check_out_date,
+          price_total,
+          price_daily,
+          currency,
+          availability_status,
+          booking_url,
+          source,
+          fetched_at,
+          expires_at
+        )
+        values (
+          $1, $2, $3, $4, $5,
+          $6, $7, 'USD', $8, $9,
+          $10, now(), now() + ($11 || ' hours')::interval
+        )
+        on conflict (airport_code, booking_url, check_in_date, check_out_date)
+        do update set
+          lot_id = excluded.lot_id,
+          lot_name = excluded.lot_name,
+          price_total = excluded.price_total,
+          price_daily = excluded.price_daily,
+          currency = excluded.currency,
+          availability_status = excluded.availability_status,
+          source = excluded.source,
+          fetched_at = excluded.fetched_at,
+          expires_at = excluded.expires_at
+        `,
+                [
+                    option.providerLotId || option.googlePlaceId || option.id,
+                    option.name,
+                    params.airportCode.toUpperCase(),
+                    params.checkInDate,
+                    params.checkOutDate,
+                    option.price,
+                    option.priceUnit === 'total'
+                        ? option.price / Math.max(
+                            1,
+                            Math.ceil(
+                                (new Date(params.checkOutDate).getTime() - new Date(params.checkInDate).getTime()) /
+                                (1000 * 60 * 60 * 24)
+                            )
+                        )
+                        : option.price,
+                    option.availabilityStatus || 'available',
+                    option.sourceLink || option.mapLink || '',
+                    params.source,
+                    params.ttlHours ?? 2,
+                ]
+            );
+        }
+
+        await client.query('commit');
+    } catch (error) {
+        await client.query('rollback');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+export type LatestParkingPriceSnapshot = {
+    lotName: string;
+    airportCode: string;
+    checkInDate: string;
+    checkOutDate: string;
+    priceTotal: number | null;
+    priceDaily: number | null;
+    availabilityStatus: string | null;
+    bookingUrl: string | null;
+    source: string | null;
+    fetchedAt: string;
+};
+
+export async function getLatestParkingPriceSnapshots(params: {
+    airportCode: string;
+    checkInDate?: string;
+    checkOutDate?: string;
+}): Promise<LatestParkingPriceSnapshot[]> {
+    if (!params.checkInDate || !params.checkOutDate) return [];
+
+    const result = await db.query(
+        `
+    select distinct on (lower(lot_name), source)
+      lot_name as "lotName",
+      airport_code as "airportCode",
+      check_in_date::text as "checkInDate",
+      check_out_date::text as "checkOutDate",
+      price_total::float8 as "priceTotal",
+      price_daily::float8 as "priceDaily",
+      availability_status as "availabilityStatus",
+      booking_url as "bookingUrl",
+      source,
+      fetched_at::text as "fetchedAt"
+    from parking_price_snapshots
+    where airport_code = $1
+      and check_in_date = $2::date
+      and check_out_date = $3::date
+      and (
+        expires_at > now()
+        or fetched_at > now() - interval '7 days'
+      )
+    order by
+      lower(lot_name),
+      source,
+      fetched_at desc
+    `,
+        [
+            params.airportCode.toUpperCase(),
+            params.checkInDate,
+            params.checkOutDate,
+        ],
+    );
+
+    return result.rows;
+}
+
 export async function saveParkWhizQuotes(params: {
     airportCode: string;
     checkInAt: string;

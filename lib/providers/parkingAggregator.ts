@@ -4,19 +4,28 @@ import { mockParkingOptions } from '../../data/mockData';
 import { resolveParkingPricing } from './pricingResolver';
 import { resolveDynamicParkingPrice } from './dynamicParkingPricing';
 import { getParkWhizParkingOptions } from './parkWhiz';
-import { getCachedAprLotsForDateRange } from '../db/parkingCache';
 import { debugLog } from '../utils/debug';
 import { getParkingLotsByAirport } from '../parking/inventory';
 import { inventoryLotToParkingOption } from '../parking/inventoryToParkingOption';
 import { enrichInventoryOptionsWithPrices } from '../parking/priceMatcher';
 import { calculateParkingAvailabilityScore } from '../parking/availabilityScore';
 import { normalizeParkingPriceForTrip } from '../parking/parkingPriceNormalizer';
+import {
+  getCachedAprLotsForDateRange,
+  getLatestParkingPriceSnapshots,
+  saveParkingPriceSnapshotsFromOptions,
+} from '../db/parkingCache';
+
 
 type GooglePlace = {
   id?: string;
   displayName?: { text?: string };
   formattedAddress?: string;
   googleMapsUri?: string;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+  };
   rating?: number;
   userRatingCount?: number;
   businessStatus?: string;
@@ -242,6 +251,10 @@ async function getGoogleParkingPlaces(args: {
   const airport = getAirportById(args.airportCode || '') || getAirportById('SEA')!;
   const parkingSearchName = `parking near ${args.destination}`;
 
+  const parkingSearchRadiusMeters = Number(
+    process.env.PARKING_SEARCH_RADIUS_METERS || 20000
+  );
+
   if (!key) return [];
 
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
@@ -257,6 +270,7 @@ async function getGoogleParkingPlaces(args: {
         'places.rating',
         'places.userRatingCount',
         'places.businessStatus',
+        'places.location',
       ].join(','),
     },
     body: JSON.stringify({
@@ -267,7 +281,7 @@ async function getGoogleParkingPlaces(args: {
             latitude: airport.geoLocation.lat,
             longitude: airport.geoLocation.lng,
           },
-          radius: 12000,
+          radius: parkingSearchRadiusMeters,
         },
       },
     })
@@ -359,7 +373,11 @@ async function getGoogleParkingPlaces(args: {
           availability: 50,
           sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
-          routeDestination: place.formattedAddress || airport.routingAddress,
+          googlePlaceId: place.id,
+          lat: place.location?.latitude,
+          lng: place.location?.longitude,
+          normalizedAddress: place.formattedAddress,
+          routeDestination: place.formattedAddress || name,
           lastUpdated: dynamicPricing?.lastChecked || new Date().toISOString(),
           parkingBufferMinutes: 15,
           transferToTerminalMinutes: 12,
@@ -398,6 +416,69 @@ async function getGoogleParkingPlaces(args: {
     .slice(0, 12);
 }
 
+function normalizeSnapshotName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/self covered/g, '')
+    .replace(/self uncovered/g, '')
+    .replace(/lot/g, '')
+    .replace(/airport/g, '')
+    .replace(/parking/g, '')
+    .replace(/sea/g, '')
+    .replace(/seatac/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function applyPriceSnapshotsToOptions(
+  options: ParkingOption[],
+  snapshots: Awaited<ReturnType<typeof getLatestParkingPriceSnapshots>>
+): ParkingOption[] {
+  if (snapshots.length === 0) return options;
+
+  return options.map((option) => {
+    const optionKey = normalizeSnapshotName(option.name);
+
+    const match = snapshots.find((snapshot) => {
+      const snapshotKey = normalizeSnapshotName(snapshot.lotName);
+      return (
+        optionKey === snapshotKey ||
+        optionKey.includes(snapshotKey) ||
+        snapshotKey.includes(optionKey)
+      );
+    });
+
+    if (!match || typeof match.priceDaily !== 'number') return option;
+
+    return {
+      ...option,
+      price: match.priceDaily,
+      priceUnit: 'per-day',
+      priceDisplay: 'from-per-day',
+      priceNote:
+        match.priceTotal && match.priceTotal !== match.priceDaily
+          ? `${match.source || 'Provider'} selected-date price. Total: $${match.priceTotal.toFixed(2)}. Confirm final checkout price before booking.`
+          : `${match.source || 'Provider'} selected-date daily price. Confirm final checkout price before booking.`,
+      priceSource: 'marketplace-link',
+      priceConfidence: 'medium',
+      trustStatus: 'live',
+      availabilityStatus:
+        match.availabilityStatus === 'unavailable'
+          ? 'unavailable'
+          : 'available',
+      sourceName: match.source || option.sourceName,
+      sourceLink: match.bookingUrl || option.sourceLink,
+      lastUpdated: match.fetchedAt || option.lastUpdated,
+      bestFor: [
+        ...(option.bestFor || []),
+        'Live Price',
+        match.source === 'parkwhiz' ? 'ParkWhiz' : '',
+      ].filter(Boolean),
+    };
+  });
+}
+
 export async function getLiveParkingOptions(args: {
   airportCode?: string;
   destination: string;
@@ -408,10 +489,16 @@ export async function getLiveParkingOptions(args: {
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
   const airportSearchName = `${airport.label} (${airport.id}) parking`;
 
-  const inventoryLots = await getParkingLotsByAirport(airport.id, 8).catch((error) => {
+  const inventoryLots = await getParkingLotsByAirport(airport.id, 25).catch((error) => {
     console.warn('Parking inventory read failed', error);
     return [];
   });
+
+  console.log('[inventoryLots]', inventoryLots.map((lot) => ({
+    name: lot.name,
+    source: lot.source,
+    confidence: lot.confidence,
+  })));
 
   const inventoryOptions = inventoryLots.map((lot) =>
     inventoryLotToParkingOption({
@@ -432,6 +519,23 @@ export async function getLiveParkingOptions(args: {
         return [];
       })
       : [];
+
+  if (
+    parkWhizOptions.length > 0 &&
+    args.checkInDate &&
+    args.checkOutDate
+  ) {
+    await saveParkingPriceSnapshotsFromOptions({
+      airportCode: airport.id,
+      checkInDate: args.checkInDate,
+      checkOutDate: args.checkOutDate,
+      source: 'parkwhiz',
+      options: parkWhizOptions,
+      ttlHours: 2,
+    }).catch((error) => {
+      console.warn('Failed to save ParkWhiz price snapshots', error);
+    });
+  }
 
   // Keep recommendations fast. Google Places + APR crawling should run in background jobs,
   // not on every /api/recommendations request.
@@ -471,20 +575,7 @@ export async function getLiveParkingOptions(args: {
     rawSnippet: lot.rawSnippet,
   })));
 
-  const aprSeedLots =
-    airport.id === 'SEA' && aprLotsRaw.length === 0
-      ? [
-        {
-          lotName: 'Skyway Inn Airport Parking',
-          bookingUrl: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
-          price: null,
-          priceUnit: 'per-day' as const,
-          rawSnippet: 'Fallback APR seed lot used when cache is empty.',
-          lastChecked: new Date().toISOString(),
-          source: 'airportparkingreservations' as const,
-        },
-      ]
-      : aprLotsRaw;
+  const aprSeedLots = aprLotsRaw;
 
   // Keep /api/recommendations fast.
   // Live APR checks happen separately in /api/apr-availability after the page loads.
@@ -571,6 +662,52 @@ export async function getLiveParkingOptions(args: {
     pricedOptions: pricedProviderOptions,
   });
 
+  const latestPriceSnapshots = await getLatestParkingPriceSnapshots({
+    airportCode: airport.id,
+    checkInDate: args.checkInDate,
+    checkOutDate: args.checkOutDate,
+  });
+
+  const snapshotOptions: ParkingOption[] = latestPriceSnapshots
+    .filter((s) => typeof s.priceDaily === 'number' && s.priceDaily > 0)
+    .map((s) =>
+      withAvailabilityScore({
+        id: `${airport.id.toLowerCase()}-${s.source}-${s.lotName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')}`,
+        name: s.lotName,
+        type: 'off-airport',
+        price: s.priceDaily!,
+        priceUnit: 'per-day',
+        priceDisplay: 'from-per-day',
+        priceNote: s.priceTotal
+          ? `${s.source} selected-date price. Total: $${s.priceTotal.toFixed(2)}. Confirm final checkout price.`
+          : `${s.source} selected-date price. Confirm final checkout price.`,
+        availabilityStatus:
+          s.availabilityStatus === 'unavailable' ? 'unavailable' : 'available',
+        isAvailable: s.availabilityStatus !== 'unavailable',
+        priceSource: 'marketplace-link',
+        priceConfidence: 'medium',
+        bookingProvider: s.source || undefined,
+        distance: 10,
+        availability: 70,
+        trustStatus: 'live',
+        sourceName: s.source || 'Parking price snapshot',
+        sourceLink: s.bookingUrl || undefined,
+        mapLink: googleMapsSearchUrl(`${s.lotName} ${airport.label}`),
+        routeDestination: `${s.lotName}, ${airport.label}`,
+        lastUpdated: s.fetchedAt,
+        parkingBufferMinutes: 15,
+        transferToTerminalMinutes: 12,
+        transferType: 'shuttle',
+        shuttleMinutes: 12,
+        assumptions: [
+          'Price loaded from cached selected-date parking price snapshot.',
+        ],
+        bestFor: ['Live Price', s.source || 'Provider'].filter(Boolean),
+      })
+    );
+
   const marketplaceOptions = PARKING_MARKETPLACES.map((provider): ParkingOption => {
     const isOfficial = provider.id === 'official';
     const isGoogleSearch = provider.id === 'google-parking-search';
@@ -643,14 +780,30 @@ export async function getLiveParkingOptions(args: {
 
   return dedupeParkingOptions([
     ...fallbackLots.filter((p) => p.type === 'official'),
+    ...snapshotOptions,
+    ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
     ...parkWhizOptions,
     ...aprOptions,
     ...discoveredLots,
-    ...pricedInventoryOptions,
     ...marketplaceOptions.filter((option) => {
       const hasRealParkWhiz = parkWhizOptions.some(
         (p) => p.sourceName === 'ParkWhiz' || p.bookingProvider === 'ParkWhiz'
       );
+
+      console.log('[snapshotOptions]', snapshotOptions.map((p) => ({
+        name: p.name,
+        price: p.price,
+        sourceName: p.sourceName,
+      })));
+
+      console.log('[final parking options before dedupe]', [
+        ...snapshotOptions,
+        ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
+        ...pricedInventoryOptions,
+        ...parkWhizOptions,
+        ...aprOptions,
+        ...discoveredLots,
+      ].map((p) => p.name));
 
       if (
         hasRealParkWhiz &&
@@ -672,11 +825,12 @@ export async function getLiveParkingOptions(args: {
         const name = p.name.toLowerCase();
 
         if (p.type === 'official') return 0;
-        if (p.bookingProvider === 'ParkWhiz' || p.sourceName === 'ParkWhiz') return 1;
-        if (isAprOption(p)) return 2;
-        if (name.includes('wally')) return 3;
-        if (name.includes('master')) return 4;
-        return 5;
+        if (p.sourceName === 'Google Places' || p.sourceName === 'Parking inventory') return 1;
+        if (p.bookingProvider === 'ParkWhiz' || p.sourceName === 'ParkWhiz') return 2;
+        if (isAprOption(p)) return 3;
+        if (name.includes('wally')) return 4;
+        if (name.includes('master')) return 5;
+        return 6;
       };
 
       const rankDiff = rank(a) - rank(b);

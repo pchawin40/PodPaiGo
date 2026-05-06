@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
 
         const airportCode = String(body.airportCode ?? 'SEA').toUpperCase();
-        const radiusMeters = Number(body.radiusMeters ?? 12000);
+        const radiusMeters = Number(body.radiusMeters ?? 20000);
 
         const airport = getAirportById(airportCode);
 
@@ -124,7 +124,9 @@ export async function POST(req: NextRequest) {
                     isOfficial:
                         lower.includes('official') ||
                         lower.includes('terminal') ||
-                        lower.includes(`${airportCode.toLowerCase()} parking`),
+                        lower.includes('parking garage') ||
+                        lower.includes(`${airportCode.toLowerCase()} parking`) ||
+                        lower.includes(airport.label.toLowerCase()),
                     confidence: confidenceForPlace(place),
                 };
             });
