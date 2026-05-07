@@ -2075,6 +2075,9 @@ export default function ResultsContent() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editingData, setEditingData] = useState<TripData | null>(null);
+  const editTripRef = useRef<HTMLDivElement | null>(null);
+  const [editTripJustOpened, setEditTripJustOpened] = useState(false);
+
 
   const [showTooLate, setShowTooLate] = useState(false);
 
@@ -3169,10 +3172,25 @@ export default function ResultsContent() {
               <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
                 <button
                   type="button"
-                  onClick={startEditing}
+                  onClick={() => {
+                    setEditingData(tripData);
+                    setIsEditing(true);
+                    setEditTripJustOpened(true);
+
+                    window.setTimeout(() => {
+                      editTripRef.current?.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start',
+                      });
+                    }, 50);
+
+                    window.setTimeout(() => {
+                      setEditTripJustOpened(false);
+                    }, 1800);
+                  }}
                   className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
                 >
-                  Edit trip
+                  {isEditing ? 'Editing below' : 'Edit trip'}
                 </button>
                 <Link
                   href="/trip"
@@ -3254,15 +3272,47 @@ export default function ResultsContent() {
                 </button>
               </div>
 
-              <div className="mt-5">
-                <EditTripForm
-                  initialData={editingData}
-                  onSubmit={handleRecalculate}
-                  onCancel={cancelEditing}
-                  intent={intent}
-                  airportCode={currentAirportCode}
-                />
-              </div>
+              {isEditing && editingData && (
+                <section
+                  ref={editTripRef}
+                  className={
+                    'scroll-mt-6 rounded-3xl border bg-white p-6 shadow-sm transition-all duration-300 ' +
+                    (editTripJustOpened
+                      ? 'border-blue-400 shadow-[0_0_0_4px_rgba(37,99,235,0.15)]'
+                      : 'border-zinc-200')
+                  }
+                >
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-zinc-950">Edit trip</h2>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        Update your trip details and recalculate recommendations.
+                      </p>
+                    </div>
+                  </div>
+
+                  <EditTripForm
+                    initialData={editingData}
+                    onSubmit={(data) => {
+                      const params = new URLSearchParams();
+
+                      Object.entries(data).forEach(([key, value]) => {
+                        if (value !== undefined && value !== null && value !== '') {
+                          params.set(key, String(value));
+                        }
+                      });
+
+                      router.push(`/results?${params.toString()}`);
+                    }}
+                    onCancel={() => {
+                      setIsEditing(false);
+                      setEditingData(null);
+                    }}
+                    intent={intent}
+                    airportCode={(editingData as TripDataWithExtras).airportCode || getTripAirportCode(editingData)}
+                  />
+                </section>
+              )}
             </div>
           )
         }
@@ -4147,7 +4197,7 @@ function EditTripForm({
           </>
         )}
 
-        {(isDeparture || isRoundTrip) && (
+        {/* {(isDeparture || isRoundTrip) && (
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-zinc-800">
               Parking duration (hours)
@@ -4162,7 +4212,7 @@ function EditTripForm({
               className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </div>
-        )}
+        )} */}
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
