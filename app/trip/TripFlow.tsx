@@ -82,6 +82,37 @@ function addDays(dateString: string, days: number): string {
   return formatLocalDateInputValue(parsed);
 }
 
+function buildLocalDateTime(date: string, time: string): Date | null {
+  if (!date || !time) return null;
+
+  const value = new Date(`${date}T${time}`);
+
+  if (Number.isNaN(value.getTime())) return null;
+
+  return value;
+}
+
+function calculateParkingDurationMinutes({
+  checkInDate,
+  checkInTime,
+  checkOutDate,
+  checkOutTime,
+}: {
+  checkInDate: string;
+  checkInTime: string;
+  checkOutDate: string;
+  checkOutTime: string;
+}): number | null {
+  const checkIn = buildLocalDateTime(checkInDate, checkInTime);
+  const checkOut = buildLocalDateTime(checkOutDate, checkOutTime);
+
+  if (!checkIn || !checkOut) return null;
+
+  const minutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
+
+  return Math.max(24 * 60, minutes);
+}
+
 function intentToTripType(intent: Intent): TripType {
   switch (intent) {
     case 'flying-out':
@@ -310,10 +341,16 @@ export default function TripFlow() {
     }
 
     if (state.date && state.parkingCheckOutDate) {
-      const checkIn = parseLocalDate(state.date);
-      const checkOut = parseLocalDate(state.parkingCheckOutDate);
-      if (checkIn && checkOut && checkOut.getTime() < checkIn.getTime()) {
-        next.push('Parking check-out date must be on or after check-in date.');
+      const checkInTime = state.time || '12:00';
+      const checkOutTime = state.parkingCheckOutTime || checkInTime;
+
+      const checkIn = buildLocalDateTime(state.date, checkInTime);
+      const checkOut = buildLocalDateTime(state.parkingCheckOutDate, checkOutTime);
+
+      if (!checkIn || !checkOut) {
+        next.push('Parking check-in/check-out time is invalid.');
+      } else if (checkOut.getTime() <= checkIn.getTime()) {
+        next.push('Parking checkout must be after parking check-in.');
       }
     }
 
@@ -452,6 +489,10 @@ export default function TripFlow() {
       params.set('parkingCheckInDate', state.date);
       if (state.parkingCheckOutDate) {
         params.set('parkingCheckOutDate', state.parkingCheckOutDate);
+
+        if (state.parkingCheckOutTime) {
+          params.set('parkingCheckOutTime', state.parkingCheckOutTime);
+        }
       }
 
       // Flying-out only: airport readiness assumptions
@@ -463,17 +504,17 @@ export default function TripFlow() {
       }
 
       if (state.parkingCheckOutDate) {
-        const checkIn = new Date(`${state.date}T${state.time || '12:00'}`);
-        const checkOut = new Date(
-          `${state.parkingCheckOutDate}T${state.parkingCheckOutTime || state.time || '12:00'}`
-        );
+        const checkInTime = state.time || '12:00';
+        const checkOutTime = state.parkingCheckOutTime || checkInTime;
 
-        if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
-          const minutes = Math.max(
-            24 * 60,
-            Math.round((checkOut.getTime() - checkIn.getTime()) / 60000)
-          );
+        const minutes = calculateParkingDurationMinutes({
+          checkInDate: state.date,
+          checkInTime,
+          checkOutDate: state.parkingCheckOutDate,
+          checkOutTime,
+        });
 
+        if (minutes !== null) {
           params.set('parkingDuration', String(minutes));
         }
       } else if (state.parkingDurationHours) {
@@ -1061,6 +1102,10 @@ export default function TripFlow() {
                           }
                           className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                         />
+
+                        <div className="mt-2 text-xs text-zinc-500">
+                          Optional — defaults to your parking check-in time if blank.
+                        </div>
                       </div>
                     )}
                   </>
