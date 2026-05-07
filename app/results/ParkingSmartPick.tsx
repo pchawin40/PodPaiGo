@@ -165,6 +165,7 @@ export default function ParkingSmartPick({
   leaveByTime,
   aprLivePrices = {},
   weatherImpact,
+  onShowReviews,
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
@@ -173,6 +174,7 @@ export default function ParkingSmartPick({
   aprLivePrices?: Record<string, number>;
   aprLiveChecking?: boolean;
   weatherImpact?: WeatherImpact | null;
+  onShowReviews?: (parking: ParkingOption) => void;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -380,7 +382,7 @@ export default function ParkingSmartPick({
     savings && officialTotal ? Math.round((savings / officialTotal) * 100) : null;
 
   const displayLeaveByTime = leaveByTime ? formatTimeFriendly(leaveByTime) : null;
- 
+
   const ctaLabel =
     best.bookingProvider === 'AirportParkingReservations'
       ? 'View deal'
@@ -409,6 +411,15 @@ export default function ParkingSmartPick({
             </span>
 
             <ParkingAvailabilityBadge option={best} />
+            <button
+              type="button"
+              onClick={() => onShowReviews?.(best)}
+              className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              title="See Google review details"
+            >
+              ⭐ {typeof best.reviewScore === "number" ? best.reviewScore.toFixed(1) : "Reviews"}
+              {best.reviewCount ? ` · ${best.reviewCount.toLocaleString()}` : ""}
+            </button>
 
             {savings && (
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">

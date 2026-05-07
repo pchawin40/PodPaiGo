@@ -60,6 +60,7 @@ import {
   formatMoneyCents
 } from '../utils/formatter';
 import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
+import ParkingReviewsModal from './ParkingReviewsModal';
 
 type PriceableOption = {
   id?: string;
@@ -87,6 +88,9 @@ type AppOption = PriceableOption & {
   assumptions?: string[];
   availabilityStatus?: string;
   isAvailable?: boolean;
+  googlePlaceId?: string;
+  reviewScore?: number;
+  reviewCount?: number;
 };
 
 type TripDataWithExtras = TripData & {
@@ -1152,6 +1156,7 @@ function OptionCard({
   sort,
   aprLivePrices,
   aprLiveChecking,
+  onShowReviews,
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -1161,6 +1166,7 @@ function OptionCard({
   sort: SortTab;
   aprLivePrices: Record<string, number>;
   aprLiveChecking: boolean;
+  onShowReviews?: (parking: ParkingOption) => void;
 }) {
   const opt = withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption;
 
@@ -1168,6 +1174,8 @@ function OptionCard({
     aprLiveChecking &&
     item.type === 'parking' &&
     isAprOption(opt);
+
+  const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
 
   const airportCode = getTripAirportCode(tripData);
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
@@ -1388,6 +1396,23 @@ function OptionCard({
                 isAprOption(opt) &&
                 isAprFetching &&
                 getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
+
+              {item.type === "parking" && (() => {
+                const parking = opt as ParkingOption;
+                const hasRating = typeof parking.reviewScore === "number";
+
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onShowReviews?.(parking)}
+                    className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                    title="See Google review details"
+                  >
+                    ⭐ {hasRating ? parking.reviewScore!.toFixed(1) : "Reviews"}
+                    {parking.reviewCount ? ` · ${parking.reviewCount.toLocaleString()}` : ""}
+                  </button>
+                );
+              })()}
             </div>
           </div>
 
@@ -2114,6 +2139,7 @@ export default function ResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3443,6 +3469,7 @@ export default function ResultsContent() {
                 aprLivePrices={aprLivePrices}
                 aprLiveChecking={aprLiveChecking}
                 weatherImpact={recommendation?.weatherImpact}
+                onShowReviews={setReviewsParking}
               />
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
                 {/* Show Parking Lots Map */}
@@ -3688,6 +3715,7 @@ export default function ResultsContent() {
                         tripData={tripData}
                         intent={intent}
                         sort={sort}
+                        onShowReviews={setReviewsParking}
                       />
                     ))}
                   </div>
@@ -3776,6 +3804,12 @@ export default function ResultsContent() {
             subtitle="Compare route planning, fares, confidence, and links."
             items={[...(transitOptions), ...extraTransitProviders]}
             defaultOpen={false}
+          />
+
+          <ParkingReviewsModal
+            parking={reviewsParking}
+            open={!!reviewsParking}
+            onClose={() => setReviewsParking(null)}
           />
         </div>
 

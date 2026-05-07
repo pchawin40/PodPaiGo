@@ -43,29 +43,39 @@ export default async function AirportsPage() {
             <Link
               key={airport.id}
               href={airportHref(airport.code)}
-              className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm hover:bg-slate-50"
+              className="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
             >
-              <div className="text-sm font-semibold text-blue-700">
-                {airport.code}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700">
+                    {airport.code}
+                  </div>
+
+                  <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 group-hover:text-blue-700">
+                    {airport.name}
+                  </h2>
+
+                  {(airport.city || airport.state) && (
+                    <p className="mt-2 text-sm text-slate-500">
+                      {[airport.city, airport.state].filter(Boolean).join(", ")}
+                    </p>
+                  )}
+                </div>
+
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold capitalize text-slate-600">
+                  {statusLabel(airport.status)}
+                </span>
               </div>
 
-              <h2 className="mt-2 text-2xl font-bold">{airport.name}</h2>
-
-              {(airport.city || airport.state) && (
-                <p className="mt-2 text-sm text-slate-500">
-                  {[airport.city, airport.state].filter(Boolean).join(", ")}
-                </p>
-              )}
-
-              <p className="mt-3 text-sm font-medium text-slate-700">
-                {statusLabel(airport.status)}
-              </p>
-
               {airport.description && (
-                <p className="mt-3 text-sm leading-6 text-slate-600">
+                <p className="mt-5 text-sm leading-6 text-slate-600">
                   {airport.description}
                 </p>
               )}
+
+              <div className="mt-6 text-sm font-semibold text-blue-700">
+                View airport planner →
+              </div>
             </Link>
           ))}
         </div>
