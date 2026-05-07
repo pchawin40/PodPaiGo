@@ -14,6 +14,7 @@ import {
   rankRecommendations
 } from './domain';
 import { getWeatherImpactForAirport } from './weather/nws';
+import { calculateAirportReadinessBuffer } from './airports/airportReadiness';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -422,12 +423,28 @@ export class RecommendationEngine {
       }
     }
 
+    const airportReadiness =
+      tripData.type === 'one-way-departure'
+        ? calculateAirportReadinessBuffer({
+          checkingBags: !!tripData.checkingBags,
+          securityOption: tripData.securityOption || 'standard',
+          flightType: tripData.flightType || 'domestic',
+          cabin: tripData.cabin || 'economy',
+        })
+        : null;
+
+    const airportReadinessBufferMinutes =
+      tripData.type === 'one-way-departure' &&
+        tripData.timeAnchor !== 'airport-arrival'
+        ? airportReadiness?.bufferMinutes ?? 75
+        : 0;
+
     const leaveByTime = isDepartureLeg(tripData)
       ? calculateLeaveByTime(
         tripData,
         resolvedTsaEstimate,
         trafficEstimate.duration,
-        30 + weatherBufferMinutes
+        airportReadinessBufferMinutes + weatherBufferMinutes
       )
       : null;
 
