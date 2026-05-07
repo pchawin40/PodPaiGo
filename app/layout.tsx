@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PodPaiGo - Smart Airport Parking & Transportation",
-  description: "Find the best parking and transportation options for SeaTac Airport",
+  title: {
+    default: "PodPaiGo - Airport Parking, Rideshare & Transit Planner",
+    template: "%s | PodPaiGo",
+  },
+  description:
+    "Compare airport parking, rideshare, and transit with leave-by timing, estimated total cost, weather impact, walking burden, and trip stress.",
 };
 
 export default function RootLayout({

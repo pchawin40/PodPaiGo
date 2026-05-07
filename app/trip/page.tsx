@@ -1,5 +1,11 @@
-import TripFlow from './TripFlow';
+import SiteHeader from "../components/SiteHeader";
+import TripFlow from "./TripFlow";
 
 export default function TripPage() {
-  return <TripFlow />;
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <SiteHeader ctaHref="/" ctaLabel="Home" />
+      <TripFlow />
+    </div>
+  );
 }
