@@ -1,5 +1,37 @@
 import { getAirportById } from '../../lib/airports/catalog';
 
+type IndoorMapLike = {
+    provider?: string;
+    label: string;
+    sourceName: string;
+    url: string;
+    embedUrl?: string;
+    embeddable?: boolean;
+    mapType?: string;
+};
+
+function isStaticImageMap(map?: IndoorMapLike | null): boolean {
+    if (!map) return false;
+
+    const type = map.mapType || '';
+    const url = map.embedUrl || map.url || '';
+
+    return (
+        type === 'official-static-image' ||
+        url.toLowerCase().endsWith('.png') ||
+        url.toLowerCase().endsWith('.jpg') ||
+        url.toLowerCase().endsWith('.jpeg') ||
+        url.toLowerCase().endsWith('.webp')
+    );
+}
+
+function canRenderIframe(map?: IndoorMapLike | null): boolean {
+    if (!map?.embeddable || !map.embedUrl) return false;
+    if (isStaticImageMap(map)) return false;
+
+    return map.mapType === 'official-indoor';
+}
+
 export default function AirportTerminalMap({
     airportCode,
     airlineOrFlight,
@@ -10,41 +42,68 @@ export default function AirportTerminalMap({
     const airport =
         getAirportById((airportCode || 'SEA').toUpperCase()) || getAirportById('SEA')!;
 
-    const indoorMap = airport.indoorMap;
-    const embeddableIndoorMap =
-        indoorMap?.embeddable && indoorMap.embedUrl ? indoorMap : null;
+    const indoorMap = airport.indoorMap as IndoorMapLike | undefined;
 
-    if (embeddableIndoorMap) {
-        return (
-            <div className="flex h-full flex-col bg-white">
-                <div className="flex shrink-0 flex-col gap-3 border-b border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                            Official indoor airport map
-                        </div>
-                        <h2 className="mt-0.5 text-lg font-semibold text-zinc-950">
-                            {airport.id} — {embeddableIndoorMap.label}
-                        </h2>
-                        <div className="mt-0.5 text-xs text-zinc-500">
-                            Source: {embeddableIndoorMap.sourceName}
-                            {airlineOrFlight ? ` · Flight input: ${airlineOrFlight}` : ''}
-                        </div>
-                    </div>
+    const mapUrl =
+        indoorMap?.url ||
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            airport.routingAddress
+        )}`;
 
+    const sourceName = indoorMap?.sourceName || 'Google Maps fallback';
+    const label = indoorMap?.label || `${airport.destinationName} location map`;
+
+    const showStaticImage = indoorMap?.embeddable && isStaticImageMap(indoorMap);
+    const showIframe = canRenderIframe(indoorMap);
+
+    const header = (
+        <div className="flex shrink-0 flex-col gap-3 border-b border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Airport map
+                </div>
+                <h2 className="mt-0.5 text-lg font-semibold text-zinc-950">
+                    {airport.id} — {label}
+                </h2>
+                <div className="mt-0.5 text-xs text-zinc-500">
+                    Source: {sourceName}
+                    {airlineOrFlight ? ` · Flight input: ${airlineOrFlight}` : ''}
+                </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+                <a
+                    href={mapUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                    Open map
+                </a>
+
+                {airport.officialAirportUrl && (
                     <a
-                        href={embeddableIndoorMap.url}
+                        href={airport.officialAirportUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                        className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
                     >
-                        Open full map
+                        Airport website
                     </a>
-                </div>
+                )}
+            </div>
+        </div>
+    );
+
+    if (showIframe && indoorMap?.embedUrl) {
+        return (
+            <div className="flex h-full flex-col bg-white">
+                {header}
 
                 <div className="min-h-0 flex-1 bg-zinc-100">
                     <iframe
-                        title={`${airport.id} indoor airport map`}
-                        src={embeddableIndoorMap.embedUrl}
+                        title={`${airport.id} airport map`}
+                        src={indoorMap.embedUrl}
                         className="h-full w-full border-0"
                         loading="lazy"
                         referrerPolicy="no-referrer-when-downgrade"
@@ -55,82 +114,62 @@ export default function AirportTerminalMap({
         );
     }
 
+    if (showStaticImage && indoorMap?.embedUrl) {
+        return (
+            <div className="flex h-full flex-col bg-white">
+                {header}
+
+                <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-4">
+                    <div className="mx-auto flex min-h-full w-full items-start justify-center">
+                        <img
+                            src={indoorMap.embedUrl}
+                            alt={`${airport.id} airport map`}
+                            className="max-h-none max-w-none rounded-xl border border-zinc-200 bg-white shadow-sm"
+                        />
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="h-full bg-slate-100 p-6">
-            <div className="mx-auto flex h-full max-w-5xl flex-col justify-center">
-                <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-                    <div className="border-b border-slate-200 bg-white p-6">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Official airport map
-                        </div>
+        <div className="flex h-full flex-col bg-white">
+            {header}
 
-                        <h2 className="mt-2 text-3xl font-bold text-slate-950">
-                            {airport.id} — {airport.destinationName}
-                        </h2>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 p-6">
+                <div className="max-w-xl rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-xl">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Open official map
+                    </div>
 
-                        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-                            {indoorMap?.url
-                                ? 'This airport’s official map opens best in a new tab. Use it for the most accurate terminal, gate, restroom, restaurant, and check-in details.'
-                                : 'We do not have an official airport map link for this airport yet. Use the airport website or airline app to confirm terminal, gate, restroom, restaurant, and check-in details.'}
-                        </p>
+                    <h2 className="mt-2 text-2xl font-bold text-slate-950">
+                        {airport.id} — {airport.destinationName}
+                    </h2>
 
-                        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-                            {indoorMap?.url && (
-                                <a
-                                    href={indoorMap.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
-                                >
-                                    Open official map
-                                </a>
-                            )}
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                        This official map cannot be displayed inside PodPaiGo because the source website blocks embedded viewing. Open it in a new tab for the most accurate airport map.
+                    </p>
 
+                    <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                        <a
+                            href={mapUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex cursor-pointer items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                        >
+                            Open map
+                        </a>
+
+                        {airport.officialAirportUrl && (
                             <a
-                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                    airport.routingAddress
-                                )}`}
+                                href={airport.officialAirportUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
                             >
-                                Open in Google Maps
+                                Airport website
                             </a>
-
-                            {airport.officialAirportUrl && (
-                                <a
-                                    href={airport.officialAirportUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                                >
-                                    Airport website
-                                </a>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="grid gap-0 bg-slate-50 md:grid-cols-3">
-                        <div className="border-b border-slate-200 p-6 md:border-b-0 md:border-r">
-                            <div className="text-sm font-semibold text-slate-900">Check-in</div>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                                {airport.checkinNote || 'Confirm check-in area with your airline before leaving.'}
-                            </p>
-                        </div>
-
-                        <div className="border-b border-slate-200 p-6 md:border-b-0 md:border-r">
-                            <div className="text-sm font-semibold text-slate-900">Airport guidance</div>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                                {airport.genericGuidance || 'Confirm terminal, gate, and boarding details before leaving.'}
-                            </p>
-                        </div>
-
-                        <div className="p-6">
-                            <div className="text-sm font-semibold text-slate-900">Best used for</div>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                                Terminal layout, gates, food, restrooms, baggage claim, and ground transportation.
-                            </p>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>

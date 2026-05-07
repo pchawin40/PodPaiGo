@@ -102,6 +102,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use the Paine Field passenger terminal. Confirm airline check-in and gate details before leaving.',
     genericGuidance: 'Smaller airport, but still confirm flight status and boarding time with your airline.',
     officialParkingUrl: 'https://www.painefield.com/parking-transportation',
+    indoorMap: {
+      provider: 'official',
+      label: 'Official Paine Field terminal map',
+      sourceName: 'Paine Field',
+      url: 'https://flypainefield.com/img/terminal-map-043026.png',
+      embedUrl: 'https://flypainefield.com/img/terminal-map-043026.png',
+      embeddable: true,
+    },
+    officialAirportUrl: 'https://flypainefield.com/',
   },
   {
     id: 'BLI',
@@ -114,6 +123,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use the main passenger terminal. Confirm airline check-in and gate details before leaving.',
     genericGuidance: 'Confirm flight status and airport arrival guidance with your airline.',
     officialParkingUrl: 'https://www.portofbellingham.com/91/Parking',
+    indoorMap: {
+      provider: 'official',
+      label: 'Official Bellingham airport terminal map',
+      sourceName: 'Port of Bellingham',
+      url: 'https://www.portofbellingham.com/ImageRepository/Document?documentID=3250',
+      embedUrl: 'https://www.portofbellingham.com/ImageRepository/Document?documentID=3250',
+      embeddable: false,
+    },
+    officialAirportUrl: 'https://www.portofbellingham.com/89/Airport',
   },
   {
     id: 'GEG',
@@ -126,6 +144,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use your airline’s terminal/check-in area. Confirm gate and flight status before leaving.',
     genericGuidance: 'Confirm flight status, terminal, and check-in area with your airline.',
     officialParkingUrl: 'https://spokaneairports.net/parking/',
+    indoorMap: {
+      provider: 'official',
+      label: 'Official Spokane airport directory map',
+      sourceName: 'Spokane International Airport',
+      url: 'https://spokaneairports.net/core/files/spokaneairports/uploads/images/Directory%20for%20Website.png',
+      embedUrl: 'https://spokaneairports.net/core/files/spokaneairports/uploads/images/Directory%20for%20Website.png',
+      embeddable: true,
+    },
+    officialAirportUrl: 'https://spokaneairports.net/',
   },
   {
     id: 'PSC',
@@ -138,6 +165,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use the main passenger terminal. Confirm airline check-in and gate details before leaving.',
     genericGuidance: 'Confirm flight status and boarding details with your airline.',
     officialParkingUrl: 'https://www.flytricities.com/parking/',
+    indoorMap: {
+      provider: 'official',
+      label: 'Official Tri-Cities airport map',
+      sourceName: 'Tri-Cities Airport',
+      url: 'https://www.flytricities.com/uploads/Maps/PSC_Updated_AirportMap.png',
+      embedUrl: 'https://www.flytricities.com/uploads/Maps/PSC_Updated_AirportMap.png',
+      embeddable: true,
+    },
+    officialAirportUrl: 'https://www.flytricities.com/',
   },
   {
     id: 'YKM',
@@ -150,6 +186,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use the main passenger terminal. Confirm airline check-in and flight status before leaving.',
     genericGuidance: 'Confirm flight status and boarding details with your airline.',
     officialParkingUrl: 'https://flyykm.com/',
+    indoorMap: {
+      provider: 'official',
+      label: 'Yakima Air Terminal airport diagram',
+      sourceName: 'FlightAware / FAA airport diagram',
+      url: 'https://www.flightaware.com/resources/airport/KYKM/APD/AIRPORT+DIAGRAM/png',
+      embedUrl: 'https://www.flightaware.com/resources/airport/KYKM/APD/AIRPORT+DIAGRAM/png',
+      embeddable: false,
+    },
+    officialAirportUrl: 'https://flyykm.com/',
   },
 ];
 
