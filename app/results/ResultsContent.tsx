@@ -61,6 +61,7 @@ import {
 } from '../utils/formatter';
 import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
 import ParkingReviewsModal from './ParkingReviewsModal';
+import { attachGooglePlaceToParking } from '@/lib/parking/googlePlaceMatch';
 
 type PriceableOption = {
   id?: string;
@@ -1157,6 +1158,7 @@ function OptionCard({
   aprLivePrices,
   aprLiveChecking,
   onShowReviews,
+  googleEnrichedParking,
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -1167,6 +1169,7 @@ function OptionCard({
   aprLivePrices: Record<string, number>;
   aprLiveChecking: boolean;
   onShowReviews?: (parking: ParkingOption) => void;
+  googleEnrichedParking?: Record<string, ParkingOption>;
 }) {
   const opt = withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption;
 
@@ -1176,6 +1179,10 @@ function OptionCard({
     isAprOption(opt);
 
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
+  const parking = item.type === "parking"
+    ? ((googleEnrichedParking?.[opt.id || ""] || opt) as ParkingOption)
+    : null;
+
 
   const airportCode = getTripAirportCode(tripData);
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
@@ -1397,22 +1404,31 @@ function OptionCard({
                 isAprFetching &&
                 getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
 
-              {item.type === "parking" && (() => {
-                const parking = opt as ParkingOption;
-                const hasRating = typeof parking.reviewScore === "number";
+              {item.type === "parking" ? (() => {
+                const parking = (googleEnrichedParking?.[opt.id || ""] || opt) as ParkingOption;
 
                 return (
                   <button
                     type="button"
                     onClick={() => onShowReviews?.(parking)}
-                    className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                     title="See Google review details"
                   >
-                    ⭐ {hasRating ? parking.reviewScore!.toFixed(1) : "Reviews"}
-                    {parking.reviewCount ? ` · ${parking.reviewCount.toLocaleString()}` : ""}
+                    {typeof parking.reviewScore === "number" ? (
+                      <>
+                        <span>⭐ {parking.reviewScore.toFixed(1)}</span>
+                        {parking.reviewCount ? (
+                          <span className="text-amber-700/70">
+                            ({Intl.NumberFormat("en", { notation: "compact" }).format(parking.reviewCount)})
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span>⭐ Check reviews</span>
+                    )}
                   </button>
                 );
-              })()}
+              })() : null}
             </div>
           </div>
 
@@ -2139,11 +2155,95 @@ export default function ResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
+
+  async function enrichParkingListWithGoogle(parkingOptions: ParkingOption[]) {
+    const firstFew = parkingOptions.slice(0, 8);
+
+    const enrichedPairs = await Promise.all(
+      firstFew.map(async (parking) => {
+        const enriched = await attachGooglePlaceToParking(parking, tripData);
+        return [parking.id, enriched] as const;
+      })
+    );
+
+    setGoogleEnrichedParking((prev: Record<string, ParkingOption>) => {
+      const next = { ...prev };
+
+      enrichedPairs.forEach(([id, enriched]) => {
+        next[id] = enriched;
+      });
+
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!recommendation?.parking?.length || !tripData) return;
+
+    enrichParkingListWithGoogle(recommendation.parking);
+  }, [recommendation?.parking, tripData]);
+
+  useEffect(() => {
+    if (!recommendation?.parking?.length || !tripData) return;
+
+    const aprOptions = recommendation.parking.filter((p) =>
+      p.bookingProvider === 'AirportParkingReservations' ||
+      p.sourceName === 'AirportParkingReservations'
+    );
+
+    if (aprOptions.length === 0) return;
+
+    const requestKey = JSON.stringify({
+      ids: aprOptions.map((p) => p.id || p.name),
+      parkingCheckInDate: (tripData as TripDataWithExtras).parkingCheckInDate,
+      parkingCheckOutDate: (tripData as TripDataWithExtras).parkingCheckOutDate,
+      parkingDuration: (tripData as TripDataWithExtras).parkingDuration,
+    });
+
+    if (aprRequestKeyRef.current === requestKey) return;
+
+    aprRequestKeyRef.current = requestKey;
+    const fetchId = aprFetchIdRef.current + 1;
+    aprFetchIdRef.current = fetchId;
+
+    setAprLiveChecking(true);
+    setAprLivePartial(false);
+
+    fetch('/api/parking/apr-live-prices', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tripData,
+        parkingOptions: aprOptions,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (aprFetchIdRef.current !== fetchId) return;
+
+        const prices = data?.pricesByKey || data?.prices || {};
+
+        setAprLivePrices(prices);
+        setAprLivePartial(Object.keys(prices).length < aprOptions.length);
+      })
+      .catch((err) => {
+        console.error('[APR live price fetch failed]', err);
+        if (aprFetchIdRef.current !== fetchId) return;
+        setAprLivePartial(true);
+      })
+      .finally(() => {
+        if (aprFetchIdRef.current !== fetchId) return;
+        setAprLiveChecking(false);
+      });
+  }, [recommendation, tripData]);
 
   const airportSecurity = useMemo(() => {
     const airportCode = getTripAirportCode(tripData);
@@ -2206,6 +2306,8 @@ export default function ResultsContent() {
 
   const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
   const intent = searchParams.get('intent') || '';
+
+
 
   const seatacZone = useMemo(() => {
     if (!airlineOrFlight) return null;
@@ -2741,62 +2843,6 @@ export default function ResultsContent() {
   }, [tripData]);
 
   useEffect(() => {
-    if (!recommendation?.parking?.length || !tripData) return;
-
-    const aprOptions = recommendation.parking.filter((p) =>
-      p.bookingProvider === 'AirportParkingReservations' ||
-      p.sourceName === 'AirportParkingReservations'
-    );
-
-    if (aprOptions.length === 0) return;
-
-    const requestKey = JSON.stringify({
-      ids: aprOptions.map((p) => p.id || p.name),
-      parkingCheckInDate: (tripData as TripDataWithExtras).parkingCheckInDate,
-      parkingCheckOutDate: (tripData as TripDataWithExtras).parkingCheckOutDate,
-      parkingDuration: (tripData as TripDataWithExtras).parkingDuration,
-    });
-
-    if (aprRequestKeyRef.current === requestKey) return;
-
-    aprRequestKeyRef.current = requestKey;
-    const fetchId = aprFetchIdRef.current + 1;
-    aprFetchIdRef.current = fetchId;
-
-    setAprLiveChecking(true);
-    setAprLivePartial(false);
-
-    fetch('/api/parking/apr-live-prices', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        tripData,
-        parkingOptions: aprOptions,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (aprFetchIdRef.current !== fetchId) return;
-
-        const prices = data?.pricesByKey || data?.prices || {};
-
-        setAprLivePrices(prices);
-        setAprLivePartial(Object.keys(prices).length < aprOptions.length);
-      })
-      .catch((err) => {
-        console.error('[APR live price fetch failed]', err);
-        if (aprFetchIdRef.current !== fetchId) return;
-        setAprLivePartial(true);
-      })
-      .finally(() => {
-        if (aprFetchIdRef.current !== fetchId) return;
-        setAprLiveChecking(false);
-      });
-  }, [recommendation, tripData]);
-
-  useEffect(() => {
     if (!tripData || !recommendation?.parking?.length) return;
 
     const airportCode = getTripAirportCode(tripData);
@@ -3164,6 +3210,14 @@ export default function ResultsContent() {
   const hiddenParking = remainingParking.slice(visibleMoreParkingCount, maxParkingDisplayCount);
   const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
 
+  async function handleShowReviews(parking: ParkingOption) {
+    setReviewsParking(parking);
+
+    const enriched = await attachGooglePlaceToParking(parking, tripData);
+
+    setReviewsParking(enriched);
+  }
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 pb-24 pt-8">
@@ -3469,7 +3523,7 @@ export default function ResultsContent() {
                 aprLivePrices={aprLivePrices}
                 aprLiveChecking={aprLiveChecking}
                 weatherImpact={recommendation?.weatherImpact}
-                onShowReviews={setReviewsParking}
+                onShowReviews={handleShowReviews}
               />
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
                 {/* Show Parking Lots Map */}
@@ -3716,6 +3770,7 @@ export default function ResultsContent() {
                         intent={intent}
                         sort={sort}
                         onShowReviews={setReviewsParking}
+                        googleEnrichedParking={googleEnrichedParking}
                       />
                     ))}
                   </div>

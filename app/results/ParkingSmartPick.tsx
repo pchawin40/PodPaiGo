@@ -414,11 +414,21 @@ export default function ParkingSmartPick({
             <button
               type="button"
               onClick={() => onShowReviews?.(best)}
-              className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
               title="See Google review details"
             >
-              ⭐ {typeof best.reviewScore === "number" ? best.reviewScore.toFixed(1) : "Reviews"}
-              {best.reviewCount ? ` · ${best.reviewCount.toLocaleString()}` : ""}
+              {typeof best.reviewScore === "number" ? (
+                <>
+                  <span>⭐ {best.reviewScore.toFixed(1)}</span>
+                  {best.reviewCount ? (
+                    <span className="text-amber-700/70">
+                      ({Intl.NumberFormat("en", { notation: "compact" }).format(best.reviewCount)})
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span>⭐ Check reviews</span>
+              )}
             </button>
 
             {savings && (
