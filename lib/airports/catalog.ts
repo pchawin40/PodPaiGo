@@ -64,7 +64,6 @@ export type AirportInfo = {
   airportMap?: AirportMapSource;
   indoorMap?: AirportIndoorMap;
 
-  // Optional structured data for future PodPaiGo guidance
   terminals?: AirportTerminal[];
   checkinAreas?: AirportCheckinArea[];
   terminalZones?: AirportTerminalZone[];
@@ -82,6 +81,15 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
     checkinNote: 'Use airline-specific check-in guidance when available. Otherwise, use the main terminal check-in area.',
     genericGuidance: 'Confirm terminal, gate, and check-in area with your airline before leaving.',
     officialParkingUrl: 'https://www.portseattle.org/sea/parking',
+    officialAirportUrl: 'https://www.portseattle.org/sea-tac',
+    indoorMap: {
+      provider: 'official',
+      label: 'Official terminal map and airport guidance',
+      sourceName: 'Port of Seattle',
+      url: 'https://maps.flysea.org/',
+      embedUrl: 'https://maps.flysea.org/',
+      embeddable: true,
+    },
   },
   {
     id: 'PAE',

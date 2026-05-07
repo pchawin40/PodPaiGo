@@ -2311,21 +2311,6 @@ export default function ResultsContent() {
         : 'text-zinc-900';
 
   const handleRecalculate = async (newTripData: TripData) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[EditTrip] Recalculate started', {
-        type: newTripData.type,
-        origin: newTripData.origin,
-        destination: newTripData.destination,
-        departureDate: newTripData.type === 'one-way-departure' || newTripData.type === 'round-trip'
-          ? newTripData.departureDate
-          : undefined,
-        departureTime: newTripData.type === 'one-way-departure' || newTripData.type === 'round-trip'
-          ? newTripData.departureTime
-          : undefined,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
     // Reset old state immediately so stale high-risk/no-viable UI doesn't linger.
     setLoading(true);
     setShowTooLate(false);
@@ -2345,16 +2330,6 @@ export default function ResultsContent() {
       const rec: Recommendation = await response.json();
       const fetchDurationMs = Date.now() - fetchStartTime;
 
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[EditTrip] Recommendations fetched', {
-          duration: `${fetchDurationMs}ms`,
-          parkingCount: rec.parking?.length || 0,
-          rideshareCount: rec.rideshare?.length || 0,
-          transitCount: rec.transit?.length || 0,
-          timestamp: new Date().toISOString(),
-        });
-      }
-
       setRecommendation(rec);
       setTripData(newTripData);
 
@@ -2366,13 +2341,6 @@ export default function ResultsContent() {
         rec.tsaEstimate
       );
       setRankedOptions(ranked);
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[EditTrip] Options ranked', {
-          rankedCount: ranked.length,
-          timestamp: new Date().toISOString(),
-        });
-      }
 
       setIsEditing(false);
       setEditingData(null);
@@ -2454,13 +2422,6 @@ export default function ResultsContent() {
       }
 
       const newUrl = `/results?${params.toString()}`;
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[EditTrip] URL params after update', {
-          url: newUrl,
-          params: Object.fromEntries(params),
-          timestamp: new Date().toISOString(),
-        });
-      }
 
       // Use router.replace so Next's useSearchParams updates and TripData is rebuilt from the URL.
       router.replace(newUrl);
