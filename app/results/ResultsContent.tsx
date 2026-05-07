@@ -3516,10 +3516,14 @@ export default function ResultsContent() {
               </div>
 
               <ParkingSmartPick
-                options={cheapestSmartPickOptions}
+                options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
                 tripData={tripData}
                 leaveByTime={recommendation.leaveByTime}
-                selectedOption={smartPickOption}
+                selectedOption={
+                  smartPickOption
+                    ? googleEnrichedParking[smartPickOption.id] || smartPickOption
+                    : smartPickOption
+                }
                 aprLivePrices={aprLivePrices}
                 aprLiveChecking={aprLiveChecking}
                 weatherImpact={recommendation?.weatherImpact}
