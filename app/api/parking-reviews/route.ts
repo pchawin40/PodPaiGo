@@ -23,6 +23,7 @@ async function fetchGoogleReviews(
         `?place_id=${encodeURIComponent(placeId)}` +
         `&fields=name,rating,user_ratings_total,reviews` +
         `&reviews_sort=${sort === "newest" ? "newest" : "most_relevant"}` +
+        `&language=en` +
         `&key=${encodeURIComponent(apiKey)}`;
 
     const res = await fetch(url, {
@@ -32,15 +33,6 @@ async function fetchGoogleReviews(
     if (!res.ok) return [];
 
     const json = await res.json();
-
-    console.log("Google Places Details debug", {
-        status: json.status,
-        error_message: json.error_message,
-        name: json?.result?.name,
-        rating: json?.result?.rating,
-        reviewCount: json?.result?.user_ratings_total,
-        reviewsReturned: json?.result?.reviews?.length ?? 0,
-    });
 
     const reviews: GoogleReview[] =
         json?.result?.reviews ?? [];

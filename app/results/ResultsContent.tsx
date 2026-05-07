@@ -2155,13 +2155,13 @@ export default function ResultsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
 
+  const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
   async function enrichParkingListWithGoogle(parkingOptions: ParkingOption[]) {
     const firstFew = parkingOptions.slice(0, 8);
 
@@ -2184,10 +2184,18 @@ export default function ResultsContent() {
   }
 
   useEffect(() => {
-    if (!recommendation?.parking?.length || !tripData) return;
+    if (!rankedOptions.length || !tripData) return;
 
-    enrichParkingListWithGoogle(recommendation.parking);
-  }, [recommendation?.parking, tripData]);
+    const parkingOptions = rankedOptions
+      .filter((item) => item.type === "parking")
+      .map((item) => item.option as ParkingOption)
+      .filter((parking) => parking.id && !googleEnrichedParking[parking.id])
+      .slice(0, 12);
+
+    if (parkingOptions.length === 0) return;
+
+    enrichParkingListWithGoogle(parkingOptions);
+  }, [rankedOptions, tripData]);
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
@@ -3211,9 +3219,14 @@ export default function ResultsContent() {
   const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
 
   async function handleShowReviews(parking: ParkingOption) {
-    setReviewsParking(parking);
+    setReviewsParking(googleEnrichedParking[parking.id] || parking);
 
     const enriched = await attachGooglePlaceToParking(parking, tripData);
+
+    setGoogleEnrichedParking((prev) => ({
+      ...prev,
+      [parking.id]: enriched,
+    }));
 
     setReviewsParking(enriched);
   }
@@ -3766,14 +3779,13 @@ export default function ResultsContent() {
                       <OptionCard
                         aprLivePrices={aprLivePrices}
                         aprLiveChecking={aprLiveChecking}
-                        compact
-                        key={`parking-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                        key={`too-late-${opt.type}-${(opt.option as AppOption).id || idx}`}
                         item={opt}
                         rank={idx + 1}
                         tripData={tripData}
                         intent={intent}
                         sort={sort}
-                        onShowReviews={setReviewsParking}
+                        onShowReviews={handleShowReviews}
                         googleEnrichedParking={googleEnrichedParking}
                       />
                     ))}
@@ -3810,6 +3822,8 @@ export default function ResultsContent() {
                         tripData={tripData}
                         intent={intent}
                         sort={sort}
+                        onShowReviews={handleShowReviews}
+                        googleEnrichedParking={googleEnrichedParking}
                       />
                     ))}
                   </div>

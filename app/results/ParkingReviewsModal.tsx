@@ -103,17 +103,6 @@ export default function ParkingReviewsModal({
                                         {parking.reviewCount.toLocaleString()} reviews
                                     </span>
                                 )}
-
-                                {parking.googlePlaceId && (
-                                    <a
-                                        href={googleReviewsUrl(parking.googlePlaceId) ?? "#"}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="mt-4 inline-flex rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-                                    >
-                                        View all Google reviews
-                                    </a>
-                                )}
                             </div>
                         </div>
 
@@ -163,7 +152,7 @@ export default function ParkingReviewsModal({
 
                     {!loading && parking.googlePlaceId && sortedReviews.length === 0 && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                            Google rating is connected, but Google did not return review snippets for this listing. Open Google reviews to read the full review feed.
+                            Google rating is connected, but Google did not return review snippets for this listing. Use the button above to open the full Google review feed.
                         </div>
                     )}
 
@@ -197,6 +186,17 @@ export default function ParkingReviewsModal({
                                                     {review.relative_time_description || "Google review"}
                                                 </span>
                                             </div>
+
+                                            {parking.googlePlaceId && (
+                                                <a
+                                                    href={googleReviewsUrl(parking.googlePlaceId) ?? "#"}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="mt-4 inline-flex rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
+                                                >
+                                                    View all Google reviews
+                                                </a>
+                                            )}
 
                                             {review.text && (
                                                 <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-700">
