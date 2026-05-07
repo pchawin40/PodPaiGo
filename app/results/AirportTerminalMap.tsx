@@ -29,7 +29,7 @@ function canRenderIframe(map?: IndoorMapLike | null): boolean {
     if (!map?.embeddable || !map.embedUrl) return false;
     if (isStaticImageMap(map)) return false;
 
-    return map.mapType === 'official-indoor';
+    return true;
 }
 
 export default function AirportTerminalMap({

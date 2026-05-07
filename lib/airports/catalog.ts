@@ -16,6 +16,7 @@ export type AirportIndoorMap = {
   embedUrl?: string;
   embeddable: boolean;
   sourceName: string;
+  mapType?: 'official-indoor' | 'official-static-image' | 'official-link';
 };
 
 export type AirportTerminal = {
@@ -89,6 +90,7 @@ export const AIRPORTS_CATALOG: AirportInfo[] = [
       url: 'https://maps.flysea.org/',
       embedUrl: 'https://maps.flysea.org/',
       embeddable: true,
+      mapType: 'official-indoor',
     },
   },
   {

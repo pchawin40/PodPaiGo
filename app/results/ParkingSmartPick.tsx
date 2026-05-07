@@ -380,13 +380,18 @@ export default function ParkingSmartPick({
     savings && officialTotal ? Math.round((savings / officialTotal) * 100) : null;
 
   const displayLeaveByTime = leaveByTime ? formatTimeFriendly(leaveByTime) : null;
-
+ 
   const ctaLabel =
     best.bookingProvider === 'AirportParkingReservations'
       ? 'View deal'
       : best.type === 'official'
         ? 'Book official'
         : 'Check price';
+
+  const bestRouteLinks = {
+    routeToParkingUrl: parkingRouteLink(best, tripData),
+    parkingToAirportUrl: parkingToAirportRouteLink(best, tripData),
+  };
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -499,9 +504,9 @@ export default function ParkingSmartPick({
             </a>
           )}
 
-          {parkingRouteLink(best, tripData) && (
+          {bestRouteLinks.routeToParkingUrl && (
             <a
-              href={parkingRouteLink(best, tripData) || '#'}
+              href={bestRouteLinks.routeToParkingUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
@@ -510,9 +515,9 @@ export default function ParkingSmartPick({
             </a>
           )}
 
-          {parkingToAirportRouteLink(best, tripData) && (
+          {bestRouteLinks.parkingToAirportUrl && (
             <a
-              href={parkingToAirportRouteLink(best, tripData) || '#'}
+              href={bestRouteLinks.parkingToAirportUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"

@@ -1,4 +1,4 @@
-import { ParkingOption } from '../types';
+import { ParkingOption, TripData } from '../types';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
 
 export function parkingTimeBreakdown(option: ParkingOption): {
@@ -54,6 +54,73 @@ export function parkingTimeBreakdown(option: ParkingOption): {
     label: parts.map((p) => `${p.label} ${formatMinutes(p.minutes)}`).join(' + '),
     totalMinutes,
     parts,
+  };
+}
+
+function looksLikeAirportDestination(value: string): boolean {
+  const lower = value.toLowerCase();
+
+  return (
+    lower.includes('terminal') ||
+    lower.includes('central terminal') ||
+    lower.includes('international airport') ||
+    lower.includes('airport terminal') ||
+    lower.includes('passenger terminal')
+  );
+}
+
+export function parkingLotDestination(
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
+  airportDestination?: string | null
+): string {
+  const routeDestination = String(option.routeDestination || '').trim();
+  const normalizedAddress = String(option.normalizedAddress || '').trim();
+  const name = String(option.name || '').trim();
+
+  if (typeof option.lat === 'number' && typeof option.lng === 'number') {
+    return `${option.lat},${option.lng}`;
+  }
+
+  if (normalizedAddress) return normalizedAddress;
+
+  if (routeDestination && !looksLikeAirportDestination(routeDestination)) {
+    return routeDestination;
+  }
+
+  if (name) return name;
+
+  return airportDestination || '';
+}
+
+export function parkingRouteLinks(
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
+  tripData: Pick<TripData, 'origin' | 'destination'> | null
+): {
+  routeToParkingUrl: string | null;
+  parkingToAirportUrl: string | null;
+  parkingLotDestination: string;
+  airportDestination: string;
+} {
+  const airportDestination = String(tripData?.destination || option.routeDestination || '').trim();
+  const lotDestination = parkingLotDestination(option, airportDestination);
+  const origin = String(tripData?.origin || '').trim();
+
+  const routeToParkingUrl = lotDestination
+    ? origin
+      ? googleMapsDirectionsLink(origin, lotDestination, 'driving')
+      : googleMapsSearchLink(lotDestination)
+    : option.mapLink || null;
+
+  const parkingToAirportUrl =
+    lotDestination && airportDestination
+      ? googleMapsDirectionsLink(lotDestination, airportDestination, 'driving')
+      : null;
+
+  return {
+    routeToParkingUrl,
+    parkingToAirportUrl,
+    parkingLotDestination: lotDestination,
+    airportDestination,
   };
 }
 
