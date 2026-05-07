@@ -59,6 +59,7 @@ import {
   formatMoney,
   formatMoneyCents
 } from '../utils/formatter';
+import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
 
 type PriceableOption = {
   id?: string;
@@ -306,7 +307,7 @@ function confidenceFromTrust(trust: TrustStatus): { label: string; className: st
 }
 
 function getTripAirportCode(tripData: TripData | null): string {
-  return (tripData?.airportCode || 'SEA').toUpperCase();
+  return ((tripData as TripDataWithExtras | null)?.airportCode || 'SEA').toUpperCase();
 }
 
 async function copyTextThenOpen(text: string, url: string) {
@@ -1933,10 +1934,19 @@ function ProviderDropdownSection({
 
 function TsaWaitTimesCard({
   tsaEstimate,
+  airportCode,
 }: {
   tsaEstimate: Recommendation['tsaEstimate'];
+  airportCode?: string;
 }) {
   const waitTimes = tsaEstimate.waitTimes;
+
+  const airportSecurity = getAirportSecurityEstimate(
+    airportCode || 'SEA',
+    (tsaEstimate.selectedLane || 'standard') as SecurityOption
+  );
+
+  const isSea = (airportCode || 'SEA').toUpperCase() === 'SEA';
 
   const laneLabels: Record<string, string> = {
     standard: 'Standard',
@@ -1948,7 +1958,9 @@ function TsaWaitTimesCard({
   if (!waitTimes) {
     return (
       <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-        <span className="font-semibold text-zinc-900">TSA</span>
+        <span className="font-semibold text-zinc-900">
+          {airportSecurity.label}
+        </span>
         <span className="rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
           {tsaEstimate.waitTime}m
         </span>
@@ -1994,10 +2006,42 @@ function TsaWaitTimesCard({
     (lane) => lane.key !== selectedLane && lane.key !== fastestLane?.key
   );
 
+  if (!isSea) {
+    return (
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-zinc-900">
+            {airportSecurity.label}
+          </span>
+
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 ring-1 ring-zinc-200">
+            Selected {airportSecurity.selectedLineLabel}: {airportSecurity.selectedMinutes}m
+          </span>
+
+          {airportSecurity.fastestLineLabel !== airportSecurity.selectedLineLabel && (
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200">
+              Fastest {airportSecurity.fastestLineLabel}: {airportSecurity.fastestMinutes}m
+            </span>
+          )}
+
+          <span className="text-xs text-zinc-400">
+            {airportSecurity.isLive ? 'live' : 'est.'}
+          </span>
+        </div>
+
+        <div className="mt-2 text-xs text-zinc-500">
+          {airportSecurity.note}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-zinc-900">TSA</span>
+        <span className="font-semibold text-zinc-900">
+          {airportSecurity.label}
+        </span>
 
         {selectedLaneData && (
           <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 ring-1 ring-zinc-200">
@@ -2029,17 +2073,40 @@ function TsaWaitTimesCard({
         </div>
       )}
 
-      {tsaEstimate.bestCheckpoint && (
-        <div className="mt-2 text-xs text-zinc-500">
-          For selected {selectedLabel}:{' '}
-          <span className="font-medium text-zinc-700">
-            use {tsaEstimate.bestCheckpoint.name}
-          </span>{' '}
-          · {tsaEstimate.bestCheckpoint.minutes}m
-        </div>
-      )}
+      <div className="mt-2 text-xs text-zinc-500">
+        {airportCode?.toUpperCase() === 'SEA' && tsaEstimate.bestCheckpoint ? (
+          <>
+            For selected {selectedLabel}:{' '}
+            <span className="font-medium text-zinc-700">
+              use {tsaEstimate.bestCheckpoint.name}
+            </span>{' '}
+            · {tsaEstimate.bestCheckpoint.minutes}m
+          </>
+        ) : (
+          <span>{airportSecurity.note}</span>
+        )}
+      </div>
     </div>
   );
+}
+
+function securitySummaryLabel(
+  airportCode: string,
+  securityOption?: SecurityOption
+): string {
+  const code = airportCode.toUpperCase();
+
+  if (code !== 'SEA') {
+    if (securityOption === 'precheck') return 'PreCheck if available';
+    if (securityOption === 'clear') return 'Expedited if available';
+    if (securityOption === 'clear-precheck') return 'Expedited if available';
+    return 'Standard screening';
+  }
+
+  if (securityOption === 'precheck') return 'TSA PreCheck';
+  if (securityOption === 'clear') return 'CLEAR';
+  if (securityOption === 'clear-precheck') return 'CLEAR + PreCheck';
+  return 'TSA';
 }
 
 export default function ResultsContent() {
@@ -2050,6 +2117,14 @@ export default function ResultsContent() {
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
+
+  const airportSecurity = useMemo(() => {
+    const airportCode = getTripAirportCode(tripData);
+    const selectedSecurity =
+      (tripData as TripDataWithExtras | null)?.securityOption || 'standard';
+
+    return getAirportSecurityEstimate(airportCode, selectedSecurity);
+  }, [tripData]);
 
   const airportReadiness = useMemo(() => {
     if (!tripData || tripData.type !== 'one-way-departure') return null;
@@ -2851,9 +2926,19 @@ export default function ResultsContent() {
   const heroAirportTiming = (() => {
     if (intent !== 'flying-out' || tripData.type !== 'one-way-departure') return null;
 
-    const buf = computeAirportReadyBufferMinutes(tripData);
+    const tripExtras = tripData as TripDataWithExtras;
+
+    const readiness = calculateAirportReadinessBuffer({
+      checkingBags: !!tripExtras.checkingBags,
+      securityOption: (tripExtras.securityOption || 'standard') as SecurityOption,
+      flightType: (tripExtras.flightType || 'domestic') as FlightType,
+      cabin: (tripExtras.cabin || 'economy') as CabinClass,
+    });
+
+    const airportReadyBufferMinutes = readiness.bufferMinutes;
     const depMin = parseHHMMToMinutes(tripData.departureTime);
-    if (!buf || depMin == null) return null;
+
+    if (!airportReadyBufferMinutes || depMin == null) return null;
 
     const recommendedBy = minutesToHHMM(
       tripData.timeAnchor === 'airport-arrival'
@@ -2866,13 +2951,12 @@ export default function ResultsContent() {
     const cabin = String((tripData as TripDataWithExtras).cabin || 'economy');
     const securityOption = String((tripData as TripDataWithExtras).securityOption || 'standard');
 
-    const secLabel = securityOption === 'precheck'
-      ? 'PreCheck'
-      : securityOption === 'clear'
-        ? 'CLEAR'
-        : securityOption === 'clear-precheck'
-          ? 'CLEAR + PreCheck'
-          : 'TSA';
+    const airportCode = getTripAirportCode(tripData);
+
+    const secLabel = securitySummaryLabel(
+      airportCode,
+      securityOption as SecurityOption
+    );
 
     return {
       recommendedBy,
@@ -3090,7 +3174,10 @@ export default function ResultsContent() {
 
               {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
                 recommendation.tsaEstimate && (
-                  <TsaWaitTimesCard tsaEstimate={recommendation.tsaEstimate} />
+                  <TsaWaitTimesCard
+                    tsaEstimate={recommendation.tsaEstimate}
+                    airportCode={tripData?.airportCode}
+                  />
                 )}
 
               <p className="mt-2 text-sm text-zinc-500">
@@ -3149,23 +3236,20 @@ export default function ResultsContent() {
               )}
 
               {heroAirportTiming && (
-                <div className="rounded-xl bg-zinc-50 p-3">
-                  <div className="text-xs font-medium text-zinc-500">
+                <div className="rounded-2xl bg-zinc-50 p-4">
+                  <div className="text-sm text-zinc-500">
                     Recommended inside-airport arrival by
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-zinc-900">
+
+                  <div className="mt-1 text-lg font-bold text-zinc-950">
                     {formatTimeFriendly(heroAirportTiming.recommendedBy)}
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600">
-                    {heroAirportTiming.lines.map((l) => (
-                      <span key={l}>{l}</span>
+
+                  <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm text-zinc-600">
+                    {heroAirportTiming.lines.map((line) => (
+                      <span key={line}>{line}</span>
                     ))}
                   </div>
-                  {heroAirportTiming.airportTimingIsLimitingFactor && (
-                    <div className="mt-2 text-xs text-amber-900">
-                      Recommended airport arrival time matters more than traffic today.
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -3294,7 +3378,7 @@ export default function ResultsContent() {
                   <EditTripForm
                     initialData={editingData}
                     onSubmit={(data) => {
-                      const params = new URLSearchParams();
+                      const params = new URLSearchParams(searchParams.toString());
 
                       Object.entries(data).forEach(([key, value]) => {
                         if (value !== undefined && value !== null && value !== '') {
@@ -3302,7 +3386,28 @@ export default function ResultsContent() {
                         }
                       });
 
-                      router.push(`/results?${params.toString()}`);
+                      const selectedAirport =
+                        getAirportById(((data as TripDataWithExtras).airportCode || 'SEA').toUpperCase()) ||
+                        getAirportById('SEA')!;
+
+                      params.set('airportCode', selectedAirport.id);
+                      params.set('airport', selectedAirport.id);
+                      params.set('airportName', selectedAirport.label);
+                      params.set('destination', selectedAirport.routingAddress);
+                      params.set('rideshareDestinationName', selectedAirport.rideshareDestinationName);
+                      params.set('airportCheckinNote', selectedAirport.checkinNote || '');
+
+                      params.set('airportLat', String(selectedAirport.geoLocation.lat));
+                      params.set('airportLng', String(selectedAirport.geoLocation.lng));
+
+                      params.set('intent', intent || params.get('intent') || 'flying-out');
+
+                      const nextUrl = `/results?${params.toString()}`;
+
+                      setIsEditing(false);
+                      setEditingData(null);
+
+                      router.push(nextUrl);
                     }}
                     onCancel={() => {
                       setIsEditing(false);
@@ -3700,7 +3805,16 @@ function EditTripForm({
   airportCode: string;
 }) {
   const [origin, setOrigin] = useState(initialData.origin);
-  const [selectedAirportCode, setSelectedAirportCode] = useState(airportCode || 'SEA');
+  const [selectedAirportCode, setSelectedAirportCode] = useState(
+    ((airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA')).toUpperCase()
+  );
+
+  useEffect(() => {
+    setSelectedAirportCode(
+      (airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA').toUpperCase()
+    );
+  }, [airportCode, initialData]);
+
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>(
     initialData.transportAvailability || 'all'
   );
@@ -3858,6 +3972,7 @@ function EditTripForm({
         airportTripDate,
         airportTripTime,
         transportAvailability,
+        airportCode: selectedAirport.id,
       };
     } else if (initialData.type === 'one-way-arrival') {
       data = {
@@ -3867,12 +3982,14 @@ function EditTripForm({
         arrivalDate,
         arrivalTime,
         transportAvailability,
+        airportCode: selectedAirport.id,
       };
     } else {
       data = {
         type: initialData.type,
         origin,
         destination,
+        airportCode: selectedAirport.id,
         departureDate,
         departureTime,
         returnDate,
@@ -3909,7 +4026,11 @@ function EditTripForm({
             <label className="block text-sm font-medium text-zinc-800">Airport</label>
             <select
               value={selectedAirportCode}
-              onChange={(e) => setSelectedAirportCode(e.target.value)}
+              onChange={(e) => {
+                const nextCode = e.target.value.toUpperCase();
+                console.log('airport changed', nextCode);
+                setSelectedAirportCode(nextCode);
+              }}
               className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             >
               {AIRPORTS_CATALOG.map((airport) => (
