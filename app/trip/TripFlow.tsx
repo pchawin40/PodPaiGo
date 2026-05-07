@@ -16,6 +16,22 @@ type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
 
 type Step = 1 | 2;
 
+type SecurityLaneKey = 'standard' | 'precheck' | 'clear' | 'clearPrecheck';
+
+type AirportSecurityStatus = {
+  airportCode: string;
+  sourceName: string;
+  trustStatus: 'live' | 'estimated' | 'unavailable';
+  lanes: Record<
+    SecurityLaneKey,
+    {
+      available: boolean;
+      waitMinutes?: number;
+      note?: string;
+    }
+  >;
+};
+
 type FormState = {
   intent: Intent | null;
   transportAvailability: TransportAvailability;
@@ -116,6 +132,45 @@ function intentCopy(intent: Intent) {
   }
 }
 
+function securityLaneKey(option: SecurityOption): SecurityLaneKey {
+  if (option === 'clear-precheck') return 'clearPrecheck';
+  return option;
+}
+
+function securityHintText(
+  option: SecurityOption,
+  status: AirportSecurityStatus | null
+): string {
+  if (!status) return 'Checking availability...';
+
+  const lane = status.lanes[securityLaneKey(option)];
+
+  if (!lane) return 'Availability unknown';
+
+  const waitText =
+    typeof lane.waitMinutes === 'number'
+      ? ` · about ${lane.waitMinutes} min`
+      : '';
+
+  if (!lane.available) return 'Not confirmed here';
+
+  if (option === 'clear-precheck') {
+    if (status.trustStatus === 'live') return `Fastest eligible${waitText} live`;
+    if (status.trustStatus === 'estimated') return `Fastest eligible${waitText} estimated`;
+    return `Fastest eligible${waitText}`;
+  }
+
+  if (option === 'clear') {
+    if (status.trustStatus === 'live') return `Available${waitText} live`;
+    if (status.trustStatus === 'estimated') return `Available${waitText} estimated`;
+    return `Available${waitText}`;
+  }
+
+  if (status.trustStatus === 'live') return `Available${waitText} live`;
+  if (status.trustStatus === 'estimated') return `Available${waitText} estimated`;
+  return `Usually available${waitText}`;
+}
+
 function Card({
   title,
   subtitle,
@@ -164,6 +219,10 @@ export default function TripFlow() {
 
   // airport catalog
   const [airports, setAirports] = useState(AIRPORTS_CATALOG);
+
+  const [airportSecurityStatus, setAirportSecurityStatus] =
+    useState<AirportSecurityStatus | null>(null);
+
 
   const [state, setState] = useState<FormState>({
     intent: 'flying-out', // since you removed step 1
@@ -457,6 +516,31 @@ export default function TripFlow() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadAirportSecurity() {
+      try {
+        const res = await fetch(`/api/airport-security?airport=${state.airportCode}`);
+        const data = await res.json();
+
+        if (active) {
+          setAirportSecurityStatus(data);
+        }
+      } catch {
+        if (active) {
+          setAirportSecurityStatus(null);
+        }
+      }
+    }
+
+    loadAirportSecurity();
+
+    return () => {
+      active = false;
+    };
+  }, [state.airportCode]);
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-10">
@@ -656,8 +740,139 @@ export default function TripFlow() {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      {/* keep all your existing buttons here */}
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Bags
+                        </div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {[
+                            { value: false, label: 'No checked bags' },
+                            { value: true, label: 'Checking bags' },
+                          ].map((opt) => {
+                            const selected = state.checkingBags === opt.value;
+
+                            return (
+                              <button
+                                key={String(opt.value)}
+                                type="button"
+                                onClick={() =>
+                                  setState((s) => ({ ...s, checkingBags: opt.value }))
+                                }
+                                className={
+                                  'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
+                                  (selected
+                                    ? 'border-blue-500 bg-blue-50 text-blue-950'
+                                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50')
+                                }
+                              >
+                                <div>{opt.label}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Security
+                        </div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {[
+                            { value: 'standard' as SecurityOption, label: 'Standard TSA' },
+                            { value: 'precheck' as SecurityOption, label: 'TSA PreCheck' },
+                            { value: 'clear' as SecurityOption, label: 'CLEAR' },
+                            { value: 'clear-precheck' as SecurityOption, label: 'CLEAR + PreCheck' },
+                          ].map((opt) => {
+                            const selected = state.securityOption === opt.value;
+
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() =>
+                                  setState((s) => ({ ...s, securityOption: opt.value }))
+                                }
+                                className={
+                                  'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
+                                  (selected
+                                    ? 'border-blue-500 bg-blue-50 text-blue-950'
+                                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50')
+                                }
+                              >
+                                <div>{opt.label}</div>
+                                <div className="mt-1 text-xs font-normal text-zinc-500">
+                                  {securityHintText(opt.value, airportSecurityStatus)}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Flight type
+                        </div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {[
+                            { value: 'domestic' as FlightType, label: 'Domestic' },
+                            { value: 'international' as FlightType, label: 'International' },
+                          ].map((opt) => {
+                            const selected = state.flightType === opt.value;
+
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() =>
+                                  setState((s) => ({ ...s, flightType: opt.value }))
+                                }
+                                className={
+                                  'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
+                                  (selected
+                                    ? 'border-blue-500 bg-blue-50 text-blue-950'
+                                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50')
+                                }
+                              >
+                                <div>{opt.label}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Cabin
+                        </div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {[
+                            { value: 'economy' as CabinClass, label: 'Economy' },
+                            { value: 'premium' as CabinClass, label: 'Premium / Business / First' },
+                          ].map((opt) => {
+                            const selected = state.cabin === opt.value;
+
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() =>
+                                  setState((s) => ({ ...s, cabin: opt.value }))
+                                }
+                                className={
+                                  'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
+                                  (selected
+                                    ? 'border-blue-500 bg-blue-50 text-blue-950'
+                                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50')
+                                }
+                              >
+                                <div>{opt.label}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">

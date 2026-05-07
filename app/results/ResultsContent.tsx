@@ -1938,6 +1938,13 @@ function TsaWaitTimesCard({
 }) {
   const waitTimes = tsaEstimate.waitTimes;
 
+  const laneLabels: Record<string, string> = {
+    standard: 'Standard',
+    precheck: 'PreCheck',
+    clear: 'CLEAR',
+    'clear-precheck': 'CLEAR + PreCheck',
+  };
+
   if (!waitTimes) {
     return (
       <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
@@ -1951,41 +1958,84 @@ function TsaWaitTimesCard({
   }
 
   const selectedLane = tsaEstimate.selectedLane ?? 'standard';
+  const selectedLabel = laneLabels[selectedLane] ?? 'Standard';
 
-  const lanes = [
+  const allLanes = [
     { key: 'standard', label: 'Standard', minutes: waitTimes.standard },
-    { key: 'precheck', label: 'TSA PreCheck', minutes: waitTimes.precheck },
+    { key: 'precheck', label: 'PreCheck', minutes: waitTimes.precheck },
     { key: 'clear', label: 'CLEAR', minutes: waitTimes.clear },
-    { key: 'clear-precheck', label: 'CLEAR + PreCheck', minutes: waitTimes.clearPrecheck },
-  ];
+    {
+      key: 'clear-precheck',
+      label: 'CLEAR + PreCheck',
+      minutes: waitTimes.clearPrecheck,
+    },
+  ].filter((lane) => typeof lane.minutes === 'number');
+
+  const selectedLaneData =
+    allLanes.find((lane) => lane.key === selectedLane) ?? null;
+
+  const fastestLane =
+    allLanes.length > 0
+      ? [...allLanes].sort((a, b) => {
+        if (a.minutes !== b.minutes) return a.minutes - b.minutes;
+
+        const priority: Record<string, number> = {
+          'clear-precheck': 0,
+          precheck: 1,
+          clear: 2,
+          standard: 3,
+        };
+
+        return (priority[a.key] ?? 99) - (priority[b.key] ?? 99);
+      })[0]
+      : null;
+
+  const otherLanes = allLanes.filter(
+    (lane) => lane.key !== selectedLane && lane.key !== fastestLane?.key
+  );
 
   return (
-    <div className="mt-3 space-y-1">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-600">
-        <span>
-          <span className="font-medium text-zinc-900">TSA:</span>{' '}
-          {lanes.find((lane) => lane.key === selectedLane)?.label ?? 'Standard'}{' '}
-          <span className="font-semibold text-zinc-900">{tsaEstimate.waitTime}m</span>
-        </span>
+    <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-zinc-900">TSA</span>
 
-        <span className="text-zinc-300">•</span>
+        {selectedLaneData && (
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 ring-1 ring-zinc-200">
+            Selected {selectedLabel}: {selectedLaneData.minutes}m
+          </span>
+        )}
 
-        <span>PreCheck {waitTimes.precheck}m</span>
-
-        <span>CLEAR + PreCheck {waitTimes.clearPrecheck}m</span>
+        {fastestLane && fastestLane.key !== selectedLane && (
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200">
+            Fastest {fastestLane.label}: {fastestLane.minutes}m
+          </span>
+        )}
 
         <span className="text-xs text-zinc-400">
           {tsaEstimate.trustStatus === 'live' ? 'live' : 'est.'}
         </span>
       </div>
 
+      {otherLanes.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-zinc-600">
+          {otherLanes.map((lane) => (
+            <span
+              key={lane.key}
+              className="rounded-full bg-white px-2.5 py-1 ring-1 ring-zinc-200"
+            >
+              {lane.label}: {lane.minutes}m
+            </span>
+          ))}
+        </div>
+      )}
+
       {tsaEstimate.bestCheckpoint && (
-        <div className="text-xs text-zinc-500">
-          Use{' '}
+        <div className="mt-2 text-xs text-zinc-500">
+          For selected {selectedLabel}:{' '}
           <span className="font-medium text-zinc-700">
-            {tsaEstimate.bestCheckpoint.name}
+            use {tsaEstimate.bestCheckpoint.name}
           </span>{' '}
-          · {tsaEstimate.bestCheckpoint.minutes}m · {tsaEstimate.bestCheckpoint.reason}
+          · {tsaEstimate.bestCheckpoint.minutes}m
         </div>
       )}
     </div>

@@ -152,7 +152,7 @@ export async function getLiveSeaTsaWaitTimes(
 
         const clearPrecheckEstimate =
             Number.isFinite(fastestKnownExpedited)
-                ? Math.max(2, fastestKnownExpedited)
+                ? Math.max(2, fastestKnownExpedited - 1)
                 : Math.max(2, Math.round(standardMedian * 0.3));
 
         return {
