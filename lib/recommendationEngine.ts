@@ -15,6 +15,13 @@ import {
 } from './domain';
 import { getWeatherImpactForAirport } from './weather/nws';
 import { calculateAirportReadinessBuffer } from './airports/airportReadiness';
+import { buildOptionIntelligence } from './intelligence/optionIntelligence';
+import { buildSmartTags } from './intelligence/tags';
+import {
+  buildParkingTransferLegs,
+  buildRideshareTransferLegs,
+  buildTransitTransferLegs,
+} from './intelligence/transferLegs';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -408,6 +415,88 @@ export class RecommendationEngine {
     const sortedRideshare = rideshareWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
     const sortedTransit = transitWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
 
+    const enrichedParking = sortedParking.map((option) => {
+      const intelligence = buildOptionIntelligence('parking', option, tripData, weatherImpact);
+
+      const smartTags = buildSmartTags(intelligence, weatherImpact);
+
+      return {
+        ...option,
+        intelligence,
+        transferLegs: buildParkingTransferLegs(option, tripData),
+
+        bestFor: [...(option.bestFor ?? []), ...smartTags],
+
+        walkingBurdenScore: intelligence.walkingBurdenScore,
+        walkingBurdenLabel: intelligence.walkingBurdenLabel,
+
+        stressScore: intelligence.stressScore,
+        stressLabel: intelligence.stressLabel,
+
+        fullLotRiskScore: intelligence.fullLotRiskScore,
+        fullLotRiskLabel: intelligence.fullLotRiskLabel,
+
+        rushPenaltyScore: intelligence.rushPenaltyScore,
+        rushPenaltyLabel: intelligence.rushPenaltyLabel,
+
+        weatherPenaltyScore: intelligence.weatherPenaltyScore,
+        weatherPenaltyLabel: intelligence.weatherPenaltyLabel,
+
+        shuttleReliabilityScore: intelligence.shuttleReliabilityScore,
+        shuttleReliabilityLabel: intelligence.shuttleReliabilityLabel,
+
+        trueTotalCost: intelligence.trueTotalCost,
+      };
+    });
+
+    const enrichedRideshare = sortedRideshare.map((option) => {
+      const intelligence = buildOptionIntelligence('rideshare', option, tripData, weatherImpact);
+
+      return {
+        ...option,
+        intelligence,
+        transferLegs: buildRideshareTransferLegs(option, tripData),
+
+        walkingBurdenScore: intelligence.walkingBurdenScore,
+        walkingBurdenLabel: intelligence.walkingBurdenLabel,
+
+        stressScore: intelligence.stressScore,
+        stressLabel: intelligence.stressLabel,
+
+        rushPenaltyScore: intelligence.rushPenaltyScore,
+        rushPenaltyLabel: intelligence.rushPenaltyLabel,
+
+        weatherPenaltyScore: intelligence.weatherPenaltyScore,
+        weatherPenaltyLabel: intelligence.weatherPenaltyLabel,
+
+        trueTotalCost: intelligence.trueTotalCost,
+      };
+    });
+
+    const enrichedTransit = sortedTransit.map((option) => {
+      const intelligence = buildOptionIntelligence('transit', option, tripData, weatherImpact);
+
+      return {
+        ...option,
+        intelligence,
+        transferLegs: buildTransitTransferLegs(option, tripData),
+
+        walkingBurdenScore: intelligence.walkingBurdenScore,
+        walkingBurdenLabel: intelligence.walkingBurdenLabel,
+
+        stressScore: intelligence.stressScore,
+        stressLabel: intelligence.stressLabel,
+
+        rushPenaltyScore: intelligence.rushPenaltyScore,
+        rushPenaltyLabel: intelligence.rushPenaltyLabel,
+
+        weatherPenaltyScore: intelligence.weatherPenaltyScore,
+        weatherPenaltyLabel: intelligence.weatherPenaltyLabel,
+
+        trueTotalCost: intelligence.trueTotalCost,
+      };
+    });
+
     let weatherBufferMinutes = 0;
 
     if (weatherImpact) {
@@ -448,10 +537,32 @@ export class RecommendationEngine {
       )
       : null;
 
+    const finalParking = enrichedParking.sort((a, b) => {
+      return (
+        (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
+        (a.stressScore ?? 50) - (b.stressScore ?? 50) ||
+        (a.walkingBurdenScore ?? 50) - (b.walkingBurdenScore ?? 50)
+      );
+    });
+
+    const finalRideshare = enrichedRideshare.sort((a, b) => {
+      return (
+        (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
+        (a.stressScore ?? 50) - (b.stressScore ?? 50)
+      );
+    });
+
+    const finalTransit = enrichedTransit.sort((a, b) => {
+      return (
+        (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
+        (a.stressScore ?? 50) - (b.stressScore ?? 50)
+      );
+    });
+
     return {
-      parking: sortedParking,
-      rideshare: sortedRideshare,
-      transit: sortedTransit,
+      parking: finalParking,
+      rideshare: finalRideshare,
+      transit: finalTransit,
       tsaEstimate: resolvedTsaEstimate,
       weatherImpact,
       leaveByTime,

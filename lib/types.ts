@@ -1,4 +1,5 @@
 import { WeatherImpact } from './weather/types';
+import type { OptionIntelligence } from './intelligence/optionIntelligence';
 
 export type TripType =
   | 'one-way-departure'
@@ -74,6 +75,25 @@ export type ParkingPriceSource =
 
 export type PriceConfidence = 'high' | 'medium' | 'low';
 
+export type TransferLegType =
+  | 'drive'
+  | 'walk'
+  | 'shuttle'
+  | 'transit'
+  | 'rideshare'
+  | 'terminal';
+
+export type TransferLeg = {
+  type: TransferLegType;
+  from: string;
+  to: string;
+  durationMinutes?: number;
+  distanceMiles?: number;
+  provider?: string;
+  confidence: TrustStatus | 'unavailable';
+  note?: string;
+};
+
 export type ParkingOption = {
   id: string;
   name: string;
@@ -138,6 +158,29 @@ export type ParkingOption = {
 
   checkpointWalkMinutes?: number;
   airportInsideRouteNote?: string;
+
+  intelligence?: OptionIntelligence;
+  transferLegs?: TransferLeg[];
+
+  walkingBurdenScore?: number;
+  walkingBurdenLabel?: string;
+
+  stressScore?: number;
+  stressLabel?: string;
+
+  fullLotRiskScore?: number;
+  fullLotRiskLabel?: string;
+
+  rushPenaltyScore?: number;
+  rushPenaltyLabel?: string;
+
+  weatherPenaltyScore?: number;
+  weatherPenaltyLabel?: string;
+
+  shuttleReliabilityScore?: number;
+  shuttleReliabilityLabel?: string;
+
+  trueTotalCost?: number;
 };
 
 export type RideshareOption = {
@@ -159,6 +202,23 @@ export type RideshareOption = {
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
+
+  intelligence?: OptionIntelligence;
+  transferLegs?: TransferLeg[];
+
+  walkingBurdenScore?: number;
+  walkingBurdenLabel?: string;
+
+  stressScore?: number;
+  stressLabel?: string;
+
+  rushPenaltyScore?: number;
+  rushPenaltyLabel?: string;
+
+  weatherPenaltyScore?: number;
+  weatherPenaltyLabel?: string;
+
+  trueTotalCost?: number;
 };
 
 export type TransitOption = {
@@ -181,6 +241,23 @@ export type TransitOption = {
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
+
+  intelligence?: OptionIntelligence;
+  transferLegs?: TransferLeg[];
+
+  walkingBurdenScore?: number;
+  walkingBurdenLabel?: string;
+
+  stressScore?: number;
+  stressLabel?: string;
+
+  rushPenaltyScore?: number;
+  rushPenaltyLabel?: string;
+
+  weatherPenaltyScore?: number;
+  weatherPenaltyLabel?: string;
+
+  trueTotalCost?: number;
 };
 
 export type TransitSegment = {
