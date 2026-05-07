@@ -93,6 +93,7 @@ type TripDataWithExtras = TripData & {
   airportCode?: string;
   parkingCheckInDate?: string;
   parkingCheckOutDate?: string;
+  parkingCheckOutTime?: string;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
   checkingBags?: boolean;
   securityOption?: SecurityOption;
@@ -3839,6 +3840,14 @@ function EditTripForm({
     'departureTime' in initialData ? initialData.departureTime : ''
   );
 
+  const [parkingCheckOutDate, setParkingCheckOutDate] = useState(
+    (initialData as TripDataWithExtras).parkingCheckOutDate || ''
+  );
+
+  const [parkingCheckOutTime, setParkingCheckOutTime] = useState(
+    (initialData as TripDataWithExtras).parkingCheckOutTime || ''
+  );
+
   const [airportTripDate, setAirportTripDate] = useState(
     'airportTripDate' in initialData ? initialData.airportTripDate : ''
   );
@@ -3863,6 +3872,11 @@ function EditTripForm({
   );
 
   const [errors, setErrors] = useState<string[]>([]);
+
+  const isDeparture = initialData.type === 'one-way-departure';
+  const isDropoffPickup = initialData.type === 'dropoff-pickup';
+  const isArrival = initialData.type === 'one-way-arrival';
+  const isRoundTrip = initialData.type === 'round-trip';
 
   const validate = (): string[] => {
     const next: string[] = [];
@@ -3919,6 +3933,21 @@ function EditTripForm({
       }
     }
 
+    if ((isDeparture || isRoundTrip) && parkingCheckOutDate) {
+      const checkInDate = departureDate;
+      const checkInTime = departureTime || '12:00';
+      const checkOutTime = parkingCheckOutTime || departureTime || '12:00';
+
+      const checkIn = new Date(`${checkInDate}T${checkInTime}`);
+      const checkOut = new Date(`${parkingCheckOutDate}T${checkOutTime}`);
+
+      if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
+        if (checkOut.getTime() < checkIn.getTime()) {
+          next.push('Parking check-out must be after parking check-in.');
+        }
+      }
+    }
+
     if (parkingDurationHours) {
       const hours = Number(parkingDurationHours);
       if (!Number.isFinite(hours) || hours <= 0) {
@@ -3938,7 +3967,25 @@ function EditTripForm({
     // Clear any stale errors once we're submitting a valid recalculation.
     setErrors([]);
 
-    const parkingDuration = parkingDurationHours ? Math.round(Number(parkingDurationHours) * 60) : undefined;
+    let parkingDuration = parkingDurationHours
+      ? Math.round(Number(parkingDurationHours) * 60)
+      : undefined;
+
+    if ((isDeparture || isRoundTrip) && parkingCheckOutDate) {
+      const checkInDate = departureDate;
+      const checkInTime = departureTime || '12:00';
+      const checkOutTime = parkingCheckOutTime || departureTime || '12:00';
+
+      const checkIn = new Date(`${checkInDate}T${checkInTime}`);
+      const checkOut = new Date(`${parkingCheckOutDate}T${checkOutTime}`);
+
+      if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
+        parkingDuration = Math.max(
+          24 * 60,
+          Math.round((checkOut.getTime() - checkIn.getTime()) / 60000)
+        );
+      }
+    }
 
     const selectedAirport = getAirportById(selectedAirportCode) || getAirportById('SEA')!;
     const destination = selectedAirport.routingAddress || selectedAirport.destinationName;
@@ -3955,8 +4002,8 @@ function EditTripForm({
         departureTime,
         timeAnchor: (initialData as TripDataWithExtras).timeAnchor || 'flight-departure',
         parkingDuration,
-        parkingCheckInDate: (initialData as TripDataWithExtras).parkingCheckInDate,
-        parkingCheckOutDate: (initialData as TripDataWithExtras).parkingCheckOutDate,
+        parkingCheckInDate: departureDate,
+        parkingCheckOutDate: parkingCheckOutDate || undefined,
         transportAvailability,
         checkingBags: showAirportTimingControls ? checkingBags : (initialData as TripDataWithExtras).checkingBags,
         securityOption: showAirportTimingControls ? securityOption : (initialData as TripDataWithExtras).securityOption,
@@ -4001,11 +4048,6 @@ function EditTripForm({
 
     onSubmit(data);
   };
-
-  const isDeparture = initialData.type === 'one-way-departure';
-  const isDropoffPickup = initialData.type === 'dropoff-pickup';
-  const isArrival = initialData.type === 'one-way-arrival';
-  const isRoundTrip = initialData.type === 'round-trip';
 
   return (
     <form onSubmit={submit} className="space-y-4">
@@ -4220,6 +4262,18 @@ function EditTripForm({
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-zinc-800">
+                Return / parking check-out date
+                <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+              </label>
+              <input
+                type="date"
+                value={parkingCheckOutDate}
+                onChange={(e) => setParkingCheckOutDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-zinc-800">Time</label>
               <input
                 type="time"
@@ -4228,6 +4282,23 @@ function EditTripForm({
                 className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </div>
+
+
+            {/* <div>
+              <label className="block text-sm font-medium text-zinc-800">
+                Return / parking check-out time
+                <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+              </label>
+              <input
+                type="time"
+                value={parkingCheckOutTime}
+                onChange={(e) => setParkingCheckOutTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+              <div className="mt-2 text-xs text-zinc-500">
+                Optional — defaults to your flight time if blank.
+              </div>
+            </div> */}
           </>
         )}
 
