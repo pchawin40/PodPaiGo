@@ -1,22 +1,27 @@
-import { ParkingOption, TripData } from "../types";
+import { ParkingOption, TripData } from '../types';
 
 export async function attachGooglePlaceToParking(
   parking: ParkingOption,
   tripData: TripData | null
 ): Promise<ParkingOption> {
-  if (parking.googlePlaceId) return parking;
+  const airport = tripData?.airportCode || null;
 
-  const airport =
-    tripData?.destination ||
-    parking.routeDestination ||
-    "airport";
-
-  const params = new URLSearchParams({
+  const body = {
     name: parking.name,
     airport,
-  });
+    address: parking.normalizedAddress || parking.routeDestination || null,
+    googlePlaceId: parking.googlePlaceId || null,
+    parkingLotId: parking.providerLotId || null,
+    destination: tripData?.destination || parking.routeDestination || null,
+  };
 
-  const res = await fetch(`/api/google-place-match?${params.toString()}`);
+  const res = await fetch('/api/google-place-match', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
 
   if (!res.ok) return parking;
 
@@ -28,8 +33,13 @@ export async function attachGooglePlaceToParking(
   return {
     ...parking,
     googlePlaceId: place.googlePlaceId,
-    reviewScore: place.rating,
-    reviewCount: place.reviewCount,
+    googleReviews: place.reviews,
+    googleReviewsFetchedAt: place.fetchedAt,
+    googleReviewsExpiresAt: place.expiresAt,
+    googlePlaceName: place.name ?? parking.googlePlaceName,
+    googlePlaceAddress: place.address ?? parking.googlePlaceAddress,
+    reviewScore: typeof place.rating === 'number' ? place.rating : parking.reviewScore,
+    reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : parking.reviewCount,
     normalizedAddress: place.address ?? parking.normalizedAddress,
   };
 }

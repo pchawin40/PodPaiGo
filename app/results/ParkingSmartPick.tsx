@@ -420,9 +420,9 @@ export default function ParkingSmartPick({
               {typeof best.reviewScore === "number" ? (
                 <>
                   <span>⭐ {best.reviewScore.toFixed(1)}</span>
-                  {best.reviewCount ? (
+                  {typeof best.reviewCount === "number" ? (
                     <span className="text-amber-700/70">
-                      ({Intl.NumberFormat("en", { notation: "compact" }).format(best.reviewCount)})
+                      ({best.reviewCount.toLocaleString()} reviews)
                     </span>
                   ) : null}
                 </>

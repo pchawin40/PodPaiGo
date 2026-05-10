@@ -136,6 +136,11 @@ export type ParkingOption = {
   covered?: boolean;
   reviewScore?: number; // e.g. from Google reviews, 0-5
   reviewCount?: number; // number of reviews, for context with reviewScore
+  googleReviews?: ParkingGoogleReview[];
+  googleReviewsFetchedAt?: string;
+  googleReviewsExpiresAt?: string;
+  googlePlaceName?: string;
+  googlePlaceAddress?: string;
   availabilityScore?: number; // internal score for availability, used in ranking
   bookingProvider?: string; // e.g. "ParkWhiz", for marketplace options
   bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options
@@ -181,6 +186,36 @@ export type ParkingOption = {
   shuttleReliabilityLabel?: string;
 
   trueTotalCost?: number;
+};
+
+export type ParkingGoogleReview = {
+  id: string;
+  authorName?: string;
+  displayName?: string;
+  rating?: number;
+  relativeTimeDescription?: string;
+  publishedAt?: string;
+  text?: string;
+  profilePhotoUrl?: string;
+  source: 'google-places';
+};
+
+export type ParkingGooglePlaceSnapshot = {
+  parkingLotId?: number;
+  airportCode: string;
+  lotName: string;
+  normalizedLotName: string;
+  lotAddress?: string;
+  googlePlaceId?: string;
+  googlePlaceName?: string;
+  googleFormattedAddress?: string;
+  googleMapsUri?: string;
+  rating?: number;
+  reviewCount?: number;
+  reviews: ParkingGoogleReview[];
+  fetchedAt: string;
+  updatedAt: string;
+  expiresAt: string;
 };
 
 export type RideshareOption = {

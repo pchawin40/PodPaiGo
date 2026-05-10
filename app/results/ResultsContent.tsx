@@ -1399,9 +1399,9 @@ function OptionCard({
                     {typeof parking.reviewScore === "number" ? (
                       <>
                         <span>⭐ {parking.reviewScore.toFixed(1)}</span>
-                        {parking.reviewCount ? (
+                        {typeof parking.reviewCount === "number" ? (
                           <span className="text-amber-700/70">
-                            ({Intl.NumberFormat("en", { notation: "compact" }).format(parking.reviewCount)})
+                            ({parking.reviewCount.toLocaleString()} reviews)
                           </span>
                         ) : null}
                       </>
@@ -3130,9 +3130,14 @@ export default function ResultsContent() {
   const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
 
   async function handleShowReviews(parking: ParkingOption) {
-    setReviewsParking(googleEnrichedParking[parking.id] || parking);
+    const cached = googleEnrichedParking[parking.id];
 
-    const enriched = await attachGooglePlaceToParking(parking, tripData);
+    if (cached?.googleReviews?.length) {
+      setReviewsParking(cached);
+      return;
+    }
+
+    const enriched = await attachGooglePlaceToParking(cached || parking, tripData);
 
     setGoogleEnrichedParking((prev) => ({
       ...prev,

@@ -1,17 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ParkingOption } from "../../lib/types";
-
-type Review = {
-    id: string;
-    author_name?: string;
-    rating?: number;
-    relative_time_description?: string;
-    text?: string;
-    profile_photo_url?: string;
-    source_name?: string;
-};
+import { useMemo, useState } from "react";
+import { ParkingGoogleReview, ParkingOption } from "../../lib/types";
 
 type SortMode = "most_relevant" | "newest" | "highest" | "lowest";
 
@@ -35,28 +25,25 @@ export default function ParkingReviewsModal({
     open: boolean;
     onClose: () => void;
 }) {
-    const [reviews, setReviews] = useState<Review[]>([]);
-    const [loading, setLoading] = useState(false);
     const [sort, setSort] = useState<SortMode>("most_relevant");
 
-    useEffect(() => {
-        if (!open || !parking?.googlePlaceId) return;
-
-        setLoading(true);
-
-        fetch(
-            `/api/parking-reviews?placeId=${encodeURIComponent(
-                parking.googlePlaceId
-            )}&sort=${sort === "newest" ? "newest" : "most_relevant"}`
-        )
-            .then((res) => res.json())
-            .then((data) => setReviews(data.reviews ?? []))
-            .catch(() => setReviews([]))
-            .finally(() => setLoading(false));
-    }, [open, parking?.googlePlaceId, sort]);
+    const reviews = useMemo(
+        () => (parking?.googleReviews ?? []) as ParkingGoogleReview[],
+        [parking?.googleReviews]
+    );
 
     const sortedReviews = useMemo(() => {
         const copy = [...reviews];
+
+        if (sort === "newest") {
+            return copy.sort((a, b) => {
+                const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+                const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+
+                if (aTime !== bTime) return bTime - aTime;
+                return (b.rating ?? 0) - (a.rating ?? 0);
+            });
+        }
 
         if (sort === "highest") {
             return copy.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
@@ -98,7 +85,7 @@ export default function ParkingReviewsModal({
                                     {stars(parking.reviewScore)}
                                 </span>
 
-                                {parking.reviewCount && (
+                                {typeof parking.reviewCount === "number" && (
                                     <span className="text-sm text-zinc-600">
                                         {parking.reviewCount.toLocaleString()} reviews
                                     </span>
@@ -146,36 +133,32 @@ export default function ParkingReviewsModal({
                         </div>
                     )}
 
-                    {loading && (
-                        <div className="text-sm text-zinc-600">Loading Google reviews...</div>
-                    )}
-
-                    {!loading && parking.googlePlaceId && sortedReviews.length === 0 && (
+                    {parking.googlePlaceId && sortedReviews.length === 0 && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
                             Google rating is connected, but Google did not return review snippets for this listing. Use the button above to open the full Google review feed.
                         </div>
                     )}
 
-                    {!loading && sortedReviews.length > 0 && (
+                    {sortedReviews.length > 0 && (
                         <div className="space-y-6">
                             {sortedReviews.map((review) => (
                                 <article key={review.id} className="border-b border-zinc-200 pb-6">
                                     <div className="flex items-start gap-3">
-                                        {review.profile_photo_url ? (
+                                        {review.profilePhotoUrl ? (
                                             <img
-                                                src={review.profile_photo_url}
+                                                src={review.profilePhotoUrl}
                                                 alt=""
                                                 className="h-10 w-10 rounded-full object-cover"
                                             />
                                         ) : (
                                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200 text-sm font-bold text-zinc-700">
-                                                {(review.author_name || "G").slice(0, 1)}
+                                                {(review.displayName || review.authorName || "G").slice(0, 1)}
                                             </div>
                                         )}
 
                                         <div className="min-w-0 flex-1">
                                             <div className="font-semibold text-zinc-900">
-                                                {review.author_name || "Google reviewer"}
+                                                {review.displayName || review.authorName || "Google reviewer"}
                                             </div>
 
                                             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
@@ -183,7 +166,7 @@ export default function ParkingReviewsModal({
                                                     {stars(review.rating)}
                                                 </span>
                                                 <span className="text-zinc-500">
-                                                    {review.relative_time_description || "Google review"}
+                                                    {review.relativeTimeDescription || "Google review"}
                                                 </span>
                                             </div>
 

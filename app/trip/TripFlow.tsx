@@ -478,6 +478,19 @@ export default function TripFlow() {
     setStep(1);
   };
 
+  const scrollToField = (field: string) => {
+    setHighlightedField(field);
+
+    requestAnimationFrame(() => {
+      document.getElementById(`${field}-field`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+
+    setTimeout(() => setHighlightedField(null), 2200);
+  };
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -489,33 +502,69 @@ export default function TripFlow() {
       : null;
 
     const nextFieldErrors: Record<string, string> = {};
-    if (!state.origin.trim()) nextFieldErrors.origin = 'Enter your starting address.';
-    if (!state.time) {
-      next.push('Time is required.');
-      nextFieldErrors.time = 'Select your flight or trip time.';
+
+    if (!state.origin.trim()) {
+      nextFieldErrors.origin = 'Enter your starting address.';
     }
+
     if (!state.date) {
       nextFieldErrors.date = 'Select your parking check-in date.';
     } else if (!normalizedDate) {
       nextFieldErrors.date = 'Use MM/DD/YYYY or YYYY-MM-DD.';
     }
+
+    if (!state.time) {
+      nextFieldErrors.time = 'Select your flight or trip time.';
+    }
+
     if (state.parkingCheckOutDate && !normalizedParkingCheckOutDate) {
       nextFieldErrors.parkingCheckOutDate = 'Use MM/DD/YYYY or YYYY-MM-DD.';
+    }
+
+    // Make "past trip" error point to the date/time fields
+    if (normalizedDate && state.time) {
+      const combined = new Date(`${normalizedDate}T${state.time}`);
+      const now = new Date();
+
+      if (Number.isNaN(combined.getTime())) {
+        nextFieldErrors.date = 'Date or time is invalid.';
+        nextFieldErrors.time = 'Date or time is invalid.';
+      } else if (combined.getTime() < now.getTime()) {
+        nextFieldErrors.date = 'Trip date/time cannot be in the past.';
+        nextFieldErrors.time = 'Trip date/time cannot be in the past.';
+      }
+    }
+
+    // Make checkout ordering error point to checkout field
+    if (normalizedDate && normalizedParkingCheckOutDate) {
+      const checkInTime = state.time || '12:00';
+      const checkOutTime = state.parkingCheckOutTime || checkInTime;
+
+      const checkIn = buildLocalDateTime(normalizedDate, checkInTime);
+      const checkOut = buildLocalDateTime(normalizedParkingCheckOutDate, checkOutTime);
+
+      if (!checkIn || !checkOut) {
+        nextFieldErrors.parkingCheckOutDate = 'Parking check-in/check-out time is invalid.';
+      } else if (checkOut.getTime() <= checkIn.getTime()) {
+        nextFieldErrors.parkingCheckOutDate = 'Parking checkout must be after parking check-in.';
+      }
     }
 
     setErrors(next);
     setFieldErrors(nextFieldErrors);
 
-    const firstMissing = Object.keys(nextFieldErrors)[0];
+    const firstFieldError = Object.keys(nextFieldErrors)[0];
 
-    if (next.length > 0) {
-      if (firstMissing) {
-        setHighlightedField(firstMissing);
-        document.getElementById(`${firstMissing}-field`)?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
+    if (next.length > 0 || firstFieldError) {
+      if (firstFieldError) {
+        scrollToField(firstFieldError);
+      } else {
+        requestAnimationFrame(() => {
+          document.getElementById('trip-error-summary')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
         });
-        setTimeout(() => setHighlightedField(null), 1800);
       }
       return;
     }
@@ -658,7 +707,10 @@ export default function TripFlow() {
         </div>
 
         {errors.length > 0 && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4">
+          <div
+            id="trip-error-summary"
+            className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4"
+          >
             <div className="text-sm font-medium text-red-900">Please fix:</div>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800">
               {errors.map((err) => (
@@ -1047,53 +1099,13 @@ export default function TripFlow() {
                       ? 'Parking start date'
                       : 'Date'}
                   </label>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_13rem]">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="MM/DD/YYYY"
-                      value={state.date}
-                      onChange={(e) => {
-                        const nextDate = normalizeDateInputValue(e.target.value) ?? e.target.value;
-                        setState((s) => ({
-                          ...s,
-                          date: nextDate,
-                          parkingCheckOutDate:
-                            !parkingCheckoutTouched && isFullDate(nextDate)
-                              ? addDays(nextDate, 7)
-                              : s.parkingCheckOutDate,
-                        }));
-                        setFieldErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.date;
-                          return next;
-                        });
-                      }}
-                      onBlur={(e) => {
-                        const normalized = normalizeDateInputValue(e.target.value);
-                        if (!normalized) return;
-
-                        setState((s) => ({
-                          ...s,
-                          date: normalized,
-                          parkingCheckOutDate:
-                            !parkingCheckoutTouched && isFullDate(normalized)
-                              ? addDays(normalized, 7)
-                              : s.parkingCheckOutDate,
-                        }));
-                      }}
-                      className={
-                        'w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
-                        (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
-                        (highlightedField === 'date' ? 'animate-pulse' : '')
-                      }
-                    />
-
+                  <div className="mt-2">
                     <input
                       type="date"
-                      value={calendarDateValue(state.date)}
+                      value={isFullDate(state.date) ? state.date : ''}
                       onChange={(e) => {
                         const nextDate = e.target.value;
+
                         setState((s) => ({
                           ...s,
                           date: nextDate,
@@ -1102,6 +1114,7 @@ export default function TripFlow() {
                               ? addDays(nextDate, 7)
                               : s.parkingCheckOutDate,
                         }));
+
                         setFieldErrors((prev) => {
                           const next = { ...prev };
                           delete next.date;
@@ -1111,13 +1124,16 @@ export default function TripFlow() {
                       aria-label="Choose parking start date from calendar"
                       className={
                         'w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
-                        (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200')
+                        (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
+                        (highlightedField === 'date' ? 'animate-pulse' : '')
                       }
                     />
+                    {fieldErrors.date && (
+                      <p className="mt-2 text-sm font-medium text-red-600">
+                        {fieldErrors.date}
+                      </p>
+                    )}
                   </div>
-                  {fieldErrors.date && (
-                    <div className="mt-2 text-sm text-red-700">{fieldErrors.date}</div>
-                  )}
                 </div>
 
                 {showTimingFields &&
@@ -1147,11 +1163,11 @@ export default function TripFlow() {
                         }
                         aria-label="Trip time"
                       />
-                      {fieldErrors.time ? (
-                        <div className="mt-2 text-sm text-red-700">{fieldErrors.time}</div>
-                      ) : state.time === '' && intent === 'flying-out' ? (
-                        <div className="mt-2 text-xs text-zinc-500">Select flight departure time</div>
-                      ) : null}
+                      {fieldErrors.time && (
+                        <p className="mt-2 text-sm font-medium text-red-600">
+                          {fieldErrors.time}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -1165,43 +1181,17 @@ export default function TripFlow() {
                         </span>
                       </label>
 
-                      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_13rem]">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="MM/DD/YYYY"
-                          value={state.parkingCheckOutDate}
-                          onChange={(e) => {
-                            const nextDate = normalizeDateInputValue(e.target.value) ?? e.target.value;
-                            setParkingCheckoutTouched(true);
-                            setState((s) => ({
-                              ...s,
-                              parkingCheckOutDate: nextDate,
-                            }));
-
-                            setFieldErrors((prev) => {
-                              const next = { ...prev };
-                              delete next.parkingCheckOutDate;
-                              return next;
-                            });
-                          }}
-                          onBlur={(e) => {
-                            const normalized = normalizeDateInputValue(e.target.value);
-                            if (!normalized) return;
-                            setState((s) => ({ ...s, parkingCheckOutDate: normalized }));
-                          }}
-                          className={
-                            'w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
-                            (fieldErrors.parkingCheckOutDate ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200')
-                          }
-                        />
-
+                      <div className="mt-2">
                         <input
                           type="date"
                           value={calendarDateValue(state.parkingCheckOutDate)}
                           onChange={(e) => {
                             setParkingCheckoutTouched(true);
-                            setState((s) => ({ ...s, parkingCheckOutDate: e.target.value }));
+                            setState((s) => ({
+                              ...s,
+                              parkingCheckOutDate: e.target.value,
+                            }));
+
                             setFieldErrors((prev) => {
                               const next = { ...prev };
                               delete next.parkingCheckOutDate;

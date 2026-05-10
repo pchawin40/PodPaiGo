@@ -12,13 +12,6 @@ type GeocoderResult = {
   formatted_address: string;
 };
 
-type LegacyAutocompleteService = {
-  getPlacePredictions: (
-    request: { input: string },
-    callback: (results: Prediction[] | null) => void
-  ) => void;
-};
-
 type AutocompleteSuggestion = {
   placePrediction?: {
     placeId?: string;
@@ -37,7 +30,6 @@ type AutocompleteSuggestionApi = {
 };
 
 type PlacesLibrary = {
-  AutocompleteService?: new () => LegacyAutocompleteService;
   AutocompleteSuggestion?: AutocompleteSuggestionApi;
 };
 
@@ -78,7 +70,6 @@ interface GoogleMapsWindow {
   google?: {
     maps?: {
       places?: {
-        AutocompleteService?: new () => LegacyAutocompleteService;
         AutocompleteSuggestion?: AutocompleteSuggestionApi;
       };
       Geocoder: new () => {
@@ -100,12 +91,15 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [hasTouchedInput, setHasTouchedInput] = useState(false);
 
-  const [recentOrigins, setRecentOrigins] = useState<string[]>(() =>
-    typeof window === 'undefined' ? [] : getRecentOrigins()
-  );
+  const [recentOrigins, setRecentOrigins] = useState<string[]>([]);
+  const [hasMounted, setHasMounted] = useState(false);
+
+  useEffect(() => {
+    setHasMounted(true);
+    setRecentOrigins(getRecentOrigins());
+  }, []);
 
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const autocompleteService = useRef<LegacyAutocompleteService | null>(null);
   const autocompleteSuggestion = useRef<AutocompleteSuggestionApi | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -129,13 +123,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
       const places = window.google?.maps?.places as PlacesLibrary | undefined;
 
-      if (places && !autocompleteService.current && places.AutocompleteService) {
-        const service = new places.AutocompleteService();
-        if (typeof service.getPlacePredictions === 'function') {
-          autocompleteService.current = service;
-        }
-      }
-
       if (
         places?.AutocompleteSuggestion?.fetchAutocompleteSuggestions &&
         !autocompleteSuggestion.current
@@ -158,7 +145,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     if (!hasTouchedInput) return;
 
     if (
-      (!autocompleteService.current && !autocompleteSuggestion.current) ||
+      !autocompleteSuggestion.current ||
       !apiKeyPresent ||
       inputValue.trim().length < 3
     ) {
@@ -176,20 +163,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
     // Wrap callback in async timeout to avoid setState in effect directly
     const timeoutId = setTimeout(() => {
-      const legacyService = autocompleteService.current;
-      if (legacyService?.getPlacePredictions) {
-        legacyService.getPlacePredictions(request, (results: Prediction[] | null) => {
-          setLoadingPredictions(false);
-          if (!results) {
-            setPredictions([]);
-            return;
-          }
-          setPredictions(results);
-          setIsOpen(true);
-          setHighlightedIndex(-1);
-        });
-        return;
-      }
 
       const suggestionApi = autocompleteSuggestion.current;
       if (!suggestionApi) {
