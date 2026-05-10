@@ -13,9 +13,8 @@ function airportHref(code: string) {
   return `/airports/${code.toLowerCase()}`;
 }
 
-function statusLabel(status?: string | null) {
-  if (!status) return "Planned";
-  return status;
+function guideLabel(code: string) {
+  return code.toUpperCase() === "SEA" ? "Active airport planner" : "Airport planning guide";
 }
 
 export default async function AirportsPage() {
@@ -62,8 +61,8 @@ export default async function AirportsPage() {
                   )}
                 </div>
 
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold capitalize text-slate-600">
-                  {statusLabel(airport.status)}
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800">
+                  {guideLabel(airport.code)}
                 </span>
               </div>
 

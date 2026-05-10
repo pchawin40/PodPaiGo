@@ -81,14 +81,14 @@ export default function AirportTerminalMap({
                     Open map
                 </a>
 
-                {airport.officialAirportUrl && (
+                {mapUrl && (
                     <a
-                        href={airport.officialAirportUrl}
+                        href={mapUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
                     >
-                        Airport website
+                        Official map
                     </a>
                 )}
             </div>
@@ -120,11 +120,11 @@ export default function AirportTerminalMap({
                 {header}
 
                 <div className="min-h-0 flex-1 overflow-auto bg-zinc-100 p-4">
-                    <div className="mx-auto flex min-h-full w-full items-start justify-center">
+                    <div className="mx-auto flex min-h-full w-full items-center justify-center">
                         <img
                             src={indoorMap.embedUrl}
                             alt={`${airport.id} airport map`}
-                            className="max-h-none max-w-none rounded-xl border border-zinc-200 bg-white shadow-sm"
+                            className="max-h-full max-w-full rounded-xl border border-zinc-200 bg-white object-contain shadow-sm"
                         />
                     </div>
                 </div>
@@ -160,14 +160,14 @@ export default function AirportTerminalMap({
                             Open map
                         </a>
 
-                        {airport.officialAirportUrl && (
+                        {mapUrl && (
                             <a
-                                href={airport.officialAirportUrl}
+                                href={mapUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
                             >
-                                Airport website
+                                Official map
                             </a>
                         )}
                     </div>

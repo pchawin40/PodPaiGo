@@ -28,7 +28,6 @@ import {
   getParkingDailyPrice,
 } from '../../lib/parking/priceDisplay';
 import {
-  parkingRouteBreakdown,
   routeUrlForOption,
   googleMapsParkingRouteLink,
   hasRealParkingPrice
@@ -62,6 +61,7 @@ import {
 import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
 import ParkingReviewsModal from './ParkingReviewsModal';
 import { attachGooglePlaceToParking } from '@/lib/parking/googlePlaceMatch';
+import type { WeatherImpact } from '@/lib/weather/types';
 
 type PriceableOption = {
   id?: string;
@@ -118,6 +118,13 @@ type BestTooLateSummary = {
 
 type ProviderLinkItem = PriceableOption;
 
+type ParkingWeatherItem = {
+  key: string;
+  label: string;
+  date: string;
+  weatherImpact: WeatherImpact | null;
+};
+
 
 type SortTab = RecommendationSortMode;
 
@@ -134,30 +141,6 @@ function formatParkingDailyPrice(option: { price: number; bestFor?: string[]; pr
   return isSelectedDatePrice(option)
     ? `${formatMoney(option.price)}/day`
     : `From ${formatMoney(option.price)}/day`;
-}
-
-function weatherAdjustedParkingSortScore(
-  option: ParkingOption,
-  tripData: TripData | null,
-  weatherImpact?: Recommendation['weatherImpact']
-): number {
-  const totalPrice = getParkingTotalPrice(option, tripData) ?? 999999;
-  const time = parkingTimeBreakdown(option).totalMinutes || 999;
-
-  let weatherPenalty = 0;
-
-  if (weatherImpact) {
-    const adj = weatherImpact.parkingScoreAdjustments;
-
-    if (option.covered) weatherPenalty -= adj.coveredBonus * 3;
-    if (option.type === 'official') weatherPenalty -= adj.officialGarageBonus * 3;
-    if (option.transferType === 'shuttle') weatherPenalty -= adj.shuttlePenalty * 3;
-    if (!option.covered && option.type === 'off-airport') {
-      weatherPenalty -= adj.uncoveredPenalty * 3;
-    }
-  }
-
-  return totalPrice + time * 1.5 + weatherPenalty;
 }
 
 function formatMiniMinutes(minutes: number): string {
@@ -199,28 +182,6 @@ function parkingTimeParts(option: ParkingOption) {
       { label: 'Buffer', minutes: buffer },
     ].filter((p) => p.minutes > 0),
   };
-}
-
-function getTransferLabel(option: ParkingOption): string {
-  const transfer = option.transferToTerminalMinutes ?? 0;
-  const isShuttle = option.transferType === 'shuttle';
-
-  const shuttleWait = isShuttle ? 8 : 0;
-  const totalTransfer = transfer + shuttleWait;
-
-  if (isShuttle) {
-    return `Shuttle ${formatMiniMinutes(totalTransfer)} to terminal`;
-  }
-
-  if (option.transferType === 'airport-garage') {
-    return `Walk ${formatMiniMinutes(transfer)} inside garage`;
-  }
-
-  if (option.transferType === 'walk') {
-    return `Walk ${formatMiniMinutes(transfer)} to terminal`;
-  }
-
-  return `Transfer ${formatMiniMinutes(transfer)}`;
 }
 
 function ParkingTimeSummary({
@@ -314,6 +275,33 @@ function confidenceFromTrust(trust: TrustStatus): { label: string; className: st
 
 function getTripAirportCode(tripData: TripData | null): string {
   return ((tripData as TripDataWithExtras | null)?.airportCode || 'SEA').toUpperCase();
+}
+
+function formatWeatherDateLabel(date: string): string {
+  const parsed = parseLocalDate(date);
+  if (!parsed) return date;
+
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function buildWeatherTargetDateTime(date: string, time?: string): string {
+  return `${date}T${time || '12:00'}`;
+}
+
+function weatherRiskText(weather: WeatherImpact): string {
+  if (weather.riskLevel === 'low') return 'Normal travel conditions';
+  if (weather.riskLevel === 'medium') return 'May impact comfort';
+  return 'Plan for weather impact';
+}
+
+function weatherRiskClass(weather: WeatherImpact): string {
+  if (weather.riskLevel === 'high') return 'border-red-200 bg-red-50 text-red-800';
+  if (weather.riskLevel === 'medium') return 'border-amber-200 bg-amber-50 text-amber-900';
+  return 'border-zinc-200 bg-zinc-50 text-zinc-800';
 }
 
 async function copyTextThenOpen(text: string, url: string) {
@@ -1177,12 +1165,6 @@ function OptionCard({
     aprLiveChecking &&
     item.type === 'parking' &&
     isAprOption(opt);
-
-  const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
-  const parking = item.type === "parking"
-    ? ((googleEnrichedParking?.[opt.id || ""] || opt) as ParkingOption)
-    : null;
-
 
   const airportCode = getTripAirportCode(tripData);
   const airport = getAirportById(airportCode) || getAirportById('SEA')!;
@@ -2160,28 +2142,31 @@ export default function ResultsContent() {
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [tripData, setTripData] = useState<TripData | null>(null);
-
   const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
-  async function enrichParkingListWithGoogle(parkingOptions: ParkingOption[]) {
-    const firstFew = parkingOptions.slice(0, 8);
+  const [parkingPricesChecking, setParkingPricesChecking] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingData, setEditingData] = useState<TripData | null>(null);
+  const editTripRef = useRef<HTMLDivElement | null>(null);
+  const [editTripJustOpened, setEditTripJustOpened] = useState(false);
+  const [showTooLate, setShowTooLate] = useState(false);
+  const [showMoreParking, setShowMoreParking] = useState(false);
+  const [matchedParkingPrices, setMatchedParkingPrices] = useState<Record<string, {
+    price: number;
+    priceUnit?: PriceUnit;
+    provider?: string;
+    sourceLink?: string;
+  }>>({});
+  const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
+  const [aprLiveChecking, setAprLiveChecking] = useState(false);
+  const [aprLivePartial, setAprLivePartial] = useState(false);
+  const [parkingWeather, setParkingWeather] = useState<ParkingWeatherItem[]>([]);
+  const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
 
-    const enrichedPairs = await Promise.all(
-      firstFew.map(async (parking) => {
-        const enriched = await attachGooglePlaceToParking(parking, tripData);
-        return [parking.id, enriched] as const;
-      })
-    );
-
-    setGoogleEnrichedParking((prev: Record<string, ParkingOption>) => {
-      const next = { ...prev };
-
-      enrichedPairs.forEach(([id, enriched]) => {
-        next[id] = enriched;
-      });
-
-      return next;
-    });
-  }
+  const aprFetchIdRef = useRef(0);
+  const aprRequestKeyRef = useRef('');
+  const priceMatchKeyRef = useRef('');
 
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
@@ -2194,8 +2179,35 @@ export default function ResultsContent() {
 
     if (parkingOptions.length === 0) return;
 
-    enrichParkingListWithGoogle(parkingOptions);
-  }, [rankedOptions, tripData]);
+    let cancelled = false;
+
+    const enrichParking = async () => {
+      const enrichedPairs = await Promise.all(
+        parkingOptions.slice(0, 8).map(async (parking) => {
+          const enriched = await attachGooglePlaceToParking(parking, tripData);
+          return [parking.id, enriched] as const;
+        })
+      );
+
+      if (cancelled) return;
+
+      setGoogleEnrichedParking((prev: Record<string, ParkingOption>) => {
+        const next = { ...prev };
+
+        enrichedPairs.forEach(([id, enriched]) => {
+          next[id] = enriched;
+        });
+
+        return next;
+      });
+    };
+
+    void enrichParking();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rankedOptions, tripData, googleEnrichedParking]);
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
@@ -2253,14 +2265,6 @@ export default function ResultsContent() {
       });
   }, [recommendation, tripData]);
 
-  const airportSecurity = useMemo(() => {
-    const airportCode = getTripAirportCode(tripData);
-    const selectedSecurity =
-      (tripData as TripDataWithExtras | null)?.securityOption || 'standard';
-
-    return getAirportSecurityEstimate(airportCode, selectedSecurity);
-  }, [tripData]);
-
   const airportReadiness = useMemo(() => {
     if (!tripData || tripData.type !== 'one-way-departure') return null;
 
@@ -2280,37 +2284,6 @@ export default function ResultsContent() {
     airportReadinessBufferMinutes: airportReadiness?.bufferMinutes,
   });
 
-
-  const [parkingPricesChecking, setParkingPricesChecking] = useState(false);
-
-  const [isEditing, setIsEditing] = useState(false);
-  const [editingData, setEditingData] = useState<TripData | null>(null);
-  const editTripRef = useRef<HTMLDivElement | null>(null);
-  const [editTripJustOpened, setEditTripJustOpened] = useState(false);
-
-
-  const [showTooLate, setShowTooLate] = useState(false);
-
-  const [showMoreParking, setShowMoreParking] = useState(false);
-
-  const [matchedParkingPrices, setMatchedParkingPrices] = useState<Record<string, {
-    price: number;
-    priceUnit?: PriceUnit;
-    provider?: string;
-    sourceLink?: string;
-  }>>({});
-
-  const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
-  const [aprLiveChecking, setAprLiveChecking] = useState(false);
-  const [aprLivePartial, setAprLivePartial] = useState(false);
-
-  const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
-  const [showMapModal, setShowMapModal] = useState(false);
-  const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
-
-  const aprFetchIdRef = useRef(0);
-  const aprRequestKeyRef = useRef('');
-  const priceMatchKeyRef = useRef('');
 
   const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
   const intent = searchParams.get('intent') || '';
@@ -2525,130 +2498,6 @@ export default function ResultsContent() {
         ? 'text-amber-700'
         : 'text-zinc-900';
 
-  const handleRecalculate = async (newTripData: TripData) => {
-    // Reset old state immediately so stale high-risk/no-viable UI doesn't linger.
-    setLoading(true);
-    setShowTooLate(false);
-    setRecommendation(null);
-    setRankedOptions([]);
-
-    try {
-      const fetchStartTime = Date.now();
-      const response = await fetch('/api/recommendations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newTripData),
-      });
-
-      const rec: Recommendation = await response.json();
-      const fetchDurationMs = Date.now() - fetchStartTime;
-
-      setRecommendation(rec);
-      setTripData(newTripData);
-
-      const ranked = rankRecommendations(
-        newTripData,
-        rec.parking,
-        rec.rideshare,
-        rec.transit,
-        rec.tsaEstimate
-      );
-      setRankedOptions(ranked);
-
-      setIsEditing(false);
-      setEditingData(null);
-
-      const params = new URLSearchParams();
-
-      params.set('type', newTripData.type);
-      params.set('origin', newTripData.origin);
-      params.set('destination', newTripData.destination);
-
-      const nextTrip = newTripData as TripDataWithExtras;
-
-      if (nextTrip.airportCode) {
-        params.set('airport', nextTrip.airportCode);
-      }
-
-      if (nextTrip.transportAvailability) {
-        params.set('transport', nextTrip.transportAvailability);
-      }
-
-      if (nextTrip.checkingBags !== undefined) {
-        params.set('bags', nextTrip.checkingBags ? 'yes' : 'no');
-      }
-
-      if (nextTrip.securityOption) {
-        params.set('security', nextTrip.securityOption);
-      }
-
-      if (nextTrip.flightType) {
-        params.set('flightType', nextTrip.flightType);
-      }
-
-      if (nextTrip.cabin) {
-        params.set('cabin', nextTrip.cabin);
-      }
-
-      params.set('sort', sort);
-
-      // Preserve consumer-only context.
-      const existingIntent = searchParams.get('intent');
-      const existingAirlineOrFlight = searchParams.get('airlineOrFlight');
-      if (existingIntent) params.set('intent', existingIntent);
-      if (existingAirlineOrFlight) params.set('airlineOrFlight', existingAirlineOrFlight);
-
-      if (newTripData.type === 'one-way-departure') {
-        params.set('departureDate', newTripData.departureDate);
-        params.set('departureTime', newTripData.departureTime);
-
-        const nextTimeAnchor = (newTripData as TripDataWithExtras).timeAnchor;
-
-        if (nextTimeAnchor) {
-          params.set('timeAnchor', nextTimeAnchor);
-        }
-        params.set('checkedInAtAirport', (newTripData as TripDataWithExtras).checkedInAtAirport === false ? 'no' : 'yes');
-        if (newTripData.parkingDuration) {
-          params.set('parkingDuration', newTripData.parkingDuration.toString());
-        }
-        if (nextTrip.parkingCheckInDate) {
-          params.set('parkingCheckInDate', nextTrip.parkingCheckInDate);
-        }
-
-        if (nextTrip.parkingCheckOutDate) {
-          params.set('parkingCheckOutDate', nextTrip.parkingCheckOutDate);
-        }
-      } else if (newTripData.type === 'one-way-arrival') {
-        params.set('arrivalDate', newTripData.arrivalDate);
-        params.set('arrivalTime', newTripData.arrivalTime);
-      } else if (newTripData.type === 'round-trip') {
-        params.set('departureDate', newTripData.departureDate);
-        params.set('departureTime', newTripData.departureTime);
-        params.set('returnDate', newTripData.returnDate);
-        params.set('returnTime', newTripData.returnTime);
-        if (newTripData.parkingDuration) {
-          params.set('parkingDuration', newTripData.parkingDuration.toString());
-        }
-      } else if (newTripData.type === 'dropoff-pickup') {
-        params.set('airportTripDate', newTripData.airportTripDate);
-        params.set('airportTripTime', newTripData.airportTripTime);
-      }
-
-      const newUrl = `/results?${params.toString()}`;
-
-      // Use router.replace so Next's useSearchParams updates and TripData is rebuilt from the URL.
-      router.replace(newUrl);
-    } catch (error) {
-      console.error('Error recalculating recommendations:', error);
-      setLoading(false);
-    } finally {
-      // NOTE: We don't set loading to false here because the URL change will trigger useEffect
-      // which will set loading back to true. We let the URL-driven fetch handle the final loading state.
-    }
-  };
-
   const startEditing = () => {
     setIsEditing(true);
     setEditingData(tripData);
@@ -2734,7 +2583,7 @@ export default function ResultsContent() {
     }
 
     return { viableOptions: viable, tooLateOptions: tooLate, bestTooLateSummary: best };
-  }, [sortedOptions, intent, tripData]);
+  }, [sortedOptions, intent, tripData, airportReadyBufferMinutes]);
 
   const bestViableLeaveByTime = useMemo(() => {
     const isFlyingOut = intent === 'flying-out' && tripData?.type === 'one-way-departure';
@@ -2813,6 +2662,82 @@ export default function ResultsContent() {
   }, [currentAirportCode, tripData?.origin]);
 
   useEffect(() => {
+    if (!tripData) {
+      setParkingWeather([]);
+      return;
+    }
+
+    const tripExtras = tripData as TripDataWithExtras;
+    const startDate =
+      tripExtras.parkingCheckInDate ||
+      (tripData.type === 'one-way-departure' ? tripData.departureDate : '');
+    const returnDate = tripExtras.parkingCheckOutDate || '';
+    const airportCode = getTripAirportCode(tripData);
+    const startTime =
+      tripData.type === 'one-way-departure'
+        ? tripData.departureTime
+        : tripExtras.parkingCheckOutTime || '12:00';
+    const returnTime = tripExtras.parkingCheckOutTime || startTime || '12:00';
+
+    const requests = [
+      startDate
+        ? {
+          key: 'parking-start',
+          label: 'Start',
+          date: startDate,
+          time: startTime,
+        }
+        : null,
+      returnDate && returnDate !== startDate
+        ? {
+          key: 'parking-return',
+          label: 'Return',
+          date: returnDate,
+          time: returnTime,
+        }
+        : null,
+    ].filter((item): item is { key: string; label: string; date: string; time: string } =>
+      Boolean(item)
+    );
+
+    if (requests.length === 0) {
+      setParkingWeather([]);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    Promise.all(
+      requests.map(async (item) => {
+        const params = new URLSearchParams({
+          airport: airportCode,
+          targetDateTime: buildWeatherTargetDateTime(item.date, item.time),
+        });
+
+        const response = await fetch(`/api/weather?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const data = await response.json();
+
+        return {
+          key: item.key,
+          label: item.label,
+          date: item.date,
+          weatherImpact: (data?.weatherImpact || null) as WeatherImpact | null,
+        };
+      })
+    )
+      .then((items) => setParkingWeather(items))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.warn('selected-date weather failed', error);
+        setParkingWeather([]);
+      });
+
+    return () => controller.abort();
+  }, [tripData]);
+
+  useEffect(() => {
     if (!tripData) return;
 
     const refresh = async () => {
@@ -2842,7 +2767,7 @@ export default function ResultsContent() {
             });
           }
         }
-      } catch (e) {
+      } catch {
         console.warn('live parking refresh failed');
       }
     };
@@ -3061,9 +2986,7 @@ export default function ResultsContent() {
     };
   })();
 
-  const visibleResultOptions = sortedOptions.filter((o) => o.type !== 'parking');
-
-  const parkingOptionsOnly = parkingOptionsWithLive.map((p, idx) => {
+  const parkingOptionsOnly = parkingOptionsWithLive.map((p) => {
     const matchedRanked = sortedOptions.find((o) => {
       const rankedKey = parkingKeySafe(o.option as AppOption);
       const parkingKey = parkingKeySafe(p as AppOption);
@@ -3109,9 +3032,6 @@ export default function ResultsContent() {
 
     const aTotal = getParkingComparableTotal(aOption as AppOption, tripData) ?? getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
     const bTotal = getParkingComparableTotal(bOption as AppOption, tripData) ?? getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
-
-    const aDaily = getParkingDailyPrice(aOption, tripData) ?? aTotal;
-    const bDaily = getParkingDailyPrice(bOption, tripData) ?? bTotal;
 
     if (sort === 'cheapest') return (aTotal - bTotal) || (a.duration - b.duration);
     if (sort === 'fastest') {
@@ -3175,15 +3095,6 @@ export default function ResultsContent() {
       : smartPickParkingOptions;
 
   const smartPickOption = cheapestSmartPickOptions[0] || null;
-
-  const smartPickKey = parkingKeySafe(smartPickOption);
-
-  const isSameAsSmartPick = (option: AppOption | null | undefined): boolean => {
-    const otherKey = option ? parkingKeySafe(option) : null;
-    return Boolean(smartPickKey && otherKey && smartPickKey === otherKey);
-  };
-
-  const rawRecommendedPicks: RankedRecommendation[] = visibleResultOptions.slice(0, 3);
 
   const visibleMoreParkingCount = 10;
   const maxParkingDisplayCount = 25;
@@ -3285,6 +3196,12 @@ export default function ResultsContent() {
                 </div>
               )}
 
+              {aprLivePartial && !aprLiveChecking && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Some provider prices could not be refreshed. Confirm final parking rates before booking.
+                </div>
+              )}
+
               {seatacZone && (
                 <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
                   Suggested SEA check-in area:{' '}
@@ -3325,6 +3242,43 @@ export default function ResultsContent() {
                           ? 'May impact comfort'
                           : 'Plan for weather impact'}
                     </span>
+                  </div>
+                </div>
+              )}
+
+              {parkingWeather.length > 0 && (
+                <div className="rounded-xl border border-zinc-200 bg-white p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Weather for selected dates
+                  </div>
+
+                  <div className="mt-3 grid gap-2">
+                    {parkingWeather.map((item) => (
+                      <div
+                        key={item.key}
+                        className={`rounded-xl border px-3 py-2 text-sm ${item.weatherImpact
+                          ? weatherRiskClass(item.weatherImpact)
+                          : 'border-zinc-200 bg-zinc-50 text-zinc-700'
+                          }`}
+                      >
+                        <div className="font-semibold">
+                          {item.label}: {formatWeatherDateLabel(item.date)}
+                        </div>
+
+                        {item.weatherImpact ? (
+                          <div className="mt-1 text-xs leading-5">
+                            {item.weatherImpact.summary}
+                            {typeof item.weatherImpact.temperatureF === 'number'
+                              ? ` · ${item.weatherImpact.temperatureF}°F`
+                              : ''}
+                            {' · '}
+                            {weatherRiskText(item.weatherImpact)}
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-xs">Weather unavailable for this date.</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -3934,7 +3888,7 @@ function EditTripForm({
   const [flightType, setFlightType] = useState<FlightType>(((initialData as TripDataWithExtras).flightType || 'domestic') as FlightType);
   const [cabin, setCabin] = useState<CabinClass>(((initialData as TripDataWithExtras).cabin || 'economy') as CabinClass);
 
-  const [parkingDurationHours, setParkingDurationHours] = useState(
+  const [parkingDurationHours] = useState(
     'parkingDuration' in initialData && initialData.parkingDuration
       ? String(Math.round((initialData.parkingDuration / 60) * 10) / 10)
       : ''
@@ -3951,7 +3905,7 @@ function EditTripForm({
     (initialData as TripDataWithExtras).parkingCheckOutDate || ''
   );
 
-  const [parkingCheckOutTime, setParkingCheckOutTime] = useState(
+  const [parkingCheckOutTime] = useState(
     (initialData as TripDataWithExtras).parkingCheckOutTime || ''
   );
 
@@ -3961,8 +3915,6 @@ function EditTripForm({
   const [airportTripTime, setAirportTripTime] = useState(
     'airportTripTime' in initialData ? initialData.airportTripTime : ''
   );
-
-  const [refreshingParking, setRefreshingParking] = useState(false);
 
   const [arrivalDate, setArrivalDate] = useState(
     'arrivalDate' in initialData ? initialData.arrivalDate : ''
@@ -4390,22 +4342,6 @@ function EditTripForm({
               />
             </div>
 
-
-            {/* <div>
-              <label className="block text-sm font-medium text-zinc-800">
-                Return / parking check-out time
-                <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-              </label>
-              <input
-                type="time"
-                value={parkingCheckOutTime}
-                onChange={(e) => setParkingCheckOutTime(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-              <div className="mt-2 text-xs text-zinc-500">
-                Optional — defaults to your flight time if blank.
-              </div>
-            </div> */}
           </>
         )}
 
@@ -4495,23 +4431,6 @@ function EditTripForm({
             </div>
           </>
         )}
-
-        {/* {(isDeparture || isRoundTrip) && (
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-zinc-800">
-              Parking duration (hours)
-              <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-            </label>
-            <input
-              type="number"
-              value={parkingDurationHours}
-              onChange={(e) => setParkingDurationHours(e.target.value)}
-              min="0.5"
-              step="0.5"
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-        )} */}
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -4532,4 +4451,3 @@ function EditTripForm({
     </form>
   );
 }
-

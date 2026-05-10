@@ -12,6 +12,35 @@ type GeocoderResult = {
   formatted_address: string;
 };
 
+type LegacyAutocompleteService = {
+  getPlacePredictions: (
+    request: { input: string },
+    callback: (results: Prediction[] | null) => void
+  ) => void;
+};
+
+type AutocompleteSuggestion = {
+  placePrediction?: {
+    placeId?: string;
+    text?: { text?: string };
+    structuredFormat?: {
+      mainText?: { text?: string };
+      secondaryText?: { text?: string };
+    };
+  };
+};
+
+type AutocompleteSuggestionApi = {
+  fetchAutocompleteSuggestions: (request: {
+    input: string;
+  }) => Promise<{ suggestions?: AutocompleteSuggestion[] }>;
+};
+
+type PlacesLibrary = {
+  AutocompleteService?: new () => LegacyAutocompleteService;
+  AutocompleteSuggestion?: AutocompleteSuggestionApi;
+};
+
 const LOCAL_STORAGE_KEY = 'podpaigo-recent-origins';
 const MAX_RECENTS = 5;
 
@@ -49,12 +78,8 @@ interface GoogleMapsWindow {
   google?: {
     maps?: {
       places?: {
-        AutocompleteService: new () => {
-          getPlacePredictions: (
-            request: { input: string },
-            callback: (results: Prediction[] | null) => void
-          ) => void;
-        };
+        AutocompleteService?: new () => LegacyAutocompleteService;
+        AutocompleteSuggestion?: AutocompleteSuggestionApi;
       };
       Geocoder: new () => {
         geocode: (
@@ -80,14 +105,8 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   );
 
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  type AutocompleteServiceType = {
-    getPlacePredictions: (
-      request: { input: string },
-      callback: (results: Prediction[] | null) => void
-    ) => void;
-  };
-
-  const autocompleteService = useRef<AutocompleteServiceType | null>(null);
+  const autocompleteService = useRef<LegacyAutocompleteService | null>(null);
+  const autocompleteSuggestion = useRef<AutocompleteSuggestionApi | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
@@ -95,12 +114,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [locateError, setLocateError] = useState<string | null>(null);
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY;
   const apiKeyPresent = Boolean(apiKey);
-
-  const [hasMounted, setHasMounted] = useState(false);
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
 
   // Load Google Maps JS Places Library if not loaded and apiKey present
   useEffect(() => {
@@ -114,13 +127,20 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
       if (cancelled) return;
 
-      const places = window.google?.maps?.places as any;
+      const places = window.google?.maps?.places as PlacesLibrary | undefined;
 
-      if (places && !autocompleteService.current) {
-        autocompleteService.current =
-          places.AutocompleteSuggestion
-            ? new places.AutocompleteSuggestion()
-            : new places.AutocompleteService();
+      if (places && !autocompleteService.current && places.AutocompleteService) {
+        const service = new places.AutocompleteService();
+        if (typeof service.getPlacePredictions === 'function') {
+          autocompleteService.current = service;
+        }
+      }
+
+      if (
+        places?.AutocompleteSuggestion?.fetchAutocompleteSuggestions &&
+        !autocompleteSuggestion.current
+      ) {
+        autocompleteSuggestion.current = places.AutocompleteSuggestion;
       }
     }
 
@@ -137,7 +157,11 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   useEffect(() => {
     if (!hasTouchedInput) return;
 
-    if (!autocompleteService.current || !apiKeyPresent || inputValue.trim().length < 3) {
+    if (
+      (!autocompleteService.current && !autocompleteSuggestion.current) ||
+      !apiKeyPresent ||
+      inputValue.trim().length < 3
+    ) {
       setLoadingPredictions(false);
       // Delay clearing suggestions in next tick to avoid hook conflicts
       const t = setTimeout(() => setPredictions([]), 0);
@@ -152,16 +176,59 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
     // Wrap callback in async timeout to avoid setState in effect directly
     const timeoutId = setTimeout(() => {
-      autocompleteService.current?.getPlacePredictions(request, (results: Prediction[] | null) => {
+      const legacyService = autocompleteService.current;
+      if (legacyService?.getPlacePredictions) {
+        legacyService.getPlacePredictions(request, (results: Prediction[] | null) => {
+          setLoadingPredictions(false);
+          if (!results) {
+            setPredictions([]);
+            return;
+          }
+          setPredictions(results);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+        });
+        return;
+      }
+
+      const suggestionApi = autocompleteSuggestion.current;
+      if (!suggestionApi) {
         setLoadingPredictions(false);
-        if (!results) {
+        setPredictions([]);
+        return;
+      }
+
+      suggestionApi
+        .fetchAutocompleteSuggestions(request)
+        .then(({ suggestions = [] }) => {
+          const nextPredictions = suggestions
+            .map((suggestion) => {
+              const prediction = suggestion.placePrediction;
+              const primary = prediction?.structuredFormat?.mainText?.text;
+              const secondary = prediction?.structuredFormat?.secondaryText?.text;
+              const description =
+                prediction?.text?.text ||
+                [primary, secondary].filter(Boolean).join(', ');
+
+              if (!description) return null;
+
+              return {
+                description,
+                place_id: prediction?.placeId || description,
+              };
+            })
+            .filter((prediction): prediction is Prediction => Boolean(prediction));
+
+          setPredictions(nextPredictions);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+        })
+        .catch(() => {
           setPredictions([]);
-          return;
-        }
-        setPredictions(results);
-        setIsOpen(true);
-        setHighlightedIndex(-1);
-      });
+        })
+        .finally(() => {
+          setLoadingPredictions(false);
+        });
     }, 250);
 
     return () => clearTimeout(timeoutId);
@@ -334,7 +401,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         </div>
       )}
 
-      {hasMounted && recentOrigins.length > 0 && !isOpen && (
+      {recentOrigins.length > 0 && !isOpen && (
         <div className="rounded-xl border border-zinc-200 bg-white p-3 mt-2">
           <div className="text-xs font-medium text-zinc-700 mb-2">Recent origins</div>
           <ul className="flex flex-wrap gap-2">

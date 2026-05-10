@@ -1,7 +1,6 @@
 import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate, SecurityOption } from './types';
 import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { getAirportById } from './airports/catalog';
-import { getLiveParkingOptions } from './providers/parkingAggregator';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { SeaTacAirportData } from './airports';
@@ -554,12 +553,19 @@ export class MockProvider implements DataProvider {
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
-    const liveParkingOptions = await getLiveParkingOptions({
-      airportCode,
-      destination,
-      checkInDate: parkingDates.checkInDate,
-      checkOutDate: parkingDates.checkOutDate,
-    });
+    const liveParkingOptions = await import('./providers/parkingAggregator')
+      .then(({ getLiveParkingOptions }) =>
+        getLiveParkingOptions({
+          airportCode,
+          destination,
+          checkInDate: parkingDates.checkInDate,
+          checkOutDate: parkingDates.checkOutDate,
+        })
+      )
+      .catch((error) => {
+        console.warn('Live parking options unavailable; using mock parking options', error);
+        return [];
+      });
 
     const parkingSource =
       liveParkingOptions.length > 0

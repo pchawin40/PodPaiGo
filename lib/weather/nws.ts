@@ -103,8 +103,21 @@ export async function getWeatherImpactForAirport(args: {
 
   const targetTime = args.targetDateTime ? new Date(args.targetDateTime).getTime() : Date.now();
 
+  const firstPeriod = periods[0];
+  const lastPeriod = periods[periods.length - 1];
   const bestPeriod =
-    periods.find((period) => new Date(period.startTime).getTime() >= targetTime) ?? periods[0];
+    periods.find((period) => new Date(period.startTime).getTime() >= targetTime) ?? lastPeriod;
 
-  return buildWeatherImpact(bestPeriod);
+  const impact = buildWeatherImpact(bestPeriod);
+  const firstTime = new Date(firstPeriod.startTime).getTime();
+  const lastTime = new Date(lastPeriod.startTime).getTime();
+
+  if (targetTime < firstTime || targetTime > lastTime) {
+    return {
+      ...impact,
+      summary: `${impact.summary} (nearest available forecast)`,
+    };
+  }
+
+  return impact;
 }
