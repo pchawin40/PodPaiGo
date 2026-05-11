@@ -72,10 +72,10 @@ function extractRouteStateHint(value: string): string | null {
   const text = ` ${value.toUpperCase()} `;
 
   const states = [
-    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
-    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
-    'VA','WA','WV','WI','WY','DC'
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+    'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+    'VA', 'WA', 'WV', 'WI', 'WY', 'DC'
   ];
 
   for (const state of states) {
@@ -521,15 +521,11 @@ export class LiveTrafficProvider implements TrafficProvider {
         console.error('Live traffic API failed, falling back to mock:', safeMsg);
       }
 
-      return mockTrafficEstimates[routeKey] || {
-        route: routeKey,
-        duration: 25,
-        congestion: 'medium',
-        trustStatus: 'estimated',
-        sourceName: 'Historical averages',
-        lastUpdated: new Date().toISOString(),
-        assumptions: ['Fallback data', 'Based on typical conditions'],
-      };
+      return unavailableTrafficEstimate(
+        routeKey,
+        'Google Routes API',
+        'Route unavailable from this origin to the airport area.'
+      );
     }
   }
 }
@@ -654,38 +650,7 @@ export class MockProvider implements DataProvider {
     const airportRouteEstimate = await this.getRouteEstimate(origin, airportDestination, dateTime, true);
 
     if (airportRouteEstimate.routeUnavailable) {
-      return parkingSource.map((option) => {
-        const meta = resolveParkingTransferMeta(option);
-
-        return {
-          ...option,
-          parkingBufferMinutes: option.parkingBufferMinutes ?? meta.parkingBufferMinutes,
-          transferToTerminalMinutes: option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes,
-          transferType: option.transferType ?? meta.transferType,
-          distance: 0,
-          duration: 0,
-          availability: 0,
-          routeTrustStatus: airportRouteEstimate.trustStatus,
-          routeUnavailable: true,
-          routeUnavailableReason:
-            airportRouteEstimate.routeUnavailableReason ||
-            'Route unavailable from this origin to the airport area.',
-          routeOrigin: origin,
-          routeDestination: option.routeDestination || airportDestination,
-          mapLink: undefined,
-          sourceLink:
-            option.sourceLink && option.sourceLink.includes('example.com')
-              ? undefined
-              : option.sourceLink,
-          lastUpdated: new Date().toISOString(),
-          assumptions: [
-            ...option.assumptions,
-            airportRouteEstimate.routeUnavailableReason ||
-            'Route unavailable from this origin to the airport area.',
-            'This parking option is not usable from the selected origin.',
-          ],
-        };
-      });
+      return [];
     }
 
     return Promise.all(parkingSource.map(async option => {
@@ -736,6 +701,11 @@ export class MockProvider implements DataProvider {
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
+
+    if (routeEstimate.routeUnavailable) {
+      return [];
+    }
+
     const baseDuration = routeEstimate.duration + 5;
 
     return mockRideshareOptions.map(option => {

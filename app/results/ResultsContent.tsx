@@ -3480,14 +3480,63 @@ export default function ResultsContent() {
     ? []
     : parkingDisplayOptions.filter((parkingOption) => !isParkingRouteUnavailable(parkingOption));
 
-  const remainingParking = reachableParkingDisplayOptions
+  const remainingParking = parkingDisplayOptions
     .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
+    .sort((a, b) => {
+      const aUnavailable = isParkingRouteUnavailable(a);
+      const bUnavailable = isParkingRouteUnavailable(b);
+
+      if (aUnavailable !== bUnavailable) {
+        return aUnavailable ? 1 : -1;
+      }
+
+      if (sort === 'fastest') {
+        const aDuration =
+          typeof a.distance === 'number'
+            ? a.distance +
+            (a.parkingBufferMinutes ?? 0) +
+            (a.transferToTerminalMinutes ?? 0)
+            : 999999;
+
+        const bDuration =
+          typeof b.distance === 'number'
+            ? b.distance +
+            (b.parkingBufferMinutes ?? 0) +
+            (b.transferToTerminalMinutes ?? 0)
+            : 999999;
+
+        if (aDuration !== bDuration) return aDuration - bDuration;
+
+        return parkingPriceRank(a) - parkingPriceRank(b);
+      }
+
+      if (sort === 'cheapest') {
+        const aPriceRank = parkingPriceRank(a);
+        const bPriceRank = parkingPriceRank(b);
+
+        if (aPriceRank !== bPriceRank) return aPriceRank - bPriceRank;
+
+        const aPrice = getParkingTotalPrice(a, tripData) ?? a.price ?? 999999;
+        const bPrice = getParkingTotalPrice(b, tripData) ?? b.price ?? 999999;
+
+        return aPrice - bPrice;
+      }
+
+      // easiest/default
+      const aGarageBoost =
+        a.transferType === 'walk' || a.transferType === 'airport-garage' ? -50 : 0;
+      const bGarageBoost =
+        b.transferType === 'walk' || b.transferType === 'airport-garage' ? -50 : 0;
+
+      return aGarageBoost - bGarageBoost;
+    })
     .map((parkingOption: ParkingOption) => {
       const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
         const rankedKey = parkingKeySafe(ranked.option as AppOption);
         const parkingKey = parkingKeySafe(parkingOption as AppOption);
         return rankedKey && parkingKey && rankedKey === parkingKey;
       });
+
       const routeUnavailable = isParkingRouteUnavailable(parkingOption);
 
       return {
@@ -3500,18 +3549,25 @@ export default function ResultsContent() {
             : ['Available parking option'],
           cost: routeUnavailable
             ? 999999
-            : getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999999,
+            : getParkingTotalPrice(parkingOption, tripData) ??
+            parkingOption.price ??
+            999999,
           duration: routeUnavailable
-            ? 0
-            : (typeof parkingOption.distance === 'number' ? parkingOption.distance : 45) +
-            (typeof parkingOption.parkingBufferMinutes === 'number' ? parkingOption.parkingBufferMinutes : 10) +
-            (typeof parkingOption.transferToTerminalMinutes === 'number' ? parkingOption.transferToTerminalMinutes : 10),
+            ? 999999
+            : (typeof parkingOption.distance === 'number'
+              ? parkingOption.distance
+              : 999999) +
+            (parkingOption.parkingBufferMinutes ?? 0) +
+            (parkingOption.transferToTerminalMinutes ?? 0),
         }),
         type: 'parking',
         option: parkingOption,
         cost: routeUnavailable
           ? 999999
-          : getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999999,
+          : getParkingTotalPrice(parkingOption, tripData) ??
+          parkingOption.price ??
+          matchedRanked?.cost ??
+          999999,
       } as RankedRecommendation;
     });
 
@@ -3551,10 +3607,53 @@ export default function ResultsContent() {
     }
   }
 
+  function parkingHasRealPrice(option: ParkingOption): boolean {
+    const anyOption = option as ParkingOption & {
+      priceDisplay?: string;
+      priceUnit?: string;
+      trustStatus?: string;
+      bookingProvider?: string;
+      sourceName?: string;
+    };
+
+    return (
+      typeof option.price === 'number' &&
+      option.price > 0 &&
+      anyOption.priceDisplay !== 'check-live'
+    );
+  }
+
+  function parkingPriceRank(option: ParkingOption): number {
+    const anyOption = option as ParkingOption & {
+      priceDisplay?: string;
+      trustStatus?: string;
+      bookingProvider?: string;
+      sourceName?: string;
+    };
+
+    if (isParkingRouteUnavailable(option)) return 999;
+
+    if (parkingHasRealPrice(option)) {
+      if (
+        anyOption.trustStatus === 'live' ||
+        anyOption.bookingProvider === 'parkwhiz' ||
+        anyOption.bookingProvider === 'AirportParkingReservations' ||
+        anyOption.sourceName === 'AirportParkingReservations'
+      ) {
+        return 0;
+      }
+
+      return 1;
+    }
+
+    if (anyOption.priceDisplay === 'check-live') return 5;
+
+    return 9;
+  }
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 pb-24 pt-8">
-        {/* Hero */}
         {/* Hero */}
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
