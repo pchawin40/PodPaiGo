@@ -306,7 +306,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           origins: unknown[];
           destinations: unknown[];
           regionCode: string;
-          departureTime: { seconds: number };
+          departureTime: string;
         } = {
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_AWARE',
@@ -314,7 +314,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           destinations: [],
           // regionCode helps routing in ambiguous areas
           regionCode: 'US',
-          departureTime: { seconds: departureTimeSeconds },
+          departureTime: new Date(resolvedDateTime).toISOString(),
         };
 
         if (originLatLng) {
@@ -598,6 +598,7 @@ export class MockProvider implements DataProvider {
     }
 
     let estimate: TrafficEstimate;
+
     if (allowLive && this.trafficProvider instanceof LiveTrafficProvider) {
       estimate = await this.trafficProvider.getTrafficEstimate(origin, destination, dateTime);
     } else if (isClearlyNonDrivableRoute(origin, destination)) {
@@ -665,13 +666,27 @@ export class MockProvider implements DataProvider {
       const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
       const sourceLink = option.sourceLink && option.sourceLink.includes('example.com') ? undefined : option.sourceLink;
 
+      const routeDurationMinutes =
+        routeEstimate.routeUnavailable || typeof routeEstimate.duration !== 'number'
+          ? null
+          : routeEstimate.duration;
+
+      const liveDriveMinutes = routeEstimate.routeUnavailable
+        ? 0
+        : routeEstimate.duration ?? option.distance ?? 0;
+
       return {
         ...option,
         parkingBufferMinutes,
         transferToTerminalMinutes,
         transferType,
-        distance: routeEstimate.routeUnavailable ? 0 : option.distance ?? 0,
-        duration: routeEstimate.routeUnavailable ? 0 : routeEstimate.duration ?? 0,
+
+        // IMPORTANT:
+        // In this app, parking UI uses "distance" as drive minutes.
+        // So both distance and duration must receive the live Google route duration.
+        distance: liveDriveMinutes,
+        duration: liveDriveMinutes,
+
         routeTrustStatus: routeEstimate.trustStatus,
         routeUnavailable: routeEstimate.routeUnavailable === true,
         routeUnavailableReason: routeEstimate.routeUnavailable
@@ -691,7 +706,7 @@ export class MockProvider implements DataProvider {
           routeEstimate.routeUnavailable
             ? 'This parking option is not usable from the selected origin.'
             : routeEstimate.trustStatus === 'live'
-              ? 'Based on live routing'
+              ? `Based on live routing: ${liveDriveMinutes} min drive`
               : 'Estimated route time for origin-aware travel',
         ],
       };

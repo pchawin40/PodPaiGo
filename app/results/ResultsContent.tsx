@@ -168,32 +168,65 @@ function formatMiniMinutes(minutes: number): string {
 }
 
 function parkingTimeParts(option: ParkingOption) {
-  const drive = typeof option.distance === 'number' ? option.distance : 0;
-  const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
-  const transfer = typeof option.transferToTerminalMinutes === 'number' ? option.transferToTerminalMinutes : 0;
+  const optionWithDuration = option as ParkingOption & { duration?: number };
 
-  const isShuttle = option.transferType === 'shuttle';
-  const isGarage = option.transferType === 'airport-garage';
+  const drive =
+    typeof optionWithDuration.duration === 'number' && optionWithDuration.duration > 0
+      ? optionWithDuration.duration
+      : typeof option.distance === 'number' && option.distance > 0
+        ? option.distance
+        : 0;
 
-  const shuttleWait = isShuttle ? 8 : 0;
-  const walkInside = isGarage ? 5 : 2;
+  const park =
+    typeof option.parkingBufferMinutes === 'number'
+      ? option.parkingBufferMinutes
+      : option.transferType === 'airport-garage'
+        ? 8
+        : 15;
+
+  const shuttleWait =
+    option.transferType === 'shuttle'
+      ? typeof option.shuttleWaitMinutes === 'number'
+        ? option.shuttleWaitMinutes
+        : 8
+      : 0;
+
+  const transfer =
+    typeof option.transferToTerminalMinutes === 'number'
+      ? option.transferToTerminalMinutes
+      : option.transferType === 'airport-garage' || option.transferType === 'walk'
+        ? 5
+        : option.transferType === 'shuttle'
+          ? 12
+          : 10;
+
+  const walkInside =
+    option.transferType === 'airport-garage' || option.transferType === 'walk'
+      ? 5
+      : 2;
+
   const buffer = 5;
 
-  const total = drive + park + shuttleWait + transfer + walkInside + buffer;
+  const parts: Array<{ label: string; minutes: number }> = [
+    { label: 'Drive', minutes: drive },
+    { label: option.transferType === 'airport-garage' ? 'Park' : 'Park/check-in', minutes: park },
+    { label: 'Shuttle wait', minutes: shuttleWait },
+    {
+      label:
+        option.transferType === 'airport-garage' || option.transferType === 'walk'
+          ? 'Walk to terminal'
+          : option.transferType === 'shuttle'
+            ? 'Shuttle'
+            : 'Transfer',
+      minutes: transfer,
+    },
+    { label: 'Walk inside airport', minutes: walkInside },
+    { label: 'Buffer', minutes: buffer },
+  ].filter((part) => part.minutes > 0);
 
-  return {
-    total,
-    parts: [
-      { label: 'Drive', minutes: drive },
-      { label: 'Park', minutes: park },
-      ...(isShuttle
-        ? [{ label: 'Shuttle', minutes: shuttleWait + transfer }]
-        : [{ label: isGarage ? 'Garage walk' : 'Walk', minutes: transfer }]
-      ),
-      { label: 'Inside airport', minutes: walkInside },
-      { label: 'Buffer', minutes: buffer },
-    ].filter((p) => p.minutes > 0),
-  };
+  const total = parts.reduce((sum, part) => sum + part.minutes, 0);
+
+  return { total, parts };
 }
 
 function ParkingTimeSummary({
