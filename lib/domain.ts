@@ -292,7 +292,7 @@ export function rankRecommendations(
           score: 0,
           stressScore: 0,
           cost: 999999,
-          duration: 0,
+          duration: 999999,
           reasons: [
             parking.routeUnavailableReason ||
             'Route unavailable from this origin to this parking lot.',
@@ -508,11 +508,26 @@ export function rankRecommendations(
 
 export type RecommendationSortMode = 'easiest' | 'cheapest' | 'fastest';
 
+function isUnavailableRecommendation(recommendation: RankedRecommendation): boolean {
+  return (
+    recommendation.type === 'parking' &&
+    (recommendation.option as ParkingOption).routeUnavailable === true
+  );
+}
+
 export function sortRankedRecommendations(
   recommendations: RankedRecommendation[],
   mode: RecommendationSortMode
 ): RankedRecommendation[] {
   return [...recommendations].sort((a, b) => {
+    const aUnavailable = isUnavailableRecommendation(a);
+    const bUnavailable = isUnavailableRecommendation(b);
+
+    // Always push unavailable parking to the bottom,
+    // regardless of Cheapest / Fastest / Easiest tab.
+    if (aUnavailable && !bUnavailable) return 1;
+    if (!aUnavailable && bUnavailable) return -1;
+
     if (mode === 'cheapest') {
       return a.cost - b.cost || a.duration - b.duration || b.stressScore - a.stressScore;
     }

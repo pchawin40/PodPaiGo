@@ -197,6 +197,28 @@ function ParkingTimeSummary({
   option: ParkingOption;
   compact?: boolean;
 }) {
+  if (option.routeUnavailable) {
+    if (compact) {
+      return (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+          Route unavailable from this origin.
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="font-semibold text-red-800">
+          Route unavailable from this origin
+        </div>
+        <div className="mt-1">
+          We could not calculate a real route from your origin to this parking option.
+          Try an origin near the airport, rideshare, taxi, or another transportation option.
+        </div>
+      </div>
+    );
+  }
+
   const breakdown = parkingTimeParts(option);
 
   if (compact) {
@@ -2843,10 +2865,10 @@ export default function ResultsContent() {
 
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = currentAirport.label;
-  const airportRouteUnavailable = Boolean(
-    recommendation?.airportRouteUnavailable ||
-    recommendation?.trafficEstimate?.routeUnavailable
-  );
+  const airportRouteUnavailable =
+    Boolean(recommendation?.airportRouteUnavailable) ||
+    Boolean(recommendation?.trafficEstimate?.routeUnavailable);
+
   const airportRouteUnavailableReason =
     recommendation?.airportRouteUnavailableReason ||
     recommendation?.trafficEstimate?.routeUnavailableReason ||
@@ -3451,6 +3473,8 @@ export default function ResultsContent() {
     }
   }
 
+  const hasParkingOptions = parkingOptions.some((option) => !option.routeUnavailable);
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
       <main className="flex-1 w-full max-w-5xl mx-auto px-4 pb-24 pt-8">
@@ -3468,12 +3492,12 @@ export default function ResultsContent() {
                 {airportRouteUnavailable
                   ? 'Route unavailable from this origin'
                   : noViableFlyingOut
-                  ? 'No reliable option gets you airport-ready on time'
-                  : intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime
-                    ? `You should leave at ${formatTimeFriendly(bestViableLeaveByTime)}`
-                    : recommendation.leaveByTime
-                      ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
-                      : 'Your best options'}
+                    ? 'No reliable option gets you airport-ready on time'
+                    : intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime
+                      ? `You should leave at ${formatTimeFriendly(bestViableLeaveByTime)}`
+                      : recommendation.leaveByTime
+                        ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
+                        : 'Your best options'}
               </h1>
 
               {airportRouteUnavailable && (
@@ -3692,21 +3716,20 @@ export default function ResultsContent() {
             </div>
             <div className="mt-1 text-xs text-zinc-600">
               {airportRouteUnavailable ? (
-                'No valid ground route returned for this origin and airport.'
-              ) : recommendation.trafficEstimate ? (
-                recommendation.trafficEstimate.trustStatus === 'live' ? (
-                  <>
-                    <span>Live traffic data · Updated just now</span>
-                    {recommendation.trafficEstimate.staticDuration && (
-                      <div className="text-xs text-zinc-600">
-                        Typical: {formatMinutes(Math.min(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}-{formatMinutes(Math.max(recommendation.trafficEstimate.staticDuration, recommendation.trafficEstimate.duration))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  `${recommendation.trafficEstimate.congestion} congestion`
-                )
-              ) : 'No traffic estimate'}
+                <>
+                  <div className="text-sm font-semibold text-amber-700">Route unavailable</div>
+                  <h1 className="text-3xl font-bold text-zinc-900">
+                    We can’t calculate a route from this origin to SEA
+                  </h1>
+                  <p className="mt-2 text-sm text-zinc-600">
+                    Try a local starting point near the airport, or choose another transportation option.
+                  </p>
+                </>
+              ) : (
+                <h1 className="text-3xl font-bold text-zinc-900">
+                  You should leave at {recommendation.leaveByTime}
+                </h1>
+              )}
             </div>
           </div>
         </div>
@@ -4062,7 +4085,9 @@ export default function ResultsContent() {
                 <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-semibold text-zinc-900">More parking options</h2>
+                      <h2 className="text-lg font-semibold text-zinc-900">
+                        More parking options
+                      </h2>
                       <p className="mt-1 text-sm text-zinc-600">
                         Additional live and baseline parking choices.
                       </p>
@@ -4074,27 +4099,78 @@ export default function ResultsContent() {
                         onClick={() => setShowMoreParking((v) => !v)}
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {showMoreParking ? 'Show top 5 only' : `Show ${hiddenParking.length} more parking options`}
+                        {showMoreParking
+                          ? 'Show top 5 only'
+                          : `Show ${hiddenParking.length} more parking options`}
                       </button>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    {displayedParking.map((opt, idx) => (
-                      <OptionCard
-                        aprLivePrices={aprLivePrices}
-                        aprLiveChecking={aprLiveChecking}
-                        key={`too-late-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                        item={opt}
-                        rank={idx + 1}
-                        tripData={tripData}
-                        intent={intent}
-                        sort={sort}
-                        onShowReviews={handleShowReviews}
-                        googleEnrichedParking={googleEnrichedParking}
-                      />
-                    ))}
-                  </div>
+                  {displayedParking.filter((opt) => {
+                    const option = opt.option as AppOption;
+                    return option.type !== 'parking' || !option.routeUnavailable;
+                  }).length > 0 && (
+                      <div className="grid grid-cols-1 gap-4">
+                        {displayedParking
+                          .filter((opt) => {
+                            const option = opt.option as AppOption;
+                            return option.type !== 'parking' || !option.routeUnavailable;
+                          })
+                          .map((opt, idx) => (
+                            <OptionCard
+                              aprLivePrices={aprLivePrices}
+                              aprLiveChecking={aprLiveChecking}
+                              key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                              item={opt}
+                              rank={idx + 1}
+                              tripData={tripData}
+                              intent={intent}
+                              sort={sort}
+                              onShowReviews={handleShowReviews}
+                              googleEnrichedParking={googleEnrichedParking}
+                            />
+                          ))}
+                      </div>
+                    )}
+
+                  {displayedParking.filter((opt) => {
+                    const option = opt.option as AppOption;
+                    return option.type === 'parking' && option.routeUnavailable;
+                  }).length > 0 && (
+                      <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                        <h3 className="text-sm font-semibold text-amber-900">
+                          Parking options not reachable from this origin
+                        </h3>
+
+                        <p className="mt-1 text-sm text-amber-800">
+                          Your origin appears to be outside the drivable airport area, so these
+                          parking options are not usable for this trip. Try a local origin near
+                          the airport, rideshare, taxi, or a different transportation option.
+                        </p>
+
+                        <div className="mt-4 grid grid-cols-1 gap-4">
+                          {displayedParking
+                            .filter((opt) => {
+                              const option = opt.option as AppOption;
+                              return option.type === 'parking' && option.routeUnavailable;
+                            })
+                            .map((opt, idx) => (
+                              <OptionCard
+                                aprLivePrices={aprLivePrices}
+                                aprLiveChecking={aprLiveChecking}
+                                key={`parking-unreachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                                item={opt}
+                                rank={idx + 1}
+                                tripData={tripData}
+                                intent={intent}
+                                sort={sort}
+                                onShowReviews={handleShowReviews}
+                                googleEnrichedParking={googleEnrichedParking}
+                              />
+                            ))}
+                        </div>
+                      </div>
+                    )}
                 </section>
               )}
 
