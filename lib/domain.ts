@@ -1,4 +1,8 @@
 import { TripData, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate, TrustStatus } from './types';
+import {
+  isParkingRouteUnavailable,
+  parkingRouteUnavailableReason,
+} from './parking/routeStatus';
 
 
 /**
@@ -55,7 +59,7 @@ function getTrustPenalty(trustStatus: TrustStatus): number {
 function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOption | TransitJourney, type: 'parking' | 'rideshare' | 'transit'): number {
   if (type === 'parking') {
     const parkingOption = option as ParkingOption;
-    if (parkingOption.routeUnavailable) return -100;
+    if (isParkingRouteUnavailable(parkingOption)) return -100;
 
     const totalMinutes = getParkingTotalMinutes(parkingOption);
     return totalMinutes <= 10 ? 18 : totalMinutes <= 20 ? 10 : 4;
@@ -113,7 +117,7 @@ function getStressScore(
   const directnessBoost = getDirectnessBoost(option, type);
   const availability = option.availability || 0;
   const duration = type === 'parking'
-    ? (option as ParkingOption).routeUnavailable
+    ? isParkingRouteUnavailable(option as ParkingOption)
       ? 999
       : getParkingTotalMinutes(option as ParkingOption)
     : type === 'rideshare'
@@ -285,7 +289,7 @@ export function rankRecommendations(
   if (useParking) {
     const parkingWaitPenalty = (tsaEstimate?.waitTime ?? 25) * 0.5;
     parkingOptions.forEach(parking => {
-      if (parking.routeUnavailable) {
+      if (isParkingRouteUnavailable(parking)) {
         recommendations.push({
           type: 'parking',
           option: parking,
@@ -294,8 +298,7 @@ export function rankRecommendations(
           cost: 999999,
           duration: 999999,
           reasons: [
-            parking.routeUnavailableReason ||
-            'Route unavailable from this origin to this parking lot.',
+            parkingRouteUnavailableReason(parking),
           ],
         });
         return;
@@ -511,7 +514,7 @@ export type RecommendationSortMode = 'easiest' | 'cheapest' | 'fastest';
 function isUnavailableRecommendation(recommendation: RankedRecommendation): boolean {
   return (
     recommendation.type === 'parking' &&
-    (recommendation.option as ParkingOption).routeUnavailable === true
+    isParkingRouteUnavailable(recommendation.option as ParkingOption)
   );
 }
 

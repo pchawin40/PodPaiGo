@@ -12,6 +12,7 @@ import {
   calculateRideshareCost,
   calculateTransitCost,
 } from '../domain';
+import { isParkingRouteUnavailable } from '../parking/routeStatus';
 
 type OptionKind = 'parking' | 'rideshare' | 'transit';
 
@@ -96,6 +97,8 @@ function getParkingTransferMinutes(option: ParkingOption) {
 }
 
 function getParkingRouteMinutes(option: ParkingOption) {
+  if (isParkingRouteUnavailable(option)) return 999;
+
   return option.distance + (option.parkingBufferMinutes ?? 0) + getParkingTransferMinutes(option);
 }
 
@@ -460,6 +463,8 @@ function calculateTrueTotalCost(
   trip: TripData
 ) {
   if (kind === 'parking' && isParking(option)) {
+    if (isParkingRouteUnavailable(option)) return undefined;
+
     if (!isDepartureOrRoundTrip(trip)) return undefined;
 
     const parkingDuration = calculateParkingDuration(trip);

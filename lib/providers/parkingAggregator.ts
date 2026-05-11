@@ -10,6 +10,7 @@ import { inventoryLotToParkingOption } from '../parking/inventoryToParkingOption
 import { enrichInventoryOptionsWithPrices } from '../parking/priceMatcher';
 import { calculateParkingAvailabilityScore } from '../parking/availabilityScore';
 import { normalizeParkingPriceForTrip } from '../parking/parkingPriceNormalizer';
+import { withStableParkingRouteStatus } from '../parking/routeStatus';
 import {
   getCachedAprLotsForDateRange,
   getLatestParkingPriceSnapshots,
@@ -53,7 +54,7 @@ function withAvailabilityScore(option: ParkingOption): ParkingOption {
   const availabilityScore = calculateParkingAvailabilityScore(option);
 
   return {
-    ...option,
+    ...withStableParkingRouteStatus(option),
     availabilityScore,
     availability: availabilityScore,
     isAvailable: option.availabilityStatus !== 'unavailable',
@@ -182,6 +183,7 @@ function aprLotToParkingOption(
     distance: 12,
     availability: 50,
     trustStatus: 'estimated',
+    routeUnavailable: false,
     sourceName: 'AirportParkingReservations',
     sourceLink: lot.bookingUrl,
     routeDestination: aprLotRouteDestination(lot.lotName),
@@ -357,6 +359,7 @@ async function getGoogleParkingPlaces(args: {
           searchQuery: parkingSearchName,
           distance: 10,
           availability: 50,
+          routeUnavailable: false,
           sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           googlePlaceId: place.id,
@@ -673,6 +676,7 @@ export async function getLiveParkingOptions(args: {
         distance: 10,
         availability: 70,
         trustStatus: 'live',
+        routeUnavailable: false,
         sourceName: s.source || 'Parking price snapshot',
         sourceLink: s.bookingUrl || undefined,
         mapLink: googleMapsSearchUrl(`${s.lotName} ${airport.label}`),
@@ -715,6 +719,7 @@ export async function getLiveParkingOptions(args: {
       distance: 10,
       availability: 50,
       trustStatus: provider.trustStatus,
+      routeUnavailable: false,
       routeDestination: airport.routingAddress,
       sourceName: provider.sourceName,
       sourceLink,
@@ -785,6 +790,7 @@ export async function getLiveParkingOptions(args: {
     .map((option) =>
       normalizeParkingPriceForTrip(option, args.checkInDate, args.checkOutDate)
     )
+    .map(withStableParkingRouteStatus)
     .map(withAvailabilityScore)
     .sort((a, b) => {
       const rank = (p: ParkingOption) => {

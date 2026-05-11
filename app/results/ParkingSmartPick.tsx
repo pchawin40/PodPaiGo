@@ -10,6 +10,7 @@ import {
   parkingPriceLine,
 } from '../../lib/parking/priceDisplay';
 import { parkingRouteLinks, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
+import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherImpact } from '@/lib/weather/types';
 
@@ -146,7 +147,7 @@ export default function ParkingSmartPick({
   const optionsWithAprLivePrice = options.map((option) =>
     withAprLivePrice(option, aprLivePrices)
   ) as ParkingOption[];
-  const routeAvailableOptions = optionsWithAprLivePrice.filter((option) => !option.routeUnavailable);
+  const routeAvailableOptions = optionsWithAprLivePrice.filter((option) => !isParkingRouteUnavailable(option));
 
   const selectedOptionWithAprLivePrice = selectedOption
     ? (withAprLivePrice(selectedOption, aprLivePrices) as ParkingOption)
@@ -302,7 +303,7 @@ export default function ParkingSmartPick({
   })[0];
 
   const selectedSmartPick =
-    selectedOptionWithAprLivePrice && !selectedOptionWithAprLivePrice.routeUnavailable
+    selectedOptionWithAprLivePrice && !isParkingRouteUnavailable(selectedOptionWithAprLivePrice)
       ? selectedOptionWithAprLivePrice
       : null;
 

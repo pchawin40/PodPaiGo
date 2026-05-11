@@ -3,6 +3,7 @@ import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
+import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
 
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
@@ -53,15 +54,15 @@ export async function attachGooglePlaceToParking(
     source: parking.sourceName || null,
     airportCode,
   })) {
-    matchResultCache.set(cacheKey, parking);
-    return parking;
+    matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
+    return withStableParkingRouteStatus(parking);
   }
 
   const inflight = matchInFlightCache.get(cacheKey);
   if (inflight) return inflight;
 
   const cached = matchResultCache.get(cacheKey);
-  if (cached && !options.force) return cached;
+  if (cached && !options.force) return withStableParkingRouteStatus(cached);
 
   const body = buildRequestBody(parking, airportCode);
 
@@ -76,8 +77,8 @@ export async function attachGooglePlaceToParking(
       });
 
       if (!res.ok) {
-        matchResultCache.set(cacheKey, parking);
-        return parking;
+        matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
+        return withStableParkingRouteStatus(parking);
       }
 
       const data = await res.json();
@@ -86,12 +87,12 @@ export async function attachGooglePlaceToParking(
 
       if (!place?.googlePlaceId) {
         if (!options.force) {
-          matchResultCache.set(cacheKey, parking);
+          matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
         }
-        return parking;
+        return withStableParkingRouteStatus(parking);
       }
 
-      const enriched: ParkingOption = {
+      const enriched: ParkingOption = mergeParkingRouteStatus(parking, {
         ...parking,
         googlePlaceId: place.googlePlaceId,
         googleReviews: place.reviews,
@@ -103,15 +104,15 @@ export async function attachGooglePlaceToParking(
         reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : parking.reviewCount,
         normalizedAddress: place.address ?? parking.normalizedAddress,
         address: place.address ?? parking.address,
-      };
+      }) as ParkingOption;
 
       matchResultCache.set(cacheKey, enriched);
       return enriched;
     } catch {
       if (!options.force) {
-        matchResultCache.set(cacheKey, parking);
+        matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
       }
-      return parking;
+      return withStableParkingRouteStatus(parking);
     } finally {
       matchInFlightCache.delete(cacheKey);
     }

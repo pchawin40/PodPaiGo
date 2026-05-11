@@ -4,6 +4,7 @@ import { getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { SeaTacAirportData } from './airports';
+import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
 
 
 
@@ -70,7 +71,14 @@ function normalizeTrafficRoute(origin: string, destination: string): string {
 function extractRouteStateHint(value: string): string | null {
   const lower = value.toLowerCase();
 
-  if (/\bhi\b/.test(lower) || lower.includes('hawaii') || lower.includes('honolulu')) {
+  if (
+    /\bhi\b/.test(lower) ||
+    lower.includes('hawaii') ||
+    lower.includes('honolulu') ||
+    lower.includes('oahu') ||
+    lower.includes('waikiki') ||
+    lower.includes('kuhio')
+  ) {
     return 'HI';
   }
 
@@ -186,6 +194,14 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
 export class MockTrafficProvider implements TrafficProvider {
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
     const route = normalizeTrafficRoute(origin, destination);
+    if (isClearlyNonDrivableRoute(origin, destination)) {
+      return unavailableTrafficEstimate(
+        route,
+        'Route validation',
+        'Route unavailable from this origin to the airport area.'
+      );
+    }
+
     // Mock traffic data
     return mockTrafficEstimates[route] || {
       route,
@@ -634,8 +650,45 @@ export class MockProvider implements DataProvider {
         ? liveParkingOptions
         : mockParkingOptions;
 
+    const airportDestination = resolveAirportDestinationForRouting(destination);
+    const airportRouteEstimate = await this.getRouteEstimate(origin, airportDestination, dateTime, true);
+
+    if (airportRouteEstimate.routeUnavailable) {
+      return parkingSource.map((option) => {
+        const meta = resolveParkingTransferMeta(option);
+
+        return {
+          ...option,
+          parkingBufferMinutes: option.parkingBufferMinutes ?? meta.parkingBufferMinutes,
+          transferToTerminalMinutes: option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes,
+          transferType: option.transferType ?? meta.transferType,
+          distance: 0,
+          duration: 0,
+          availability: 0,
+          routeTrustStatus: airportRouteEstimate.trustStatus,
+          routeUnavailable: true,
+          routeUnavailableReason:
+            airportRouteEstimate.routeUnavailableReason ||
+            'Route unavailable from this origin to the airport area.',
+          routeOrigin: origin,
+          routeDestination: option.routeDestination || airportDestination,
+          mapLink: undefined,
+          sourceLink:
+            option.sourceLink && option.sourceLink.includes('example.com')
+              ? undefined
+              : option.sourceLink,
+          lastUpdated: new Date().toISOString(),
+          assumptions: [
+            ...option.assumptions,
+            airportRouteEstimate.routeUnavailableReason ||
+            'Route unavailable from this origin to the airport area.',
+            'This parking option is not usable from the selected origin.',
+          ],
+        };
+      });
+    }
+
     return Promise.all(parkingSource.map(async option => {
-      const airportDestination = resolveAirportDestinationForRouting(destination);
       const routeDestination = option.routeDestination || airportDestination;
       const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
 
@@ -656,7 +709,9 @@ export class MockProvider implements DataProvider {
         duration: routeEstimate.routeUnavailable ? 0 : routeEstimate.duration ?? 0,
         routeTrustStatus: routeEstimate.trustStatus,
         routeUnavailable: routeEstimate.routeUnavailable === true,
-        routeUnavailableReason: routeEstimate.routeUnavailableReason,
+        routeUnavailableReason: routeEstimate.routeUnavailable
+          ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
+          : undefined,
         availability: routeEstimate.routeUnavailable ? 0 : option.availability,
         routeOrigin: routeOrigins,
         routeDestination,

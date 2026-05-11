@@ -73,6 +73,7 @@ export function inventoryLotToParkingOption(args: {
         distance: 0,
         availability: Math.round((lot.confidence ?? 0.5) * 100),
         trustStatus: 'estimated',
+        routeUnavailable: false,
 
         sourceName: lot.source,
     sourceLink: official

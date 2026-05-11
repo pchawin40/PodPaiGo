@@ -32,6 +32,12 @@ import {
   routeUrlForOption,
   hasRealParkingPrice
 } from '../../lib/parking/routeDisplay';
+import {
+  isParkingRouteUnavailable,
+  mergeParkingRouteStatus,
+  parkingRouteUnavailableReason,
+  withStableParkingRouteStatus,
+} from '../../lib/parking/routeStatus';
 
 import {
   parseHHMMToMinutes,
@@ -199,7 +205,7 @@ function ParkingTimeSummary({
   compact?: boolean;
   routeUnavailable?: boolean;
 }) {
-  const unavailable = routeUnavailable || option.routeUnavailable;
+  const unavailable = routeUnavailable || isParkingRouteUnavailable(option);
 
   if (unavailable) {
     if (compact) {
@@ -1210,10 +1216,6 @@ function getAirportReadyBufferForTiming(params: {
   );
 }
 
-function isParkingRouteUnavailable(option: ParkingOption | AppOption | null | undefined): boolean {
-  return Boolean(option?.routeUnavailable);
-}
-
 function OptionCard({
   compact = false,
   item,
@@ -1237,7 +1239,10 @@ function OptionCard({
   onShowReviews?: (parking: ParkingOption) => void;
   googleEnrichedParking?: Record<string, ParkingOption>;
 }) {
-  const opt = withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption;
+  const opt =
+    item.type === 'parking'
+      ? (withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption)
+      : (item.option as AppOption);
 
   const isAprFetching =
     aprLiveChecking &&
@@ -1383,7 +1388,7 @@ function OptionCard({
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
         'rounded-2xl border bg-white p-5 shadow-sm ' +
-        (timing.status === 'too-late' ? 'border-red-200' : 'border-zinc-200')
+        (!routeUnavailable && timing.status === 'too-late' ? 'border-red-200' : 'border-zinc-200')
       }
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1505,7 +1510,11 @@ function OptionCard({
           )}
 
           {item.type === 'parking' && (
-            <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
+            <ParkingTimeSummary
+              option={opt as ParkingOption}
+              compact={compact}
+              routeUnavailable={routeUnavailable}
+            />
           )}
 
           {item.type === 'parking' && (() => {
@@ -1647,7 +1656,7 @@ function OptionCard({
         <div className="flex shrink-0 flex-col gap-2 sm:items-stretch">
           {compact ? (
             <div className="flex flex-col gap-2">
-              {sourceLink && (
+              {!routeUnavailable && sourceLink && (
                 <button
                   type="button"
                   onClick={() =>
@@ -1667,7 +1676,7 @@ function OptionCard({
                 </button>
               )}
 
-              {item.type === 'parking' && parkingLotRouteLink && (
+              {item.type === 'parking' && !routeUnavailable && parkingLotRouteLink && (
                 <a
                   href={parkingLotRouteLink}
                   target="_blank"
@@ -1697,7 +1706,7 @@ function OptionCard({
             </div>
           ) : (
             <>
-              {sourceLink && item.type === 'parking' ? (
+              {!routeUnavailable && sourceLink && item.type === 'parking' ? (
                 <button
                   type="button"
                   onClick={() =>
@@ -1711,7 +1720,7 @@ function OptionCard({
                       ? 'Book official'
                       : 'Copy search + open'}
                 </button>
-              ) : sourceLink ? (
+              ) : sourceLink && !routeUnavailable ? (
                 <a
                   href={sourceLink}
                   target="_blank"
@@ -1961,6 +1970,33 @@ function getParkingComparableTotal(option: AppOption, tripData: TripData | null)
   return Math.round(option.price * days * 100) / 100;
 }
 
+function mergeRankedParkingRouteStatus(
+  primary: RankedRecommendation,
+  secondary: RankedRecommendation
+): RankedRecommendation {
+  if (primary.type !== 'parking' || secondary.type !== 'parking') return primary;
+
+  const mergedOption = mergeParkingRouteStatus(
+    primary.option as ParkingOption,
+    secondary.option as ParkingOption
+  ) as ParkingOption;
+
+  if (!isParkingRouteUnavailable(mergedOption)) {
+    return {
+      ...primary,
+      option: mergedOption,
+    };
+  }
+
+  return {
+    ...primary,
+    option: mergedOption,
+    cost: 999999,
+    duration: 999999,
+    reasons: [parkingRouteUnavailableReason(mergedOption)],
+  };
+}
+
 function dedupeParkingRankedOptions(
   options: RankedRecommendation[],
   tripData: TripData | null
@@ -1979,7 +2015,10 @@ function dedupeParkingRankedOptions(
     const current = byKey.get(key);
 
     if (!current) {
-      byKey.set(key, item);
+      byKey.set(key, {
+        ...item,
+        option: withStableParkingRouteStatus(item.option as ParkingOption),
+      });
       continue;
     }
 
@@ -2005,7 +2044,12 @@ function dedupeParkingRankedOptions(
       }
     }
 
-    byKey.set(key, winner);
+    byKey.set(
+      key,
+      winner === current
+        ? mergeRankedParkingRouteStatus(current, item)
+        : mergeRankedParkingRouteStatus(item, current)
+    );
   }
 
   return Array.from(byKey.values());
@@ -2337,18 +2381,16 @@ export default function ResultsContent() {
     if (!parkingId) return;
 
     const mergedParking: ParkingOption = {
-      ...selectedParking,
-      ...enrichedParking,
+      ...mergeParkingRouteStatus(selectedParking, enrichedParking),
       id: parkingId,
-    };
+    } as ParkingOption;
 
     setGoogleEnrichedParking((prev) => ({
       ...prev,
       [parkingId]: {
-        ...(prev[parkingId] || selectedParking),
-        ...enrichedParking,
+        ...mergeParkingRouteStatus(prev[parkingId] || selectedParking, enrichedParking),
         id: parkingId,
-      },
+      } as ParkingOption,
     }));
 
     setRankedOptions((prev) =>
@@ -2361,10 +2403,9 @@ export default function ResultsContent() {
         return {
           ...item,
           option: {
-            ...option,
-            ...enrichedParking,
+            ...mergeParkingRouteStatus(option, enrichedParking),
             id: parkingId,
-          },
+          } as ParkingOption,
         };
       })
     );
@@ -2375,11 +2416,10 @@ export default function ResultsContent() {
           ...prev,
           parking: prev.parking.map((option) =>
             option.id === parkingId
-              ? {
-                ...option,
-                ...enrichedParking,
+              ? ({
+                ...mergeParkingRouteStatus(option, enrichedParking),
                 id: parkingId,
-              }
+              } as ParkingOption)
               : option
           ),
         }
@@ -2388,10 +2428,7 @@ export default function ResultsContent() {
 
     setReviewsParking((current) =>
       current?.id === parkingId
-        ? {
-          ...current,
-          ...mergedParking,
-        }
+        ? mergeParkingRouteStatus(current, mergedParking) as ParkingOption
         : current
     );
   }
@@ -2404,6 +2441,7 @@ export default function ResultsContent() {
       .filter((item) => item.type === "parking")
       .map((item) => item.option as ParkingOption)
       .filter((parking) => {
+        if (isParkingRouteUnavailable(parking)) return false;
         if (!parking.id) return false;
         if (!shouldAttemptGooglePlaceMatch({
           lotName: parking.name,
@@ -2432,7 +2470,7 @@ export default function ResultsContent() {
 
           const inflight = googlePlaceInFlightKeysRef.current.get(key);
           if (inflight) {
-            const enriched = await inflight;
+            const enriched = mergeParkingRouteStatus(parking, await inflight) as ParkingOption;
             googlePlaceInFlightKeysRef.current.delete(key);
             return [parking.id, enriched] as const;
           }
@@ -2440,7 +2478,7 @@ export default function ResultsContent() {
           const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
           googlePlaceInFlightKeysRef.current.set(key, promise);
 
-          const enriched = await promise;
+          const enriched = mergeParkingRouteStatus(parking, await promise) as ParkingOption;
           googlePlaceInFlightKeysRef.current.delete(key);
           return [parking.id, enriched] as const;
         })
@@ -2452,7 +2490,7 @@ export default function ResultsContent() {
         const next = { ...prev };
 
         enrichedPairs.forEach(([id, enriched]) => {
-          next[id] = enriched;
+          next[id] = mergeParkingRouteStatus(next[id] || parkingOptions.find((p) => p.id === id) || enriched, enriched) as ParkingOption;
         });
 
         return next;
@@ -2475,8 +2513,11 @@ export default function ResultsContent() {
     if (!recommendation?.parking?.length || !tripData) return;
 
     const aprOptions = recommendation.parking.filter((p) =>
-      p.bookingProvider === 'AirportParkingReservations' ||
-      p.sourceName === 'AirportParkingReservations'
+      !isParkingRouteUnavailable(p) &&
+      (
+        p.bookingProvider === 'AirportParkingReservations' ||
+        p.sourceName === 'AirportParkingReservations'
+      )
     );
 
     if (aprOptions.length === 0) return;
@@ -3015,8 +3056,14 @@ export default function ResultsContent() {
     return () => controller.abort();
   }, [tripData]);
 
+  const recommendationRouteUnavailableForRefresh =
+    Boolean(recommendation?.airportRouteUnavailable) ||
+    Boolean(recommendation?.trafficEstimate?.routeUnavailable);
+  const hasRecommendationForRefresh = Boolean(recommendation);
+
   useEffect(() => {
-    if (!tripData) return;
+    if (!tripData || !hasRecommendationForRefresh) return;
+    if (recommendationRouteUnavailableForRefresh) return;
 
     const refresh = async () => {
       try {
@@ -3033,17 +3080,29 @@ export default function ResultsContent() {
 
         const data = await res.json();
 
-        if (data?.parking?.length) {
-          if (Array.isArray(data?.parking) && data.parking.length > 0) {
-            setRecommendation((prev) => {
-              if (!prev) return prev;
+        if (Array.isArray(data?.parking) && data.parking.length > 0) {
+          setRecommendation((prev) => {
+            if (!prev) return prev;
 
-              return {
-                ...prev,
-                parking: data.parking,
-              };
-            });
-          }
+            const refreshed = data.parking as ParkingOption[];
+
+            return {
+              ...prev,
+              parking: prev.parking.map((existing) => {
+                const existingKey = parkingKeySafe(existing);
+                const match = refreshed.find((fresh) => {
+                  if (fresh.id && existing.id && fresh.id === existing.id) return true;
+
+                  const freshKey = parkingKeySafe(fresh);
+                  return Boolean(existingKey && freshKey && existingKey === freshKey);
+                });
+
+                return match
+                  ? mergeParkingRouteStatus(existing, match) as ParkingOption
+                  : withStableParkingRouteStatus(existing);
+              }),
+            };
+          });
         }
       } catch {
         console.warn('live parking refresh failed');
@@ -3051,7 +3110,11 @@ export default function ResultsContent() {
     };
 
     refresh();
-  }, [tripData]);
+  }, [
+    tripData,
+    hasRecommendationForRefresh,
+    recommendationRouteUnavailableForRefresh,
+  ]);
 
   useEffect(() => {
     if (!tripData || !recommendation?.parking?.length) return;
@@ -3069,8 +3132,11 @@ export default function ResultsContent() {
 
     const lots = [...recommendation.parking]
       .filter((p) =>
-        p.bookingProvider === 'AirportParkingReservations' ||
-        p.sourceName === 'AirportParkingReservations'
+        !isParkingRouteUnavailable(p) &&
+        (
+          p.bookingProvider === 'AirportParkingReservations' ||
+          p.sourceName === 'AirportParkingReservations'
+        )
       )
       .slice(0, 5)
       .map((p) => ({
@@ -3161,7 +3227,9 @@ export default function ResultsContent() {
   const parkingOptions = recommendation.parking ?? [];
 
   const parkingOptionsWithLive = parkingOptions.map((p) => {
-    const aprUpdated = withAprLivePrice(p, aprLivePrices) as ParkingOption;
+    const aprUpdated = withStableParkingRouteStatus(
+      withAprLivePrice(p, aprLivePrices) as ParkingOption
+    );
     const matched =
       matchedParkingPrices[String(p.id || '')] ||
       matchedParkingPrices[String(p.name || '')] ||
@@ -3169,13 +3237,13 @@ export default function ResultsContent() {
 
     if (!matched) return aprUpdated;
 
-    return {
+    return mergeParkingRouteStatus(aprUpdated, {
       ...aprUpdated,
       price: matched.price,
       priceUnit: matched.priceUnit || 'per-day',
       priceDisplay: 'from-per-day',
       priceNote: `Matched price from ${matched.provider || 'parking provider'}. Confirm final checkout price before booking.`,
-      priceSource: 'provider-match',
+      priceSource: 'marketplace-link',
       priceConfidence: 'medium',
       trustStatus: 'live',
       sourceName: matched.provider || aprUpdated.sourceName,
@@ -3184,7 +3252,7 @@ export default function ResultsContent() {
         ...(aprUpdated.bestFor || []),
         'Live Price',
       ],
-    };
+    } as ParkingOption) as ParkingOption;
   });
 
   const rideshareOptions = recommendation.rideshare ?? [];
@@ -3286,13 +3354,15 @@ export default function ResultsContent() {
         duration: breakdown?.totalMinutes ?? 0,
       }),
       type: 'parking',
-      option: p,
+      option: withStableParkingRouteStatus(p),
       cost: typeof p.price === 'number' ? p.price : matchedRanked?.cost ?? 999,
     } as RankedRecommendation;
   });
 
   const parkingOptionsWithAprPricesRaw = parkingOptionsOnly.map((o) => {
-    const updatedOption = withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption;
+    const updatedOption = withStableParkingRouteStatus(
+      withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption
+    );
     const comparableTotal = getParkingComparableTotal(updatedOption, tripData);
 
     return {
@@ -3406,7 +3476,11 @@ export default function ResultsContent() {
   const visibleMoreParkingCount = 10;
   const maxParkingDisplayCount = 25;
 
-  const remainingParking = parkingDisplayOptions
+  const reachableParkingDisplayOptions = airportRouteUnavailable
+    ? []
+    : parkingDisplayOptions.filter((parkingOption) => !isParkingRouteUnavailable(parkingOption));
+
+  const remainingParking = reachableParkingDisplayOptions
     .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
     .map((parkingOption: ParkingOption) => {
       const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
@@ -3469,15 +3543,13 @@ export default function ResultsContent() {
     }
 
     try {
-      const enriched = await promise;
+      const enriched = mergeParkingRouteStatus(parking, await promise) as ParkingOption;
       mergeGooglePlaceResultIntoParking(parking, enriched);
       setReviewsParking(enriched);
     } finally {
       googlePlaceInFlightKeysRef.current.delete(key);
     }
   }
-
-  const hasParkingOptions = parkingOptions.some((option) => !option.routeUnavailable);
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
@@ -3507,10 +3579,10 @@ export default function ResultsContent() {
               {airportRouteUnavailable && (
                 <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
                   <div className="font-semibold">
-                    We could not calculate a ground route from {tripData.origin} to {displayDestination}.
+                    We could not calculate a real route from your starting location to this airport.
                   </div>
                   <div className="mt-1">
-                    Please enter a local starting point near the airport, or choose another transportation option.
+                    Try an origin near {currentAirport.id}, rideshare/taxi, or another transportation option.
                   </div>
                   {airportRouteUnavailableReason && (
                     <div className="mt-2 text-xs text-amber-800">
@@ -3834,7 +3906,7 @@ export default function ResultsContent() {
         </div>
 
         {
-          showParkingProviders && parkingDisplayOptions.length > 0 && (
+          showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
             <div className="mt-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold">
@@ -3854,7 +3926,7 @@ export default function ResultsContent() {
                 <ParkingSmartPick
                   options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
                   tripData={tripData}
-                  leaveByTime={recommendation.leaveByTime}
+                  leaveByTime={airportRouteUnavailable ? null : recommendation.leaveByTime}
                   selectedOption={
                     smartPickOption
                       ? googleEnrichedParking[smartPickOption.id] || smartPickOption
@@ -4119,7 +4191,10 @@ export default function ResultsContent() {
                       {displayedParking
                         .filter((opt) => {
                           const option = opt.option as AppOption;
-                          return option.type !== 'parking' || !option.routeUnavailable;
+
+                          if (option.type !== 'parking') return true;
+
+                          return !isParkingRouteUnavailable(option);
                         })
                         .map((opt, idx) => (
                           <OptionCard

@@ -1,4 +1,5 @@
 import { ParkingOption } from '../types';
+import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
 
 function normalize(text: string): string {
   return text
@@ -61,9 +62,9 @@ export function enrichInventoryOptionsWithPrices(args: {
   return args.inventoryOptions.map((inventory) => {
     const match = findBestPriceMatch(inventory, args.pricedOptions);
 
-    if (!match) return inventory;
+    if (!match) return withStableParkingRouteStatus(inventory);
 
-    return {
+    return mergeParkingRouteStatus(inventory, {
       ...inventory,
 
       price: match.price,
@@ -92,6 +93,6 @@ export function enrichInventoryOptionsWithPrices(args: {
         ...(inventory.assumptions ?? []),
         `Matched price from ${match.sourceName || match.bookingProvider || 'provider'} option: ${match.name}`,
       ],
-    };
+    });
   });
 }

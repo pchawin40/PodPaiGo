@@ -22,6 +22,7 @@ import {
   buildRideshareTransferLegs,
   buildTransitTransferLegs,
 } from './intelligence/transferLegs';
+import { isParkingRouteUnavailable } from './parking/routeStatus';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -81,6 +82,7 @@ function genericParkingFallback(airportCode: string, destination: string): Parki
     distance: 10,
     availability: 80,
     trustStatus: 'estimated',
+    routeUnavailable: false,
     routeOrigin: '',
     routeDestination: destination,
     lastUpdated: new Date().toISOString(),
@@ -571,8 +573,8 @@ export class RecommendationEngine {
       : null;
 
     const finalParking = enrichedParking.sort((a, b) => {
-      if (a.routeUnavailable !== b.routeUnavailable) {
-        return a.routeUnavailable ? 1 : -1;
+      if (isParkingRouteUnavailable(a) !== isParkingRouteUnavailable(b)) {
+        return isParkingRouteUnavailable(a) ? 1 : -1;
       }
 
       return (

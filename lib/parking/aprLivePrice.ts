@@ -1,3 +1,5 @@
+import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
+
 type AprPricedOption = {
   sourceLink?: string;
   bestFor?: string[];
@@ -6,6 +8,9 @@ type AprPricedOption = {
   priceUnit?: string;
   trustStatus?: string;
   priceNote?: string;
+  routeUnavailable?: boolean;
+  routeTrustStatus?: 'live' | 'verified-source' | 'estimated' | 'fallback';
+  routeUnavailableReason?: string;
 };
 
 export function getAprLivePrice(
@@ -24,9 +29,9 @@ export function withAprLivePrice<T extends AprPricedOption>(
   aprLivePrices: Record<string, number>
 ): T {
   const livePrice = getAprLivePrice(option, aprLivePrices);
-  if (livePrice == null) return option;
+  if (livePrice == null) return withStableParkingRouteStatus(option) as T;
 
-  return {
+  return mergeParkingRouteStatus(option, {
     ...option,
     price: livePrice,
     priceDisplay: 'from-per-day',
@@ -34,5 +39,5 @@ export function withAprLivePrice<T extends AprPricedOption>(
     trustStatus: 'live',
     priceNote: 'APR listed price',
     bestFor: Array.from(new Set(['APR listed price', ...(option.bestFor || [])])),
-  };
+  }) as T;
 }

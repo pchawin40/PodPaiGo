@@ -5,6 +5,7 @@ import {
     saveParkWhizQuotes,
 } from '../db/parkingCache';
 import { debugLog } from '../utils/debug';
+import { withStableParkingRouteStatus } from '../parking/routeStatus';
 
 type ParkWhizAmenity = {
     name?: string;
@@ -207,6 +208,7 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
             distance: transferToTerminalMinutes,
             availability: estimateAvailabilityScore(availabilityStatus),
             trustStatus: totalPrice ? 'live' : 'estimated',
+            routeUnavailable: false,
             sourceName: 'ParkWhiz',
             sourceLink: bookingUrl,
             mapLink: googleMapsSearchUrl(mapQuery),
@@ -286,7 +288,7 @@ export async function getParkWhizParkingOptions(args: {
     });
 
     if (cached?.options?.length) {
-        return cached.options.map((option) => ({
+        return cached.options.map((option) => withStableParkingRouteStatus({
             ...option,
             priceUnit:
                 option.sourceName === 'ParkWhiz' || option.bookingProvider === 'ParkWhiz'

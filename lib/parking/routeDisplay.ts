@@ -1,12 +1,13 @@
 import { ParkingOption, TripData } from '../types';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
+import { isParkingRouteUnavailable } from './routeStatus';
 
 export function parkingTimeBreakdown(option: ParkingOption): {
   label: string;
   totalMinutes: number;
   parts: Array<{ label: string; minutes: number }>;
 } {
-  if (option.routeUnavailable) {
+  if (isParkingRouteUnavailable(option)) {
     return {
       label: 'Route unavailable',
       totalMinutes: 0,

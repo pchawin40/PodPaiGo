@@ -1,4 +1,5 @@
 import { ParkingOption } from '../types';
+import { withStableParkingRouteStatus } from './routeStatus';
 
 function estimateParkingDaysFromDates(checkInDate?: string, checkOutDate?: string): number {
   if (!checkInDate || !checkOutDate) return 1;
@@ -25,15 +26,15 @@ export function normalizeParkingPriceForTrip(
   if (option.priceUnit === 'total' && option.price > 0 && days > 1) {
     const dailyPrice = option.price / days;
 
-    return {
+    return withStableParkingRouteStatus({
       ...option,
       price: Number(dailyPrice.toFixed(2)),
       priceUnit: 'per-day',
       priceNote:
         option.priceNote ||
         'Provider returned total trip price; converted to daily rate for comparison.',
-    };
+    });
   }
 
-  return option;
+  return withStableParkingRouteStatus(option);
 }

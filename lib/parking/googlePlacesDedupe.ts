@@ -1,5 +1,10 @@
 import { ParkingOption } from '../types';
 import { getParkingTotalPrice, getParkingDailyPrice } from './priceDisplay';
+import {
+  isParkingRouteUnavailable,
+  mergeParkingRouteStatus,
+  withStableParkingRouteStatus,
+} from './routeStatus';
 
 type ParkingOptionWithPlace = ParkingOption & {
   googlePlaceId?: string;
@@ -108,13 +113,20 @@ function betterParkingOption(
   b: ParkingOptionWithPlace,
   tripData: unknown
 ): ParkingOptionWithPlace {
+  const routeMerged = (winner: ParkingOptionWithPlace, other: ParkingOptionWithPlace) =>
+    mergeParkingRouteStatus(winner, other) as ParkingOptionWithPlace;
+
+  if (isParkingRouteUnavailable(a) !== isParkingRouteUnavailable(b)) {
+    return routeMerged(isParkingRouteUnavailable(a) ? a : b, isParkingRouteUnavailable(a) ? b : a);
+  }
+
   const aTotal = getParkingTotalPrice(a, tripData as never);
   const bTotal = getParkingTotalPrice(b, tripData as never);
 
   // Prefer cheaper trip total if both exist.
   if (typeof aTotal === 'number' && typeof bTotal === 'number') {
     if (Math.abs(aTotal - bTotal) > 1) {
-      return aTotal < bTotal ? a : b;
+      return aTotal < bTotal ? routeMerged(a, b) : routeMerged(b, a);
     }
   }
 
@@ -124,7 +136,7 @@ function betterParkingOption(
   // Then cheaper daily.
   if (typeof aDaily === 'number' && typeof bDaily === 'number') {
     if (Math.abs(aDaily - bDaily) > 1) {
-      return aDaily < bDaily ? a : b;
+      return aDaily < bDaily ? routeMerged(a, b) : routeMerged(b, a);
     }
   }
 
@@ -133,11 +145,11 @@ function betterParkingOption(
   const bProviderRank = providerPriority(b);
 
   if (aProviderRank !== bProviderRank) {
-    return aProviderRank < bProviderRank ? a : b;
+    return aProviderRank < bProviderRank ? routeMerged(a, b) : routeMerged(b, a);
   }
 
   // Keep first one if basically tied.
-  return a;
+  return routeMerged(a, b);
 }
 
 export function dedupeAndSortParkingOptions<T extends ParkingOption>(
@@ -152,7 +164,7 @@ export function dedupeAndSortParkingOptions<T extends ParkingOption>(
     );
 
     if (existingIndex === -1) {
-      winners.push(option);
+      winners.push(withStableParkingRouteStatus(option) as ParkingOptionWithPlace);
       continue;
     }
 
