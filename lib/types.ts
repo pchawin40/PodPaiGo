@@ -150,6 +150,7 @@ export type ParkingOption = {
   providerLotId?: string;
   normalizedName?: string;
   normalizedAddress?: string;
+  address?: string;
   canonicalLotKey?: string;
   lat?: number;
   lng?: number;

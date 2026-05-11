@@ -61,6 +61,10 @@ import {
 import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
 import ParkingReviewsModal from './ParkingReviewsModal';
 import { attachGooglePlaceToParking } from '@/lib/parking/googlePlaceMatch';
+import {
+  buildParkingGoogleCacheKey,
+  shouldAttemptGooglePlaceMatch,
+} from '../../lib/parking/googlePlaceMatchUtils';
 import type { WeatherImpact } from '@/lib/weather/types';
 
 type PriceableOption = {
@@ -2167,14 +2171,116 @@ export default function ResultsContent() {
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
   const priceMatchKeyRef = useRef('');
+  const googlePlaceAttemptedKeysRef = useRef(new Set<string>());
+  const googlePlaceInFlightKeysRef = useRef(new Map<string, Promise<ParkingOption>>());
+
+  function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
+    return buildParkingGoogleCacheKey({
+      airportCode,
+      parkingLotId: parking.providerLotId || parking.id,
+      lotName: parking.name,
+      lotAddress: parking.address || parking.normalizedAddress || parking.routeDestination || null,
+    });
+  }
+
+  function mergeGooglePlaceResultIntoParking(
+    selectedParking: ParkingOption,
+    enrichedParking: ParkingOption
+  ) {
+    const parkingId = selectedParking.id || enrichedParking.id;
+    if (!parkingId) return;
+
+    const mergedParking: ParkingOption = {
+      ...selectedParking,
+      ...enrichedParking,
+      id: parkingId,
+    };
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[merge google place result into parking option]', {
+        parkingId,
+        selectedParking,
+        enrichedParking,
+        mergedParking,
+      });
+    }
+
+    setGoogleEnrichedParking((prev) => ({
+      ...prev,
+      [parkingId]: {
+        ...(prev[parkingId] || selectedParking),
+        ...enrichedParking,
+        id: parkingId,
+      },
+    }));
+
+    setRankedOptions((prev) =>
+      prev.map((item) => {
+        if (item.type !== 'parking') return item;
+
+        const option = item.option as ParkingOption;
+        if (option.id !== parkingId) return item;
+
+        return {
+          ...item,
+          option: {
+            ...option,
+            ...enrichedParking,
+            id: parkingId,
+          },
+        };
+      })
+    );
+
+    setRecommendation((prev) =>
+      prev
+        ? {
+          ...prev,
+          parking: prev.parking.map((option) =>
+            option.id === parkingId
+              ? {
+                ...option,
+                ...enrichedParking,
+                id: parkingId,
+              }
+              : option
+          ),
+        }
+        : prev
+    );
+
+    setReviewsParking((current) =>
+      current?.id === parkingId
+        ? {
+          ...current,
+          ...mergedParking,
+        }
+        : current
+    );
+  }
 
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
+    const airportCode = getTripAirportCode(tripData);
 
     const parkingOptions = rankedOptions
       .filter((item) => item.type === "parking")
       .map((item) => item.option as ParkingOption)
-      .filter((parking) => parking.id && !googleEnrichedParking[parking.id])
+      .filter((parking) => {
+        if (!parking.id) return false;
+        if (!shouldAttemptGooglePlaceMatch({
+          lotName: parking.name,
+          lotAddress: parking.address || parking.normalizedAddress || parking.routeDestination || null,
+          provider: parking.bookingProvider || null,
+          source: parking.sourceName || null,
+          airportCode,
+        })) {
+          return false;
+        }
+
+        const key = parkingGoogleMatchKey(parking, airportCode);
+        return !googleEnrichedParking[parking.id] && !googlePlaceAttemptedKeysRef.current.has(key);
+      })
       .slice(0, 12);
 
     if (parkingOptions.length === 0) return;
@@ -2184,7 +2290,21 @@ export default function ResultsContent() {
     const enrichParking = async () => {
       const enrichedPairs = await Promise.all(
         parkingOptions.slice(0, 8).map(async (parking) => {
-          const enriched = await attachGooglePlaceToParking(parking, tripData);
+          const key = parkingGoogleMatchKey(parking, airportCode);
+          googlePlaceAttemptedKeysRef.current.add(key);
+
+          const inflight = googlePlaceInFlightKeysRef.current.get(key);
+          if (inflight) {
+            const enriched = await inflight;
+            googlePlaceInFlightKeysRef.current.delete(key);
+            return [parking.id, enriched] as const;
+          }
+
+          const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
+          googlePlaceInFlightKeysRef.current.set(key, promise);
+
+          const enriched = await promise;
+          googlePlaceInFlightKeysRef.current.delete(key);
           return [parking.id, enriched] as const;
         })
       );
@@ -2199,6 +2319,11 @@ export default function ResultsContent() {
         });
 
         return next;
+      });
+
+      enrichedPairs.forEach(([id, enriched]) => {
+        const key = parkingGoogleMatchKey(enriched, airportCode);
+        googlePlaceAttemptedKeysRef.current.add(key);
       });
     };
 
@@ -3130,21 +3255,34 @@ export default function ResultsContent() {
   const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
 
   async function handleShowReviews(parking: ParkingOption) {
+    const airportCode = getTripAirportCode(tripData);
+    const key = parkingGoogleMatchKey(parking, airportCode);
     const cached = googleEnrichedParking[parking.id];
+    const selectedParking = cached || parking;
 
     if (cached?.googleReviews?.length) {
       setReviewsParking(cached);
       return;
     }
 
-    const enriched = await attachGooglePlaceToParking(cached || parking, tripData);
+    setReviewsParking(selectedParking);
+    googlePlaceAttemptedKeysRef.current.add(key);
 
-    setGoogleEnrichedParking((prev) => ({
-      ...prev,
-      [parking.id]: enriched,
-    }));
+    let promise = googlePlaceInFlightKeysRef.current.get(key);
+    if (!promise) {
+      promise = attachGooglePlaceToParking(selectedParking, tripData, airportCode, {
+        force: true,
+      });
+      googlePlaceInFlightKeysRef.current.set(key, promise);
+    }
 
-    setReviewsParking(enriched);
+    try {
+      const enriched = await promise;
+      mergeGooglePlaceResultIntoParking(parking, enriched);
+      setReviewsParking(enriched);
+    } finally {
+      googlePlaceInFlightKeysRef.current.delete(key);
+    }
   }
 
   return (
@@ -3842,6 +3980,12 @@ export default function ResultsContent() {
             parking={reviewsParking}
             open={!!reviewsParking}
             onClose={() => setReviewsParking(null)}
+            airportCode={getTripAirportCode(tripData)}
+            onResolvedParking={(parking) => {
+              if (reviewsParking) {
+                mergeGooglePlaceResultIntoParking(reviewsParking, parking);
+              }
+            }}
           />
         </div>
 

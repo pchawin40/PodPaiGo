@@ -75,13 +75,14 @@ export function inventoryLotToParkingOption(args: {
         trustStatus: 'estimated',
 
         sourceName: lot.source,
-        sourceLink: official
+    sourceLink: official
             ? airport?.officialParkingUrl ?? lot.sourceUrl ?? undefined
             : lot.sourceUrl ?? undefined,
         mapLink: googleMapsDirectionsUrl(origin, destination),
 
         routeOrigin: origin,
         routeDestination: destination,
+        address: lot.address ?? destination,
         lastUpdated: lot.updatedAt,
 
         parkingBufferMinutes: official ? 8 : 15,

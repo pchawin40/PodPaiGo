@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ParkingGoogleReview, ParkingOption } from "../../lib/types";
+import { attachGooglePlaceToParking } from "../../lib/parking/googlePlaceMatch";
 
 type SortMode = "most_relevant" | "newest" | "highest" | "lowest";
 
@@ -20,16 +21,24 @@ export default function ParkingReviewsModal({
     parking,
     open,
     onClose,
+    airportCode,
+    onResolvedParking,
 }: {
     parking: ParkingOption | null;
     open: boolean;
     onClose: () => void;
+    airportCode?: string | null;
+    onResolvedParking?: (parking: ParkingOption) => void;
 }) {
     const [sort, setSort] = useState<SortMode>("most_relevant");
+    const [resolvedParking, setResolvedParking] = useState<ParkingOption | null>(parking);
+    const [loadingGoogleData, setLoadingGoogleData] = useState(false);
+    const modalFetchAttemptedKeysRef = useRef(new Set<string>());
+    const onResolvedParkingRef = useRef(onResolvedParking);
 
     const reviews = useMemo(
-        () => (parking?.googleReviews ?? []) as ParkingGoogleReview[],
-        [parking?.googleReviews]
+        () => (resolvedParking?.googleReviews ?? []) as ParkingGoogleReview[],
+        [resolvedParking?.googleReviews]
     );
 
     const sortedReviews = useMemo(() => {
@@ -56,7 +65,72 @@ export default function ParkingReviewsModal({
         return copy;
     }, [reviews, sort]);
 
-    if (!open || !parking) return null;
+    useEffect(() => {
+        setResolvedParking(parking);
+    }, [parking]);
+
+    useEffect(() => {
+        onResolvedParkingRef.current = onResolvedParking;
+    }, [onResolvedParking]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadGoogleData() {
+            if (!open || !parking) return;
+
+            if (process.env.NODE_ENV !== "production") {
+                console.log("[ParkingReviewsModal selected option]", parking);
+            }
+
+            const hasCompleteGoogleData =
+                !!parking.googlePlaceId &&
+                typeof parking.reviewScore === "number" &&
+                typeof parking.reviewCount === "number" &&
+                Array.isArray(parking.googleReviews) &&
+                parking.googleReviews.length > 0;
+
+            if (hasCompleteGoogleData) {
+                return;
+            }
+
+            const attemptKey = [
+                airportCode || "UNKNOWN",
+                parking.providerLotId || parking.id,
+                parking.name,
+                parking.address || parking.normalizedAddress || parking.routeDestination || "",
+            ].join("|");
+
+            if (modalFetchAttemptedKeysRef.current.has(attemptKey)) {
+                return;
+            }
+
+            modalFetchAttemptedKeysRef.current.add(attemptKey);
+            setLoadingGoogleData(true);
+
+            const enriched = await attachGooglePlaceToParking(parking, null, airportCode ?? null, {
+                force: true,
+            });
+
+            if (process.env.NODE_ENV !== "production") {
+                console.log("[ParkingReviewsModal fetch response]", enriched);
+            }
+
+            if (!cancelled) {
+                setResolvedParking(enriched);
+                onResolvedParkingRef.current?.(enriched);
+                setLoadingGoogleData(false);
+            }
+        }
+
+        void loadGoogleData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [airportCode, open, parking]);
+
+    if (!open || !resolvedParking) return null;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4">
@@ -65,29 +139,29 @@ export default function ParkingReviewsModal({
                     <div className="flex items-start justify-between gap-4">
                         <div>
                             <h2 className="text-2xl font-semibold text-zinc-900">
-                                {parking.name}
+                                {resolvedParking.name}
                             </h2>
 
-                            {parking.normalizedAddress && (
+                            {resolvedParking.normalizedAddress && (
                                 <p className="mt-1 text-sm text-zinc-500">
-                                    {parking.normalizedAddress}
+                                    {resolvedParking.normalizedAddress}
                                 </p>
                             )}
 
                             <div className="mt-4 flex flex-wrap items-center gap-2">
                                 <span className="text-3xl font-medium text-zinc-700">
-                                    {typeof parking.reviewScore === "number"
-                                        ? parking.reviewScore.toFixed(1)
+                                    {typeof resolvedParking.reviewScore === "number"
+                                        ? resolvedParking.reviewScore.toFixed(1)
                                         : "—"}
                                 </span>
 
                                 <span className="text-xl text-amber-500">
-                                    {stars(parking.reviewScore)}
+                                    {stars(resolvedParking.reviewScore)}
                                 </span>
 
-                                {typeof parking.reviewCount === "number" && (
+                                {typeof resolvedParking.reviewCount === "number" && (
                                     <span className="text-sm text-zinc-600">
-                                        {parking.reviewCount.toLocaleString()} reviews
+                                        {resolvedParking.reviewCount.toLocaleString()} reviews
                                     </span>
                                 )}
                             </div>
@@ -127,19 +201,25 @@ export default function ParkingReviewsModal({
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-6 py-5">
-                    {!parking.googlePlaceId && (
+                    {loadingGoogleData && (
+                        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-900">
+                            Loading Google reviews...
+                        </div>
+                    )}
+
+                    {!loadingGoogleData && !resolvedParking.googlePlaceId && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
                             Google listing is not connected for this lot yet.
                         </div>
                     )}
 
-                    {parking.googlePlaceId && sortedReviews.length === 0 && (
+                    {!loadingGoogleData && resolvedParking.googlePlaceId && sortedReviews.length === 0 && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
                             Google rating is connected, but Google did not return review snippets for this listing. Use the button above to open the full Google review feed.
                         </div>
                     )}
 
-                    {sortedReviews.length > 0 && (
+                    {!loadingGoogleData && sortedReviews.length > 0 && (
                         <div className="space-y-6">
                             {sortedReviews.map((review) => (
                                 <article key={review.id} className="border-b border-zinc-200 pb-6">
@@ -170,9 +250,9 @@ export default function ParkingReviewsModal({
                                                 </span>
                                             </div>
 
-                                            {parking.googlePlaceId && (
+                                            {resolvedParking.googlePlaceId && (
                                                 <a
-                                                    href={googleReviewsUrl(parking.googlePlaceId) ?? "#"}
+                                                    href={googleReviewsUrl(resolvedParking.googlePlaceId) ?? "#"}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="mt-4 inline-flex rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"

@@ -374,6 +374,7 @@ async function getGoogleParkingPlaces(args: {
           sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           googlePlaceId: place.id,
+          address: place.formattedAddress,
           lat: place.location?.latitude,
           lng: place.location?.longitude,
           normalizedAddress: place.formattedAddress,

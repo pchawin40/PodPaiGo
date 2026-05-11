@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  buildParkingGoogleCacheKey,
   parkingGooglePlaceToOptionUpdate,
   resolveParkingGooglePlace,
 } from '../../../lib/parking/googlePlacesCache';
+import {
+  buildParkingGoogleCacheKey,
+  shouldAttemptGooglePlaceMatch,
+} from '../../../lib/parking/googlePlaceMatchUtils';
 
 async function readBody(req: NextRequest): Promise<Record<string, unknown>> {
   try {
@@ -30,15 +33,48 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleRequest(input: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[google-place-match server input]', input);
+  }
+
   const name = toString(input.name);
   const airport = toString(input.airport) || toString(input.airportCode);
   const address = toString(input.address);
   const googlePlaceId = toString(input.googlePlaceId);
   const airportContext = toString(input.airportContext) || toString(input.destination);
+  const provider = toString(input.provider);
+  const source = toString(input.source);
   const parkingLotId = input.parkingLotId ?? input.providerLotId ?? input.parking_lot_id;
 
   if (!name) {
     return NextResponse.json({ place: null, source: 'missing-name' });
+  }
+
+  if (
+    !shouldAttemptGooglePlaceMatch({
+      lotName: name,
+      lotAddress: address,
+      provider,
+      source,
+      airportCode: airport,
+    })
+  ) {
+    const result = {
+      place: null,
+      cacheKey: buildParkingGoogleCacheKey({
+        airportCode: airport || null,
+        parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+        lotName: name,
+        lotAddress: address,
+      }),
+      source: 'skipped-non-parking',
+    };
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[google-place-match result]', result);
+    }
+
+    return NextResponse.json(result);
   }
 
   const place = await resolveParkingGooglePlace({
@@ -48,35 +84,42 @@ async function handleRequest(input: Record<string, unknown>) {
     lotAddress: address,
     googlePlaceId,
     airportContext,
+    provider,
+    source,
   });
 
-  if (!place) {
-    return NextResponse.json({
-      place: null,
-      cacheKey: buildParkingGoogleCacheKey({
-        airportCode: airport || null,
-        parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
-        lotName: name,
-        lotAddress: address,
-      }),
-    });
+  const result = place
+    ? {
+        place: {
+          googlePlaceId: place.googlePlaceId,
+          name: place.googlePlaceName || place.lotName,
+          rating: place.rating,
+          reviewCount: place.reviewCount,
+          address: place.googleFormattedAddress || place.lotAddress,
+          reviews: place.reviews,
+          fetchedAt: place.fetchedAt,
+          expiresAt: place.expiresAt,
+          source: place.source,
+          matchConfidence: place.matchConfidence,
+          ...parkingGooglePlaceToOptionUpdate(place),
+        },
+        cacheKey: place.cacheKey,
+        source: place.source,
+      }
+    : {
+        place: null,
+        cacheKey: buildParkingGoogleCacheKey({
+          airportCode: airport || null,
+          parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+          lotName: name,
+          lotAddress: address,
+        }),
+        source: 'unavailable',
+      };
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[google-place-match result]', result);
   }
 
-  return NextResponse.json({
-    place: {
-      googlePlaceId: place.googlePlaceId,
-      name: place.googlePlaceName || place.lotName,
-      rating: place.rating,
-      reviewCount: place.reviewCount,
-      address: place.googleFormattedAddress || place.lotAddress,
-      reviews: place.reviews,
-      fetchedAt: place.fetchedAt,
-      expiresAt: place.expiresAt,
-      source: place.source,
-      matchConfidence: place.matchConfidence,
-      ...parkingGooglePlaceToOptionUpdate(place),
-    },
-    cacheKey: place.cacheKey,
-    source: place.source,
-  });
+  return NextResponse.json(result);
 }

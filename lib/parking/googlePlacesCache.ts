@@ -1,6 +1,11 @@
 import { db } from '../db/client';
 import { getAirportById } from '../airports/catalog';
 import { ParkingOption, ParkingGooglePlaceSnapshot, ParkingGoogleReview } from '../types';
+import {
+  buildParkingGoogleCacheKey,
+  normalizeParkingLotName,
+  shouldAttemptGooglePlaceMatch,
+} from './googlePlaceMatchUtils';
 
 type GoogleLegacyReview = {
   author_name?: string;
@@ -31,6 +36,36 @@ type GoogleLegacyPlaceDetailsResult = {
   reviews?: GoogleLegacyReview[];
 };
 
+type GoogleNewReview = {
+  name?: string;
+  authorAttribution?: {
+    displayName?: string;
+    photoUri?: string;
+  };
+  rating?: number;
+  relativePublishTimeDescription?: string;
+  text?: {
+    text?: string;
+  };
+  originalText?: {
+    text?: string;
+  };
+  publishTime?: string;
+};
+
+type GoogleNewPlace = {
+  id?: string;
+  displayName?: {
+    text?: string;
+  };
+  formattedAddress?: string;
+  rating?: number;
+  userRatingCount?: number;
+  googleMapsUri?: string;
+  types?: string[];
+  reviews?: GoogleNewReview[];
+};
+
 export type ParkingGooglePlaceCacheRecord = ParkingGooglePlaceSnapshot & {
   cacheKey: string;
   matchConfidence?: 'strong' | 'weak' | 'direct';
@@ -45,26 +80,18 @@ function cleanText(value: string | null | undefined): string {
     .trim();
 }
 
-export function normalizeParkingLotName(name: string): string {
-  return cleanText(name)
-    .replace(/\bself covered\b/g, ' ')
-    .replace(/\bself uncovered\b/g, ' ')
-    .replace(/\bcovered\b/g, ' ')
-    .replace(/\buncovered\b/g, ' ')
-    .replace(/\bparking\b/g, ' ')
-    .replace(/\blot\b/g, ' ')
-    .replace(/\bgarage\b/g, ' ')
-    .replace(/\bterminal\b/g, ' ')
-    .replace(/\bairport\b/g, ' ')
-    .replace(/\bsea tac\b/g, ' ')
-    .replace(/\bseatac\b/g, ' ')
-    .replace(/\bseattle\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function normalizeAddress(value?: string | null): string {
   return cleanText(value);
+}
+
+function simplifyParkingProductName(name: string): string {
+  return String(name || '')
+    .replace(/\s+-\s+self\s+(?:un)?covered.*$/i, '')
+    .replace(/\s+-\s*covered.*$/i, '')
+    .replace(/\s+-\s*uncovered.*$/i, '')
+    .replace(/\s+lot$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildParkingSearchQuery(args: {
@@ -90,8 +117,44 @@ function buildParkingSearchQuery(args: {
   return [name || args.lotName, context].filter(Boolean).join(' ').trim();
 }
 
+function buildParkingSearchQueries(args: {
+  lotName: string;
+  lotAddress?: string | null;
+  airportCode?: string | null;
+  airportContext?: string | null;
+}): string[] {
+  const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
+  const simplifiedName = simplifyParkingProductName(args.lotName);
+  const context = args.airportContext || airport?.label || airport?.destinationName || args.airportCode || null;
+  const queries = [
+    [simplifiedName, args.lotAddress].filter(Boolean).join(' '),
+    [simplifiedName, context].filter(Boolean).join(' '),
+    [args.lotName, args.lotAddress].filter(Boolean).join(' '),
+    [args.lotName, context, 'parking'].filter(Boolean).join(' '),
+    buildParkingSearchQuery(args),
+  ];
+
+  return Array.from(new Set(queries.map((query) => query.trim()).filter(Boolean)));
+}
+
 function getServerApiKey(): string | null {
   return process.env.GOOGLE_MAPS_SERVER_API_KEY || null;
+}
+
+async function logGooglePlacesError(scope: string, res: Response | null): Promise<void> {
+  if (process.env.NODE_ENV === 'production' || !res || res.ok) return;
+
+  let body = '';
+  try {
+    body = await res.clone().text();
+  } catch {
+    body = '';
+  }
+
+  console.warn(`[google-place-match ${scope} error]`, {
+    status: res.status,
+    body: body.slice(0, 800),
+  });
 }
 
 function toReview(review: GoogleLegacyReview, index: number, placeId: string): ParkingGoogleReview {
@@ -106,6 +169,47 @@ function toReview(review: GoogleLegacyReview, index: number, placeId: string): P
     profilePhotoUrl: review.profile_photo_url || undefined,
     source: 'google-places',
   };
+}
+
+function toReviewFromNew(review: GoogleNewReview, index: number, placeId: string): ParkingGoogleReview {
+  return {
+    id: review.name || `${placeId}-${review.publishTime ?? index}`,
+    authorName: review.authorAttribution?.displayName || undefined,
+    displayName: review.authorAttribution?.displayName || undefined,
+    rating: typeof review.rating === 'number' ? review.rating : undefined,
+    relativeTimeDescription: review.relativePublishTimeDescription || undefined,
+    publishedAt: review.publishTime || undefined,
+    text: review.text?.text || review.originalText?.text || undefined,
+    profilePhotoUrl: review.authorAttribution?.photoUri || undefined,
+    source: 'google-places',
+  };
+}
+
+function newPlaceToLegacy(place: GoogleNewPlace | null | undefined): GoogleLegacyPlaceDetailsResult | null {
+  if (!place?.id) return null;
+
+  return {
+    place_id: place.id,
+    name: place.displayName?.text,
+    formatted_address: place.formattedAddress,
+    rating: place.rating,
+    user_ratings_total: place.userRatingCount,
+    url: place.googleMapsUri,
+    reviews: (place.reviews || []).map((review, index) => ({
+      author_name: review.authorAttribution?.displayName,
+      rating: review.rating,
+      relative_time_description: review.relativePublishTimeDescription,
+      text: review.text?.text || review.originalText?.text,
+      profile_photo_url: review.authorAttribution?.photoUri,
+      time: review.publishTime ? Math.floor(new Date(review.publishTime).getTime() / 1000) : index,
+    })),
+  };
+}
+
+function numericParkingLotId(value: string | number | null | undefined): number | undefined {
+  if (value == null) return undefined;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 function mapRowToRecord(row: Record<string, unknown>): ParkingGooglePlaceCacheRecord {
@@ -298,6 +402,21 @@ function scoreSearchResult(result: GoogleLegacyPlaceSearchResult, args: {
 
   if (!result.place_id) return -Infinity;
 
+  const lowerName = String(result.name || '').toLowerCase();
+  const officialAirportParking =
+    cleanText(args.lotName).includes('official') ||
+    cleanText(args.lotName).includes('garage') ||
+    cleanText(args.lotName).includes('terminal parking');
+
+  if (
+    lowerName.includes('international airport') &&
+    !lowerName.includes('parking') &&
+    !lowerName.includes('garage') &&
+    !officialAirportParking
+  ) {
+    return -Infinity;
+  }
+
   if (candidateName && searchName) {
     if (candidateName === searchName) score += 60;
     else if (candidateName.includes(searchName) || searchName.includes(candidateName)) score += 35;
@@ -318,13 +437,12 @@ function scoreSearchResult(result: GoogleLegacyPlaceSearchResult, args: {
     score += 5;
   }
 
-  const lowerName = String(result.name || '').toLowerCase();
   if (lowerName.includes('parking') || lowerName.includes('garage')) score += 5;
 
   return score;
 }
 
-async function searchGooglePlace(args: {
+async function searchGooglePlaceNew(args: {
   lotName: string;
   lotAddress?: string | null;
   airportCode?: string | null;
@@ -334,51 +452,171 @@ async function searchGooglePlace(args: {
   if (!apiKey) return null;
 
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
-  const query = buildParkingSearchQuery({
+  const queries = buildParkingSearchQueries(args);
+
+  for (const query of queries) {
+    const body: Record<string, unknown> = {
+      textQuery: query,
+      maxResultCount: 5,
+    };
+
+    if (airport?.geoLocation?.lat && airport?.geoLocation?.lng) {
+      body.locationBias = {
+        circle: {
+          center: {
+            latitude: airport.geoLocation.lat,
+            longitude: airport.geoLocation.lng,
+          },
+          radius: Number(process.env.PARKING_SEARCH_RADIUS_METERS || 50000),
+        },
+      };
+    }
+
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': [
+          'places.id',
+          'places.displayName',
+          'places.formattedAddress',
+          'places.rating',
+          'places.userRatingCount',
+          'places.googleMapsUri',
+          'places.types',
+        ].join(','),
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      await logGooglePlacesError('places-new-search', res);
+      continue;
+    }
+
+    const json = await res.json();
+    const places = Array.isArray(json?.places) ? (json.places as GoogleNewPlace[]) : [];
+    const ranked = places
+      .map((place) => ({
+        result: {
+          place_id: place.id,
+          name: place.displayName?.text,
+          formatted_address: place.formattedAddress,
+          rating: place.rating,
+          user_ratings_total: place.userRatingCount,
+          types: place.types,
+        } satisfies GoogleLegacyPlaceSearchResult,
+        score: scoreSearchResult(
+          {
+            place_id: place.id,
+            name: place.displayName?.text,
+            formatted_address: place.formattedAddress,
+            rating: place.rating,
+            user_ratings_total: place.userRatingCount,
+            types: place.types,
+          },
+          args,
+        ),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (ranked[0] && ranked[0].score >= 10) {
+      return ranked[0].result;
+    }
+  }
+
+  return null;
+}
+
+async function searchGooglePlace(args: {
+  lotName: string;
+  lotAddress?: string | null;
+  airportCode?: string | null;
+  airportContext?: string | null;
+  provider?: string | null;
+  source?: string | null;
+}): Promise<GoogleLegacyPlaceSearchResult | null> {
+  const apiKey = getServerApiKey();
+  if (!apiKey) return null;
+
+  const newApiMatch = await searchGooglePlaceNew(args).catch(() => null);
+  if (newApiMatch) return newApiMatch;
+
+  const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
+  const queries = buildParkingSearchQueries({
     lotName: args.lotName,
     lotAddress: args.lotAddress,
     airportCode: args.airportCode || null,
     airportContext: args.airportContext || airport?.label || airport?.destinationName || null,
   });
 
-  if (!query) return null;
+  for (const query of queries) {
+    const params = new URLSearchParams({
+      query,
+      key: apiKey,
+    });
 
-  const params = new URLSearchParams({
-    query,
-    key: apiKey,
-  });
+    if (airport?.geoLocation?.lat && airport?.geoLocation?.lng) {
+      params.set('location', `${airport.geoLocation.lat},${airport.geoLocation.lng}`);
+      params.set('radius', String(Number(process.env.PARKING_SEARCH_RADIUS_METERS || 50000)));
+    }
 
-  if (airport?.geoLocation?.lat && airport?.geoLocation?.lng) {
-    params.set('location', `${airport.geoLocation.lat},${airport.geoLocation.lng}`);
-    params.set('radius', String(Number(process.env.PARKING_SEARCH_RADIUS_METERS || 50000)));
+    const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`, {
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      await logGooglePlacesError('places-legacy-search', res);
+      continue;
+    }
+
+    const json = await res.json();
+    const results = Array.isArray(json?.results) ? (json.results as GoogleLegacyPlaceSearchResult[]) : [];
+
+    const ranked = results
+      .map((result) => ({ result, score: scoreSearchResult(result, args) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    if (ranked[0] && ranked[0].score >= 10) {
+      return ranked[0].result;
+    }
   }
 
-  const res = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`, {
-    cache: 'no-store',
-  });
-
-  if (!res.ok) return null;
-
-  const json = await res.json();
-  const results = Array.isArray(json?.results) ? (json.results as GoogleLegacyPlaceSearchResult[]) : [];
-
-  if (results.length === 0) return null;
-
-  const ranked = results
-    .map((result) => ({ result, score: scoreSearchResult(result, args) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (!ranked[0] || ranked[0].score < 10) {
-    return null;
-  }
-
-  return ranked[0].result;
+  return null;
 }
 
 async function fetchGooglePlaceDetails(placeId: string): Promise<GoogleLegacyPlaceDetailsResult | null> {
   const apiKey = getServerApiKey();
   if (!apiKey) return null;
+
+  const newRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': [
+        'id',
+        'displayName',
+        'formattedAddress',
+        'rating',
+        'userRatingCount',
+        'googleMapsUri',
+        'reviews',
+      ].join(','),
+    },
+    cache: 'no-store',
+  }).catch(() => null);
+
+  if (newRes?.ok) {
+    const json = (await newRes.json()) as GoogleNewPlace;
+    const mapped = newPlaceToLegacy(json);
+    if (mapped) return mapped;
+  } else {
+    await logGooglePlacesError('places-new-details', newRes);
+  }
 
   const params = new URLSearchParams({
     place_id: placeId,
@@ -388,35 +626,15 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<GoogleLegacyPla
 
   const res = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`, {
     cache: 'no-store',
-  });
+  }).catch(() => null);
 
-  if (!res.ok) return null;
+  if (!res?.ok) {
+    await logGooglePlacesError('places-legacy-details', res);
+    return null;
+  }
 
   const json = await res.json();
   return (json?.result as GoogleLegacyPlaceDetailsResult | undefined) || null;
-}
-
-function buildCacheKey(args: {
-  airportCode?: string | null;
-  parkingLotId?: string | number | null;
-  lotName: string;
-  lotAddress?: string | null;
-}): string {
-  const airportCode = String(args.airportCode || 'UNKNOWN').toUpperCase();
-  const lotIdPart = args.parkingLotId ? `id:${String(args.parkingLotId)}` : '';
-  const namePart = `name:${normalizeParkingLotName(args.lotName) || cleanText(args.lotName)}`;
-  const addressPart = args.lotAddress ? `addr:${normalizeAddress(args.lotAddress)}` : '';
-
-  return [airportCode, lotIdPart || namePart, addressPart].filter(Boolean).join('|');
-}
-
-export function buildParkingGoogleCacheKey(args: {
-  airportCode?: string | null;
-  parkingLotId?: string | number | null;
-  lotName: string;
-  lotAddress?: string | null;
-}): string {
-  return buildCacheKey(args);
 }
 
 export async function resolveParkingGooglePlace(args: {
@@ -426,8 +644,20 @@ export async function resolveParkingGooglePlace(args: {
   lotAddress?: string | null;
   googlePlaceId?: string | null;
   airportContext?: string | null;
+  provider?: string | null;
+  source?: string | null;
 }): Promise<ParkingGooglePlaceCacheRecord | null> {
-  const cacheKey = buildCacheKey(args);
+  if (!shouldAttemptGooglePlaceMatch({
+    lotName: args.lotName,
+    lotAddress: args.lotAddress,
+    provider: args.provider,
+    source: args.source,
+    airportCode: args.airportCode || null,
+  })) {
+    return null;
+  }
+
+  const cacheKey = buildParkingGoogleCacheKey(args);
   const freshCached = await getFreshCachedRecordByKey(cacheKey);
 
   if (freshCached) {
@@ -450,6 +680,8 @@ export async function resolveParkingGooglePlace(args: {
       lotAddress: args.lotAddress,
       airportCode: args.airportCode,
       airportContext: args.airportContext,
+      provider: args.provider,
+      source: args.source,
     }).catch(() => null);
 
     if (!matched?.place_id) {
@@ -487,7 +719,7 @@ export async function resolveParkingGooglePlace(args: {
 
   const record: ParkingGooglePlaceCacheRecord = {
     cacheKey,
-    parkingLotId: args.parkingLotId != null ? Number(args.parkingLotId) : undefined,
+    parkingLotId: numericParkingLotId(args.parkingLotId),
     airportCode: String(args.airportCode || 'UNKNOWN').toUpperCase(),
     lotName: args.lotName,
     normalizedLotName: normalizeParkingLotName(args.lotName),
