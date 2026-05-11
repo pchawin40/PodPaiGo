@@ -4093,7 +4093,7 @@ export default function ResultsContent() {
                       </p>
                     </div>
 
-                    {hiddenParking.length > 0 && (
+                    {!airportRouteUnavailable && hiddenParking.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowMoreParking((v) => !v)}
@@ -4106,71 +4106,41 @@ export default function ResultsContent() {
                     )}
                   </div>
 
-                  {displayedParking.filter((opt) => {
-                    const option = opt.option as AppOption;
-                    return option.type !== 'parking' || !option.routeUnavailable;
-                  }).length > 0 && (
-                      <div className="grid grid-cols-1 gap-4">
-                        {displayedParking
-                          .filter((opt) => {
-                            const option = opt.option as AppOption;
-                            return option.type !== 'parking' || !option.routeUnavailable;
-                          })
-                          .map((opt, idx) => (
-                            <OptionCard
-                              aprLivePrices={aprLivePrices}
-                              aprLiveChecking={aprLiveChecking}
-                              key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                              item={opt}
-                              rank={idx + 1}
-                              tripData={tripData}
-                              intent={intent}
-                              sort={sort}
-                              onShowReviews={handleShowReviews}
-                              googleEnrichedParking={googleEnrichedParking}
-                            />
-                          ))}
+                  {airportRouteUnavailable ? (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
+                      <div className="text-lg font-semibold">
+                        Parking is not available from this origin
                       </div>
-                    )}
 
-                  {displayedParking.filter((opt) => {
-                    const option = opt.option as AppOption;
-                    return option.type === 'parking' && option.routeUnavailable;
-                  }).length > 0 && (
-                      <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                        <h3 className="text-sm font-semibold text-amber-900">
-                          Parking options not reachable from this origin
-                        </h3>
+                      <p className="mt-2 text-sm">
+                        We could not calculate a real route from your origin to the airport area.
+                        Since this trip starts outside the drivable airport region, airport parking
+                        options are not usable for this search.
+                      </p>
 
-                        <p className="mt-1 text-sm text-amber-800">
-                          Your origin appears to be outside the drivable airport area, so these
-                          parking options are not usable for this trip. Try a local origin near
-                          the airport, rideshare, taxi, or a different transportation option.
-                        </p>
-
-                        <div className="mt-4 grid grid-cols-1 gap-4">
-                          {displayedParking
-                            .filter((opt) => {
-                              const option = opt.option as AppOption;
-                              return option.type === 'parking' && option.routeUnavailable;
-                            })
-                            .map((opt, idx) => (
-                              <OptionCard
-                                aprLivePrices={aprLivePrices}
-                                aprLiveChecking={aprLiveChecking}
-                                key={`parking-unreachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                                item={opt}
-                                rank={idx + 1}
-                                tripData={tripData}
-                                intent={intent}
-                                sort={sort}
-                                onShowReviews={handleShowReviews}
-                                googleEnrichedParking={googleEnrichedParking}
-                              />
-                            ))}
-                        </div>
-                      </div>
-                    )}
+                      <p className="mt-2 text-sm">
+                        Try entering a local address near the airport, or choose rideshare, taxi,
+                        transit, or another transportation option instead.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {displayedParking.map((opt, idx) => (
+                        <OptionCard
+                          aprLivePrices={aprLivePrices}
+                          aprLiveChecking={aprLiveChecking}
+                          key={`parking-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                          item={opt}
+                          rank={idx + 1}
+                          tripData={tripData}
+                          intent={intent}
+                          sort={sort}
+                          onShowReviews={handleShowReviews}
+                          googleEnrichedParking={googleEnrichedParking}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
 
