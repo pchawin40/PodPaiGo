@@ -3718,7 +3718,7 @@ export default function ResultsContent() {
                 <div className="rounded-2xl bg-zinc-50 p-4">
                   <div className="text-sm text-zinc-500">
                     {airportRouteUnavailable
-                      ? 'Airport-only recommended arrival by'
+                      ? 'Airport timing only — route unavailable'
                       : 'Recommended inside-airport arrival by'}
                   </div>
 
@@ -4301,35 +4301,37 @@ export default function ResultsContent() {
         </div>
 
         {/* Pricing links */}
-        <div className="mt-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
-          {showRideProviders && (
+        {!airportRouteUnavailable &&
+          <div className="mt-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+            {showRideProviders && (
+              <ProviderDropdownSection
+                title="Ride providers"
+                subtitle="Compare Uber, Lyft, taxi, and live provider links."
+                items={rideProviderItems}
+                defaultOpen={false}
+              />
+            )}
+
             <ProviderDropdownSection
-              title="Ride providers"
-              subtitle="Compare Uber, Lyft, taxi, and live provider links."
-              items={rideProviderItems}
+              title="Transit options"
+              subtitle="Compare route planning, fares, confidence, and links."
+              items={[...(transitOptions), ...extraTransitProviders]}
               defaultOpen={false}
             />
-          )}
 
-          <ProviderDropdownSection
-            title="Transit options"
-            subtitle="Compare route planning, fares, confidence, and links."
-            items={[...(transitOptions), ...extraTransitProviders]}
-            defaultOpen={false}
-          />
-
-          <ParkingReviewsModal
-            parking={reviewsParking}
-            open={!!reviewsParking}
-            onClose={() => setReviewsParking(null)}
-            airportCode={getTripAirportCode(tripData)}
-            onResolvedParking={(parking) => {
-              if (reviewsParking) {
-                mergeGooglePlaceResultIntoParking(reviewsParking, parking);
-              }
-            }}
-          />
-        </div>
+            <ParkingReviewsModal
+              parking={reviewsParking}
+              open={!!reviewsParking}
+              onClose={() => setReviewsParking(null)}
+              airportCode={getTripAirportCode(tripData)}
+              onResolvedParking={(parking) => {
+                if (reviewsParking) {
+                  mergeGooglePlaceResultIntoParking(reviewsParking, parking);
+                }
+              }}
+            />
+          </div>
+        }
 
         <div className="mt-10 flex justify-center">
           <Link

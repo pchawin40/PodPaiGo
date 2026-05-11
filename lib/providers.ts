@@ -69,28 +69,28 @@ function normalizeTrafficRoute(origin: string, destination: string): string {
 }
 
 function extractRouteStateHint(value: string): string | null {
+  const text = ` ${value.toUpperCase()} `;
+
+  const states = [
+    'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC'
+  ];
+
+  for (const state of states) {
+    const pattern = new RegExp(`\\b${state}\\b`);
+    if (pattern.test(text)) return state;
+  }
+
   const lower = value.toLowerCase();
 
-  if (
-    /\bhi\b/.test(lower) ||
-    lower.includes('hawaii') ||
-    lower.includes('honolulu') ||
-    lower.includes('oahu') ||
-    lower.includes('waikiki') ||
-    lower.includes('kuhio')
-  ) {
-    return 'HI';
-  }
-
-  if (
-    /\bwa\b/.test(lower) ||
-    lower.includes('washington') ||
-    lower.includes('seattle') ||
-    lower.includes('seatac') ||
-    lower.includes('sea-tac')
-  ) {
-    return 'WA';
-  }
+  if (lower.includes('washington')) return 'WA';
+  if (lower.includes('hawaii') || lower.includes('honolulu') || lower.includes('oahu')) return 'HI';
+  if (lower.includes('california')) return 'CA';
+  if (lower.includes('new york')) return 'NY';
+  if (lower.includes('oregon')) return 'OR';
+  if (lower.includes('idaho')) return 'ID';
 
   return null;
 }
