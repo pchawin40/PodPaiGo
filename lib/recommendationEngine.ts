@@ -601,6 +601,8 @@ export class RecommendationEngine {
       rideshare: finalRideshare,
       transit: finalTransit,
       tsaEstimate: resolvedTsaEstimate,
+      airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
+      airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,
       weatherImpact,
       leaveByTime,
       tripDuration,

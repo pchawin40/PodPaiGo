@@ -388,6 +388,8 @@ export type Recommendation = {
   rideshare: RideshareOption[];
   transit: TransitOption[];
   tsaEstimate: TsaEstimate;
+  airportRouteUnavailable?: boolean;
+  airportRouteUnavailableReason?: string;
   weatherImpact?: WeatherImpact | null;
   leaveByTime?: string | null;
   tripDuration?: number;

@@ -2831,17 +2831,26 @@ export default function ResultsContent() {
   const bestViableLeaveByTime = useMemo(() => {
     const isFlyingOut = intent === 'flying-out' && tripData?.type === 'one-way-departure';
     if (!isFlyingOut || !tripData) return null;
+    if (recommendation?.airportRouteUnavailable || recommendation?.trafficEstimate?.routeUnavailable) return null;
     if (viableOptions.length === 0) return null;
 
     const first = viableOptions[0];
     const t = computeTimingStatus({ intent, tripData, optionTotalMinutes: first.duration });
     return t.latestSafeLeaveTime || null;
-  }, [intent, tripData, viableOptions]);
+  }, [intent, tripData, viableOptions, recommendation]);
 
   const currentAirportCode = ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
 
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = currentAirport.label;
+  const airportRouteUnavailable = Boolean(
+    recommendation?.airportRouteUnavailable ||
+    recommendation?.trafficEstimate?.routeUnavailable
+  );
+  const airportRouteUnavailableReason =
+    recommendation?.airportRouteUnavailableReason ||
+    recommendation?.trafficEstimate?.routeUnavailableReason ||
+    'We could not calculate a ground route from this origin to the airport.';
 
   const extraRideProviders = useMemo(
     () => [
@@ -3353,6 +3362,9 @@ export default function ResultsContent() {
 
     return [...available, ...unavailable];
   })();
+  const allParkingRoutesUnavailable =
+    parkingDisplayOptions.length > 0 &&
+    parkingDisplayOptions.every((option) => isParkingRouteUnavailable(option));
 
   const cheapestSmartPickOptions =
     sort === 'cheapest'
@@ -3453,7 +3465,9 @@ export default function ResultsContent() {
               </div>
 
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
-                {noViableFlyingOut
+                {airportRouteUnavailable
+                  ? 'Route unavailable from this origin'
+                  : noViableFlyingOut
                   ? 'No reliable option gets you airport-ready on time'
                   : intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime
                     ? `You should leave at ${formatTimeFriendly(bestViableLeaveByTime)}`
@@ -3461,6 +3475,22 @@ export default function ResultsContent() {
                       ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
                       : 'Your best options'}
               </h1>
+
+              {airportRouteUnavailable && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  <div className="font-semibold">
+                    We could not calculate a ground route from {tripData.origin} to {displayDestination}.
+                  </div>
+                  <div className="mt-1">
+                    Please enter a local starting point near the airport, or choose another transportation option.
+                  </div>
+                  {airportRouteUnavailableReason && (
+                    <div className="mt-2 text-xs text-amber-800">
+                      {airportRouteUnavailableReason}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {noViableFlyingOut && bestTooLateSummary?.bestLatestSafeLeave && bestTooLateSummary?.bestArrival && (
                 <div className="mt-2 text-sm text-zinc-600">
@@ -3483,7 +3513,11 @@ export default function ResultsContent() {
                 )}
 
               <p className="mt-2 text-sm text-zinc-500">
-                Live traffic + airport timing + parking pricing analyzed
+                {airportRouteUnavailable
+                  ? 'Airport readiness and TSA timing shown only; ground route timing is unavailable.'
+                  : recommendation.trafficEstimate?.trustStatus === 'live'
+                    ? 'Live traffic + airport timing + parking pricing analyzed'
+                    : 'Estimated route timing + airport timing + parking pricing analyzed'}
               </p>
 
               {aprLiveChecking && parkingPricesChecking && (
@@ -3583,7 +3617,9 @@ export default function ResultsContent() {
               {heroAirportTiming && (
                 <div className="rounded-2xl bg-zinc-50 p-4">
                   <div className="text-sm text-zinc-500">
-                    Recommended inside-airport arrival by
+                    {airportRouteUnavailable
+                      ? 'Airport-only recommended arrival by'
+                      : 'Recommended inside-airport arrival by'}
                   </div>
 
                   <div className="mt-1 text-lg font-bold text-zinc-950">
@@ -3648,10 +3684,16 @@ export default function ResultsContent() {
           <div className="rounded-xl bg-zinc-50 p-4">
             <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
             <div className="mt-1 text-sm font-semibold text-zinc-900">
-              {recommendation.trafficEstimate ? formatMinutes(recommendation.trafficEstimate.duration) : '—'}
+              {airportRouteUnavailable
+                ? 'Route unavailable'
+                : recommendation.trafficEstimate
+                  ? formatMinutes(recommendation.trafficEstimate.duration)
+                  : '—'}
             </div>
             <div className="mt-1 text-xs text-zinc-600">
-              {recommendation.trafficEstimate ? (
+              {airportRouteUnavailable ? (
+                'No valid ground route returned for this origin and airport.'
+              ) : recommendation.trafficEstimate ? (
                 recommendation.trafficEstimate.trustStatus === 'live' ? (
                   <>
                     <span>Live traffic data · Updated just now</span>
@@ -3776,8 +3818,18 @@ export default function ResultsContent() {
           showParkingProviders && parkingDisplayOptions.length > 0 && (
             <div className="mt-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-bold">Parking options</h2>
+                <h2 className="text-xl font-bold">
+                  {allParkingRoutesUnavailable
+                    ? `Parking options near ${currentAirport.id}`
+                    : 'Parking options'}
+                </h2>
               </div>
+
+              {allParkingRoutesUnavailable && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                  Parking lots near {currentAirport.id} are shown for reference, but route timing is unavailable from your current origin.
+                </div>
+              )}
 
               {smartPickParkingOptions.length > 0 && (
                 <ParkingSmartPick
