@@ -55,6 +55,8 @@ function getTrustPenalty(trustStatus: TrustStatus): number {
 function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOption | TransitJourney, type: 'parking' | 'rideshare' | 'transit'): number {
   if (type === 'parking') {
     const parkingOption = option as ParkingOption;
+    if (parkingOption.routeUnavailable) return -100;
+
     const totalMinutes = getParkingTotalMinutes(parkingOption);
     return totalMinutes <= 10 ? 18 : totalMinutes <= 20 ? 10 : 4;
   }
@@ -111,7 +113,9 @@ function getStressScore(
   const directnessBoost = getDirectnessBoost(option, type);
   const availability = option.availability || 0;
   const duration = type === 'parking'
-    ? getParkingTotalMinutes(option as ParkingOption)
+    ? (option as ParkingOption).routeUnavailable
+      ? 999
+      : getParkingTotalMinutes(option as ParkingOption)
     : type === 'rideshare'
       ? (option as RideshareOption).duration
       : (option as TransitJourney).totalDuration;
@@ -281,6 +285,22 @@ export function rankRecommendations(
   if (useParking) {
     const parkingWaitPenalty = (tsaEstimate?.waitTime ?? 25) * 0.5;
     parkingOptions.forEach(parking => {
+      if (parking.routeUnavailable) {
+        recommendations.push({
+          type: 'parking',
+          option: parking,
+          score: 0,
+          stressScore: 0,
+          cost: 999999,
+          duration: 0,
+          reasons: [
+            parking.routeUnavailableReason ||
+            'Route unavailable from this origin to this parking lot.',
+          ],
+        });
+        return;
+      }
+
       const cost = parking.type === 'official'
         ? calculateOfficialParkingCost(parking, parkingDuration)
         : calculateOffAirportParkingCost(parking, parkingDuration);

@@ -152,10 +152,6 @@ async function logGooglePlacesError(scope: string, res: Response | null): Promis
     body = '';
   }
 
-  console.warn(`[google-place-match ${scope} error]`, {
-    status: res.status,
-    body: body.slice(0, 800),
-  });
 }
 
 function toReview(review: GoogleLegacyReview, index: number, placeId: string): ParkingGoogleReview {

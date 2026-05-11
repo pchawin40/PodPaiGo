@@ -47,20 +47,6 @@ const PARKING_MARKETPLACES: ParkingMarketplace[] = [
     sourceName: 'SpotHero',
     url: 'https://spothero.com/airport-parking/',
   },
-  {
-    id: 'way',
-    name: 'Way.com',
-    trustStatus: 'estimated',
-    sourceName: 'Way.com',
-    url: 'https://www.way.com/parking',
-  },
-  {
-    id: 'parkwhiz',
-    name: 'ParkWhiz',
-    trustStatus: 'estimated',
-    sourceName: 'ParkWhiz',
-    url: 'https://www.parkwhiz.com/airport-parking/',
-  },
 ];
 
 function withAvailabilityScore(option: ParkingOption): ParkingOption {
@@ -564,11 +550,11 @@ export async function getLiveParkingOptions(args: {
     source: 'airportparkingreservations' as const,
   }));
 
-  debugLog('[parkingAggregator aprLotsRaw]', aprLotsRaw.map((lot) => ({
-    name: lot.lotName,
-    price: lot.price,
-    rawSnippet: lot.rawSnippet,
-  })));
+  // debugLog('[parkingAggregator aprLotsRaw]', aprLotsRaw.map((lot) => ({
+  //   name: lot.lotName,
+  //   price: lot.price,
+  //   rawSnippet: lot.rawSnippet,
+  // })));
 
   const aprSeedLots = aprLotsRaw;
 

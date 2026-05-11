@@ -6,6 +6,14 @@ export function parkingTimeBreakdown(option: ParkingOption): {
   totalMinutes: number;
   parts: Array<{ label: string; minutes: number }>;
 } {
+  if (option.routeUnavailable) {
+    return {
+      label: 'Route unavailable',
+      totalMinutes: 0,
+      parts: [],
+    };
+  }
+
   const drive = typeof option.distance === 'number' ? option.distance : 0;
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
   const shuttleWait =
@@ -70,16 +78,18 @@ function looksLikeAirportDestination(value: string): boolean {
 }
 
 export function parkingLotDestination(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
   airportDestination?: string | null
 ): string {
   const routeDestination = String(option.routeDestination || '').trim();
+  const address = String(option.address || '').trim();
   const normalizedAddress = String(option.normalizedAddress || '').trim();
-  const name = String(option.name || '').trim();
 
   if (typeof option.lat === 'number' && typeof option.lng === 'number') {
     return `${option.lat},${option.lng}`;
   }
+
+  if (address) return address;
 
   if (normalizedAddress) return normalizedAddress;
 
@@ -87,13 +97,11 @@ export function parkingLotDestination(
     return routeDestination;
   }
 
-  if (name) return name;
-
   return airportDestination || '';
 }
 
 export function parkingRouteLinks(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
   tripData: Pick<TripData, 'origin' | 'destination'> | null
 ): {
   routeToParkingUrl: string | null;
@@ -200,19 +208,11 @@ export function routeUrlForOption(
 }
 
 export function googleMapsParkingRouteLink(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress'>,
-  origin: string | null
+  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
+  origin: string | null,
+  airportDestination?: string | null
 ): string | null {
-  const hasCoords =
-    typeof option.lat === 'number' &&
-    typeof option.lng === 'number';
-
-  const parkingLot =
-    hasCoords
-      ? `${option.lat},${option.lng}`
-      : option.normalizedAddress ||
-      option.routeDestination ||
-      option.name;
+  const parkingLot = parkingLotDestination(option, airportDestination);
 
   if (!parkingLot) return null;
 

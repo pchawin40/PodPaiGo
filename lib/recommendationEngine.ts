@@ -143,9 +143,44 @@ function buildTripDateTime(tripData: TripData): string {
   return `${tripData.airportTripDate}T${tripData.airportTripTime}`;
 }
 
-function originLooksLikeMonroe(origin: string): boolean {
-  const lower = (origin || '').toLowerCase();
-  return lower.includes('monroe') || lower.includes('98272');
+function localDateTimeWithMinuteOffset(
+  date: string,
+  time: string,
+  offsetMinutes: number
+): string | null {
+  const parsed = new Date(`${date}T${time || '00:00'}`);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  parsed.setMinutes(parsed.getMinutes() + offsetMinutes);
+
+  const yyyy = parsed.getFullYear();
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+  const dd = String(parsed.getDate()).padStart(2, '0');
+  const hh = String(parsed.getHours()).padStart(2, '0');
+  const min = String(parsed.getMinutes()).padStart(2, '0');
+
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function plannedAirportArrivalDateTime(tripData: TripData): string | undefined {
+  if (tripData.type !== 'one-way-departure') return undefined;
+
+  if (tripData.timeAnchor === 'airport-arrival') {
+    return `${tripData.departureDate}T${tripData.departureTime}`;
+  }
+
+  const readiness = calculateAirportReadinessBuffer({
+    checkingBags: !!tripData.checkingBags,
+    securityOption: tripData.securityOption || 'standard',
+    flightType: tripData.flightType || 'domestic',
+    cabin: tripData.cabin || 'economy',
+  });
+
+  return localDateTimeWithMinuteOffset(
+    tripData.departureDate,
+    tripData.departureTime,
+    -readiness.bufferMinutes
+  ) || undefined;
 }
 
 function originNearLinkStation(origin: string): boolean {
@@ -166,10 +201,6 @@ function originNearLinkStation(origin: string): boolean {
 
 function buildTransitOnlyJourneys(origin: string, destination: string): TransitJourney[] {
   // If we can't produce something plausible without live routing, don't invent it.
-  if (originLooksLikeMonroe(origin)) {
-    return [];
-  }
-
   const allowLightRail = originNearLinkStation(origin);
   if (!allowLightRail) {
     return [];
@@ -250,6 +281,7 @@ export class RecommendationEngine {
     void route;
 
     const transportAvailability = resolveTransportAvailability(tripData);
+    const plannedAirportArrivalAt = plannedAirportArrivalDateTime(tripData);
 
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
     const allowRideshare =
@@ -295,7 +327,8 @@ export class RecommendationEngine {
         tripData.destination,
         tripData.type === 'one-way-departure'
           ? tripData.securityOption || 'standard'
-          : 'standard'
+          : 'standard',
+        plannedAirportArrivalAt
       ),
 
       this.provider.getTrafficEstimate(
@@ -528,7 +561,7 @@ export class RecommendationEngine {
         ? airportReadiness?.bufferMinutes ?? 75
         : 0;
 
-    const leaveByTime = isDepartureLeg(tripData)
+    const leaveByTime = isDepartureLeg(tripData) && !trafficEstimate.routeUnavailable
       ? calculateLeaveByTime(
         tripData,
         resolvedTsaEstimate,
@@ -538,6 +571,10 @@ export class RecommendationEngine {
       : null;
 
     const finalParking = enrichedParking.sort((a, b) => {
+      if (a.routeUnavailable !== b.routeUnavailable) {
+        return a.routeUnavailable ? 1 : -1;
+      }
+
       return (
         (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
         (a.stressScore ?? 50) - (b.stressScore ?? 50) ||

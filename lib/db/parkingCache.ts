@@ -175,7 +175,7 @@ export async function getCachedAprLotsForDateRange(params: {
         [params.airportCode, params.checkInDate ?? null, params.checkOutDate ?? null],
     );
 
-    debugLog('[DB cached APR rows latest by airport]', result.rows);
+    // debugLog('[DB cached APR rows latest by airport]', result.rows);
 
     return result.rows;
 }

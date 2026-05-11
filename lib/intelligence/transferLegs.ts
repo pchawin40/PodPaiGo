@@ -11,6 +11,21 @@ export function buildParkingTransferLegs(
     option: ParkingOption,
     trip: TripData
 ): TransferLeg[] {
+    if (option.routeUnavailable) {
+        return [
+            {
+                type: 'drive',
+                from: trip.origin,
+                to: option.name,
+                durationMinutes: undefined,
+                confidence: 'unavailable',
+                note:
+                    option.routeUnavailableReason ||
+                    'Route unavailable from this origin to this parking lot.',
+            },
+        ];
+    }
+
     const legs: TransferLeg[] = [
         {
             type: 'drive',

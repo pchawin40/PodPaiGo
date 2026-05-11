@@ -24,11 +24,6 @@ export const PROVIDER_LINKS = {
     url: 'https://spothero.com',
     sourceName: 'SpotHero',
   },
-  waycom: {
-    label: 'Way.com',
-    url: 'https://way.com',
-    sourceName: 'Way.com',
-  },
   uberDeepLink: {
     label: 'Uber (open app)',
     url: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',

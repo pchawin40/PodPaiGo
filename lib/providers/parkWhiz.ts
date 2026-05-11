@@ -210,6 +210,9 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
             sourceName: 'ParkWhiz',
             sourceLink: bookingUrl,
             mapLink: googleMapsSearchUrl(mapQuery),
+            address: address || undefined,
+            normalizedAddress: address || undefined,
+            routeDestination: address || undefined,
             lastUpdated: new Date().toISOString(),
 
             parkingBufferMinutes: 15,

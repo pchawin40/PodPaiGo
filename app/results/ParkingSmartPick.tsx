@@ -9,7 +9,7 @@ import {
   getParkingTotalPrice,
   parkingPriceLine,
 } from '../../lib/parking/priceDisplay';
-import { parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
+import { parkingRouteLinks, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherImpact } from '@/lib/weather/types';
 
@@ -39,35 +39,6 @@ function formatCompactMinutes(minutes: number): string {
   return `${mins}m`;
 }
 
-function parkingLotDestination(option: ParkingOption, tripData: TripData | null): string {
-  const routeDestination = String(option.routeDestination || '').trim();
-  const name = String(option.name || '').trim();
-  const airportDestination = String(tripData?.destination || '').trim();
-
-  const lowerRouteDestination = routeDestination.toLowerCase();
-
-  const routeLooksLikeAirport =
-    lowerRouteDestination.includes('terminal') ||
-    lowerRouteDestination.includes('central terminal') ||
-    lowerRouteDestination.includes('international airport') ||
-    lowerRouteDestination.includes('airport terminal');
-
-  // If routeDestination points to the airport/terminal, don't use it as the parking-lot destination.
-  // Use the actual lot name instead.
-  if (name && routeLooksLikeAirport) {
-    return name;
-  }
-
-  // Best case: lot has a real route destination/address.
-  if (routeDestination) return routeDestination;
-
-  // Fallback: use the parking lot name only. Do NOT append SeaTac, because selected airport may be PAE/BLI/GEG/etc.
-  if (name) return name;
-
-  // Last fallback.
-  return airportDestination;
-}
-
 function getWeatherScoreAdjustment(
   option: ParkingOption,
   weatherImpact?: WeatherImpact | null
@@ -86,36 +57,11 @@ function getWeatherScoreAdjustment(
 }
 
 function parkingRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
-  const origin = tripData?.origin;
-  const parkingLot = parkingLotDestination(option, tripData);
-
-  if (!parkingLot) return option.mapLink || null;
-
-  if (!origin) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parkingLot)}`;
-  }
-
-  return (
-    `https://www.google.com/maps/dir/?api=1` +
-    `&origin=${encodeURIComponent(origin)}` +
-    `&destination=${encodeURIComponent(parkingLot)}` +
-    `&travelmode=driving`
-  );
+  return parkingRouteLinks(option, tripData).routeToParkingUrl || option.mapLink || null;
 }
 
 function parkingToAirportRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
-  const parkingLot = parkingLotDestination(option, tripData);
-
-  if (!parkingLot) return null;
-
-  const destination = tripData?.destination || option.routeDestination || 'Airport terminal';
-
-  return (
-    `https://www.google.com/maps/dir/?api=1` +
-    `&origin=${encodeURIComponent(parkingLot)}` +
-    `&destination=${encodeURIComponent(destination)}` +
-    `&travelmode=driving`
-  );
+  return parkingRouteLinks(option, tripData).parkingToAirportUrl;
 }
 
 function weatherParkingBadge(
@@ -200,12 +146,13 @@ export default function ParkingSmartPick({
   const optionsWithAprLivePrice = options.map((option) =>
     withAprLivePrice(option, aprLivePrices)
   ) as ParkingOption[];
+  const routeAvailableOptions = optionsWithAprLivePrice.filter((option) => !option.routeUnavailable);
 
   const selectedOptionWithAprLivePrice = selectedOption
     ? (withAprLivePrice(selectedOption, aprLivePrices) as ParkingOption)
     : undefined;
 
-  const smartPickCandidates = optionsWithAprLivePrice.filter((p) => {
+  const smartPickCandidates = routeAvailableOptions.filter((p) => {
     const id = String(p.id || '').toLowerCase();
     const name = String(p.name || '').toLowerCase();
 
@@ -233,9 +180,11 @@ export default function ParkingSmartPick({
   });
 
   const candidateOptions =
-    smartPickCandidates.length > 0 ? smartPickCandidates : optionsWithAprLivePrice;
+    smartPickCandidates.length > 0 ? smartPickCandidates : routeAvailableOptions;
 
-  const cheapestOfficial = [...optionsWithAprLivePrice]
+  if (candidateOptions.length === 0) return null;
+
+  const cheapestOfficial = [...routeAvailableOptions]
     .filter((p) => p.type === 'official')
     .sort(
       (a, b) =>
@@ -352,8 +301,13 @@ export default function ParkingSmartPick({
     return score(b) - score(a);
   })[0];
 
+  const selectedSmartPick =
+    selectedOptionWithAprLivePrice && !selectedOptionWithAprLivePrice.routeUnavailable
+      ? selectedOptionWithAprLivePrice
+      : null;
+
   const best =
-    selectedOptionWithAprLivePrice ||
+    selectedSmartPick ||
     weatherAwareBest ||
     cheapest ||
     bestValue ||

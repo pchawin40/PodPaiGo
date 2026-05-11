@@ -13,14 +13,22 @@ type AirportSecurityResponse = {
     airportCode: string;
     sourceName: string;
     trustStatus: 'live' | 'estimated' | 'unavailable';
+    plannedAirportArrivalAt?: string;
+    timingBasis?: 'planned-arrival' | 'current-live';
+    note?: string;
     lanes: Record<LaneKey, SecurityLaneStatus>;
 };
 
-function fallbackSecurity(airportCode: string): AirportSecurityResponse {
+function fallbackSecurity(airportCode: string, plannedAirportArrivalAt?: string): AirportSecurityResponse {
     return {
         airportCode,
         sourceName: 'Airport security capability fallback',
         trustStatus: airportCode === 'SEA' ? 'estimated' : 'unavailable',
+        plannedAirportArrivalAt,
+        timingBasis: plannedAirportArrivalAt ? 'planned-arrival' : 'current-live',
+        note: plannedAirportArrivalAt
+            ? 'Future TSA/security timing is estimated for the planned airport arrival.'
+            : 'Airport security availability estimate.',
         lanes: {
             standard: {
                 available: true,
@@ -54,9 +62,10 @@ function fallbackSecurity(airportCode: string): AirportSecurityResponse {
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const airportCode = (searchParams.get('airport') || 'SEA').toUpperCase();
+    const plannedAirportArrivalAt = searchParams.get('plannedAirportArrivalAt') || undefined;
 
     if (airportCode !== 'SEA') {
-        return NextResponse.json(fallbackSecurity(airportCode));
+        return NextResponse.json(fallbackSecurity(airportCode, plannedAirportArrivalAt));
     }
 
     try {
@@ -64,6 +73,7 @@ export async function GET(request: Request) {
             airportCode,
             destination: 'Seattle-Tacoma International Airport',
             securityOption: 'clear-precheck',
+            plannedAirportArrivalAt,
         });
 
         const standardWait = estimate.waitTimes?.standard ?? estimate.waitTime;
@@ -100,6 +110,13 @@ export async function GET(request: Request) {
             airportCode,
             sourceName: estimate.sourceName || 'SEA TSA wait estimate',
             trustStatus: estimate.trustStatus === 'live' ? 'live' : 'estimated',
+            plannedAirportArrivalAt: estimate.plannedAirportArrivalAt,
+            timingBasis: estimate.timingBasis,
+            note: estimate.liveDataIsCurrentOnly
+                ? 'Live TSA is current only; future wait is estimated.'
+                : estimate.timingBasis === 'current-live'
+                    ? 'Live TSA wait is current only.'
+                    : 'Future TSA/security timing is estimated for the planned airport arrival.',
             lanes: {
                 standard: {
                     available: true,
@@ -126,6 +143,6 @@ export async function GET(request: Request) {
 
         return NextResponse.json(response);
     } catch {
-        return NextResponse.json(fallbackSecurity(airportCode));
+        return NextResponse.json(fallbackSecurity(airportCode, plannedAirportArrivalAt));
     }
 }

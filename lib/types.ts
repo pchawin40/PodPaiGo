@@ -123,6 +123,8 @@ export type ParkingOption = {
   availability: number; // percentage
   trustStatus: TrustStatus;
   routeTrustStatus?: TrustStatus;
+  routeUnavailable?: boolean;
+  routeUnavailableReason?: string;
   routeOrigin?: string;
   routeDestination?: string;
   sourceName: string;
@@ -320,6 +322,8 @@ export type TrafficEstimate = {
   staticDuration?: number; // optional static duration in minutes (no-traffic typical)
   congestion: 'low' | 'medium' | 'high';
   trustStatus: TrustStatus;
+  routeUnavailable?: boolean;
+  routeUnavailableReason?: string;
   sourceName: string;
   lastUpdated: string;
   assumptions: string[];
@@ -355,6 +359,9 @@ export type TsaEstimate = {
   waitTime: number;
   waitTimes?: TsaWaitTimes;
   selectedLane?: TsaLane;
+  plannedAirportArrivalAt?: string;
+  timingBasis?: 'planned-arrival' | 'current-live';
+  liveDataIsCurrentOnly?: boolean;
 
   bestCheckpoint?: {
     name: string;

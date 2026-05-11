@@ -65,10 +65,6 @@ export async function attachGooglePlaceToParking(
 
   const body = buildRequestBody(parking, airportCode);
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[google-place-match client payload]', body);
-  }
-
   const promise = (async () => {
     try {
       const res = await fetch('/api/google-place-match', {
@@ -85,10 +81,6 @@ export async function attachGooglePlaceToParking(
       }
 
       const data = await res.json();
-
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[google-place-match API response]', data);
-      }
 
       const place = data.place;
 
@@ -112,16 +104,6 @@ export async function attachGooglePlaceToParking(
         normalizedAddress: place.address ?? parking.normalizedAddress,
         address: place.address ?? parking.address,
       };
-
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[merge google place result into parking option]', {
-          cacheKey,
-          parkingId: parking.id,
-          before: parking,
-          place,
-          after: enriched,
-        });
-      }
 
       matchResultCache.set(cacheKey, enriched);
       return enriched;

@@ -6,6 +6,29 @@ import { ParkingOption } from '../../lib/types';
 import { getAirportById } from '../../lib/airports/catalog';
 import { loadGoogleMaps } from '../../lib/googleMapsLoader';
 
+function trustedParkingSourceLink(lot: ParkingOption): string | null {
+    const provider = `${lot.bookingProvider || ''} ${lot.sourceName || ''}`.toLowerCase();
+    const link = lot.sourceLink || null;
+    const url = String(link || '').toLowerCase();
+
+    if (provider.includes('way.com') || /\bway\b/.test(provider)) return null;
+
+    if (provider.includes('parkwhiz')) {
+        if (!link) return null;
+        if (
+            url === 'https://www.parkwhiz.com' ||
+            url === 'https://parkwhiz.com' ||
+            url.includes('/airport-parking') ||
+            url.includes('/search')
+        ) {
+            return null;
+        }
+        if (lot.trustStatus !== 'live' && lot.trustStatus !== 'verified-source') return null;
+    }
+
+    return link;
+}
+
 async function geocodeParkingLot(
     lot: ParkingOption,
     airportLabel: string
@@ -17,8 +40,9 @@ async function geocodeParkingLot(
     const geocoder = new google.maps.Geocoder();
 
     const query =
-        lot.routeDestination ||
+        lot.address ||
         lot.normalizedAddress ||
+        lot.routeDestination ||
         `${lot.name} near ${airportLabel}`;
 
     const result = await geocoder.geocode({ address: query });
@@ -113,6 +137,7 @@ export default function ParkingLotsMap({
                     lot.transferType === 'shuttle'
                         ? `Shuttle ${lot.shuttleMinutes ?? lot.transferToTerminalMinutes ?? 12} min`
                         : `Walk ${lot.walkingMinutes ?? lot.transferToTerminalMinutes ?? 5} min`;
+                const trustedSourceLink = trustedParkingSourceLink(lot);
 
                 const info = new google.maps.InfoWindow({
                     content: `
@@ -158,9 +183,9 @@ export default function ParkingLotsMap({
                         }
       </div>
 
-      ${lot.sourceLink
+      ${trustedSourceLink
                             ? `<a
-      href="${lot.sourceLink}"
+      href="${trustedSourceLink}"
       target="_blank"
       rel="noopener noreferrer"
       style="

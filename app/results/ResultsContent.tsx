@@ -28,8 +28,8 @@ import {
   getParkingDailyPrice,
 } from '../../lib/parking/priceDisplay';
 import {
+  parkingRouteLinks,
   routeUrlForOption,
-  googleMapsParkingRouteLink,
   hasRealParkingPrice
 } from '../../lib/parking/routeDisplay';
 
@@ -93,6 +93,8 @@ type AppOption = PriceableOption & {
   assumptions?: string[];
   availabilityStatus?: string;
   isAvailable?: boolean;
+  routeUnavailable?: boolean;
+  routeUnavailableReason?: string;
   googlePlaceId?: string;
   reviewScore?: number;
   reviewCount?: number;
@@ -334,6 +336,62 @@ function typeLabel(type: RankedRecommendation['type']): string {
 
 function bestLink(option: PriceableOption): string | null {
   return option.sourceLink || option.mapLink || null;
+}
+
+function parkingProviderSourceText(option: {
+  sourceName?: string;
+  bookingProvider?: string;
+}): string {
+  return `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
+}
+
+function isUnreliableGeneratedParkingBookingLink(
+  option: {
+    sourceName?: string;
+    bookingProvider?: string;
+    name?: string;
+    trustStatus?: TrustStatus;
+    priceDisplay?: PriceDisplay;
+  },
+  link?: string | null
+): boolean {
+  const provider = parkingProviderSourceText(option);
+  const url = String(link || '').toLowerCase();
+
+  if (provider.includes('way.com') || /\bway\b/.test(provider)) {
+    return true;
+  }
+
+  if (!provider.includes('parkwhiz')) {
+    return false;
+  }
+
+  if (!url) return true;
+
+  const isGenericParkWhizUrl =
+    url === 'https://www.parkwhiz.com' ||
+    url === 'https://parkwhiz.com' ||
+    url.includes('/airport-parking') ||
+    url.includes('/search');
+
+  return (
+    isGenericParkWhizUrl ||
+    (option.trustStatus !== 'live' && option.trustStatus !== 'verified-source')
+  );
+}
+
+function trustedParkingBookingLink<T extends {
+  sourceName?: string;
+  bookingProvider?: string;
+  name?: string;
+  trustStatus?: TrustStatus;
+  priceDisplay?: PriceDisplay;
+  sourceLink?: string;
+}>(option: T): string | null {
+  const link = option.sourceLink || null;
+  if (!link) return null;
+
+  return isUnreliableGeneratedParkingBookingLink(option, link) ? null : link;
 }
 
 function pricingKindLabel(kind?: string): string {
@@ -790,24 +848,30 @@ function buildBookingSourceRows(parking: PriceableOption & {
       : (directPricePerDay != null ? 'from-per-day' : 'check-live');
 
   const spotHeroUrl = `https://spothero.com/search?search=${encodeURIComponent(airportSearchName)}`;
-  const wayUrl = `https://www.way.com/parking/search?query=${encodeURIComponent(airportSearchName)}`;
-  const parkWhizUrl = `https://www.parkwhiz.com/search/?destination=${encodeURIComponent(airportSearchName)}`;
+  const directLink =
+    trustedParkingBookingLink(parking) ||
+    (isOfficialAirport
+      ? airport.officialParkingUrl || googleMapsSearchLink(airportSearchName)
+      : null);
 
   // Marketplace estimates (clearly labeled estimated)
   const spotHeroEst = null;
-  const wayEst = null;
 
   const rows: BookingSourceRow[] = [
-    mkRow({
-      provider: directProvider,
-      type: isOfficialAirport ? 'official source' : 'direct booking',
-      trust: 'high',
-      notes: directNotes,
-      link: String(parking?.sourceLink || airport.officialParkingUrl || googleMapsSearchLink(airportSearchName)),
-      ctaLabel: isOfficialAirport ? 'Book official' : 'Check live',
-      pricePerDay: directPricePerDay,
-      priceDisplay: directPriceDisplay,
-    }),
+    ...(directLink
+      ? [
+        mkRow({
+          provider: directProvider,
+          type: isOfficialAirport ? 'official source' : 'direct booking',
+          trust: 'high',
+          notes: directNotes,
+          link: directLink,
+          ctaLabel: isOfficialAirport ? 'Book official' : 'Check live',
+          pricePerDay: directPricePerDay,
+          priceDisplay: directPriceDisplay,
+        }),
+      ]
+      : []),
     mkRow({
       provider: 'SpotHero',
       type: 'marketplace',
@@ -817,26 +881,6 @@ function buildBookingSourceRows(parking: PriceableOption & {
       ctaLabel: 'Check live',
       pricePerDay: spotHeroEst,
       priceDisplay: spotHeroEst != null ? 'estimated' : 'check-live',
-    }),
-    mkRow({
-      provider: 'Way.com',
-      type: 'marketplace',
-      trust: 'medium',
-      notes: wayEst != null ? 'Deals vary (estimated)' : 'Deals vary (check live)',
-      link: wayUrl,
-      ctaLabel: 'Check live',
-      pricePerDay: wayEst,
-      priceDisplay: wayEst != null ? 'estimated' : 'check-live',
-    }),
-    mkRow({
-      provider: 'ParkWhiz',
-      type: 'compare marketplace',
-      trust: 'medium',
-      notes: 'Compare rates (check live)',
-      link: parkWhizUrl,
-      ctaLabel: 'Check live',
-      pricePerDay: null,
-      priceDisplay: 'check-live',
     }),
   ];
 
@@ -1140,6 +1184,10 @@ function getAirportReadyBufferForTiming(params: {
   );
 }
 
+function isParkingRouteUnavailable(option: ParkingOption | AppOption | null | undefined): boolean {
+  return Boolean(option?.routeUnavailable);
+}
+
 function OptionCard({
   compact = false,
   item,
@@ -1176,23 +1224,28 @@ function OptionCard({
 
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
 
-  const sourceLink = opt.sourceLink || null;
-  const parkingLotDestinationForTerminalRoute =
-    String((opt as ParkingOption).name || (opt as ParkingOption).routeDestination || '');
-
-  const parkingLotRouteLink =
+  const sourceLink =
     item.type === 'parking'
-      ? googleMapsParkingRouteLink(opt as ParkingOption, tripData?.origin || null)
+      ? trustedParkingBookingLink(opt)
+      : opt.sourceLink || null;
+
+  const parkingRoutes =
+    item.type === 'parking'
+      ? parkingRouteLinks(opt as ParkingOption, {
+        origin: tripData?.origin || '',
+        destination: airport.routingAddress || tripData?.destination || airport.destinationName || airport.label,
+      })
       : null;
 
-  const parkingToTerminalRouteLink =
-    item.type === 'parking'
-      ? googleMapsDirectionsLink(
-        parkingLotDestinationForTerminalRoute,
-        airport.routingAddress || airport.destinationName || airport.label,
-        'driving'
-      )
-      : null;
+  const routeUnavailable =
+    item.type === 'parking' &&
+    (isParkingRouteUnavailable(opt as ParkingOption) ||
+      !tripData?.origin ||
+      !parkingRoutes?.parkingLotDestination ||
+      !parkingRoutes?.routeToParkingUrl);
+
+  const parkingLotRouteLink = routeUnavailable ? null : parkingRoutes?.routeToParkingUrl || null;
+  const parkingToTerminalRouteLink = routeUnavailable ? null : parkingRoutes?.parkingToAirportUrl || null;
 
   const routeLink =
     item.type === 'parking'
@@ -1264,9 +1317,10 @@ function OptionCard({
     tripData,
     optionTotalMinutes: item.duration,
   });
-  const timingMeta = timingBadge(timing.status);
+  const timingMeta = routeUnavailable ? null : timingBadge(timing.status);
 
   const timingSummary = (() => {
+    if (routeUnavailable) return null;
     if (timing.status === 'n/a' || !timing.latestSafeLeaveTime || !timing.youReachTerminalAround) return null;
 
     const leaveBy = formatTimeFriendly(timing.latestSafeLeaveTime);
@@ -1418,7 +1472,13 @@ function OptionCard({
             </div>
           </div>
 
-          {item.type === 'parking' && (
+          {item.type === 'parking' && routeUnavailable && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">
+              Route unavailable from this origin to this parking lot. Try a local origin near the airport, rideshare, or another transportation option.
+            </div>
+          )}
+
+          {item.type === 'parking' && !routeUnavailable && (
             <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
           )}
 
@@ -1450,7 +1510,7 @@ function OptionCard({
             </div>
           )}
 
-          {timing.status === 'too-late' && timing.recommendedInsideArrivalBy && timing.youReachTerminalAround && shortByMinutes != null && (
+          {!routeUnavailable && timing.status === 'too-late' && timing.recommendedInsideArrivalBy && timing.youReachTerminalAround && shortByMinutes != null && (
             <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
               <div className="font-medium">Likely misses recommended airport arrival window.</div>
               <div className="mt-2 space-y-1 text-sm">
@@ -1602,6 +1662,12 @@ function OptionCard({
                   Parking to terminal
                 </a>
               )}
+
+              {routeUnavailable && (
+                <div className="max-w-56 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  Route unavailable for this origin/date. Try a different origin or transportation option.
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -1655,6 +1721,12 @@ function OptionCard({
                 </a>
               )}
 
+              {routeUnavailable && (
+                <div className="max-w-56 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  Route unavailable for this origin/date. Try a different origin or transportation option.
+                </div>
+              )}
+
               {item.type !== 'parking' && routeLink && (
                 <a
                   href={routeLink}
@@ -1674,7 +1746,7 @@ function OptionCard({
         <details className="mt-4">
           <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">Details & evidence</summary>
           <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
-            {timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' && (
+            {!routeUnavailable && timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' && (
               <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
                 <div className="text-sm font-medium text-zinc-900">Flight timing check</div>
                 <div className="mt-2 space-y-1 text-sm text-zinc-700">
@@ -1699,7 +1771,7 @@ function OptionCard({
               </div>
             )}
 
-            {item.type === 'parking' && !compact && parkingBreakdown && (
+            {item.type === 'parking' && !compact && !routeUnavailable && parkingBreakdown && (
               <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -1960,6 +2032,31 @@ function ProviderDropdownSection({
   );
 }
 
+function formatPlannedAirportArrival(value?: string): string | null {
+  if (!value) return null;
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute)
+  );
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function TsaWaitTimesCard({
   tsaEstimate,
   airportCode,
@@ -1975,6 +2072,17 @@ function TsaWaitTimesCard({
   );
 
   const isSea = (airportCode || 'SEA').toUpperCase() === 'SEA';
+  const plannedArrivalLabel = formatPlannedAirportArrival(
+    tsaEstimate.plannedAirportArrivalAt
+  );
+  const timingBasisText = plannedArrivalLabel
+    ? `Estimated for your planned airport arrival: ${plannedArrivalLabel}`
+    : tsaEstimate.timingBasis === 'current-live'
+      ? 'Live TSA is current only.'
+      : 'Future TSA/security timing is estimated.';
+  const currentOnlyText = tsaEstimate.liveDataIsCurrentOnly
+    ? 'Live TSA is current only; future wait is estimated.'
+    : null;
 
   const laneLabels: Record<string, string> = {
     standard: 'Standard',
@@ -1985,14 +2093,20 @@ function TsaWaitTimesCard({
 
   if (!waitTimes) {
     return (
-      <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
-        <span className="font-semibold text-zinc-900">
-          {airportSecurity.label}
-        </span>
-        <span className="rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
-          {tsaEstimate.waitTime}m
-        </span>
-        <span className="text-zinc-500">{tsaEstimate.sourceName}</span>
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
+        <div className="inline-flex items-center gap-2">
+          <span className="font-semibold text-zinc-900">
+            {airportSecurity.label}
+          </span>
+          <span className="rounded-full bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
+            {tsaEstimate.waitTime}m
+          </span>
+          <span className="text-zinc-500">{tsaEstimate.sourceName}</span>
+        </div>
+        <div className="mt-2 text-zinc-500">
+          {timingBasisText}
+          {currentOnlyText ? ` ${currentOnlyText}` : ''}
+        </div>
       </div>
     );
   }
@@ -2058,7 +2172,8 @@ function TsaWaitTimesCard({
         </div>
 
         <div className="mt-2 text-xs text-zinc-500">
-          {airportSecurity.note}
+          {timingBasisText}
+          {currentOnlyText ? ` ${currentOnlyText}` : ` ${airportSecurity.note}`}
         </div>
       </div>
     );
@@ -2113,6 +2228,11 @@ function TsaWaitTimesCard({
         ) : (
           <span>{airportSecurity.note}</span>
         )}
+      </div>
+
+      <div className="mt-2 text-xs text-zinc-500">
+        {timingBasisText}
+        {currentOnlyText ? ` ${currentOnlyText}` : ''}
       </div>
     </div>
   );
@@ -2195,15 +2315,6 @@ export default function ResultsContent() {
       ...enrichedParking,
       id: parkingId,
     };
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[merge google place result into parking option]', {
-        parkingId,
-        selectedParking,
-        enrichedParking,
-        mergedParking,
-      });
-    }
 
     setGoogleEnrichedParking((prev) => ({
       ...prev,
@@ -2654,11 +2765,18 @@ export default function ResultsContent() {
         tripData,
         optionTotalMinutes: opt.duration,
       });
-      return { opt, timing: t };
+      const routeUnavailable =
+        opt.type === 'parking' &&
+        isParkingRouteUnavailable(opt.option as ParkingOption);
+      return { opt, timing: t, routeUnavailable };
     });
 
-    const tooLate = timed.filter((x) => x.timing.status === 'too-late').map((x) => x.opt);
-    const viable = timed.filter((x) => x.timing.status !== 'too-late').map((x) => x.opt);
+    const tooLate = timed
+      .filter((x) => !x.routeUnavailable && x.timing.status === 'too-late')
+      .map((x) => x.opt);
+    const viable = timed
+      .filter((x) => !x.routeUnavailable && x.timing.status !== 'too-late')
+      .map((x) => x.opt);
 
     // Best (least-bad) missed option for empty-state summary.
     let best: {
@@ -3118,16 +3236,19 @@ export default function ResultsContent() {
       return rankedKey && parkingKey && rankedKey === parkingKey;
     });
 
-    const breakdown = parkingTimeBreakdown(p as ParkingOption);
+    const routeUnavailable = isParkingRouteUnavailable(p as ParkingOption);
+    const breakdown = routeUnavailable ? null : parkingTimeBreakdown(p as ParkingOption);
 
     return {
       ...(matchedRanked || {
         type: 'parking',
         score: 0,
         stressScore: 0,
-        reasons: ['Available parking option'],
+        reasons: routeUnavailable
+          ? ['Route unavailable from this origin to this parking lot.']
+          : ['Available parking option'],
         cost: typeof p.price === 'number' ? p.price : 999,
-        duration: breakdown.totalMinutes,
+        duration: breakdown?.totalMinutes ?? 0,
       }),
       type: 'parking',
       option: p,
@@ -3154,6 +3275,10 @@ export default function ResultsContent() {
   const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
     const aOption = a.option as ParkingOption;
     const bOption = b.option as ParkingOption;
+
+    if (isParkingRouteUnavailable(aOption) !== isParkingRouteUnavailable(bOption)) {
+      return isParkingRouteUnavailable(aOption) ? 1 : -1;
+    }
 
     const aTotal = getParkingComparableTotal(aOption as AppOption, tripData) ?? getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
     const bTotal = getParkingComparableTotal(bOption as AppOption, tripData) ?? getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
@@ -3195,19 +3320,38 @@ export default function ResultsContent() {
     const options =
       sort === 'easiest'
         ? dedupeAndSortParkingOptions(
+          sortedParkingForCurrentTab
+            .map((opt) => opt.option as ParkingOption),
+          tripData
+        )
+        : sortedParkingForCurrentTab
+          .map((opt) => opt.option as ParkingOption);
+
+    const canonical = canonicalizeParkingOptions(options);
+    const routeAvailable = canonical.filter((option) => !isParkingRouteUnavailable(option));
+
+    if (sort === 'cheapest') {
+      const priced = routeAvailable.filter((option) => hasRealParkingPrice(option));
+      return priced.length > 0 ? priced : routeAvailable;
+    }
+
+    return routeAvailable;
+  })();
+
+  const parkingDisplayOptions = (() => {
+    const options =
+      sort === 'easiest'
+        ? dedupeAndSortParkingOptions(
           sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
           tripData
         )
         : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
     const canonical = canonicalizeParkingOptions(options);
+    const available = canonical.filter((option) => !isParkingRouteUnavailable(option));
+    const unavailable = canonical.filter((option) => isParkingRouteUnavailable(option));
 
-    if (sort === 'cheapest') {
-      const priced = canonical.filter((option) => hasRealParkingPrice(option));
-      return priced.length > 0 ? priced : canonical;
-    }
-
-    return canonical;
+    return [...available, ...unavailable];
   })();
 
   const cheapestSmartPickOptions =
@@ -3224,30 +3368,40 @@ export default function ResultsContent() {
   const visibleMoreParkingCount = 10;
   const maxParkingDisplayCount = 25;
 
-  const remainingParking = smartPickParkingOptions.slice(1).map((parkingOption: ParkingOption) => {
-    const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
-      const rankedKey = parkingKeySafe(ranked.option as AppOption);
-      const parkingKey = parkingKeySafe(parkingOption as AppOption);
-      return rankedKey && parkingKey && rankedKey === parkingKey;
-    });
+  const remainingParking = parkingDisplayOptions
+    .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
+    .map((parkingOption: ParkingOption) => {
+      const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
+        const rankedKey = parkingKeySafe(ranked.option as AppOption);
+        const parkingKey = parkingKeySafe(parkingOption as AppOption);
+        return rankedKey && parkingKey && rankedKey === parkingKey;
+      });
+      const routeUnavailable = isParkingRouteUnavailable(parkingOption);
 
-    return {
-      ...(matchedRanked || {
+      return {
+        ...(matchedRanked || {
+          type: 'parking',
+          score: 0,
+          stressScore: 0,
+          reasons: routeUnavailable
+            ? ['Route unavailable from this origin to this parking lot.']
+            : ['Available parking option'],
+          cost: routeUnavailable
+            ? 999999
+            : getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999999,
+          duration: routeUnavailable
+            ? 0
+            : (typeof parkingOption.distance === 'number' ? parkingOption.distance : 45) +
+            (typeof parkingOption.parkingBufferMinutes === 'number' ? parkingOption.parkingBufferMinutes : 10) +
+            (typeof parkingOption.transferToTerminalMinutes === 'number' ? parkingOption.transferToTerminalMinutes : 10),
+        }),
         type: 'parking',
-        score: 0,
-        stressScore: 0,
-        reasons: ['Available parking option'],
-        cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? 999999,
-        duration:
-          (typeof parkingOption.distance === 'number' ? parkingOption.distance : 45) +
-          (typeof parkingOption.parkingBufferMinutes === 'number' ? parkingOption.parkingBufferMinutes : 10) +
-          (typeof parkingOption.transferToTerminalMinutes === 'number' ? parkingOption.transferToTerminalMinutes : 10),
-      }),
-      type: 'parking',
-      option: parkingOption,
-      cost: getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999999,
-    } as RankedRecommendation;
-  });
+        option: parkingOption,
+        cost: routeUnavailable
+          ? 999999
+          : getParkingTotalPrice(parkingOption, tripData) ?? parkingOption.price ?? matchedRanked?.cost ?? 999999,
+      } as RankedRecommendation;
+    });
 
   const initiallyVisibleParking = remainingParking.slice(0, visibleMoreParkingCount);
   const expandedParking = remainingParking.slice(0, maxParkingDisplayCount);
@@ -3619,26 +3773,28 @@ export default function ResultsContent() {
         </div>
 
         {
-          showParkingProviders && smartPickParkingOptions.length > 0 && (
+          showParkingProviders && parkingDisplayOptions.length > 0 && (
             <div className="mt-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold">Parking options</h2>
               </div>
 
-              <ParkingSmartPick
-                options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
-                tripData={tripData}
-                leaveByTime={recommendation.leaveByTime}
-                selectedOption={
-                  smartPickOption
-                    ? googleEnrichedParking[smartPickOption.id] || smartPickOption
-                    : smartPickOption
-                }
-                aprLivePrices={aprLivePrices}
-                aprLiveChecking={aprLiveChecking}
-                weatherImpact={recommendation?.weatherImpact}
-                onShowReviews={handleShowReviews}
-              />
+              {smartPickParkingOptions.length > 0 && (
+                <ParkingSmartPick
+                  options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
+                  tripData={tripData}
+                  leaveByTime={recommendation.leaveByTime}
+                  selectedOption={
+                    smartPickOption
+                      ? googleEnrichedParking[smartPickOption.id] || smartPickOption
+                      : smartPickOption
+                  }
+                  aprLivePrices={aprLivePrices}
+                  aprLiveChecking={aprLiveChecking}
+                  weatherImpact={recommendation?.weatherImpact}
+                  onShowReviews={handleShowReviews}
+                />
+              )}
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
                 {/* Show Parking Lots Map */}
                 <div className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/90 p-1.5 shadow-[0_12px_35px_rgba(15,23,42,0.18)] backdrop-blur-md">

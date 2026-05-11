@@ -67,6 +67,56 @@ function normalizeTrafficRoute(origin: string, destination: string): string {
   return `${origin}-${destination}`;
 }
 
+function extractRouteStateHint(value: string): string | null {
+  const lower = value.toLowerCase();
+
+  if (/\bhi\b/.test(lower) || lower.includes('hawaii') || lower.includes('honolulu')) {
+    return 'HI';
+  }
+
+  if (
+    /\bwa\b/.test(lower) ||
+    lower.includes('washington') ||
+    lower.includes('seattle') ||
+    lower.includes('seatac') ||
+    lower.includes('sea-tac')
+  ) {
+    return 'WA';
+  }
+
+  return null;
+}
+
+function isClearlyNonDrivableRoute(origin: string, destination: string): boolean {
+  const originState = extractRouteStateHint(origin);
+  const destinationState = extractRouteStateHint(destination);
+
+  return Boolean(
+    originState &&
+    destinationState &&
+    originState !== destinationState &&
+    (originState === 'HI' || destinationState === 'HI')
+  );
+}
+
+function unavailableTrafficEstimate(
+  route: string,
+  sourceName: string,
+  reason: string
+): TrafficEstimate {
+  return {
+    route,
+    duration: 0,
+    congestion: 'high',
+    trustStatus: 'fallback',
+    routeUnavailable: true,
+    routeUnavailableReason: reason,
+    sourceName,
+    lastUpdated: new Date().toISOString(),
+    assumptions: [reason],
+  };
+}
+
 function resolveParkingTransferMeta(option: ParkingOption): {
   parkingBufferMinutes: number;
   transferToTerminalMinutes: number;
@@ -116,7 +166,11 @@ export interface FlightProvider {
 }
 
 export interface TsaProvider {
-  getTsaEstimate(destination: string, securityOption?: SecurityOption): Promise<TsaEstimate>;
+  getTsaEstimate(
+    destination: string,
+    securityOption?: SecurityOption,
+    plannedAirportArrivalAt?: string
+  ): Promise<TsaEstimate>;
 }
 
 export interface AirportInfoProvider {
@@ -190,6 +244,14 @@ export class LiveTrafficProvider implements TrafficProvider {
     const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
 
     try {
+      if (isClearlyNonDrivableRoute(origin, destination)) {
+        return unavailableTrafficEstimate(
+          routeKey,
+          'Route validation',
+          'Route unavailable from this origin to the airport area.'
+        );
+      }
+
       if (!this.serverKey) {
         throw new Error('Google Maps server API key not configured');
       }
@@ -353,6 +415,14 @@ export class LiveTrafficProvider implements TrafficProvider {
         else if (element?.duration && typeof durationValue === 'number') hasDuration = true;
         else if (element?.staticDuration) hasDuration = true;
 
+        if (res.status === 200 && condition && condition !== 'ROUTE_EXISTS') {
+          return unavailableTrafficEstimate(
+            routeKey,
+            'Google Routes API',
+            'Google Routes could not calculate a driving route for this origin and destination.'
+          );
+        }
+
         if (!(res.status === 200 && condition === 'ROUTE_EXISTS' && hasDuration && statusAcceptable)) {
           throw new Error(`Routes API element indicates failure: condition=${String(condition)}, status=${statusIsEmptyObject ? '[empty object]' : String(statusField)}, durationPresent=${hasDuration}`);
         }
@@ -492,18 +562,9 @@ export class MockProvider implements DataProvider {
   }
 
   private estimateRouteDuration(origin: string, destination: string, fallbackMinutes: number): TrafficEstimate {
-    const originLower = origin.toLowerCase();
-    let duration = fallbackMinutes;
-
-    if (originLower.includes('monroe') || originLower.includes('98272')) {
-      duration = Math.max(fallbackMinutes, 50);
-    } else if (originLower.includes('seattle') || originLower.includes('98101')) {
-      duration = Math.min(fallbackMinutes, 25);
-    }
-
     return {
       route: `${origin}->${destination}`,
-      duration,
+      duration: fallbackMinutes,
       congestion: 'medium',
       trustStatus: 'estimated',
       sourceName: 'Estimated route model',
@@ -513,13 +574,8 @@ export class MockProvider implements DataProvider {
   }
 
   private estimateHubDriveTime(origin: string, hub: { driveTimeFactor: number }): number {
-    const originLower = origin.toLowerCase();
-    if (originLower.includes('monroe') || originLower.includes('98272')) {
-      return hub.driveTimeFactor;
-    }
-    if (originLower.includes('seattle') || originLower.includes('98101')) {
-      return Math.max(15, hub.driveTimeFactor - 10);
-    }
+    void origin;
+
     return hub.driveTimeFactor + 5;
   }
 
@@ -532,6 +588,12 @@ export class MockProvider implements DataProvider {
     let estimate: TrafficEstimate;
     if (allowLive && this.trafficProvider instanceof LiveTrafficProvider) {
       estimate = await this.trafficProvider.getTrafficEstimate(origin, destination, dateTime);
+    } else if (isClearlyNonDrivableRoute(origin, destination)) {
+      estimate = unavailableTrafficEstimate(
+        normalizeTrafficRoute(origin, destination),
+        'Route validation',
+        'Route unavailable from this origin to the airport area.'
+      );
     } else {
       estimate = this.estimateRouteDuration(origin, destination, 35);
     }
@@ -575,10 +637,7 @@ export class MockProvider implements DataProvider {
     return Promise.all(parkingSource.map(async option => {
       const airportDestination = resolveAirportDestinationForRouting(destination);
       const routeDestination = option.routeDestination || airportDestination;
-      const shouldLiveRoute = true;
-      const routeEstimate = shouldLiveRoute
-        ? await this.getRouteEstimate(origin, routeDestination, dateTime, true)
-        : this.estimateRouteDuration(origin, routeDestination, option.id === 'off-airport-1' ? 55 : 60);
+      const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
 
       const meta = resolveParkingTransferMeta(option);
       const parkingBufferMinutes = option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
@@ -595,6 +654,8 @@ export class MockProvider implements DataProvider {
         transferType,
         distance: routeEstimate.duration,
         routeTrustStatus: routeEstimate.trustStatus,
+        routeUnavailable: routeEstimate.routeUnavailable,
+        routeUnavailableReason: routeEstimate.routeUnavailableReason,
         routeOrigin: routeOrigins,
         routeDestination,
         sourceLink,
@@ -603,7 +664,11 @@ export class MockProvider implements DataProvider {
         assumptions: [
           ...option.assumptions,
           `Route from ${origin} to ${routeDestination}`,
-          routeEstimate.trustStatus === 'live' ? 'Based on live routing' : 'Estimated route time for origin-aware travel',
+          routeEstimate.routeUnavailable
+            ? routeEstimate.routeUnavailableReason || 'Route unavailable from this origin.'
+            : routeEstimate.trustStatus === 'live'
+              ? 'Based on live routing'
+              : 'Estimated route time for origin-aware travel',
         ],
       };
     }));
@@ -726,7 +791,8 @@ export class MockProvider implements DataProvider {
 
   async getTsaEstimate(
     destination: string,
-    securityOption: SecurityOption = 'standard'
+    securityOption: SecurityOption = 'standard',
+    plannedAirportArrivalAt?: string
   ): Promise<TsaEstimate> {
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
     const code = airport?.id || 'SEA';
@@ -735,6 +801,7 @@ export class MockProvider implements DataProvider {
       airportCode: code,
       destination,
       securityOption,
+      plannedAirportArrivalAt,
     });
   }
 

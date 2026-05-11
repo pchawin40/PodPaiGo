@@ -33,9 +33,6 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleRequest(input: Record<string, unknown>) {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[google-place-match server input]', input);
-  }
 
   const name = toString(input.name);
   const airport = toString(input.airport) || toString(input.airportCode);
@@ -69,10 +66,6 @@ async function handleRequest(input: Record<string, unknown>) {
       }),
       source: 'skipped-non-parking',
     };
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[google-place-match result]', result);
-    }
 
     return NextResponse.json(result);
   }
@@ -116,10 +109,6 @@ async function handleRequest(input: Record<string, unknown>) {
         }),
         source: 'unavailable',
       };
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[google-place-match result]', result);
-  }
 
   return NextResponse.json(result);
 }

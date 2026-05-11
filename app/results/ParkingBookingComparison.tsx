@@ -12,6 +12,7 @@ type ParkingBookingComparisonProps = {
 
 export default function ParkingBookingComparison({
   parkingOptions,
+  tripData,
   aprLivePrices = {},
   aprLiveChecking = false,
 }: ParkingBookingComparisonProps) {
@@ -28,7 +29,32 @@ export default function ParkingBookingComparison({
     if (!rows.find(r => r.provider === provider)) rows.push({ provider, price, notes, link, sortOrder });
   }
 
-  // Find if SEA official present
+  const airportCode = ((tripData as (TripData & { airportCode?: string }) | null)?.airportCode || 'Airport').toUpperCase();
+
+  function trustedLink(option: ParkingOption): string | undefined {
+    const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
+    const link = option.sourceLink;
+    const url = String(link || '').toLowerCase();
+
+    if (provider.includes('way.com') || /\bway\b/.test(provider)) return undefined;
+
+    if (provider.includes('parkwhiz')) {
+      if (!link) return undefined;
+      if (
+        url === 'https://www.parkwhiz.com' ||
+        url === 'https://parkwhiz.com' ||
+        url.includes('/airport-parking') ||
+        url.includes('/search')
+      ) {
+        return undefined;
+      }
+      if (option.trustStatus !== 'live' && option.trustStatus !== 'verified-source') return undefined;
+    }
+
+    return link;
+  }
+
+  // Find official reserved/general options when present.
   const seaReserved = parkingOptionsWithLive.find(p => p.id === 'sea-reserved' || p.name?.toLowerCase().includes('reserved'));
   const seaGeneral = parkingOptionsWithLive.find(p => p.id === 'sea-general' || p.name?.toLowerCase().includes('general'));
 
@@ -40,10 +66,10 @@ export default function ParkingBookingComparison({
         ? `From ${seaReserved.price ? `$${seaReserved.price}/day` : 'Check live'}`
         : 'Check live';
     pushRow(
-      'Official SEA (Reserved)',
+      `Official ${airportCode} (Reserved)`,
       price,
       isLiveSelected ? 'Live selected-date' : 'Official',
-      seaReserved.sourceLink,
+      trustedLink(seaReserved),
       isLiveSelected ? 0 : 1
     );
   }
@@ -56,10 +82,10 @@ export default function ParkingBookingComparison({
         ? `From ${seaGeneral.price ? `$${seaGeneral.price}/day` : 'Check live'}`
         : 'Check live';
     pushRow(
-      'Official SEA (General)',
+      `Official ${airportCode} (General)`,
       price,
       isLiveSelected ? 'Live selected-date' : 'Official',
-      seaGeneral.sourceLink,
+      trustedLink(seaGeneral),
       isLiveSelected ? 0 : 1
     );
   }
@@ -99,18 +125,16 @@ export default function ParkingBookingComparison({
           : directPrice.startsWith('From')
             ? 'Listed rate'
             : 'Check live',
-      p.sourceLink,
+      trustedLink(p),
       hasLivePrice ? 0 : 2
     );
-    // Marketplace rows (SpotHero, Way.com)
+    // Keep only broadly reliable generic marketplace search. Hide Way.com/ParkWhiz generated tabs for now.
     pushRow('SpotHero', 'Check live', 'Marketplace', 'https://spothero.com', 3);
-    pushRow('Way.com', 'Check live', 'Marketplace', 'https://way.com', 3);
   });
 
-  // If no offsites, still show marketplace examples
+  // If no offsites, still show a marketplace example.
   if (offsites.length === 0) {
     pushRow('SpotHero', 'Check live', 'Marketplace', 'https://spothero.com', 3);
-    pushRow('Way.com', 'Check live', 'Marketplace', 'https://way.com', 3);
   }
 
   const sortedRows = [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.provider.localeCompare(b.provider));
