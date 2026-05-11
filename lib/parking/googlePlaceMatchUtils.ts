@@ -6,30 +6,39 @@ function cleanText(value: string | null | undefined): string {
     .trim();
 }
 
-export function normalizeParkingLotName(name: string): string {
-  return cleanText(name)
-    .replace(/\bself covered\b/g, ' ')
-    .replace(/\bself uncovered\b/g, ' ')
-    .replace(/\bcovered\b/g, ' ')
-    .replace(/\buncovered\b/g, ' ')
-    .replace(/\bparking\b/g, ' ')
-    .replace(/\blot\b/g, ' ')
-    .replace(/\bgarage\b/g, ' ')
-    .replace(/\bterminal\b/g, ' ')
-    .replace(/\bairport\b/g, ' ')
-    .replace(/\bsea tac\b/g, ' ')
-    .replace(/\bseatac\b/g, ' ')
-    .replace(/\bseattle\b/g, ' ')
+const PARKING_MARKETPLACE_PROVIDERS = new Set([
+  'parkwhiz',
+  'spothero',
+  'way',
+  'way com',
+  'airportparkingreservations',
+  'airport parking reservations',
+  'apr',
+]);
+
+export function cleanGoogleParkingSearchName(name: string): string {
+  return String(name || '')
+    .replace(/\s+-\s*self\s+uncovered.*$/i, '')
+    .replace(/\s+-\s*self\s+covered.*$/i, '')
+    .replace(/\s+-\s*uncovered.*$/i, '')
+    .replace(/\s+-\s*covered.*$/i, '')
+    .replace(/\s+-\s*valet.*$/i, '')
+    .replace(/\s+-\s*rooftop.*$/i, '')
+    .replace(/\s+-\s*daily.*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+export function normalizeParkingLotName(name: string): string {
+  return cleanText(cleanGoogleParkingSearchName(name));
+}
+
 function hasParkingSignal(text: string): boolean {
-  return /\b(parking|garage|lot|valet|shuttle|park)\b/.test(text);
+  return /\b(parking|garage|lot|valet|shuttle|park|self covered|self uncovered|covered|uncovered)\b/.test(text);
 }
 
 function hasAirportOnlySignal(text: string): boolean {
-  return /\b(airport|terminal|central terminal|concourse|rideshare|transit)\b/.test(text);
+  return /\b(terminal|central terminal|concourse|rideshare|transit)\b/.test(text);
 }
 
 function normalizeAddress(value?: string | null): string {
@@ -47,14 +56,28 @@ export function shouldAttemptGooglePlaceMatch(args: {
   const address = cleanText(args.lotAddress);
   const provider = cleanText(args.provider);
   const source = cleanText(args.source);
-  const parkingSignal = hasParkingSignal(name) || hasParkingSignal(provider) || hasParkingSignal(source);
+
+  const providerIsParkingMarketplace =
+    PARKING_MARKETPLACE_PROVIDERS.has(provider) ||
+    PARKING_MARKETPLACE_PROVIDERS.has(source);
+
+  const parkingSignal =
+    hasParkingSignal(name) ||
+    hasParkingSignal(provider) ||
+    hasParkingSignal(source);
+
+  const hasUsableName = Boolean(normalizeParkingLotName(args.lotName));
+
+  if (!hasUsableName) return false;
+
+  // ParkWhiz/SpotHero/Way entries are parking products even if the business is a hotel.
+  if (providerIsParkingMarketplace) return true;
+
+  // Airport-only destinations like Central Terminal should still be skipped.
   const airportOnlyName = hasAirportOnlySignal(name) && !parkingSignal;
   const airportOnlyAddress = hasAirportOnlySignal(address) && !parkingSignal;
 
-  if (!normalizeParkingLotName(args.lotName)) return false;
-  if (airportOnlyName) return false;
-  if (airportOnlyAddress) return false;
-  if (hasAirportOnlySignal(name) && parkingSignal) return true;
+  if (airportOnlyName || airportOnlyAddress) return false;
 
   return parkingSignal;
 }

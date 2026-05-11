@@ -3,6 +3,7 @@ import { getAirportById } from '../airports/catalog';
 import { ParkingOption, ParkingGooglePlaceSnapshot, ParkingGoogleReview } from '../types';
 import {
   buildParkingGoogleCacheKey,
+  cleanGoogleParkingSearchName,
   normalizeParkingLotName,
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
@@ -100,7 +101,7 @@ function buildParkingSearchQuery(args: {
   airportCode?: string | null;
   airportContext?: string | null;
 }): string {
-  const name = normalizeParkingLotName(args.lotName) || cleanText(args.lotName);
+  const name = cleanGoogleParkingSearchName(args.lotName) || args.lotName;
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
   const context = [
     args.lotAddress,
