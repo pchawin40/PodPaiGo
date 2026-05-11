@@ -193,11 +193,15 @@ function parkingTimeParts(option: ParkingOption) {
 function ParkingTimeSummary({
   option,
   compact = false,
+  routeUnavailable = false,
 }: {
   option: ParkingOption;
   compact?: boolean;
+  routeUnavailable?: boolean;
 }) {
-  if (option.routeUnavailable) {
+  const unavailable = routeUnavailable || option.routeUnavailable;
+
+  if (unavailable) {
     if (compact) {
       return (
         <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
@@ -1501,7 +1505,13 @@ function OptionCard({
           )}
 
           {item.type === 'parking' && !routeUnavailable && (
-            <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
+            <ParkingTimeSummary
+              option={{
+                ...(opt as ParkingOption),
+                routeUnavailable,
+              }}
+              compact={compact}
+            />
           )}
 
           {item.type === 'parking' && (() => {
@@ -3705,33 +3715,25 @@ export default function ResultsContent() {
             </div>
           </div>
 
-          <div className="rounded-xl bg-zinc-50 p-4">
-            <div className="text-xs font-medium text-zinc-500">Traffic estimate</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-900">
-              {airportRouteUnavailable
-                ? 'Route unavailable'
-                : recommendation.trafficEstimate
+          {!airportRouteUnavailable && (
+            <div className="rounded-xl bg-zinc-50 p-4">
+              <div className="text-xs font-medium text-zinc-500">
+                Traffic estimate
+              </div>
+
+              <div className="mt-1 text-sm font-semibold text-zinc-900">
+                {recommendation.trafficEstimate
                   ? formatMinutes(recommendation.trafficEstimate.duration)
                   : '—'}
+              </div>
+
+              <div className="mt-1 text-xs text-zinc-600">
+                {recommendation.trafficEstimate?.congestion
+                  ? `${recommendation.trafficEstimate.congestion} congestion`
+                  : 'Based on available route data'}
+              </div>
             </div>
-            <div className="mt-1 text-xs text-zinc-600">
-              {airportRouteUnavailable ? (
-                <>
-                  <div className="text-sm font-semibold text-amber-700">Route unavailable</div>
-                  <h1 className="text-3xl font-bold text-zinc-900">
-                    We can’t calculate a route from this origin to SEA
-                  </h1>
-                  <p className="mt-2 text-sm text-zinc-600">
-                    Try a local starting point near the airport, or choose another transportation option.
-                  </p>
-                </>
-              ) : (
-                <h1 className="text-3xl font-bold text-zinc-900">
-                  You should leave at {recommendation.leaveByTime}
-                </h1>
-              )}
-            </div>
-          </div>
+          )}
         </div>
 
         {/* APR Loading / Warning States */}
@@ -4107,38 +4109,38 @@ export default function ResultsContent() {
                   </div>
 
                   {airportRouteUnavailable ? (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800">
-                      <div className="text-lg font-semibold">
-                        Parking is not available from this origin
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+                      <div className="font-semibold">
+                        Parking options are not usable from this origin
                       </div>
-
-                      <p className="mt-2 text-sm">
-                        We could not calculate a real route from your origin to the airport area.
-                        Since this trip starts outside the drivable airport region, airport parking
-                        options are not usable for this search.
-                      </p>
-
-                      <p className="mt-2 text-sm">
-                        Try entering a local address near the airport, or choose rideshare, taxi,
-                        transit, or another transportation option instead.
+                      <p className="mt-2">
+                        Your starting location appears to be too far from the selected airport area,
+                        so we cannot calculate a real route to these parking lots. Try entering an
+                        origin near the airport, or choose rideshare, taxi, transit, or another
+                        transportation option.
                       </p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
-                      {displayedParking.map((opt, idx) => (
-                        <OptionCard
-                          aprLivePrices={aprLivePrices}
-                          aprLiveChecking={aprLiveChecking}
-                          key={`parking-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                          item={opt}
-                          rank={idx + 1}
-                          tripData={tripData}
-                          intent={intent}
-                          sort={sort}
-                          onShowReviews={handleShowReviews}
-                          googleEnrichedParking={googleEnrichedParking}
-                        />
-                      ))}
+                      {displayedParking
+                        .filter((opt) => {
+                          const option = opt.option as AppOption;
+                          return option.type !== 'parking' || !option.routeUnavailable;
+                        })
+                        .map((opt, idx) => (
+                          <OptionCard
+                            aprLivePrices={aprLivePrices}
+                            aprLiveChecking={aprLiveChecking}
+                            key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                            item={opt}
+                            rank={idx + 1}
+                            tripData={tripData}
+                            intent={intent}
+                            sort={sort}
+                            onShowReviews={handleShowReviews}
+                            googleEnrichedParking={googleEnrichedParking}
+                          />
+                        ))}
                     </div>
                   )}
                 </section>
