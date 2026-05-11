@@ -1504,14 +1504,8 @@ function OptionCard({
             </div>
           )}
 
-          {item.type === 'parking' && !routeUnavailable && (
-            <ParkingTimeSummary
-              option={{
-                ...(opt as ParkingOption),
-                routeUnavailable,
-              }}
-              compact={compact}
-            />
+          {item.type === 'parking' && (
+            <ParkingTimeSummary option={opt as ParkingOption} compact={compact} />
           )}
 
           {item.type === 'parking' && (() => {
@@ -1735,8 +1729,8 @@ function OptionCard({
                 <a
                   href={parkingLotRouteLink}
                   target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                  rel="noreferrer"
+                  className="rounded-xl border border-zinc-200 px-4 py-3 text-center text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
                 >
                   Route to parking
                 </a>
@@ -4083,7 +4077,7 @@ export default function ResultsContent() {
             </div>
           ) : (
             <>
-              {remainingParking.length > 0 && (
+              {remainingParking.length > 0 && !airportRouteUnavailable && (
                 <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -4143,6 +4137,23 @@ export default function ResultsContent() {
                         ))}
                     </div>
                   )}
+                </section>
+              )}
+
+              {airportRouteUnavailable && (
+                <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                  <h2 className="text-lg font-semibold text-amber-950">
+                    Parking options are unavailable from this origin
+                  </h2>
+
+                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                    We could not calculate a real route from your starting location to this airport area.
+                    Because of that, parking recommendations and leave-by timing are not reliable for this trip.
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                    Try entering an origin near the airport, or choose rideshare, taxi, or another transportation option.
+                  </p>
                 </section>
               )}
 

@@ -652,10 +652,12 @@ export class MockProvider implements DataProvider {
         parkingBufferMinutes,
         transferToTerminalMinutes,
         transferType,
-        distance: routeEstimate.duration,
+        distance: routeEstimate.routeUnavailable ? 0 : option.distance ?? 0,
+        duration: routeEstimate.routeUnavailable ? 0 : routeEstimate.duration ?? 0,
         routeTrustStatus: routeEstimate.trustStatus,
-        routeUnavailable: routeEstimate.routeUnavailable,
+        routeUnavailable: routeEstimate.routeUnavailable === true,
         routeUnavailableReason: routeEstimate.routeUnavailableReason,
+        availability: routeEstimate.routeUnavailable ? 0 : option.availability,
         routeOrigin: routeOrigins,
         routeDestination,
         sourceLink,
@@ -663,9 +665,11 @@ export class MockProvider implements DataProvider {
         lastUpdated: new Date().toISOString(),
         assumptions: [
           ...option.assumptions,
-          `Route from ${origin} to ${routeDestination}`,
           routeEstimate.routeUnavailable
             ? routeEstimate.routeUnavailableReason || 'Route unavailable from this origin.'
+            : `Route from ${origin} to ${routeDestination}`,
+          routeEstimate.routeUnavailable
+            ? 'This parking option is not usable from the selected origin.'
             : routeEstimate.trustStatus === 'live'
               ? 'Based on live routing'
               : 'Estimated route time for origin-aware travel',
