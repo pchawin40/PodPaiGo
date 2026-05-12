@@ -37,6 +37,33 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
+function getParkingDriveMinutes(option: ParkingOption): number {
+  const optionWithRoute = option as ParkingOption & {
+    routeToParkingMinutes?: number | null;
+    driveMinutes?: number | null;
+    durationMinutes?: number | null;
+    routeDurationMinutes?: number | null;
+    distanceMinutes?: number | null;
+  };
+
+  const candidates = [
+    optionWithRoute.routeToParkingMinutes,
+    optionWithRoute.driveMinutes,
+    optionWithRoute.durationMinutes,
+    optionWithRoute.routeDurationMinutes,
+    optionWithRoute.distanceMinutes,
+  ];
+
+  const valid = candidates.find(
+    (minutes) =>
+      typeof minutes === 'number' &&
+      Number.isFinite(minutes) &&
+      minutes > 0
+  );
+
+  return valid ?? 0;
+}
+
 export function parkingTimeBreakdown(option: ParkingOption): {
   label: string;
   totalMinutes: number;
@@ -50,7 +77,7 @@ export function parkingTimeBreakdown(option: ParkingOption): {
     };
   }
 
-  const drive = typeof option.distance === 'number' ? option.distance : 0;
+  const drive = getParkingDriveMinutes(option);
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
   const shuttleWait =
     option.transferType === 'shuttle'
@@ -76,18 +103,22 @@ export function parkingTimeBreakdown(option: ParkingOption): {
         : 0;
 
   const parts = [
-    { label: 'Drive', minutes: drive },
-    { label: 'Park/check-in', minutes: park },
+    ...(drive > 0 ? [{ label: 'Drive', minutes: drive }] : []),
+    ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
     ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
-    {
-      label:
-        option.transferType === 'shuttle'
-          ? 'Shuttle'
-          : option.transferType === 'airport-garage'
-            ? 'Garage to terminal'
-            : 'Walk to terminal',
-      minutes: transfer,
-    },
+    ...(transfer > 0
+      ? [
+        {
+          label:
+            option.transferType === 'shuttle'
+              ? 'Shuttle'
+              : option.transferType === 'airport-garage'
+                ? 'Garage to terminal'
+                : 'Walk to terminal',
+          minutes: transfer,
+        },
+      ]
+      : []),
     ...(walk > 0 ? [{ label: 'Walk inside airport', minutes: walk }] : []),
     ...(risk > 0 ? [{ label: 'Buffer/risk', minutes: risk }] : []),
   ];

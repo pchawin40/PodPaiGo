@@ -45,6 +45,9 @@ export default function Home() {
             </Link>
             <Link href="/airports" className="hover:text-slate-950">
               Airports
+          </Link>
+            <Link href="/roadmap" className="hover:text-slate-950">
+              Roadmap
             </Link>
             <Link href="/about" className="hover:text-slate-950">
               About
