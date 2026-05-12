@@ -199,14 +199,22 @@ export function calculateRideshareCost(rideshare: RideshareOption, tripData: Tri
   return rideshare.price;
 }
 
-export function calculateTransitCost(transit: TransitOption | TransitJourney, tripData: TripData): number {
-  if ('totalCost' in transit) {
-    // It's a TransitJourney
-    return tripData.type === 'round-trip' ? transit.totalCost * 2 : transit.totalCost;
-  } else {
-    // It's a TransitOption (legacy)
-    return tripData.type === 'round-trip' ? transit.price * 2 : transit.price;
+export function calculateTransitCost(
+  transit: TransitOption | TransitJourney,
+  tripData: TripData
+): number {
+  if (tripData.transitPayment === 'orca-pass') {
+    return 0;
   }
+
+  const oneWayCost =
+    'totalCost' in transit
+      ? transit.totalCost
+      : transit.price;
+
+  return tripData.type === 'round-trip'
+    ? oneWayCost * 2
+    : oneWayCost;
 }
 
 export function calculateLeaveByTime(

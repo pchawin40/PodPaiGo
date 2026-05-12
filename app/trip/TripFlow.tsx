@@ -3,14 +3,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AddressInput } from './AddressInput';
-import { CabinClass, FlightType, SecurityOption, TransportAvailability, TripType } from '../../lib/types';
+import {
+  CabinClass,
+  FlightType,
+  SecurityOption,
+  TransportAvailability,
+  TransitPaymentOption,
+  TripData,
+  TripType,
+} from '../../lib/types';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
 import { parseLocalDate } from '../../lib/tripTime';
 import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney } from '../utils/formatter';
-import { TripData } from '../../lib/types';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
+import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
 type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
 
@@ -35,6 +43,7 @@ type AirportSecurityStatus = {
 type FormState = {
   intent: Intent | null;
   transportAvailability: TransportAvailability;
+  transitPayment: TransitPaymentOption;
   airlineOrFlight: string;
   origin: string;
   date: string;
@@ -293,9 +302,10 @@ export default function TripFlow() {
 
 
   const [state, setState] = useState<FormState>({
-    intent: 'flying-out', // since you removed step 1
-    timeAnchor: 'flight-departure', // 👈 ADD THIS
+    intent: 'flying-out',
+    timeAnchor: 'flight-departure',
     transportAvailability: 'all',
+    transitPayment: 'normal',
     airlineOrFlight: '',
     origin: '',
     date: '',
@@ -586,6 +596,7 @@ export default function TripFlow() {
     params.set('airport', selectedAirport.id);
     params.set('intent', state.intent!);
     params.set('transport', state.transportAvailability);
+    params.set('transitPayment', state.transitPayment);
     params.set('airportName', selectedAirport.label);
     params.set('airportCheckinNote', airportGuide.note ?? '');
     params.set('rideshareDestinationName', airportGuide.rideshareDestinationName);
@@ -869,6 +880,15 @@ export default function TripFlow() {
                       );
                     })}
                   </div>
+                  {(state.transportAvailability === 'all' || state.transportAvailability === 'transit') && (
+                    <TransitPaymentPicker
+                      value={state.transitPayment}
+                      onChange={(transitPayment) =>
+                        setState((s) => ({ ...s, transitPayment }))
+                      }
+                      className="mt-5"
+                    />
+                  )}
                   <div className="mt-2 text-xs text-zinc-500">Default: No preference — compare everything</div>
                 </div>
 

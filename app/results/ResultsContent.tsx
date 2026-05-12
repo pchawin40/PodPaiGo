@@ -58,7 +58,8 @@ import {
   TripData,
   TrustStatus,
   ParkingOption,
-  RideshareEstimateConfidence
+  RideshareEstimateConfidence,
+  TransitPaymentOption
 } from '../../lib/types';
 import {
   costOf,
@@ -73,6 +74,7 @@ import {
   shouldAttemptGooglePlaceMatch,
 } from '../../lib/parking/googlePlaceMatchUtils';
 import type { WeatherImpact } from '@/lib/weather/types';
+import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
 type PriceableOption = {
   id?: string;
@@ -119,6 +121,7 @@ type TripDataWithExtras = TripData & {
   parkingCheckOutDate?: string;
   parkingCheckOutTime?: string;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
+  transitPayment?: 'cash' | 'orca-card' | 'orca-pass';
   checkingBags?: boolean;
   securityOption?: SecurityOption;
   flightType?: FlightType;
@@ -586,9 +589,11 @@ function providerIcon(providerName: string): string {
 function PricingLinksSection({
   title,
   items,
+  transitPayment,
 }: {
   title: string;
   items: ProviderLinkItem[];
+  transitPayment?: TransitPaymentOption;
 }) {
   if (!items || items.length === 0) return null;
 
@@ -614,16 +619,20 @@ function PricingLinksSection({
           kind && !(isTransitSection && kind === 'check-live');
 
         const primaryPrice =
-          isRideSection && it.priceRangeLabel
-            ? `Est. ${it.priceRangeLabel}`
-            : isRideSection && typeof it.price === 'number'
-              ? `Est. ${formatMoney(it.price)}`
-              : price.primary;
+          isTransitSection && transitPayment === 'orca-pass'
+            ? '$0'
+            : isRideSection && it.priceRangeLabel
+              ? `Est. ${it.priceRangeLabel}`
+              : isRideSection && typeof it.price === 'number'
+                ? `Est. ${formatMoney(it.price)}`
+                : price.primary;
 
         const secondaryPrice =
-          isRideSection
-            ? it.priceNote || 'Prices vary by demand, traffic, and pickup time'
-            : it.priceNote || price.secondary;
+          isTransitSection && transitPayment === 'orca-pass'
+            ? 'Covered by ORCA pass'
+            : isRideSection
+              ? it.priceNote || 'Prices vary by demand, traffic, and pickup time'
+              : it.priceNote || price.secondary;
 
         const primaryCta =
           it.id === 'soundtransit-planner'
@@ -680,7 +689,7 @@ function PricingLinksSection({
 
                         {isTransitSection && typeof it.price === 'number' && (
                           <div className="text-xs font-medium text-zinc-500">
-                            fare estimate
+                            {transitPayment === 'orca-pass' ? 'pass applied' : 'fare estimate'}
                           </div>
                         )}
 
@@ -2153,11 +2162,13 @@ function ProviderDropdownSection({
   subtitle,
   items,
   defaultOpen = false,
+  transitPayment,
 }: {
   title: string;
   subtitle: string;
   items: ProviderLinkItem[];
   defaultOpen?: boolean;
+  transitPayment?: TransitPaymentOption;
 }) {
   if (!items || items.length === 0) return null;
 
@@ -2190,7 +2201,11 @@ function ProviderDropdownSection({
         </div>
       </summary>
 
-      <PricingLinksSection title={title} items={items} />
+      <PricingLinksSection
+        title={title}
+        items={items}
+        transitPayment={transitPayment}
+      />
     </details>
   );
 }
@@ -4510,6 +4525,7 @@ export default function ResultsContent() {
               subtitle="Compare route planning, fares, confidence, and links."
               items={[...(transitOptions), ...extraTransitProviders]}
               defaultOpen={false}
+              transitPayment={tripData?.transitPayment}
             />
 
             <ParkingReviewsModal
@@ -4565,6 +4581,10 @@ function EditTripForm({
 
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>(
     initialData.transportAvailability || 'all'
+  );
+
+  const [transitPayment, setTransitPayment] = useState<'normal' | 'orca-pass'>(
+    (initialData as TripDataWithExtras).transitPayment || 'normal'
   );
 
   const showAirportTimingControls = intent === 'flying-out' && initialData.type === 'one-way-departure';
@@ -4755,6 +4775,7 @@ function EditTripForm({
         flightType: showAirportTimingControls ? flightType : (initialData as TripDataWithExtras).flightType,
         cabin: showAirportTimingControls ? cabin : (initialData as TripDataWithExtras).cabin,
         checkedInAtAirport: (initialData as TripDataWithExtras).checkedInAtAirport,
+        transitPayment,
       };
     } else if (initialData.type === 'dropoff-pickup') {
       data = {
@@ -4765,6 +4786,7 @@ function EditTripForm({
         airportTripTime,
         transportAvailability,
         airportCode: selectedAirport.id,
+        transitPayment,
       };
     } else if (initialData.type === 'one-way-arrival') {
       data = {
@@ -4775,6 +4797,7 @@ function EditTripForm({
         arrivalTime,
         transportAvailability,
         airportCode: selectedAirport.id,
+        transitPayment,
       };
     } else {
       data = {
@@ -4788,6 +4811,7 @@ function EditTripForm({
         returnTime,
         parkingDuration,
         transportAvailability,
+        transitPayment,
       };
     }
 
@@ -4856,6 +4880,13 @@ function EditTripForm({
               );
             })}
           </div>
+          {(transportAvailability === 'all' || transportAvailability === 'transit') && (
+            <TransitPaymentPicker
+              value={transitPayment}
+              onChange={setTransitPayment}
+              className="mt-4"
+            />
+          )}
         </div>
 
         {showAirportTimingControls && (

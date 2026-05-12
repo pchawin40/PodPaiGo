@@ -70,7 +70,7 @@ const FARE_PROFILES: FareProfile[] = [
   },
   {
     id: 'premium-xl',
-    name: 'Premium / XL',
+    name: 'Uber Premium / XL',
     providerKind: 'uber',
     baseFare: 6,
     perMile: 2.65,

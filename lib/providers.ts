@@ -895,7 +895,7 @@ export class MockProvider implements DataProvider {
       return {
         id: `drive-transit-${route.hub.name.toLowerCase().replace(/ /g, '-')}`,
         name: `Drive to ${route.hub.name} + Light Rail to SeaTac`,
-        price: 3.25,
+        price: 3.00,
         duration: totalDuration,
         frequency: 10,
         totalDuration,

@@ -166,7 +166,7 @@ describe('Transit Cost Calculations', () => {
   const transit: TransitOption = {
     id: 'light-rail',
     name: 'Light Rail',
-    price: 3.25, // one-way price
+    price: 3.00, // one-way price
     duration: 40,
     frequency: 10,
     trustStatus: 'verified-source',
@@ -282,7 +282,7 @@ describe('Recommendation Ranking', () => {
     {
       id: 'light-rail',
       name: 'Light Rail',
-      price: 3.25,
+      price: 3.00,
       duration: 40,
       frequency: 10,
       trustStatus: 'verified-source',

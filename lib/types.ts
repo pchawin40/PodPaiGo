@@ -13,11 +13,14 @@ export type SecurityOption = 'standard' | 'precheck' | 'clear' | 'clear-precheck
 export type FlightType = 'domestic' | 'international';
 export type CabinClass = 'economy' | 'premium';
 
+export type TransitPaymentOption = 'normal' | 'orca-pass';
+
 type BaseTripData = {
   origin: string;
   destination: string;
   airportCode?: string;
   transportAvailability?: TransportAvailability;
+  transitPayment?: TransitPaymentOption;
   parkingCheckInDate?: string;
   parkingCheckOutDate?: string;
 };

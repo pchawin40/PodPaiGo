@@ -219,9 +219,9 @@ export const mockTransitOptions: TransitOption[] = [
   {
     id: 'light-rail',
     name: 'Light Rail',
-    price: 3.25,
+    price: 3.00,
     priceDisplay: 'estimated',
-    priceNote: 'Fare info (not a live quote)',
+    priceNote: '$3 one-way fare estimate',
     duration: 40,
     frequency: 10,
     availability: 90,
@@ -235,9 +235,9 @@ export const mockTransitOptions: TransitOption[] = [
   {
     id: 'bus-174',
     name: 'Bus Route 174',
-    price: 2.75,
+    price: 3.00,
     priceDisplay: 'estimated',
-    priceNote: 'Fare info (not a live quote)',
+    priceNote: '$3 one-way fare estimate',
     duration: 45,
     frequency: 15,
     availability: 75,

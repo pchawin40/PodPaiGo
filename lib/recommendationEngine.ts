@@ -428,9 +428,23 @@ export class RecommendationEngine {
       calculatedCost: calculateRideshareCost(r, tripData)
     }));
 
+    const hasOrcaPass = tripData.transitPayment === 'orca-pass';
+
     const transitWithCosts = transit.map(t => ({
       ...t,
-      calculatedCost: calculateTransitCost(t, tripData)
+      price: hasOrcaPass ? 0 : t.price,
+      totalCost: hasOrcaPass && 'totalCost' in t ? 0 : (t as { totalCost?: number }).totalCost,
+      calculatedCost: hasOrcaPass ? 0 : calculateTransitCost(t, tripData),
+      priceNote: hasOrcaPass
+        ? '$0 with ORCA / employer transit pass'
+        : t.priceNote,
+      assumptions: hasOrcaPass
+        ? [
+          ...(t.assumptions || []),
+          'Transit fare shown as $0 because ORCA / employer pass was selected.',
+          'Park & Ride lot rules, time limits, and permit requirements may still apply.',
+        ]
+        : t.assumptions,
     }));
 
     const sortedParking = parkingWithCosts.sort((a, b) => {
