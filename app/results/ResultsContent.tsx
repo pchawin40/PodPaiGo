@@ -121,7 +121,7 @@ type TripDataWithExtras = TripData & {
   parkingCheckOutDate?: string;
   parkingCheckOutTime?: string;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
-  transitPayment?: 'cash' | 'orca-card' | 'orca-pass';
+  transitPayment?: TransitPaymentOption;
   checkingBags?: boolean;
   securityOption?: SecurityOption;
   flightType?: FlightType;
@@ -2742,6 +2742,10 @@ export default function ResultsContent() {
       ? transportRaw
       : 'all';
 
+    const transitPaymentRaw = searchParams.get('transitPayment') || 'normal';
+    const transitPayment: TransitPaymentOption =
+      transitPaymentRaw === 'orca-pass' ? 'orca-pass' : 'normal';
+
     const intentParam = searchParams.get('intent') || '';
 
     const timeAnchorRaw = searchParams.get('timeAnchor');
@@ -2809,6 +2813,7 @@ export default function ResultsContent() {
             parkingCheckInDate,
             parkingCheckOutDate,
             transportAvailability,
+            transitPayment,
             checkingBags,
             securityOption,
             flightType,
@@ -2828,6 +2833,7 @@ export default function ResultsContent() {
             parkingCheckInDate,
             parkingCheckOutDate,
             transportAvailability,
+            transitPayment,
             checkedInAtAirport,
           };
       }
@@ -2835,7 +2841,7 @@ export default function ResultsContent() {
       const arrivalDate = searchParams.get('arrivalDate') || '';
       const arrivalTime = searchParams.get('arrivalTime') || '';
       if (arrivalDate && arrivalTime && origin && destination) {
-        data = { type, origin, destination, arrivalDate, arrivalTime, transportAvailability };
+        data = { type, origin, destination, arrivalDate, arrivalTime, transportAvailability, transitPayment };
       }
     } else if (type === 'round-trip') {
       const departureDate = searchParams.get('departureDate') || '';
@@ -2843,18 +2849,18 @@ export default function ResultsContent() {
       const returnDate = searchParams.get('returnDate') || '';
       const returnTime = searchParams.get('returnTime') || '';
       if (departureDate && departureTime && returnDate && returnTime && origin && destination) {
-        data = { type, origin, destination, departureDate, departureTime, returnDate, returnTime, parkingDuration, transportAvailability };
+        data = { type, origin, destination, departureDate, departureTime, returnDate, returnTime, parkingDuration, transportAvailability, transitPayment };
       }
     } else if (type === 'dropoff-pickup') {
       const airportTripDate = searchParams.get('airportTripDate') || '';
       const airportTripTime = searchParams.get('airportTripTime') || '';
       if (airportTripDate && airportTripTime && origin && destination) {
-        data = { type, origin, destination, airportTripDate, airportTripTime, transportAvailability };
+        data = { type, origin, destination, airportTripDate, airportTripTime, transportAvailability, transitPayment };
       }
     }
 
     if (data) { // Ensure airport code is included in trip data for consistent processing, even if not explicitly in URL params for some trip types
-      data = { ...data, airportCode } as TripData;
+      data = { ...data, airportCode, transitPayment } as TripData;
     }
 
     if (data) {
@@ -4525,7 +4531,7 @@ export default function ResultsContent() {
               subtitle="Compare route planning, fares, confidence, and links."
               items={[...(transitOptions), ...extraTransitProviders]}
               defaultOpen={false}
-              transitPayment={tripData?.transitPayment}
+              transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
             />
 
             <ParkingReviewsModal
