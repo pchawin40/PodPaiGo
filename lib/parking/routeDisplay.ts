@@ -39,15 +39,27 @@ type ParkingLotDestinationResult = {
 
 function getParkingDriveMinutes(option: ParkingOption): number {
   const optionWithRoute = option as ParkingOption & {
+    duration?: number | null;
     routeToParkingMinutes?: number | null;
     driveMinutes?: number | null;
     durationMinutes?: number | null;
     routeDurationMinutes?: number | null;
     distanceMinutes?: number | null;
+    routeMinutes?: number | null;
+    drivingMinutes?: number | null;
+    driveTimeMinutes?: number | null;
+    routeToLotMinutes?: number | null;
+    originToParkingMinutes?: number | null;
   };
 
   const candidates = [
+    optionWithRoute.duration,
     optionWithRoute.routeToParkingMinutes,
+    optionWithRoute.originToParkingMinutes,
+    optionWithRoute.routeToLotMinutes,
+    optionWithRoute.driveTimeMinutes,
+    optionWithRoute.drivingMinutes,
+    optionWithRoute.routeMinutes,
     optionWithRoute.driveMinutes,
     optionWithRoute.durationMinutes,
     optionWithRoute.routeDurationMinutes,

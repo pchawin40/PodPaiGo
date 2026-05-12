@@ -101,14 +101,6 @@ function weatherParkingBadge(
   return { label, className };
 }
 
-function parkingOptionKey(option: ParkingOption): string {
-  return String(option.id || option.name || '')
-    .toLowerCase()
-    .replace(/parking/g, '')
-    .replace(/official/g, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
 function mergeGoogleEnrichedParking(
   option: ParkingOption,
   googleEnrichedParking: Record<string, Partial<ParkingOption>>
