@@ -100,6 +100,7 @@ export async function attachGooglePlaceToParking(
         googleReviewsExpiresAt: place.expiresAt,
         googlePlaceName: place.name ?? parking.googlePlaceName,
         googlePlaceAddress: place.address ?? parking.googlePlaceAddress,
+        googleMapsUri: place.googleMapsUri ?? parking.googleMapsUri,
         reviewScore: typeof place.rating === 'number' ? place.rating : parking.reviewScore,
         reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : parking.reviewCount,
         normalizedAddress: place.address ?? parking.normalizedAddress,

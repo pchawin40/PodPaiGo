@@ -1,6 +1,7 @@
 import { ParkingOption } from '../types';
 import { ParkingLotInventoryRow } from './inventory';
 import { getAirportById } from '../airports/catalog';
+import { cleanParkingProviderInventoryName } from './googlePlaceMatchUtils';
 
 function googleMapsDirectionsUrl(origin: string, destination: string): string {
     return `https://www.google.com/maps/dir/${encodeURIComponent(origin)}/${encodeURIComponent(destination)}`;
@@ -39,10 +40,11 @@ export function inventoryLotToParkingOption(args: {
     origin: string;
 }): ParkingOption {
     const { lot, origin } = args;
+    const cleanedName = cleanParkingProviderInventoryName(lot.name) || lot.name;
 
     const destination =
         lot.address ||
-        `${lot.name}, ${lot.airportCode} Airport`;
+        `${cleanedName}, ${lot.airportCode} Airport`;
 
     const official = lot.isOfficial || inferOfficial(lot.name);
     const covered = inferCovered(lot.name);
@@ -84,6 +86,9 @@ export function inventoryLotToParkingOption(args: {
         routeOrigin: origin,
         routeDestination: destination,
         address: lot.address ?? destination,
+        normalizedAddress: lot.address ?? destination,
+        lat: typeof lot.latitude === 'number' ? lot.latitude : undefined,
+        lng: typeof lot.longitude === 'number' ? lot.longitude : undefined,
         lastUpdated: lot.updatedAt,
 
         parkingBufferMinutes: official ? 8 : 15,

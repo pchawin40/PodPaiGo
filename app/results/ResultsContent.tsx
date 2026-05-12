@@ -1293,20 +1293,19 @@ function OptionCard({
       ? trustedParkingBookingLink(opt)
       : opt.sourceLink || null;
 
-  const parkingRoutes =
+  const routeParkingOption =
     item.type === 'parking'
-      ? parkingRouteLinks(opt as ParkingOption, {
-        origin: tripData?.origin || '',
-        destination: airport.routingAddress || tripData?.destination || airport.destinationName || airport.label,
-      })
+      ? (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption
+      : null;
+
+  const parkingRoutes =
+    routeParkingOption
+      ? parkingRouteLinks(routeParkingOption, tripData)
       : null;
 
   const routeUnavailable =
     item.type === 'parking' &&
-    (isParkingRouteUnavailable(opt as ParkingOption) ||
-      !tripData?.origin ||
-      !parkingRoutes?.parkingLotDestination ||
-      !parkingRoutes?.routeToParkingUrl);
+    (isParkingRouteUnavailable(opt as ParkingOption) || !tripData?.origin);
 
   const parkingLotRouteLink = routeUnavailable ? null : parkingRoutes?.routeToParkingUrl || null;
   const parkingToTerminalRouteLink = routeUnavailable ? null : parkingRoutes?.parkingToAirportUrl || null;

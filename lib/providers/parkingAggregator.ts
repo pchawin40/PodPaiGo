@@ -11,6 +11,7 @@ import { enrichInventoryOptionsWithPrices } from '../parking/priceMatcher';
 import { calculateParkingAvailabilityScore } from '../parking/availabilityScore';
 import { normalizeParkingPriceForTrip } from '../parking/parkingPriceNormalizer';
 import { withStableParkingRouteStatus } from '../parking/routeStatus';
+import { cleanParkingProviderInventoryName } from '../parking/googlePlaceMatchUtils';
 import {
   getCachedAprLotsForDateRange,
   getLatestParkingPriceSnapshots,
@@ -118,29 +119,8 @@ function isAprOption(p: ParkingOption): boolean {
 }
 
 function aprLotRouteDestination(lotName: string): string {
-  const lower = lotName.toLowerCase();
-
-  if (lower.includes('jiffy')) {
-    return 'Jiffy Airport Parking Seattle, 18836 International Blvd, SeaTac, WA 98188';
-  }
-
-  if (lower.includes('skyway')) {
-    return 'Skyway Inn Airport Parking, 20045 International Blvd, SeaTac, WA 98198';
-  }
-
-  if (lower.includes('extra car')) {
-    return 'Extra Car Airport Parking, SeaTac, WA';
-  }
-
-  if (lower.includes('hilton')) {
-    return 'Hilton Seattle Airport & Conference Center, 17620 International Blvd, SeaTac, WA 98188';
-  }
-
-  if (lower.includes('masterpark lot b')) {
-    return 'MasterPark Lot B, SeaTac, WA';
-  }
-
-  return `${lotName}, SeaTac, WA`;
+  const cleanedName = cleanParkingProviderInventoryName(lotName) || lotName;
+  return `${cleanedName}, SeaTac, WA`;
 }
 
 function aprLotToParkingOption(
@@ -363,6 +343,7 @@ async function getGoogleParkingPlaces(args: {
           sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
           googlePlaceId: place.id,
+          googleMapsUri: place.googleMapsUri,
           address: place.formattedAddress,
           lat: place.location?.latitude,
           lng: place.location?.longitude,

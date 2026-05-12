@@ -26,6 +26,30 @@ const transitHubs = [
   { name: 'Angle Lake Station', driveTimeFactor: 55, transitTime: 60, isParkAndRide: true },
 ];
 
+function parseGoogleDurationToMinutes(value: unknown): number | null {
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d+(?:\.\d+)?)s$/);
+    if (match) {
+      return Math.ceil(Number(match[1]) / 60);
+    }
+  }
+
+  if (typeof value === 'number') {
+    return Math.ceil(value / 60);
+  }
+
+  if (
+    value &&
+    typeof value === 'object' &&
+    'value' in value &&
+    typeof (value as { value?: unknown }).value === 'number'
+  ) {
+    return Math.ceil((value as { value: number }).value / 60);
+  }
+
+  return null;
+}
+
 function resolveAirportDestinationForRouting(destinationKey: string): string {
   const lower = destinationKey.toLowerCase();
 
@@ -464,10 +488,31 @@ export class LiveTrafficProvider implements TrafficProvider {
           throw new Error('No duration available from Routes API');
         }
 
-        const durationMinutes = Math.ceil(durationMs / 60000);
+        const durationMinutes =
+          parseGoogleDurationToMinutes(element.duration) ??
+          parseGoogleDurationToMinutes(element.staticDuration);
+
+        if (durationMinutes == null) {
+          throw new Error(
+            `No usable duration from Routes API. duration=${JSON.stringify(
+              element.duration
+            )}, staticDuration=${JSON.stringify(element.staticDuration)}`
+          );
+        }
+
+        const staticDurationMinutes =
+          parseGoogleDurationToMinutes(element.staticDuration) ?? undefined;
 
         // Heuristic congestion: compare traffic-aware duration vs staticDuration if available
         let congestion: 'low' | 'medium' | 'high' = 'medium';
+
+        if (staticDurationMinutes && durationMinutes) {
+          const ratio = durationMinutes / staticDurationMinutes;
+          if (ratio < 1.2) congestion = 'low';
+          else if (ratio < 1.5) congestion = 'medium';
+          else congestion = 'high';
+        }
+
         let staticMs: number | null = null;
         if (typeof element.staticDuration === 'string') {
           const m = element.staticDuration.match(/^(\d+)s$/);
@@ -488,7 +533,7 @@ export class LiveTrafficProvider implements TrafficProvider {
         const estimate: TrafficEstimate = {
           route: routeKey,
           duration: durationMinutes,
-          staticDuration: staticMs ? Math.ceil(staticMs / 60000) : undefined,
+          staticDuration: staticDurationMinutes,
           congestion,
           trustStatus: 'live',
           sourceName: 'Google Routes API',
@@ -561,8 +606,14 @@ export class MockProvider implements DataProvider {
     const trafficProviderType =
       process.env.NODE_ENV === 'test'
         ? 'mock'
-        : process.env.TRAFFIC_PROVIDER || 'live';
-    this.trafficProvider = trafficProviderType === 'live' ? new LiveTrafficProvider() : new MockTrafficProvider();
+        : process.env.TRAFFIC_PROVIDER === 'mock'
+          ? 'mock'
+          : 'live';
+
+    this.trafficProvider =
+      trafficProviderType === 'live'
+        ? new LiveTrafficProvider()
+        : new MockTrafficProvider();
   }
 
   private buildGoogleDirectionsLink(origin: string, destination: string): string {
@@ -591,21 +642,31 @@ export class MockProvider implements DataProvider {
     return hub.driveTimeFactor + 5;
   }
 
-  private async getRouteEstimate(origin: string, destination: string, dateTime: string, allowLive: boolean): Promise<TrafficEstimate> {
+  private async getRouteEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    allowLive: boolean
+  ): Promise<TrafficEstimate> {
     const cacheKey = `${origin}|${destination}|${dateTime}|${allowLive}`;
+
     if (this.routeCache.has(cacheKey)) {
       return this.routeCache.get(cacheKey)!;
     }
 
     let estimate: TrafficEstimate;
 
-    if (allowLive && this.trafficProvider instanceof LiveTrafficProvider) {
-      estimate = await this.trafficProvider.getTrafficEstimate(origin, destination, dateTime);
-    } else if (isClearlyNonDrivableRoute(origin, destination)) {
+    if (isClearlyNonDrivableRoute(origin, destination)) {
       estimate = unavailableTrafficEstimate(
         normalizeTrafficRoute(origin, destination),
         'Route validation',
         'Route unavailable from this origin to the airport area.'
+      );
+    } else if (allowLive) {
+      estimate = await this.trafficProvider.getTrafficEstimate(
+        origin,
+        destination,
+        dateTime
       );
     } else {
       estimate = this.estimateRouteDuration(origin, destination, 35);
@@ -620,7 +681,12 @@ export class MockProvider implements DataProvider {
     return this.trafficProvider.getTrafficEstimate(origin, routeDestination, dateTime);
   }
 
-  async getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]> {
+  async getParkingOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number
+  ): Promise<ParkingOption[]> {
     const routeOrigins = origin;
 
     const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
@@ -648,69 +714,105 @@ export class MockProvider implements DataProvider {
         : mockParkingOptions;
 
     const airportDestination = resolveAirportDestinationForRouting(destination);
-    const airportRouteEstimate = await this.getRouteEstimate(origin, airportDestination, dateTime, true);
+    const airportRouteEstimate = await this.getRouteEstimate(
+      origin,
+      airportDestination,
+      dateTime,
+      true
+    );
 
     if (airportRouteEstimate.routeUnavailable) {
       return [];
     }
 
-    return Promise.all(parkingSource.map(async option => {
-      const routeDestination = option.routeDestination || airportDestination;
-      const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
+    return Promise.all(
+      parkingSource.map(async (option) => {
+        const routeDestination =
+          option.routeDestination ||
+          option.address ||
+          option.name ||
+          airportDestination;
 
-      const meta = resolveParkingTransferMeta(option);
-      const parkingBufferMinutes = option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
-      const transferToTerminalMinutes = option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
-      const transferType = option.transferType ?? meta.transferType;
+        const routeEstimate = await this.getRouteEstimate(
+          origin,
+          routeDestination,
+          dateTime,
+          true
+        );
 
-      const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
-      const sourceLink = option.sourceLink && option.sourceLink.includes('example.com') ? undefined : option.sourceLink;
+        const meta = resolveParkingTransferMeta(option);
+        const parkingBufferMinutes =
+          option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
+        const transferToTerminalMinutes =
+          option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
+        const transferType = option.transferType ?? meta.transferType;
 
-      const routeDurationMinutes =
-        routeEstimate.routeUnavailable || typeof routeEstimate.duration !== 'number'
-          ? null
-          : routeEstimate.duration;
+        const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
+        const sourceLink =
+          option.sourceLink && option.sourceLink.includes('example.com')
+            ? undefined
+            : option.sourceLink;
 
-      const liveDriveMinutes = routeEstimate.routeUnavailable
-        ? 0
-        : routeEstimate.duration ?? option.distance ?? 0;
+        const liveDriveMinutes =
+          !routeEstimate.routeUnavailable && typeof routeEstimate.duration === 'number'
+            ? routeEstimate.duration
+            : null;
 
-      return {
-        ...option,
-        parkingBufferMinutes,
-        transferToTerminalMinutes,
-        transferType,
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Parking route debug]', {
+            name: option.name,
+            address: option.address,
+            routeDestination,
+            routeDuration: routeEstimate.duration,
+            routeTrustStatus: routeEstimate.trustStatus,
+            routeUnavailable: routeEstimate.routeUnavailable,
+            originalOptionDistance: option.distance,
+          });
+        }
 
-        // IMPORTANT:
-        // In this app, parking UI uses "distance" as drive minutes.
-        // So both distance and duration must receive the live Google route duration.
-        distance: liveDriveMinutes,
-        duration: liveDriveMinutes,
+        return {
+          ...option,
+          parkingBufferMinutes,
+          transferToTerminalMinutes,
+          transferType,
 
-        routeTrustStatus: routeEstimate.trustStatus,
-        routeUnavailable: routeEstimate.routeUnavailable === true,
-        routeUnavailableReason: routeEstimate.routeUnavailable
-          ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
-          : undefined,
-        availability: routeEstimate.routeUnavailable ? 0 : option.availability,
-        routeOrigin: routeOrigins,
-        routeDestination,
-        sourceLink,
-        mapLink,
-        lastUpdated: new Date().toISOString(),
-        assumptions: [
-          ...option.assumptions,
-          routeEstimate.routeUnavailable
-            ? routeEstimate.routeUnavailableReason || 'Route unavailable from this origin.'
-            : `Route from ${origin} to ${routeDestination}`,
-          routeEstimate.routeUnavailable
-            ? 'This parking option is not usable from the selected origin.'
-            : routeEstimate.trustStatus === 'live'
-              ? `Based on live routing: ${liveDriveMinutes} min drive`
-              : 'Estimated route time for origin-aware travel',
-        ],
-      };
-    }));
+          // In this app, ParkingOption.distance is being used as DRIVE MINUTES.
+          // Only use Google/live route minutes. Do NOT fall back to option.distance here,
+          // because that creates fake 10/25/28/35 minute drive times.
+          distance: liveDriveMinutes ?? 0,
+          duration: liveDriveMinutes ?? 0,
+
+          routeTrustStatus: routeEstimate.trustStatus,
+          routeUnavailable: routeEstimate.routeUnavailable === true || liveDriveMinutes == null,
+          routeUnavailableReason:
+            routeEstimate.routeUnavailable === true || liveDriveMinutes == null
+              ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
+              : undefined,
+
+          availability:
+            routeEstimate.routeUnavailable === true || liveDriveMinutes == null
+              ? 0
+              : option.availability,
+
+          routeOrigin: routeOrigins,
+          routeDestination,
+          sourceLink,
+          mapLink,
+          lastUpdated: new Date().toISOString(),
+          assumptions: [
+            ...option.assumptions,
+            routeEstimate.routeUnavailable || liveDriveMinutes == null
+              ? routeEstimate.routeUnavailableReason || 'Route unavailable from this origin.'
+              : `Route from ${origin} to ${routeDestination}`,
+            routeEstimate.routeUnavailable || liveDriveMinutes == null
+              ? 'This parking option is not usable from the selected origin.'
+              : routeEstimate.trustStatus === 'live'
+                ? `Based on live routing: ${liveDriveMinutes} min drive`
+                : `Estimated route time: ${liveDriveMinutes} min drive`,
+          ],
+        };
+      })
+    );
   }
 
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {

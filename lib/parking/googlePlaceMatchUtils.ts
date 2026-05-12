@@ -17,16 +17,38 @@ const PARKING_MARKETPLACE_PROVIDERS = new Set([
 ]);
 
 export function cleanGoogleParkingSearchName(name: string): string {
-  return String(name || '')
-    .replace(/\s+-\s*self\s+uncovered.*$/i, '')
-    .replace(/\s+-\s*self\s+covered.*$/i, '')
-    .replace(/\s+-\s*uncovered.*$/i, '')
-    .replace(/\s+-\s*covered.*$/i, '')
-    .replace(/\s+-\s*valet.*$/i, '')
-    .replace(/\s+-\s*rooftop.*$/i, '')
-    .replace(/\s+-\s*daily.*$/i, '')
+  return cleanParkingProviderInventoryName(name);
+}
+
+export function cleanParkingProviderInventoryName(name: string): string {
+  let cleaned = String(name || '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  if (!cleaned) return '';
+
+  const suffixPatterns = [
+    /\s+(?:parking\s+)?lot(?:\s+[A-Z]{3})?\s*-\s*self\s+(?:uncovered|covered|rooftop|park|parking).*$/i,
+    /\s+[A-Z]{3}\s*-\s*(?:[Ss]elf|SELF)\s+(?:[Uu]ncovered|[Cc]overed|[Rr]ooftop|[Pp]ark|[Pp]arking).*$/,
+    /\s*-\s*self\s+(?:uncovered|covered|rooftop|park|parking).*$/i,
+    /\s*-\s*(?:uncovered|covered|rooftop|valet|daily|monthly|outdoor|indoor)(?:\s+(?:parking|lot|garage|space|spaces|rate|rates))?.*$/i,
+    /\s+(?:parking\s+)?lot\s+[A-Z]{3}$/i,
+    /\s+[A-Z]{3}\s+(?:[Pp]arking\s+)?[Ll]ot$/,
+    /\s+(?:self\s+)?(?:uncovered|covered|rooftop|valet|outdoor|indoor)\s+(?:parking|lot|space|spaces)$/i,
+    /\s+(?:parking\s+)?lot$/i,
+  ];
+
+  let previous = '';
+
+  while (cleaned && cleaned !== previous) {
+    previous = cleaned;
+
+    for (const pattern of suffixPatterns) {
+      cleaned = cleaned.replace(pattern, '').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  return cleaned;
 }
 
 export function normalizeParkingLotName(name: string): string {

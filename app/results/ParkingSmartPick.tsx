@@ -57,14 +57,6 @@ function getWeatherScoreAdjustment(
   return score;
 }
 
-function parkingRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
-  return parkingRouteLinks(option, tripData).routeToParkingUrl || option.mapLink || null;
-}
-
-function parkingToAirportRouteLink(option: ParkingOption, tripData: TripData | null): string | null {
-  return parkingRouteLinks(option, tripData).parkingToAirportUrl;
-}
-
 function weatherParkingBadge(
   option: ParkingOption,
   weatherImpact?: WeatherImpact | null
@@ -345,10 +337,7 @@ export default function ParkingSmartPick({
         ? 'Book official'
         : 'Check price';
 
-  const bestRouteLinks = {
-    routeToParkingUrl: parkingRouteLink(best, tripData),
-    parkingToAirportUrl: parkingToAirportRouteLink(best, tripData),
-  };
+  const bestRouteLinks = parkingRouteLinks(best, tripData);
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -498,7 +487,7 @@ export default function ParkingSmartPick({
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
             >
-              Parking to airport
+              Parking to terminal
             </a>
           )}
         </div>

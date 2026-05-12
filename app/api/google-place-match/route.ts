@@ -86,6 +86,7 @@ async function handleRequest(input: Record<string, unknown>) {
         place: {
           googlePlaceId: place.googlePlaceId,
           name: place.googlePlaceName || place.lotName,
+          googleMapsUri: place.googleMapsUri,
           rating: place.rating,
           reviewCount: place.reviewCount,
           address: place.googleFormattedAddress || place.lotAddress,

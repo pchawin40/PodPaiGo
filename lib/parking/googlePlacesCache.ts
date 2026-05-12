@@ -752,6 +752,7 @@ export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheR
     googleReviewsExpiresAt: place.expiresAt,
     googlePlaceName: place.googlePlaceName,
     googlePlaceAddress: place.googleFormattedAddress,
+    googleMapsUri: place.googleMapsUri,
     reviewScore: typeof place.rating === 'number' ? place.rating : undefined,
     reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : undefined,
     normalizedAddress: place.googleFormattedAddress || undefined,

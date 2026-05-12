@@ -1,6 +1,41 @@
 import { ParkingOption, TripData } from '../types';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
 import { isParkingRouteUnavailable } from './routeStatus';
+import { getAirportById } from '../airports/catalog';
+import { cleanParkingProviderInventoryName } from './googlePlaceMatchUtils';
+
+type ParkingRouteOption = Pick<
+  ParkingOption,
+  | 'routeDestination'
+  | 'mapLink'
+  | 'name'
+  | 'lat'
+  | 'lng'
+  | 'normalizedAddress'
+  | 'address'
+  | 'googlePlaceId'
+  | 'googlePlaceName'
+  | 'googlePlaceAddress'
+  | 'googleMapsUri'
+>;
+
+type ParkingRouteTripData = Pick<TripData, 'origin' | 'destination' | 'airportCode'> | null;
+
+type ParkingDestinationSource =
+  | 'google-place'
+  | 'name-address'
+  | 'route-destination'
+  | 'address'
+  | 'coordinates'
+  | 'none';
+
+type ParkingLotDestinationResult = {
+  destination: string;
+  googlePlaceId?: string;
+  googleMapsUri?: string;
+  usedGooglePlaceData: boolean;
+  source: ParkingDestinationSource;
+};
 
 export function parkingTimeBreakdown(option: ParkingOption): {
   label: string;
@@ -66,70 +101,344 @@ export function parkingTimeBreakdown(option: ParkingOption): {
   };
 }
 
-function looksLikeAirportDestination(value: string): boolean {
-  const lower = value.toLowerCase();
+function normalizeDestinationText(value: string | null | undefined): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  return (
-    lower.includes('terminal') ||
-    lower.includes('central terminal') ||
-    lower.includes('international airport') ||
-    lower.includes('airport terminal') ||
-    lower.includes('passenger terminal')
+function hasSpecificPlaceContext(normalizedValue: string): boolean {
+  return /\b(hotel|inn|suites|motel|garage|parking|park|lot|valet|shuttle|center|plaza|station)\b/.test(
+    normalizedValue
   );
 }
 
+function looksLikeAirportDestination(
+  value: string,
+  airportDestination?: string | null
+): boolean {
+  const lower = normalizeDestinationText(value);
+  const airport = normalizeDestinationText(airportDestination);
+
+  if (!lower) return false;
+
+  const genericAirportDestinations = new Set([
+    'sea',
+    'seatac',
+    'sea tac',
+    'sea airport',
+    'seatac airport',
+    'sea tac airport',
+    'seattle tacoma airport',
+    'seattle tacoma international airport',
+    'seattle tacoma international airport sea',
+    'central terminal',
+    'airport terminal',
+    'passenger terminal',
+  ]);
+
+  if (/^[a-z]{3}$/.test(lower)) return true;
+  if (genericAirportDestinations.has(lower)) return true;
+
+  if (airport) {
+    if (lower === airport) return true;
+    if (lower.length >= 12 && /[0-9]/.test(lower) && airport.includes(lower)) return true;
+    if (lower.includes('airport') && airport.includes(lower)) return true;
+    if (lower.includes('terminal') && airport.includes(lower)) return true;
+  }
+
+  return (
+    lower.includes('central terminal') ||
+    lower.includes('airport terminal') ||
+    lower.includes('passenger terminal') ||
+    (lower.includes('terminal') && !lower.includes('parking') && !lower.includes('garage')) ||
+    lower === 'international airport' ||
+    (lower.endsWith(' international airport') && !hasSpecificPlaceContext(lower)) ||
+    (lower.endsWith(' airport') && !hasSpecificPlaceContext(lower))
+  );
+}
+
+function looksLikeGenericParkingName(value: string): boolean {
+  const lower = normalizeDestinationText(value);
+
+  return (
+    lower.includes('spothero sea parking') ||
+    lower.includes('way.com') ||
+    lower.includes('parkwhiz') ||
+    lower.includes('airport parking options') ||
+    lower.includes('parking near') ||
+    lower.includes('compare parking') ||
+    lower === 'parking' ||
+    lower === 'parking lot' ||
+    lower === 'parking garage' ||
+    lower === 'airport parking' ||
+    lower === 'airport parking lot' ||
+    lower === 'sea parking' ||
+    lower === 'sea airport parking' ||
+    lower === 'seatac parking' ||
+    lower === 'seatac airport parking'
+  );
+}
+
+function isLikelyUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function isUsableLotDestination(
+  value: string,
+  airportDestination?: string | null
+): boolean {
+  const trimmed = value.trim();
+
+  if (!trimmed) return false;
+  if (isLikelyUrl(trimmed)) return false;
+  if (looksLikeAirportDestination(trimmed, airportDestination)) return false;
+  if (looksLikeGenericParkingName(trimmed)) return false;
+
+  return true;
+}
+
+function joinNameAndAddress(name: string, address: string): string {
+  if (!name) return address;
+  if (!address) return name;
+
+  const lowerName = name.toLowerCase();
+  const lowerAddress = address.toLowerCase();
+
+  if (lowerAddress.includes(lowerName) || lowerName.includes(lowerAddress)) {
+    return name || address;
+  }
+
+  return `${name}, ${address}`;
+}
+
 export function parkingLotDestination(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
+  option: ParkingRouteOption,
   airportDestination?: string | null
 ): string {
+  return resolveParkingLotDestination(option, airportDestination).destination;
+}
+
+export function resolveParkingLotDestination(
+  option: ParkingRouteOption,
+  airportDestination?: string | null
+): ParkingLotDestinationResult {
+  const name = String(option.name || '').trim();
+  const cleanedName = cleanParkingProviderInventoryName(name);
   const routeDestination = String(option.routeDestination || '').trim();
+  const cleanedRouteDestination = cleanParkingProviderInventoryName(routeDestination);
   const address = String(option.address || '').trim();
   const normalizedAddress = String(option.normalizedAddress || '').trim();
+  const googlePlaceName = cleanParkingProviderInventoryName(option.googlePlaceName || '');
+  const googlePlaceAddress = String(option.googlePlaceAddress || '').trim();
+  const googlePlaceId = String(option.googlePlaceId || '').trim() || undefined;
+  const googleMapsUri = String(option.googleMapsUri || '').trim() || undefined;
+  const hasUsableAddress = isUsableLotDestination(address, airportDestination);
+  const hasUsableNormalizedAddress = isUsableLotDestination(
+    normalizedAddress,
+    airportDestination
+  );
+  const hasUsableGooglePlaceAddress = isUsableLotDestination(
+    googlePlaceAddress,
+    airportDestination
+  );
 
-  if (typeof option.lat === 'number' && typeof option.lng === 'number') {
-    return `${option.lat},${option.lng}`;
+  const googlePlaceDestination = joinNameAndAddress(
+    googlePlaceName,
+    hasUsableGooglePlaceAddress ? googlePlaceAddress : ''
+  );
+
+  if (
+    (googlePlaceId || googleMapsUri) &&
+    isUsableLotDestination(googlePlaceDestination, airportDestination)
+  ) {
+    return {
+      destination: googlePlaceDestination,
+      googlePlaceId,
+      googleMapsUri,
+      usedGooglePlaceData: true,
+      source: 'google-place',
+    };
   }
 
-  if (address) return address;
-
-  if (normalizedAddress) return normalizedAddress;
-
-  if (routeDestination && !looksLikeAirportDestination(routeDestination)) {
-    return routeDestination;
+  if (
+    (googlePlaceId || googleMapsUri) &&
+    hasUsableGooglePlaceAddress
+  ) {
+    return {
+      destination: googlePlaceAddress,
+      googlePlaceId,
+      googleMapsUri,
+      usedGooglePlaceData: true,
+      source: 'google-place',
+    };
   }
 
-  return airportDestination || '';
+  if (
+    (googlePlaceId || googleMapsUri) &&
+    isUsableLotDestination(googlePlaceName, airportDestination)
+  ) {
+    return {
+      destination: googlePlaceName,
+      googlePlaceId,
+      googleMapsUri,
+      usedGooglePlaceData: true,
+      source: 'google-place',
+    };
+  }
+
+  const hasRealCleanedName =
+    cleanedName && isUsableLotDestination(cleanedName, airportDestination);
+
+  if (hasRealCleanedName && hasUsableAddress) {
+    const destination = joinNameAndAddress(cleanedName, address);
+    if (isUsableLotDestination(destination, airportDestination)) {
+      return {
+        destination,
+        usedGooglePlaceData: false,
+        source: 'name-address',
+      };
+    }
+  }
+
+  if (hasRealCleanedName && hasUsableNormalizedAddress) {
+    const destination = joinNameAndAddress(cleanedName, normalizedAddress);
+    if (isUsableLotDestination(destination, airportDestination)) {
+      return {
+        destination,
+        usedGooglePlaceData: false,
+        source: 'name-address',
+      };
+    }
+  }
+
+  if (hasRealCleanedName) {
+    return {
+      destination: cleanedName,
+      usedGooglePlaceData: false,
+      source: 'name-address',
+    };
+  }
+
+  if (isUsableLotDestination(cleanedRouteDestination, airportDestination)) {
+    return {
+      destination: cleanedRouteDestination,
+      usedGooglePlaceData: false,
+      source: 'route-destination',
+    };
+  }
+
+  if (isUsableLotDestination(routeDestination, airportDestination)) {
+    return {
+      destination: routeDestination,
+      usedGooglePlaceData: false,
+      source: 'route-destination',
+    };
+  }
+
+  if (hasUsableAddress) {
+    return {
+      destination: address,
+      usedGooglePlaceData: false,
+      source: 'address',
+    };
+  }
+
+  if (hasUsableNormalizedAddress) {
+    return {
+      destination: normalizedAddress,
+      usedGooglePlaceData: false,
+      source: 'address',
+    };
+  }
+
+  if (
+    typeof option.lat === 'number' &&
+    Number.isFinite(option.lat) &&
+    typeof option.lng === 'number' &&
+    Number.isFinite(option.lng)
+  ) {
+    return {
+      destination: `${option.lat},${option.lng}`,
+      usedGooglePlaceData: false,
+      source: 'coordinates',
+    };
+  }
+
+  return {
+    destination: '',
+    googlePlaceId,
+    googleMapsUri,
+    usedGooglePlaceData: Boolean(googlePlaceId || googleMapsUri),
+    source: 'none',
+  };
+}
+
+function resolveAirportDestination(
+  tripData: ParkingRouteTripData
+): string {
+  const rawDestination = String(tripData?.destination || '').trim();
+  const airportCode = String(tripData?.airportCode || '').trim();
+  const airport =
+    getAirportById(airportCode) ||
+    getAirportById(rawDestination) ||
+    getAirportById(rawDestination.slice(0, 3));
+
+  return airport?.routingAddress || rawDestination;
 }
 
 export function parkingRouteLinks(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
-  tripData: Pick<TripData, 'origin' | 'destination'> | null
+  option: ParkingRouteOption,
+  tripData: ParkingRouteTripData
 ): {
   routeToParkingUrl: string | null;
   parkingToAirportUrl: string | null;
   parkingLotDestination: string;
   airportDestination: string;
+  usedGooglePlaceData: boolean;
+  parkingLotDestinationSource: ParkingDestinationSource;
 } {
-  const airportDestination = String(tripData?.destination || option.routeDestination || '').trim();
-  const lotDestination = parkingLotDestination(option, airportDestination);
+  const airportDestination = resolveAirportDestination(tripData);
+  const lotDestination = resolveParkingLotDestination(option, airportDestination);
   const origin = String(tripData?.origin || '').trim();
 
-  const routeToParkingUrl = lotDestination
-    ? origin
-      ? googleMapsDirectionsLink(origin, lotDestination, 'driving')
-      : googleMapsSearchLink(lotDestination)
-    : option.mapLink || null;
+  const routeToParkingUrl =
+    origin && lotDestination.destination
+      ? googleMapsDirectionsLink(origin, lotDestination.destination, 'driving', {
+        destinationPlaceId: lotDestination.googlePlaceId,
+      })
+      : null;
 
   const parkingToAirportUrl =
-    lotDestination && airportDestination
-      ? googleMapsDirectionsLink(lotDestination, airportDestination, 'driving')
+    lotDestination.destination && airportDestination
+      ? googleMapsDirectionsLink(lotDestination.destination, airportDestination, 'driving', {
+        originPlaceId: lotDestination.googlePlaceId,
+      })
       : null;
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Parking Maps route links]', {
+      parkingOptionName: option.name,
+      parkingLotDestination: lotDestination.destination || null,
+      airportDestination,
+      routeToParkingUrl,
+      parkingToAirportUrl,
+      usedGooglePlaceData: lotDestination.usedGooglePlaceData,
+      parkingLotDestinationSource: lotDestination.source,
+      googleMapsUri: lotDestination.googleMapsUri,
+    });
+  }
 
   return {
     routeToParkingUrl,
     parkingToAirportUrl,
-    parkingLotDestination: lotDestination,
+    parkingLotDestination: lotDestination.destination,
     airportDestination,
+    usedGooglePlaceData: lotDestination.usedGooglePlaceData,
+    parkingLotDestinationSource: lotDestination.source,
   };
 }
 
@@ -209,17 +518,17 @@ export function routeUrlForOption(
 }
 
 export function googleMapsParkingRouteLink(
-  option: Pick<ParkingOption, 'routeDestination' | 'mapLink' | 'name' | 'lat' | 'lng' | 'normalizedAddress' | 'address'>,
+  option: ParkingRouteOption,
   origin: string | null,
   airportDestination?: string | null
 ): string | null {
-  const parkingLot = parkingLotDestination(option, airportDestination);
+  const parkingLot = resolveParkingLotDestination(option, airportDestination);
 
-  if (!parkingLot) return null;
+  if (!parkingLot.destination || !origin) return null;
 
-  if (!origin) return googleMapsSearchLink(parkingLot);
-
-  return googleMapsDirectionsLink(origin, parkingLot, 'driving');
+  return googleMapsDirectionsLink(origin, parkingLot.destination, 'driving', {
+    destinationPlaceId: parkingLot.googlePlaceId,
+  });
 }
 
 export function costOf(option: { cost?: number }): number {

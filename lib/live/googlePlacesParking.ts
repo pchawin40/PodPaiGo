@@ -48,6 +48,12 @@ export async function enrichParkingWithGooglePlaces(
           ...p,
           reviewScore: place.rating ?? p.reviewScore,
           reviewCount: place.userRatingCount ?? p.reviewCount,
+          googlePlaceId: place.id ?? p.googlePlaceId,
+          googlePlaceName: place.displayName?.text ?? p.googlePlaceName,
+          googlePlaceAddress: place.formattedAddress ?? p.googlePlaceAddress,
+          googleMapsUri: place.googleMapsUri ?? p.googleMapsUri,
+          address: place.formattedAddress ?? p.address,
+          normalizedAddress: place.formattedAddress ?? p.normalizedAddress,
           mapLink: place.googleMapsUri ?? p.mapLink,
           sourceName: p.sourceName || 'Google Places',
           assumptions: [
