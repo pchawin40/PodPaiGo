@@ -419,18 +419,18 @@ export function parkingRouteLinks(
       })
       : null;
 
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[Parking Maps route links]', {
-      parkingOptionName: option.name,
-      parkingLotDestination: lotDestination.destination || null,
-      airportDestination,
-      routeToParkingUrl,
-      parkingToAirportUrl,
-      usedGooglePlaceData: lotDestination.usedGooglePlaceData,
-      parkingLotDestinationSource: lotDestination.source,
-      googleMapsUri: lotDestination.googleMapsUri,
-    });
-  }
+  // if (process.env.NODE_ENV === 'development') {
+  //   console.log('[Parking Maps route links]', {
+  //     parkingOptionName: option.name,
+  //     parkingLotDestination: lotDestination.destination || null,
+  //     airportDestination,
+  //     routeToParkingUrl,
+  //     parkingToAirportUrl,
+  //     usedGooglePlaceData: lotDestination.usedGooglePlaceData,
+  //     parkingLotDestinationSource: lotDestination.source,
+  //     googleMapsUri: lotDestination.googleMapsUri,
+  //   });
+  // }
 
   return {
     routeToParkingUrl,

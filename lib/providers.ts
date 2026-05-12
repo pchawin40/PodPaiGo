@@ -1,10 +1,11 @@
 import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate, SecurityOption } from './types';
-import { mockParkingOptions, mockRideshareOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
+import { mockParkingOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { SeaTacAirportData } from './airports';
 import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
+import { buildRideshareEstimateOptions } from './rideshare/estimate';
 
 
 
@@ -534,6 +535,10 @@ export class LiveTrafficProvider implements TrafficProvider {
           route: routeKey,
           duration: durationMinutes,
           staticDuration: staticDurationMinutes,
+          distanceMeters:
+            typeof element.distanceMeters === 'number'
+              ? element.distanceMeters
+              : undefined,
           congestion,
           trustStatus: 'live',
           sourceName: 'Google Routes API',
@@ -823,33 +828,34 @@ export class MockProvider implements DataProvider {
       return [];
     }
 
-    const baseDuration = routeEstimate.duration + 5;
+    const directionsUrl = this.buildGoogleDirectionsLink(origin, routeDestination);
+    const taxiQuery = origin?.trim() ? `Taxi near ${origin}` : 'Taxi near airport';
+    const uberUrl = `https://m.uber.com/ul/?${new URLSearchParams({
+      action: 'setPickup',
+      pickup: 'my_location',
+      'dropoff[formatted_address]': routeDestination,
+    }).toString()}`;
 
-    return mockRideshareOptions.map(option => {
-      const taxiQuery = origin?.trim() ? `Taxi near ${origin}` : 'Taxi SeaTac';
-
-      return {
-        ...option,
-        duration: baseDuration,
-        routeTrustStatus: routeEstimate.trustStatus,
-        routeOrigin: origin,
-        routeDestination,
-        sourceLink: option.id === 'uber'
-          ? 'https://m.uber.com/ul/?action=setPickup&pickup=my_location'
-          : option.id === 'lyft'
-            ? 'https://lyft.com/ride'
-            : option.id === 'taxi'
-              ? this.buildGoogleMapsSearchLink(taxiQuery)
-              : undefined,
-        mapLink: this.buildGoogleDirectionsLink(origin, routeDestination),
-        lastUpdated: new Date().toISOString(),
-        assumptions: [
-          ...option.assumptions,
-          `Route from ${origin} to ${routeDestination}`,
-          routeEstimate.trustStatus === 'live' ? 'Based on live traffic and pickup routing' : 'Estimated ride time',
-        ],
-      };
+    const rideshareOptions = buildRideshareEstimateOptions({
+      origin,
+      destination: routeDestination,
+      routeEstimate,
+      directionsUrl,
+      uberUrl,
+      lyftUrl: 'https://lyft.com/ride',
+      taxiSearchUrl: this.buildGoogleMapsSearchLink(taxiQuery),
     });
+
+    if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
+      console.log('[Rideshare estimates]', {
+        routeTrustStatus: routeEstimate.trustStatus,
+        duration: routeEstimate.duration,
+        distanceMeters: routeEstimate.distanceMeters,
+        optionCount: rideshareOptions.length,
+      });
+    }
+
+    return rideshareOptions;
   }
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {

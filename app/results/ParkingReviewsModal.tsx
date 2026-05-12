@@ -79,9 +79,9 @@ export default function ParkingReviewsModal({
         async function loadGoogleData() {
             if (!open || !parking) return;
 
-            if (process.env.NODE_ENV !== "production") {
-                console.log("[ParkingReviewsModal selected option]", parking);
-            }
+            // if (process.env.NODE_ENV !== "production") {
+            //     console.log("[ParkingReviewsModal selected option]", parking);
+            // }
 
             const hasCompleteGoogleData =
                 !!parking.googlePlaceId &&

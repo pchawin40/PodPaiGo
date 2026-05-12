@@ -6,6 +6,7 @@ export type RoutesApiElement = {
   durationMillis?: number;
   duration?: string | { value?: number };
   staticDuration?: string | number;
+  distanceMeters?: number;
 };
 
 export type RoutesApiResponse = {

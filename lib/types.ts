@@ -75,6 +75,11 @@ export type ParkingPriceSource =
 
 export type PriceConfidence = 'high' | 'medium' | 'low';
 
+export type RideshareEstimateConfidence =
+  | 'live-route-estimate'
+  | 'baseline-estimate'
+  | 'unavailable';
+
 export type TransferLegType =
   | 'drive'
   | 'walk'
@@ -227,9 +232,16 @@ export type RideshareOption = {
   name: string;
   /** Internal numeric price used by the recommendation engine (may be estimated/mock). */
   price: number;
+  priceMin?: number;
+  priceMax?: number;
+  priceRangeLabel?: string;
   priceDisplay?: PriceDisplay;
   priceUnit?: PriceUnit;
   priceNote?: string;
+  rideshareEstimateConfidence?: RideshareEstimateConfidence;
+  distanceMiles?: number;
+  routeDistanceMeters?: number;
+  pickupWaitMinutes?: number;
   duration: number; // in minutes
   availability: number;
   trustStatus: TrustStatus;
@@ -321,6 +333,7 @@ export type TrafficEstimate = {
   route: string;
   duration: number; // duration in minutes (traffic-aware)
   staticDuration?: number; // optional static duration in minutes (no-traffic typical)
+  distanceMeters?: number;
   congestion: 'low' | 'medium' | 'high';
   trustStatus: TrustStatus;
   routeUnavailable?: boolean;

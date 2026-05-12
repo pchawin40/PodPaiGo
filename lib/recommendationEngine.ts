@@ -107,11 +107,14 @@ function genericRideshareFallback(): RideshareOption[] {
       duration: 20,
       availability: 90,
       trustStatus: 'estimated',
+      priceDisplay: 'estimated',
+      priceNote: 'Baseline estimate only. Open Uber for final pricing.',
+      rideshareEstimateConfidence: 'baseline-estimate',
       sourceName: 'Uber',
       sourceLink: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',
       mapLink: 'https://www.google.com/maps',
       lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.'],
+      assumptions: ['Generic fallback rideshare option.', 'Not a live Uber quote.'],
     },
     {
       id: 'lyft',
@@ -120,11 +123,14 @@ function genericRideshareFallback(): RideshareOption[] {
       duration: 20,
       availability: 90,
       trustStatus: 'estimated',
+      priceDisplay: 'estimated',
+      priceNote: 'Baseline estimate only. Open Lyft for final pricing.',
+      rideshareEstimateConfidence: 'baseline-estimate',
       sourceName: 'Lyft',
       sourceLink: 'https://lyft.com/ride',
       mapLink: 'https://www.google.com/maps',
       lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.'],
+      assumptions: ['Generic fallback rideshare option.', 'Not a live Lyft quote.'],
     },
   ];
 }
@@ -386,7 +392,7 @@ export class RecommendationEngine {
         parking = genericParkingFallback(airportCode, tripData.destination);
       }
 
-      if (allowRideshare && rideshare.length === 0) {
+      if (allowRideshare && rideshare.length === 0 && !trafficEstimate.routeUnavailable) {
         rideshare = genericRideshareFallback();
       }
 

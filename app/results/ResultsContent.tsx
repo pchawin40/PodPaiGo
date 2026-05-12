@@ -57,7 +57,8 @@ import {
   Recommendation,
   TripData,
   TrustStatus,
-  ParkingOption
+  ParkingOption,
+  RideshareEstimateConfidence
 } from '../../lib/types';
 import {
   costOf,
@@ -80,6 +81,11 @@ type PriceableOption = {
   priceDisplay?: PriceDisplay;
   priceUnit?: PriceUnit;
   priceNote?: string;
+  priceMin?: number;
+  priceMax?: number;
+  priceRangeLabel?: string;
+  rideshareEstimateConfidence?: RideshareEstimateConfidence;
+  distanceMiles?: number;
   trustStatus?: TrustStatus;
   sourceLink?: string;
   mapLink?: string;
@@ -101,6 +107,7 @@ type AppOption = PriceableOption & {
   isAvailable?: boolean;
   routeUnavailable?: boolean;
   routeUnavailableReason?: string;
+  routeTrustStatus?: TrustStatus;
   googlePlaceId?: string;
   reviewScore?: number;
   reviewCount?: number;
@@ -344,6 +351,30 @@ function confidenceFromTrust(trust: TrustStatus): { label: string; className: st
   }
 }
 
+function rideshareConfidenceMeta(
+  confidence?: RideshareEstimateConfidence
+): { label: string; className: string } | null {
+  switch (confidence) {
+    case 'live-route-estimate':
+      return {
+        label: 'Live-route estimate',
+        className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+      };
+    case 'baseline-estimate':
+      return {
+        label: 'Baseline estimate',
+        className: 'bg-amber-50 text-amber-900 border-amber-200',
+      };
+    case 'unavailable':
+      return {
+        label: 'Unavailable',
+        className: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+      };
+    default:
+      return null;
+  }
+}
+
 function getTripAirportCode(tripData: TripData | null): string {
   return ((tripData as TripDataWithExtras | null)?.airportCode || 'SEA').toUpperCase();
 }
@@ -568,6 +599,7 @@ function PricingLinksSection({
     <div className="divide-y divide-zinc-100 bg-white">
       {items.map((it: ProviderLinkItem) => {
         const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
+        const rideshareConfidence = rideshareConfidenceMeta(it.rideshareEstimateConfidence);
         const price = formatProviderPrice(it);
         const link = bestLink(it);
         const kind = it.priceDisplay as string | undefined;
@@ -582,7 +614,9 @@ function PricingLinksSection({
           kind && !(isTransitSection && kind === 'check-live');
 
         const primaryPrice =
-          isRideSection && typeof it.price === 'number'
+          isRideSection && it.priceRangeLabel
+            ? `Est. ${it.priceRangeLabel}`
+            : isRideSection && typeof it.price === 'number'
             ? `Est. ${formatMoney(it.price)}`
             : price.primary;
 
@@ -597,7 +631,9 @@ function PricingLinksSection({
             : isTransitSection
               ? 'View route'
               : isRideSection
-                ? 'Check live'
+                ? String(it.name || '').toLowerCase().includes('taxi')
+                  ? 'Find taxi'
+                  : 'Open app'
                 : 'View deal';
 
         const sourceAndMapSame = Boolean(link && it.mapLink && link === it.mapLink);
@@ -625,6 +661,12 @@ function PricingLinksSection({
                         {shouldShowPriceKindBadge && (
                           <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
                             {pricingKindLabel(kind)}
+                          </span>
+                        )}
+
+                        {rideshareConfidence && (
+                          <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + rideshareConfidence.className}>
+                            {rideshareConfidence.label}
                           </span>
                         )}
                       </div>
@@ -1287,6 +1329,10 @@ function OptionCard({
   const safeParkingSearchQuery = `${airport.label} ${airport.id} airport parking`;
 
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
+  const rideshareConfidence =
+    item.type === 'rideshare'
+      ? rideshareConfidenceMeta(opt.rideshareEstimateConfidence)
+      : null;
 
   const sourceLink =
     item.type === 'parking'
@@ -1411,7 +1457,9 @@ function OptionCard({
     : null;
 
   const nonParkingPrice =
-    typeof opt.price === 'number' && opt.price > 0
+    item.type === 'rideshare' && opt.priceRangeLabel
+      ? `Est. ${opt.priceRangeLabel}`
+      : typeof opt.price === 'number' && opt.price > 0
       ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
       : visiblePrice.primary;
 
@@ -1470,6 +1518,12 @@ function OptionCard({
               <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
                 {trust.label}
               </div>
+
+              {rideshareConfidence && (
+                <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + rideshareConfidence.className}>
+                  {rideshareConfidence.label}
+                </div>
+              )}
 
               {timingMeta && (
                 <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + timingMeta.className}>
@@ -1704,7 +1758,12 @@ function OptionCard({
                       : opt.type === 'official'
                         ? 'Book official'
                         : 'Check price'
-                    : 'View'}
+                    : item.type === 'rideshare' &&
+                      (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
+                      ? 'Find taxi'
+                      : item.type === 'rideshare'
+                        ? 'Open app'
+                        : 'View'}
                 </button>
               )}
 
@@ -1762,6 +1821,8 @@ function OptionCard({
                   {item.type === 'rideshare' &&
                     (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
                     ? 'Find taxi'
+                    : item.type === 'rideshare'
+                      ? 'Open app'
                     : 'View / Book'}
                 </a>
               ) : null}
@@ -2958,7 +3019,7 @@ export default function ResultsContent() {
         name: 'Uber',
         trustStatus: 'estimated' as const,
         priceDisplay: 'check-live' as const,
-        priceNote: 'Prices vary widely by time and demand',
+        priceNote: 'Open Uber for current pricing; PodPaiGo does not have a live Uber quote.',
         sourceName: PROVIDER_LINKS.uberDeepLink.sourceName,
         sourceLink: PROVIDER_LINKS.uberDeepLink.url,
       },
@@ -2967,7 +3028,7 @@ export default function ResultsContent() {
         name: 'Lyft',
         trustStatus: 'estimated' as const,
         priceDisplay: 'check-live' as const,
-        priceNote: 'Prices vary widely by time and demand',
+        priceNote: 'Open Lyft for current pricing; PodPaiGo does not have a live Lyft quote.',
         sourceName: PROVIDER_LINKS.lyftDeepLink.sourceName,
         sourceLink: PROVIDER_LINKS.lyftDeepLink.url,
       },
@@ -4437,7 +4498,7 @@ export default function ResultsContent() {
             {showRideProviders && (
               <ProviderDropdownSection
                 title="Ride providers"
-                subtitle="Compare Uber, Lyft, taxi, and live provider links."
+                subtitle="Compare estimated fares and provider links."
                 items={rideProviderItems}
                 defaultOpen={false}
               />

@@ -100,7 +100,7 @@ export function buildRideshareTransferLegs(
             confidence: option.routeTrustStatus ?? option.trustStatus,
             note:
                 option.routeTrustStatus === 'live'
-                    ? 'Live route duration when available.'
+                    ? 'Traffic-aware route duration; fare is estimated separately.'
                     : 'Estimated rideshare route duration.',
         },
         {
