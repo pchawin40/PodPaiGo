@@ -617,8 +617,8 @@ function PricingLinksSection({
           isRideSection && it.priceRangeLabel
             ? `Est. ${it.priceRangeLabel}`
             : isRideSection && typeof it.price === 'number'
-            ? `Est. ${formatMoney(it.price)}`
-            : price.primary;
+              ? `Est. ${formatMoney(it.price)}`
+              : price.primary;
 
         const secondaryPrice =
           isRideSection
@@ -1460,8 +1460,8 @@ function OptionCard({
     item.type === 'rideshare' && opt.priceRangeLabel
       ? `Est. ${opt.priceRangeLabel}`
       : typeof opt.price === 'number' && opt.price > 0
-      ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
-      : visiblePrice.primary;
+        ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
+        : visiblePrice.primary;
 
   return (
     <div
@@ -1823,7 +1823,7 @@ function OptionCard({
                     ? 'Find taxi'
                     : item.type === 'rideshare'
                       ? 'Open app'
-                    : 'View / Book'}
+                      : 'View / Book'}
                 </a>
               ) : null}
 
@@ -4128,6 +4128,7 @@ export default function ResultsContent() {
                   aprLiveChecking={aprLiveChecking}
                   weatherImpact={recommendation?.weatherImpact}
                   onShowReviews={handleShowReviews}
+                  googleEnrichedParking={googleEnrichedParking}
                 />
               )}
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">

@@ -9,7 +9,11 @@ import {
   getParkingTotalPrice,
   parkingPriceLine,
 } from '../../lib/parking/priceDisplay';
-import { parkingRouteLinks, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
+import {
+  parkingKey,
+  parkingRouteLinks,
+  parkingTimeBreakdown,
+} from '../../lib/parking/routeDisplay';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherImpact } from '@/lib/weather/types';
@@ -97,6 +101,31 @@ function weatherParkingBadge(
   return { label, className };
 }
 
+function parkingOptionKey(option: ParkingOption): string {
+  return String(option.id || option.name || '')
+    .toLowerCase()
+    .replace(/parking/g, '')
+    .replace(/official/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function mergeGoogleEnrichedParking(
+  option: ParkingOption,
+  googleEnrichedParking: Record<string, Partial<ParkingOption>>
+): ParkingOption {
+  const enriched =
+    googleEnrichedParking[parkingKey(option)] ||
+    googleEnrichedParking[String(option.id || '')] ||
+    googleEnrichedParking[String(option.name || '')];
+
+  if (!enriched) return option;
+
+  return {
+    ...option,
+    ...enriched,
+  };
+}
+
 export default function ParkingSmartPick({
   options,
   tripData,
@@ -105,6 +134,7 @@ export default function ParkingSmartPick({
   aprLivePrices = {},
   weatherImpact,
   onShowReviews,
+  googleEnrichedParking = {},
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
@@ -114,6 +144,7 @@ export default function ParkingSmartPick({
   aprLiveChecking?: boolean;
   weatherImpact?: WeatherImpact | null;
   onShowReviews?: (parking: ParkingOption) => void;
+  googleEnrichedParking?: Record<string, Partial<ParkingOption>>;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -136,13 +167,18 @@ export default function ParkingSmartPick({
 
   if (!options?.length) return null;
 
-  const optionsWithAprLivePrice = options.map((option) =>
-    withAprLivePrice(option, aprLivePrices)
-  ) as ParkingOption[];
+  const optionsWithAprLivePrice = options.map((option) => {
+    const enrichedOption = mergeGoogleEnrichedParking(option, googleEnrichedParking);
+    return withAprLivePrice(enrichedOption, aprLivePrices);
+  }) as ParkingOption[];
+
   const routeAvailableOptions = optionsWithAprLivePrice.filter((option) => !isParkingRouteUnavailable(option));
 
   const selectedOptionWithAprLivePrice = selectedOption
-    ? (withAprLivePrice(selectedOption, aprLivePrices) as ParkingOption)
+    ? (withAprLivePrice(
+      mergeGoogleEnrichedParking(selectedOption, googleEnrichedParking),
+      aprLivePrices
+    ) as ParkingOption)
     : undefined;
 
   const smartPickCandidates = routeAvailableOptions.filter((p) => {
