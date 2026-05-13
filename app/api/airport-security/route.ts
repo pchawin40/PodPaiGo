@@ -3,6 +3,8 @@ import { getAirportTsaEstimate } from '../../../lib/airports/tsa/provider';
 
 type LaneKey = 'standard' | 'precheck' | 'clear' | 'clearPrecheck';
 
+type SecurityOption = 'standard' | 'precheck' | 'clear' | 'clear-precheck';
+
 type SecurityLaneStatus = {
     available: boolean;
     waitMinutes?: number;
@@ -18,6 +20,56 @@ type AirportSecurityResponse = {
     note?: string;
     lanes: Record<LaneKey, SecurityLaneStatus>;
 };
+
+function normalizeSecurityOption(value: string | null): SecurityOption {
+    if (
+        value === 'precheck' ||
+        value === 'clear' ||
+        value === 'clear-precheck' ||
+        value === 'standard'
+    ) {
+        return value;
+    }
+
+    return 'standard';
+}
+
+function isLaneAllowedForSelection(
+    selectedSecurity: SecurityOption,
+    lane: LaneKey
+): boolean {
+    if (lane === 'standard') return true;
+
+    if (selectedSecurity === 'precheck') {
+        return lane === 'precheck';
+    }
+
+    if (selectedSecurity === 'clear') {
+        return lane === 'clear';
+    }
+
+    if (selectedSecurity === 'clear-precheck') {
+        return lane === 'precheck' || lane === 'clear' || lane === 'clearPrecheck';
+    }
+
+    return false;
+}
+
+function restrictLane(
+    selectedSecurity: SecurityOption,
+    lane: LaneKey,
+    status: SecurityLaneStatus
+): SecurityLaneStatus {
+    if (isLaneAllowedForSelection(selectedSecurity, lane)) {
+        return status;
+    }
+
+    return {
+        ...status,
+        available: false,
+        note: 'Not included because the traveler did not select this security option.',
+    };
+}
 
 function fallbackSecurity(airportCode: string, plannedAirportArrivalAt?: string): AirportSecurityResponse {
     return {
@@ -63,6 +115,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const airportCode = (searchParams.get('airport') || 'SEA').toUpperCase();
     const plannedAirportArrivalAt = searchParams.get('plannedAirportArrivalAt') || undefined;
+    const selectedSecurity = normalizeSecurityOption(
+        searchParams.get('securityOption') || searchParams.get('security')
+    );
 
     if (airportCode !== 'SEA') {
         return NextResponse.json(fallbackSecurity(airportCode, plannedAirportArrivalAt));
@@ -72,7 +127,7 @@ export async function GET(request: Request) {
         const estimate = await getAirportTsaEstimate({
             airportCode,
             destination: 'Seattle-Tacoma International Airport',
-            securityOption: 'clear-precheck',
+            securityOption: selectedSecurity,
             plannedAirportArrivalAt,
         });
 
@@ -118,26 +173,26 @@ export async function GET(request: Request) {
                     ? 'Live TSA wait is current only.'
                     : 'Future TSA/security timing is estimated for the planned airport arrival.',
             lanes: {
-                standard: {
+                standard: restrictLane(selectedSecurity, 'standard', {
                     available: true,
                     waitMinutes: standardWait,
                     note: 'Standard TSA lane.',
-                },
-                precheck: {
+                }),
+                precheck: restrictLane(selectedSecurity, 'precheck', {
                     available: true,
                     waitMinutes: safePrecheckWait,
                     note: 'TSA PreCheck lane when operating.',
-                },
-                clear: {
+                }),
+                clear: restrictLane(selectedSecurity, 'clear', {
                     available: true,
                     waitMinutes: safeClearWait,
                     note: 'CLEAR lane when operating. Wait estimate is capped because source data is checkpoint-level.',
-                },
-                clearPrecheck: {
+                }),
+                clearPrecheck: restrictLane(selectedSecurity, 'clearPrecheck', {
                     available: true,
                     waitMinutes: safeClearPrecheckWait,
                     note: 'Fastest eligible lane when CLEAR and PreCheck are operating.',
-                },
+                }),
             },
         };
 

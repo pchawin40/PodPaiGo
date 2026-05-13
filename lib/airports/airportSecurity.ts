@@ -79,23 +79,44 @@ export function getAirportSecurityEstimate(
   const code = airportCode.toUpperCase();
 
   if (code === 'SEA') {
-    const selectedMinutes =
-      selectedSecurity === 'clear-precheck' ? 2 :
-      selectedSecurity === 'precheck' ? 3 :
-      selectedSecurity === 'clear' ? 3 :
-      3;
+    const laneMinutes: Record<SecurityOption, number> = {
+      standard: 3,
+      precheck: 3,
+      clear: 3,
+      'clear-precheck': 2,
+    };
+
+    const laneLabels: Record<SecurityOption, string> = {
+      standard: 'Standard',
+      precheck: 'PreCheck',
+      clear: 'CLEAR',
+      'clear-precheck': 'CLEAR + PreCheck',
+    };
+
+    const availableLanes: SecurityOption[] =
+      selectedSecurity === 'clear-precheck'
+        ? ['standard', 'precheck', 'clear', 'clear-precheck']
+        : selectedSecurity === 'precheck'
+          ? ['standard', 'precheck']
+          : selectedSecurity === 'clear'
+            ? ['standard', 'clear']
+            : ['standard'];
+
+    const fastestLane = availableLanes.reduce((best, lane) => {
+      const laneIsFaster = laneMinutes[lane] < laneMinutes[best];
+      const laneTiesSelected =
+        laneMinutes[lane] === laneMinutes[best] && lane === selectedSecurity;
+
+      return laneIsFaster || laneTiesSelected ? lane : best;
+    }, availableLanes[0]);
 
     return {
       label: 'TSA',
-      selectedMinutes,
-      fastestMinutes: 2,
-      selectedLineLabel:
-        selectedSecurity === 'clear-precheck' ? 'CLEAR + PreCheck' :
-        selectedSecurity === 'precheck' ? 'PreCheck' :
-        selectedSecurity === 'clear' ? 'CLEAR' :
-        'Standard',
-      fastestLineLabel: 'CLEAR + PreCheck',
-      note: 'For selected option: use the best available checkpoint shown by airport data.',
+      selectedMinutes: laneMinutes[selectedSecurity],
+      fastestMinutes: laneMinutes[fastestLane],
+      selectedLineLabel: laneLabels[selectedSecurity],
+      fastestLineLabel: laneLabels[fastestLane],
+      note: 'Fastest security option is limited to the traveler’s selected available lane(s).',
       supportsPreCheck: true,
       supportsClear: true,
       sourceName: 'SEA airport data',

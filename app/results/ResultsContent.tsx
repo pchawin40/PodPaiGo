@@ -1053,6 +1053,22 @@ function buildBookingSourceRows(parking: PriceableOption & {
 
 type TimingStatus = 'good' | 'tight' | 'too-late' | 'n/a';
 
+function getAllowedSecurityLanes(selectedSecurity?: SecurityOption) {
+  if (selectedSecurity === 'clear-precheck') {
+    return ['standard', 'precheck', 'clear', 'clear-precheck'] as const;
+  }
+
+  if (selectedSecurity === 'precheck') {
+    return ['standard', 'precheck'] as const;
+  }
+
+  if (selectedSecurity === 'clear') {
+    return ['standard', 'clear'] as const;
+  }
+
+  return ['standard'] as const;
+}
+
 function computeAirportReadyBufferMinutes(
   tripData: TripDataWithExtras | TripData | null
 ): { bufferMinutes: number; assumptions: string[] } | null {
@@ -2264,15 +2280,20 @@ function formatPlannedAirportArrival(value?: string): string | null {
 function TsaWaitTimesCard({
   tsaEstimate,
   airportCode,
+  selectedSecurityOption,
 }: {
   tsaEstimate: Recommendation['tsaEstimate'];
   airportCode?: string;
+  selectedSecurityOption?: SecurityOption;
 }) {
   const waitTimes = tsaEstimate.waitTimes;
 
+  const selectedLane =
+    selectedSecurityOption ?? tsaEstimate.selectedLane ?? 'standard';
+
   const airportSecurity = getAirportSecurityEstimate(
     airportCode || 'SEA',
-    (tsaEstimate.selectedLane || 'standard') as SecurityOption
+    selectedLane as SecurityOption
   );
 
   const isSea = (airportCode || 'SEA').toUpperCase() === 'SEA';
@@ -2315,8 +2336,16 @@ function TsaWaitTimesCard({
     );
   }
 
-  const selectedLane = tsaEstimate.selectedLane ?? 'standard';
   const selectedLabel = laneLabels[selectedLane] ?? 'Standard';
+
+  const allowedLaneKeys =
+    selectedLane === 'clear-precheck'
+      ? ['standard', 'precheck', 'clear', 'clear-precheck']
+      : selectedLane === 'precheck'
+        ? ['standard', 'precheck']
+        : selectedLane === 'clear'
+          ? ['standard', 'clear']
+          : ['standard'];
 
   const allLanes = [
     { key: 'standard', label: 'Standard', minutes: waitTimes.standard },
@@ -2329,26 +2358,31 @@ function TsaWaitTimesCard({
     },
   ].filter((lane) => typeof lane.minutes === 'number');
 
+  const eligibleLanes = allLanes.filter((lane) =>
+    allowedLaneKeys.includes(lane.key)
+  );
+
   const selectedLaneData =
     allLanes.find((lane) => lane.key === selectedLane) ?? null;
 
   const fastestLane =
-    allLanes.length > 0
-      ? [...allLanes].sort((a, b) => {
+    eligibleLanes.length > 0
+      ? [...eligibleLanes].sort((a, b) => {
         if (a.minutes !== b.minutes) return a.minutes - b.minutes;
 
         const priority: Record<string, number> = {
-          'clear-precheck': 0,
-          precheck: 1,
-          clear: 2,
-          standard: 3,
+          [selectedLane]: 0,
+          'clear-precheck': 1,
+          precheck: 2,
+          clear: 3,
+          standard: 4,
         };
 
         return (priority[a.key] ?? 99) - (priority[b.key] ?? 99);
       })[0]
       : null;
 
-  const otherLanes = allLanes.filter(
+  const otherLanes = eligibleLanes.filter(
     (lane) => lane.key !== selectedLane && lane.key !== fastestLane?.key
   );
 
@@ -3848,6 +3882,7 @@ export default function ResultsContent() {
                   <TsaWaitTimesCard
                     tsaEstimate={recommendation.tsaEstimate}
                     airportCode={tripData?.airportCode}
+                    selectedSecurityOption={(tripData as TripDataWithExtras | null)?.securityOption}
                   />
                 )}
 
