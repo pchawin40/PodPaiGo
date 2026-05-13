@@ -15,3 +15,18 @@ export type WeatherImpact = {
   sourceName: string;
   lastUpdated: string;
 };
+
+export type WeatherContext =
+  | 'travel-time-forecast'
+  | 'current-airport-weather'
+  | 'forecast-unavailable'
+  | 'invalid-travel-time'
+  | 'unavailable';
+
+export type WeatherLookupResult = {
+  weatherImpact: WeatherImpact | null;
+  context: WeatherContext;
+  targetDateTime?: string;
+  forecastRangeStart?: string;
+  forecastRangeEnd?: string;
+};

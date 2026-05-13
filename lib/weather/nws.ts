@@ -1,6 +1,6 @@
 // lib/weather/nws.ts
 import { getAirportById } from '../airports/catalog';
-import { WeatherImpact } from './types';
+import { WeatherImpact, WeatherLookupResult } from './types';
 
 type NwsHourlyPeriod = {
   startTime: string;
@@ -67,12 +67,30 @@ function buildWeatherImpact(period: NwsHourlyPeriod): WeatherImpact {
   };
 }
 
-export async function getWeatherImpactForAirport(args: {
+function findFirstPeriodAtOrAfter(
+  periods: NwsHourlyPeriod[],
+  targetTime: number
+): NwsHourlyPeriod | null {
+  const match = periods.find((period) => {
+    const periodStart = new Date(period.startTime).getTime();
+    return Number.isFinite(periodStart) && periodStart >= targetTime;
+  });
+
+  return match ?? periods[periods.length - 1] ?? null;
+}
+
+export async function getWeatherForAirport(args: {
   airportCode: string;
   targetDateTime?: string;
-}): Promise<WeatherImpact | null> {
+}): Promise<WeatherLookupResult> {
   const airport = getAirportById(args.airportCode);
-  if (!airport) return null;
+  if (!airport) {
+    return {
+      weatherImpact: null,
+      context: 'unavailable',
+      targetDateTime: args.targetDateTime,
+    };
+  }
 
   const { lat, lng } = airport.geoLocation;
 
@@ -81,43 +99,128 @@ export async function getWeatherImpactForAirport(args: {
     UserAgent: 'PodPaiGo/1.0',
   };
 
-  const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, {
-    headers,
-  });
+  try {
+    const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, {
+      headers,
+    });
 
-  if (!pointRes.ok) return null;
+    if (!pointRes.ok) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
 
-  const pointData = await pointRes.json();
-  const hourlyUrl = pointData.properties?.forecastHourly;
+    const pointData = await pointRes.json();
+    const hourlyUrl = pointData.properties?.forecastHourly;
 
-  if (!hourlyUrl) return null;
+    if (!hourlyUrl) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
 
-  const hourlyRes = await fetch(hourlyUrl, { headers });
+    const hourlyRes = await fetch(hourlyUrl, { headers });
 
-  if (!hourlyRes.ok) return null;
+    if (!hourlyRes.ok) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
 
-  const hourlyData = await hourlyRes.json();
-  const periods: NwsHourlyPeriod[] = hourlyData.properties?.periods ?? [];
+    const hourlyData = await hourlyRes.json();
+    const periods: NwsHourlyPeriod[] = hourlyData.properties?.periods ?? [];
 
-  if (periods.length === 0) return null;
+    if (periods.length === 0) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
 
-  const targetTime = args.targetDateTime ? new Date(args.targetDateTime).getTime() : Date.now();
+    const firstPeriod = periods[0];
+    const lastPeriod = periods[periods.length - 1];
+    const firstTime = new Date(firstPeriod.startTime).getTime();
+    const lastTime = new Date(lastPeriod.startTime).getTime();
 
-  const firstPeriod = periods[0];
-  const lastPeriod = periods[periods.length - 1];
-  const bestPeriod =
-    periods.find((period) => new Date(period.startTime).getTime() >= targetTime) ?? lastPeriod;
+    if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
 
-  const impact = buildWeatherImpact(bestPeriod);
-  const firstTime = new Date(firstPeriod.startTime).getTime();
-  const lastTime = new Date(lastPeriod.startTime).getTime();
+    if (args.targetDateTime) {
+      const targetTime = new Date(args.targetDateTime).getTime();
+      if (!Number.isFinite(targetTime)) {
+        return {
+          weatherImpact: null,
+          context: 'invalid-travel-time',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
 
-  if (targetTime < firstTime || targetTime > lastTime) {
+      if (targetTime < firstTime || targetTime > lastTime) {
+        return {
+          weatherImpact: null,
+          context: 'forecast-unavailable',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
+      if (!targetPeriod) {
+        return {
+          weatherImpact: null,
+          context: 'unavailable',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      return {
+        weatherImpact: buildWeatherImpact(targetPeriod),
+        context: 'travel-time-forecast',
+        targetDateTime: args.targetDateTime,
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    const now = Date.now();
+    const currentPeriod = findFirstPeriodAtOrAfter(periods, now) || periods[0];
+
     return {
-      ...impact,
-      summary: `${impact.summary} (nearest available forecast)`,
+      weatherImpact: currentPeriod ? buildWeatherImpact(currentPeriod) : null,
+      context: currentPeriod ? 'current-airport-weather' : 'unavailable',
+      forecastRangeStart: firstPeriod.startTime,
+      forecastRangeEnd: lastPeriod.startTime,
+    };
+  } catch {
+    return {
+      weatherImpact: null,
+      context: 'unavailable',
+      targetDateTime: args.targetDateTime,
     };
   }
+}
 
-  return impact;
+export async function getWeatherImpactForAirport(args: {
+  airportCode: string;
+  targetDateTime?: string;
+}): Promise<WeatherImpact | null> {
+  const result = await getWeatherForAirport(args);
+  return result.weatherImpact;
 }

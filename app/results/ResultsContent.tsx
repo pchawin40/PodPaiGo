@@ -73,7 +73,7 @@ import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from '../../lib/parking/googlePlaceMatchUtils';
-import type { WeatherImpact } from '@/lib/weather/types';
+import type { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
 type PriceableOption = {
@@ -144,6 +144,7 @@ type ParkingWeatherItem = {
   key: string;
   label: string;
   date: string;
+  context: WeatherContext;
   weatherImpact: WeatherImpact | null;
 };
 
@@ -433,6 +434,29 @@ function weatherRiskClass(weather: WeatherImpact): string {
   if (weather.riskLevel === 'high') return 'border-red-200 bg-red-50 text-red-800';
   if (weather.riskLevel === 'medium') return 'border-amber-200 bg-amber-50 text-amber-900';
   return 'border-zinc-200 bg-zinc-50 text-zinc-800';
+}
+
+function weatherSectionTitle(context?: WeatherContext): string {
+  if (context === 'travel-time-forecast') return 'Weather for your travel time';
+  if (context === 'current-airport-weather') return 'Current airport weather';
+  if (context === 'forecast-unavailable') return 'Forecast not available yet';
+  return 'Weather unavailable';
+}
+
+function weatherSectionDetail(context?: WeatherContext): string {
+  if (context === 'forecast-unavailable') {
+    return 'Weather check becomes available closer to your trip date.';
+  }
+
+  if (context === 'current-airport-weather') {
+    return 'Showing current conditions because a valid travel time was not provided.';
+  }
+
+  if (context === 'invalid-travel-time') {
+    return 'We could not read the selected travel date/time for weather.';
+  }
+
+  return 'Weather data is currently unavailable.';
 }
 
 async function copyTextThenOpen(text: string, url: string) {
@@ -3228,6 +3252,7 @@ export default function ResultsContent() {
           key: item.key,
           label: item.label,
           date: item.date,
+          context: (data?.context || 'unavailable') as WeatherContext,
           weatherImpact: (data?.weatherImpact || null) as WeatherImpact | null,
         };
       })
@@ -3937,35 +3962,47 @@ export default function ResultsContent() {
 
             {/* Right: supporting context */}
             <div className="space-y-3 lg:border-l lg:border-zinc-100 lg:pl-5">
-              {recommendation.weatherImpact && (
+              {(recommendation.weatherImpact || recommendation.weatherContext) && (
                 <div className="flex items-center gap-3 rounded-xl bg-zinc-50 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
-                    {recommendation.weatherImpact.condition === 'rain'
+                    {recommendation.weatherImpact?.condition === 'rain'
                       ? '🌧️'
-                      : recommendation.weatherImpact.condition === 'snow'
+                      : recommendation.weatherImpact?.condition === 'snow'
                         ? '🌨️'
-                        : recommendation.weatherImpact.condition === 'storm'
+                        : recommendation.weatherImpact?.condition === 'storm'
                           ? '⛈️'
-                          : recommendation.weatherImpact.condition === 'wind'
+                          : recommendation.weatherImpact?.condition === 'wind'
                             ? '🌬️'
-                            : '☀️'}
+                            : recommendation.weatherImpact
+                              ? '☀️'
+                              : '🌤️'}
                   </div>
 
                   <div className="flex flex-col">
-                    <span className={`font-medium ${weatherTone}`}>
-                      {recommendation.weatherImpact.summary}
-                      {typeof recommendation.weatherImpact.temperatureF === 'number'
-                        ? ` · ${recommendation.weatherImpact.temperatureF}°F`
-                        : ''}
-                    </span>
-
-                    <span className="text-xs text-zinc-500">
-                      {recommendation.weatherImpact.riskLevel === 'low'
-                        ? 'Normal travel conditions'
-                        : recommendation.weatherImpact.riskLevel === 'medium'
-                          ? 'May impact comfort'
-                          : 'Plan for weather impact'}
-                    </span>
+                    {recommendation.weatherImpact ? (
+                      <>
+                        <span className={`font-medium ${weatherTone}`}>
+                          {weatherSectionTitle(recommendation.weatherContext)}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {recommendation.weatherImpact.summary}
+                          {typeof recommendation.weatherImpact.temperatureF === 'number'
+                            ? ` · ${recommendation.weatherImpact.temperatureF}°F`
+                            : ''}
+                          {' · '}
+                          {weatherRiskText(recommendation.weatherImpact)}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-medium text-zinc-900">
+                          {weatherSectionTitle(recommendation.weatherContext)}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {weatherSectionDetail(recommendation.weatherContext)}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -3973,7 +4010,7 @@ export default function ResultsContent() {
               {parkingWeather.length > 0 && (
                 <div className="rounded-xl border border-zinc-200 bg-white p-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                    Weather for selected dates
+                    Weather for your travel dates
                   </div>
 
                   <div className="mt-3 grid gap-2">
@@ -3999,7 +4036,11 @@ export default function ResultsContent() {
                             {weatherRiskText(item.weatherImpact)}
                           </div>
                         ) : (
-                          <div className="mt-1 text-xs">Weather unavailable for this date.</div>
+                          <div className="mt-1 text-xs">
+                            {item.context === 'forecast-unavailable'
+                              ? 'Forecast not available yet. Weather check becomes available closer to your trip date.'
+                              : weatherSectionDetail(item.context)}
+                          </div>
                         )}
                       </div>
                     ))}
@@ -4236,6 +4277,7 @@ export default function ResultsContent() {
                   aprLivePrices={aprLivePrices}
                   aprLiveChecking={aprLiveChecking}
                   weatherImpact={recommendation?.weatherImpact}
+                  weatherContext={recommendation?.weatherContext}
                   onShowReviews={handleShowReviews}
                   googleEnrichedParking={googleEnrichedParking}
                 />

@@ -1,4 +1,4 @@
-import { WeatherImpact } from './weather/types';
+import { WeatherContext, WeatherImpact } from './weather/types';
 import type { OptionIntelligence } from './intelligence/optionIntelligence';
 
 export type TripType =
@@ -408,6 +408,9 @@ export type Recommendation = {
   airportRouteUnavailable?: boolean;
   airportRouteUnavailableReason?: string;
   weatherImpact?: WeatherImpact | null;
+  weatherContext?: WeatherContext;
+  weatherForecastRangeStart?: string;
+  weatherForecastRangeEnd?: string;
   leaveByTime?: string | null;
   tripDuration?: number;
   trafficEstimate?: TrafficEstimate;

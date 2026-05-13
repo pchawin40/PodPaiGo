@@ -13,7 +13,8 @@ import {
   isDepartureLeg,
   rankRecommendations
 } from './domain';
-import { getWeatherImpactForAirport } from './weather/nws';
+import { getWeatherForAirport } from './weather/nws';
+import type { WeatherLookupResult } from './weather/types';
 import { calculateAirportReadinessBuffer } from './airports/airportReadiness';
 import { buildOptionIntelligence } from './intelligence/optionIntelligence';
 import { buildSmartTags } from './intelligence/tags';
@@ -378,10 +379,14 @@ export class RecommendationEngine {
         )
         : parking;
 
-    const weatherImpact = await getWeatherImpactForAirport({
+    const weatherResult = await getWeatherForAirport({
       airportCode,
       targetDateTime: tripDateTime,
-    }).catch(() => null);
+    }).catch((): WeatherLookupResult => ({
+      weatherImpact: null,
+      context: 'unavailable' as const,
+    }));
+    const weatherImpact = weatherResult.weatherImpact;
 
     if (airportCode !== 'SEA') {
       parking = parking.filter((p) => !isSeaTacOnlyOption(p));
@@ -626,6 +631,9 @@ export class RecommendationEngine {
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
       airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,
       weatherImpact,
+      weatherContext: weatherResult.context,
+      weatherForecastRangeStart: weatherResult.forecastRangeStart,
+      weatherForecastRangeEnd: weatherResult.forecastRangeEnd,
       leaveByTime,
       tripDuration,
       trafficEstimate,

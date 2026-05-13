@@ -16,7 +16,7 @@ import {
 } from '../../lib/parking/routeDisplay';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
-import { WeatherImpact } from '@/lib/weather/types';
+import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import ParkingBookingSources from './ParkingBookSources';
 
 function formatTimeFriendly(time24: string) {
@@ -64,11 +64,19 @@ function getWeatherScoreAdjustment(
 
 function weatherParkingBadge(
   option: ParkingOption,
-  weatherImpact?: WeatherImpact | null
+  weatherImpact?: WeatherImpact | null,
+  weatherContext?: WeatherContext
 ): { label: string; className: string } {
   if (!weatherImpact) {
+    const unavailableLabel =
+      weatherContext === 'forecast-unavailable'
+        ? 'Forecast unavailable'
+        : weatherContext === 'current-airport-weather'
+          ? 'Current weather'
+          : 'Weather unavailable';
+
     return {
-      label: 'Weather: normal',
+      label: unavailableLabel,
       className: 'bg-white text-zinc-700 border border-zinc-200',
     };
   }
@@ -126,6 +134,7 @@ export default function ParkingSmartPick({
   leaveByTime,
   aprLivePrices = {},
   weatherImpact,
+  weatherContext,
   onShowReviews,
   googleEnrichedParking = {},
 }: {
@@ -136,6 +145,7 @@ export default function ParkingSmartPick({
   aprLivePrices?: Record<string, number>;
   aprLiveChecking?: boolean;
   weatherImpact?: WeatherImpact | null;
+  weatherContext?: WeatherContext;
   onShowReviews?: (parking: ParkingOption) => void;
   googleEnrichedParking?: Record<string, Partial<ParkingOption>>;
 }) {
@@ -347,7 +357,7 @@ export default function ParkingSmartPick({
 
   const bestTime = parkingTimeBreakdown(best);
 
-  const weatherBadge = weatherParkingBadge(best, weatherImpact);
+  const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
 
   const savings =
     officialTotal && officialTotal > bestTotal
@@ -434,7 +444,7 @@ export default function ParkingSmartPick({
 
             {weatherImpact && weatherImpact.riskLevel !== 'low' && (
               <div className="mt-2 text-xs font-medium text-sky-800">
-                Weather factor: {weatherImpact.summary}. Covered or close-in parking gets a boost today.
+                Weather factor: {weatherImpact.summary}. Covered or close-in parking gets a boost in this weather.
               </div>
             )}
           </div>
@@ -485,9 +495,7 @@ export default function ParkingSmartPick({
             )}
           </div>
 
-          <div className="mt-2 text-xs font-medium text-emerald-700">
-            Smart pick for this airport today
-          </div>
+          <div className="mt-2 text-xs font-medium text-emerald-700">Smart pick for this airport</div>
 
           <ParkingBookingSources option={best} tripData={tripData} />
 
