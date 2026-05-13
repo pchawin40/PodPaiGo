@@ -367,6 +367,10 @@ export default function ParkingSmartPick({
 
   const bestRouteLinks = parkingRouteLinks(best, tripData);
 
+  const bestWithMeta = best as ParkingOption & {
+    updatedAt?: string;
+  };
+
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -483,6 +487,89 @@ export default function ParkingSmartPick({
           <div className="mt-2 text-xs font-medium text-emerald-700">
             Smart pick for this airport today
           </div>
+
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">
+              Details & evidence
+            </summary>
+
+            <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+              <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      From your origin to being inside the airport terminal.
+                    </div>
+                  </div>
+
+                  <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-900">
+                    {formatCompactMinutes(bestTime.totalMinutes)}
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {bestTime.parts.map((part) => (
+                    <div
+                      key={`${part.label}-${part.minutes}`}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span>{part.label}</span>
+                      <span className="font-medium text-zinc-900">
+                        {formatCompactMinutes(part.minutes)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 border-t border-zinc-200 pt-3">
+                  <div className="flex items-center justify-between gap-3 font-semibold text-zinc-900">
+                    <span>Total to terminal</span>
+                    <span>{formatCompactMinutes(bestTime.totalMinutes)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {best.sourceName && (
+                  <div>
+                    Source: <span className="font-medium">{best.sourceName}</span>
+                  </div>
+                )}
+
+                {bestWithMeta.updatedAt && (
+                  <div>
+                    Updated: <span className="font-medium">{bestWithMeta.updatedAt}</span>
+                  </div>
+                )}
+
+                {best.priceConfidence && (
+                  <div>
+                    Price confidence:{' '}
+                    <span className="font-medium capitalize">{best.priceConfidence}</span>
+                  </div>
+                )}
+
+                {best.trustStatus && (
+                  <div>
+                    Trust status:{' '}
+                    <span className="font-medium capitalize">{best.trustStatus}</span>
+                  </div>
+                )}
+
+                {best.assumptions && best.assumptions.length > 0 && (
+                  <div>
+                    <div className="mt-3 font-medium text-zinc-900">Assumptions</div>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {best.assumptions.slice(0, 6).map((assumption) => (
+                        <li key={assumption}>{assumption}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
         </div>
 
         <div className="flex shrink-0 flex-col gap-2">
