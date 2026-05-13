@@ -11,39 +11,117 @@ type StoredTripPayload = {
   tripData?: Record<string, string>;
 };
 
-function queryFromStoredPayload(value: string | null): string | null {
-  if (!value) return null;
+type StoredTripState =
+  | { status: 'loading'; query: null }
+  | { status: 'ready'; query: string }
+  | { status: 'missing'; query: null }
+  | { status: 'invalid'; query: null };
+
+function hasRequiredTripFields(query: string): boolean {
+  const params = new URLSearchParams(query);
+  const type = params.get('type');
+  const hasBase = Boolean(params.get('origin') && params.get('destination'));
+
+  if (!hasBase) return false;
+
+  if (type === 'one-way-departure') {
+    return Boolean(params.get('departureDate') && params.get('departureTime'));
+  }
+
+  if (type === 'one-way-arrival') {
+    return Boolean(params.get('arrivalDate') && params.get('arrivalTime'));
+  }
+
+  if (type === 'round-trip') {
+    return Boolean(
+      params.get('departureDate') &&
+        params.get('departureTime') &&
+        params.get('returnDate') &&
+        params.get('returnTime')
+    );
+  }
+
+  if (type === 'dropoff-pickup') {
+    return Boolean(params.get('airportTripDate') && params.get('airportTripTime'));
+  }
+
+  return false;
+}
+
+function queryFromStoredPayload(value: string | null): StoredTripState {
+  if (!value) return { status: 'missing', query: null };
 
   try {
     const payload = JSON.parse(value) as StoredTripPayload;
+    let query: string | null = null;
 
     if (typeof payload.query === 'string' && payload.query.trim()) {
-      return payload.query;
+      query = payload.query;
+    } else if (payload.tripData && typeof payload.tripData === 'object') {
+      query = new URLSearchParams(payload.tripData).toString();
     }
 
-    if (payload.tripData && typeof payload.tripData === 'object') {
-      return new URLSearchParams(payload.tripData).toString();
+    if (!query) {
+      return { status: 'invalid', query: null };
     }
+
+    return hasRequiredTripFields(query)
+      ? { status: 'ready', query }
+      : { status: 'invalid', query: null };
   } catch {
-    return null;
+    return { status: 'invalid', query: null };
   }
+}
 
-  return null;
+function StoredTripFallback({ kind }: { kind: 'missing' | 'invalid' }) {
+  return (
+    <main className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4 py-12">
+      <section className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
+        <h1 className="text-2xl font-semibold text-zinc-950">
+          {kind === 'missing' ? 'Trip details not found' : 'Trip details are incomplete'}
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-zinc-600">
+          {kind === 'missing'
+            ? 'This trip was created on another device or browser. Start a new trip to see live results.'
+            : 'This saved trip is missing required trip details. Start a new trip to see live results.'}
+        </p>
+        <p className="mt-2 text-xs leading-5 text-zinc-500">
+          Phase 1 clean result URLs are device/browser-local, so shared links need a new trip
+          on the device where they are opened.
+        </p>
+        <Link
+          href="/trip"
+          className="mt-5 inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+        >
+          Start a new trip
+        </Link>
+      </section>
+    </main>
+  );
 }
 
 export default function StoredResultsPage() {
   const params = useParams<{ tripId: string }>();
-  const [storedSearchParams, setStoredSearchParams] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [storedTrip, setStoredTrip] = useState<StoredTripState>({
+    status: 'loading',
+    query: null,
+  });
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const tripId = Array.isArray(params.tripId) ? params.tripId[0] : params.tripId;
       const key = tripId ? `podpaigo-trip-${tripId}` : '';
-      const query = key ? queryFromStoredPayload(window.localStorage.getItem(key)) : null;
 
-      setStoredSearchParams(query);
-      setLoaded(true);
+      if (!key) {
+        setStoredTrip({ status: 'missing', query: null });
+        return;
+      }
+
+      try {
+        setStoredTrip(queryFromStoredPayload(window.localStorage.getItem(key)));
+      } catch {
+        setStoredTrip({ status: 'missing', query: null });
+      }
     }, 0);
 
     return () => window.clearTimeout(timeout);
@@ -53,11 +131,11 @@ export default function StoredResultsPage() {
     <>
       <SiteHeader ctaHref="/trip" ctaLabel="New trip" />
 
-      {!loaded ? (
+      {storedTrip.status === 'loading' ? (
         <div className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4">
           <div className="text-xl text-zinc-700">Loading...</div>
         </div>
-      ) : storedSearchParams ? (
+      ) : storedTrip.status === 'ready' ? (
         <Suspense
           fallback={
             <div className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4">
@@ -65,24 +143,10 @@ export default function StoredResultsPage() {
             </div>
           }
         >
-          <ResultsContent storedSearchParams={storedSearchParams} />
+          <ResultsContent storedSearchParams={storedTrip.query} />
         </Suspense>
       ) : (
-        <main className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4 py-12">
-          <section className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
-            <h1 className="text-2xl font-semibold text-zinc-950">Trip details not found</h1>
-            <p className="mt-3 text-sm leading-6 text-zinc-600">
-              This results link depends on trip details stored on this device. Start a new trip to
-              generate fresh results.
-            </p>
-            <Link
-              href="/trip"
-              className="mt-5 inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-            >
-              Plan a new trip
-            </Link>
-          </section>
-        </main>
+        <StoredTripFallback kind={storedTrip.status} />
       )}
     </>
   );

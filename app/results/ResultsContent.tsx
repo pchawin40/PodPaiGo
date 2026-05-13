@@ -2457,6 +2457,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [invalidTripMessage, setInvalidTripMessage] = useState<string | null>(null);
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
   const [parkingPricesChecking, setParkingPricesChecking] = useState(false);
@@ -2883,6 +2884,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     if (data) {
       // Always show loading state for URL-driven recomputes (date/time/origin changes, etc.)
+      setInvalidTripMessage(null);
       setLoading(true);
       setShowTooLate(false);
       setRecommendation(null);
@@ -2915,6 +2917,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         })
         .finally(() => setLoading(false));
     } else {
+      setInvalidTripMessage(
+        'This trip is missing required details. Start a new trip to see live results.'
+      );
+      setTripData(null);
+      setRecommendation(null);
+      setRankedOptions([]);
       setLoading(false);
     }
   }, [searchParams]);
@@ -3348,10 +3356,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   if (!tripData || !recommendation) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 px-4">
-        <div className="text-lg font-medium text-zinc-900">We couldn’t read your trip.</div>
-        <div className="mt-1 text-sm text-zinc-600">Go back and try again.</div>
+        <div className="text-lg font-medium text-zinc-900">
+          {invalidTripMessage ? 'Trip details are incomplete' : 'We couldn’t read your trip.'}
+        </div>
+        <div className="mt-1 max-w-md text-center text-sm text-zinc-600">
+          {invalidTripMessage || 'Go back and try again.'}
+        </div>
+        <div className="mt-2 max-w-md text-center text-xs text-zinc-500">
+          Phase 1 clean result URLs are device/browser-local.
+        </div>
         <Link href="/trip" className="mt-5 inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-700">
-          Plan a trip
+          Start a new trip
         </Link>
       </div>
     );
