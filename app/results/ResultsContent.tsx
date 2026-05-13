@@ -2363,7 +2363,9 @@ function TsaWaitTimesCard({
   );
 
   const selectedLaneData =
-    allLanes.find((lane) => lane.key === selectedLane) ?? null;
+    eligibleLanes.find((lane) => lane.key === selectedLane) ??
+    eligibleLanes.find((lane) => lane.key === 'standard') ??
+    null;
 
   const fastestLane =
     eligibleLanes.length > 0
@@ -2425,7 +2427,13 @@ function TsaWaitTimesCard({
         </span>
 
         {selectedLaneData && (
-          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 ring-1 ring-zinc-200">
+          <span
+            className={
+              fastestLane?.key === selectedLaneData.key
+                ? 'rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200'
+                : 'rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 ring-1 ring-zinc-200'
+            }
+          >
             Selected {selectedLabel}: {selectedLaneData.minutes}m
           </span>
         )}
@@ -2816,7 +2824,11 @@ export default function ResultsContent() {
     const checkedInRaw = (searchParams.get('checkedInAtAirport') || 'yes').toLowerCase();
     const checkedInAtAirport = checkedInRaw !== 'no';
 
-    const securityRaw = searchParams.get('security') || 'standard';
+    const securityRaw =
+      searchParams.get('securityOption') ||
+      searchParams.get('security') ||
+      'standard';
+
     const securityOption: SecurityOption = isOneOf(
       securityRaw,
       ['standard', 'precheck', 'clear', 'clear-precheck'] as const
@@ -3454,9 +3466,16 @@ export default function ResultsContent() {
 
     const tripExtras = tripData as TripDataWithExtras;
 
+    const selectedSecurityOption = (
+      searchParams.get('securityOption') ||
+      searchParams.get('security') ||
+      tripExtras.securityOption ||
+      'standard'
+    ) as SecurityOption;
+
     const readiness = calculateAirportReadinessBuffer({
       checkingBags: !!tripExtras.checkingBags,
-      securityOption: (tripExtras.securityOption || 'standard') as SecurityOption,
+      securityOption: selectedSecurityOption,
       flightType: (tripExtras.flightType || 'domestic') as FlightType,
       cabin: (tripExtras.cabin || 'economy') as CabinClass,
     });
@@ -4137,6 +4156,14 @@ export default function ResultsContent() {
                           params.set(key, String(value));
                         }
                       });
+
+                      if (data.type === 'one-way-departure') {
+                        const updatedSecurityOption =
+                          (data as TripDataWithExtras).securityOption || 'standard';
+
+                        params.set('securityOption', updatedSecurityOption);
+                        params.set('security', updatedSecurityOption);
+                      }
 
                       const selectedAirport =
                         getAirportById(((data as TripDataWithExtras).airportCode || 'SEA').toUpperCase()) ||
