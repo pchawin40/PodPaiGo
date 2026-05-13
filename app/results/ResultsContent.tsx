@@ -1860,7 +1860,7 @@ function OptionCard({
                     ? 'View deal'
                     : opt.type === 'official'
                       ? 'Book official'
-                      : 'Copy search + open'}
+                      : 'Check price'}
                 </button>
               ) : sourceLink && !routeUnavailable ? (
                 <a
