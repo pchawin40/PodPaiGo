@@ -26,5 +26,33 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'Mobile Chrome - Pixel 7',
+      use: { ...devices['Pixel 7'] },
+    },
+    {
+      name: 'Mobile Safari - iPhone 14',
+      use: { ...devices['iPhone 14'] },
+    },
+    {
+      name: 'Samsung Z Fold 5 - folded',
+      use: {
+        ...devices['Galaxy S9+'],
+        viewport: { width: 344, height: 882 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+      },
+    },
+    {
+      name: 'Samsung Z Fold 5 - unfolded',
+      use: {
+        viewport: { width: 690, height: 829 },
+        deviceScaleFactor: 2.6,
+        isMobile: true,
+        hasTouch: true,
+        defaultBrowserType: 'chromium',
+      },
+    },
   ],
 });

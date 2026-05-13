@@ -53,7 +53,6 @@ function getParkingDriveMinutes(option: ParkingOption): number {
   };
 
   const candidates = [
-    optionWithRoute.duration,
     optionWithRoute.routeToParkingMinutes,
     optionWithRoute.originToParkingMinutes,
     optionWithRoute.routeToLotMinutes,
@@ -64,6 +63,7 @@ function getParkingDriveMinutes(option: ParkingOption): number {
     optionWithRoute.durationMinutes,
     optionWithRoute.routeDurationMinutes,
     optionWithRoute.distanceMinutes,
+    optionWithRoute.duration,
   ];
 
   const valid = candidates.find(

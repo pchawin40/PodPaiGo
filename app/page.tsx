@@ -1,5 +1,6 @@
 import Link from "next/link";
 import HeroBadge from "./components/HeroBadge";
+import SiteHeader from "./components/SiteHeader";
 
 const features = [
   {
@@ -33,38 +34,7 @@ const steps = [
 export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-lg font-bold tracking-tight">
-            PodPaiGo
-          </Link>
-
-          <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-            <Link href="/how-it-works" className="hover:text-slate-950">
-              How it works
-            </Link>
-            <Link href="/airports" className="hover:text-slate-950">
-              Airports
-          </Link>
-            <Link href="/roadmap" className="hover:text-slate-950">
-              Roadmap
-            </Link>
-            <Link href="/about" className="hover:text-slate-950">
-              About
-            </Link>
-            <Link href="/privacy" className="hover:text-slate-950">
-              Privacy
-            </Link>
-          </nav>
-
-          <Link
-            href="/trip"
-            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-          >
-            Plan trip
-          </Link>
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-[1.1fr_0.9fr] md:items-center md:py-24">
         <div>

@@ -41,7 +41,8 @@ function resultsUrl() {
   return `/results?${search.toString()}`;
 }
 
-test('export results pdf', async ({ page }) => {
+test('export results pdf', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'PDF export is only supported in Chromium');
   await page.goto(resultsUrl());
 
   await expect(
