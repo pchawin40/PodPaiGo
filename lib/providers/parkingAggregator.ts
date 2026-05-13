@@ -313,11 +313,13 @@ async function getGoogleParkingPlaces(args: {
           lowerName.includes('wally') ||
           lowerName.includes('masterpark');
 
-        const price = dynamicPricing?.price ?? staticPricing.price;
-        const priceDisplay = dynamicPricing?.priceDisplay ?? staticPricing.priceDisplay;
-        const priceUnit = dynamicPricing?.priceUnit ?? staticPricing.priceUnit;
-        const priceNote = dynamicPricing?.priceNote ?? staticPricing.priceNote;
-        const priceConfidence = dynamicPricing?.priceConfidence ?? staticPricing.priceConfidence;
+        const hasDynamicPrice =
+          typeof dynamicPricing?.price === 'number' && dynamicPricing.price > 0;
+        const price = hasDynamicPrice ? dynamicPricing.price! : staticPricing.price;
+        const priceDisplay = hasDynamicPrice ? dynamicPricing.priceDisplay : staticPricing.priceDisplay;
+        const priceUnit = hasDynamicPrice ? dynamicPricing.priceUnit : staticPricing.priceUnit;
+        const priceNote = hasDynamicPrice ? dynamicPricing.priceNote : staticPricing.priceNote;
+        const priceConfidence = hasDynamicPrice ? dynamicPricing.priceConfidence : staticPricing.priceConfidence;
 
         const option: ParkingOption = {
           id: `${airport.id.toLowerCase()}-google-${place.id}`,
@@ -329,7 +331,7 @@ async function getGoogleParkingPlaces(args: {
           priceNote,
           availabilityStatus: 'unknown',
           isAvailable: place.businessStatus !== 'CLOSED_PERMANENTLY',
-          priceSource: dynamicPricing?.status === 'found' ? 'direct-lot-rate' : staticPricing.priceSource,
+          priceSource: dynamicPricing?.status === 'found' && hasDynamicPrice ? 'direct-lot-rate' : staticPricing.priceSource,
           priceConfidence,
           bookingProvider: dynamicPricing?.status === 'found' || dynamicPricing?.status === 'fallback'
             ? staticPricing.bookingProvider

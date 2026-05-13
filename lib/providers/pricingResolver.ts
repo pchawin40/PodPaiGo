@@ -91,10 +91,9 @@ export function resolveParkingPricing(args: {
   return {
     price: 30,
     priceDisplay: 'check-live',
-    priceUnit: undefined,
-    priceNote: 'Real nearby parking listing. Open listing or provider site to confirm live price.',
+    priceUnit: 'per-day',
+    priceNote: 'Nearby listing found; confirm price with provider.',
     priceSource: 'google-places',
     priceConfidence: 'low',
-    bookingProvider: 'Google Places',
   };
 }

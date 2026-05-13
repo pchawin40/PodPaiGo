@@ -3,6 +3,11 @@
 import { ParkingOption, TripData } from '../../lib/types';
 import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney, formatMoneyCents } from '../utils/formatter';
+import {
+  canDisplayParkingPrice,
+  getParkingDailyPrice,
+  getParkingTotalPrice,
+} from '../../lib/parking/priceDisplay';
 
 type BookingSourceRow = {
   provider: string;
@@ -23,11 +28,11 @@ type ParkingBookingSourcesProps = {
 };
 
 function buildRows(option: ParkingOption, tripData: TripData | null): BookingSourceRow[] {
-  const days = Math.max(1, estimateParkingDays(tripData));
-  const pricePerDay =
-    typeof option.price === 'number' && option.price > 0
-      ? option.price
-      : null;
+  const showStoredPrice = canDisplayParkingPrice(option);
+  const pricePerDay = showStoredPrice ? getParkingDailyPrice(option, tripData) : null;
+  const estimatedTripTotal = showStoredPrice ? getParkingTotalPrice(option, tripData) : null;
+  const isGooglePlacesFallback =
+    option.priceSource === 'google-places' || option.sourceName === 'Google Places';
 
   const link =
     option.sourceLink ||
@@ -57,8 +62,12 @@ function buildRows(option: ParkingOption, tripData: TripData | null): BookingSou
       trustLabel,
       trustClassName,
       type: 'direct booking',
-      notes: pricePerDay ? 'Direct booking' : 'Confirm final price before booking',
-      estimatedTripTotal: pricePerDay ? pricePerDay * days : null,
+      notes: pricePerDay
+        ? 'Direct booking'
+        : isGooglePlacesFallback
+          ? 'Nearby listing found; confirm price with provider.'
+          : 'Confirm final price before booking',
+      estimatedTripTotal,
       link,
       ctaLabel: 'Check price',
     },
@@ -115,7 +124,7 @@ export default function ParkingBookingSources({
             {rows.map((r) => {
               const priceCell =
                 r.pricePerDay == null
-                  ? 'Check live'
+                  ? 'Check live price'
                   : r.priceDisplay === 'live'
                     ? `Live ${formatMoneyCents(r.pricePerDay)}/day`
                     : `Est. ${formatMoney(r.pricePerDay)}/day`;

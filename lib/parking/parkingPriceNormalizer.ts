@@ -23,16 +23,18 @@ export function normalizeParkingPriceForTrip(
 ): ParkingOption {
   const days = estimateParkingDaysFromDates(checkInDate, checkOutDate);
 
+  // Important:
+  // Do NOT convert total trip prices into per-day prices here.
+  // The display helper already understands priceUnit === 'total'.
+  // Converting here can cause double multiplication later, like:
+  // $210/day · $1470 for 7 days.
   if (option.priceUnit === 'total' && option.price > 0 && days > 1) {
-    const dailyPrice = option.price / days;
-
     return withStableParkingRouteStatus({
       ...option,
-      price: Number(dailyPrice.toFixed(2)),
-      priceUnit: 'per-day',
+      priceUnit: 'total',
       priceNote:
         option.priceNote ||
-        'Provider returned total trip price; converted to daily rate for comparison.',
+        'Provider returned total trip price. Daily rate is estimated from the trip total.',
     });
   }
 

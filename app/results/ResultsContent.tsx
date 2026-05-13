@@ -788,13 +788,6 @@ function optionPriceSummary(
   }
 
   if (kind === 'check-live') {
-    if (typeof option?.price === 'number' && option.price > 0) {
-      return {
-        primary: formatMoney(option.price),
-        secondary: option?.priceNote,
-      };
-    }
-
     return {
       primary: 'Check live price',
       secondary: option?.priceNote,
@@ -1388,16 +1381,9 @@ function OptionCard({
     item.type === 'parking'
       ? ({
         ...(opt as ParkingOption),
-        price:
-          hasRealParkingPrice(opt)
-            ? opt.price ?? 0
-            : typeof item.cost === 'number' && item.cost > 0 && item.cost < 500
-              ? item.cost
-              : 0,
-        priceDisplay:
-          hasRealParkingPrice(opt)
-            ? opt.priceDisplay
-            : 'check-live',
+        price: typeof opt.price === 'number' && opt.price > 0 ? opt.price : 0,
+        priceDisplay: opt.priceDisplay,
+        priceUnit: opt.priceUnit,
       } satisfies ParkingOption)
       : null;
 
@@ -3627,8 +3613,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const smartPickOption = cheapestSmartPickOptions[0] || null;
 
-  const visibleMoreParkingCount = 10;
-  const maxParkingDisplayCount = 25;
+  const collapsedParkingDisplayCount = 5;
+  const expandedParkingDisplayCount = 10;
 
   const reachableParkingDisplayOptions = airportRouteUnavailable
     ? []
@@ -3725,10 +3711,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       } as RankedRecommendation;
     });
 
-  const initiallyVisibleParking = remainingParking.slice(0, visibleMoreParkingCount);
-  const expandedParking = remainingParking.slice(0, maxParkingDisplayCount);
-  const hiddenParking = remainingParking.slice(visibleMoreParkingCount, maxParkingDisplayCount);
-  const displayedParking = showMoreParking ? expandedParking : initiallyVisibleParking;
+  const displayableRemainingParking = remainingParking.filter((opt) => {
+    const option = opt.option as AppOption;
+
+    if (option.type !== 'parking') return true;
+
+    return !isParkingRouteUnavailable(option);
+  });
+  const displayedParking = displayableRemainingParking.slice(
+    0,
+    showMoreParking ? expandedParkingDisplayCount : collapsedParkingDisplayCount
+  );
+  const canToggleMoreParking =
+    displayableRemainingParking.length > collapsedParkingDisplayCount;
 
   async function handleShowReviews(parking: ParkingOption) {
     const airportCode = getTripAirportCode(tripData);
@@ -4429,7 +4424,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
           ) : (
             <>
-              {remainingParking.length > 0 && !airportRouteUnavailable && (
+              {displayableRemainingParking.length > 0 && !airportRouteUnavailable && (
                 <section className="mt-8">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -4441,7 +4436,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       </p>
                     </div>
 
-                    {!airportRouteUnavailable && hiddenParking.length > 0 && (
+                    {!airportRouteUnavailable && canToggleMoreParking && (
                       <button
                         type="button"
                         onClick={() => setShowMoreParking((v) => !v)}
@@ -4449,7 +4444,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       >
                         {showMoreParking
                           ? 'Show top 5 only'
-                          : `Show ${hiddenParking.length} more parking options`}
+                          : 'Show top 10'}
                       </button>
                     )}
                   </div>
@@ -4468,28 +4463,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
-                      {displayedParking
-                        .filter((opt) => {
-                          const option = opt.option as AppOption;
-
-                          if (option.type !== 'parking') return true;
-
-                          return !isParkingRouteUnavailable(option);
-                        })
-                        .map((opt, idx) => (
-                          <OptionCard
-                            aprLivePrices={aprLivePrices}
-                            aprLiveChecking={aprLiveChecking}
-                            key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
-                            item={opt}
-                            rank={idx + 1}
-                            tripData={tripData}
-                            intent={intent}
-                            sort={sort}
-                            onShowReviews={handleShowReviews}
-                            googleEnrichedParking={googleEnrichedParking}
-                          />
-                        ))}
+                      {displayedParking.map((opt, idx) => (
+                        <OptionCard
+                          aprLivePrices={aprLivePrices}
+                          aprLiveChecking={aprLiveChecking}
+                          key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
+                          item={opt}
+                          rank={idx + 1}
+                          tripData={tripData}
+                          intent={intent}
+                          sort={sort}
+                          onShowReviews={handleShowReviews}
+                          googleEnrichedParking={googleEnrichedParking}
+                        />
+                      ))}
                     </div>
                   )}
                 </section>
