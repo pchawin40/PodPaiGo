@@ -20,10 +20,6 @@ const currentFeatures = [
 
 const futurePlans = [
   {
-    title: "Washington airport coverage",
-    body: "Expand airport planning across Washington first, with better maps, terminal notes, parking sources, transit options, and airport-specific rules.",
-  },
-  {
     title: "National airport coverage",
     body: "Move from Washington airports to major U.S. airports, then broaden coverage as the data model and provider links become more reliable.",
   },

@@ -57,6 +57,38 @@ function impossibleFlightParams() {
 }
 
 test.describe('Results page QA', () => {
+  test('clean trip results route loads stored trip data', async ({ page }, testInfo) => {
+    const tripId = `e2e-${testInfo.project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const legacyUrl = resultsUrl({
+      departureDate: futureDate(1),
+      departureTime: '23:30',
+    });
+    const query = legacyUrl.split('?')[1] || '';
+
+    await page.goto('/');
+    await page.evaluate(
+      ({ id, storedQuery }) => {
+        window.localStorage.setItem(
+          `podpaigo-trip-${id}`,
+          JSON.stringify({
+            version: 1,
+            createdAt: new Date().toISOString(),
+            tripData: Object.fromEntries(new URLSearchParams(storedQuery).entries()),
+            query: storedQuery,
+          })
+        );
+      },
+      { id: tripId, storedQuery: query }
+    );
+
+    await page.goto(`/results/${tripId}`);
+
+    await expect(page).toHaveURL(new RegExp(`/results/${tripId}`));
+    await expect(page.getByText('Cheapest', { exact: true })).toBeVisible({
+      timeout: 30000,
+    });
+  });
+
   test('Cheapest sort persists after refresh', async ({ page }) => {
     await page.goto(
       resultsUrl({

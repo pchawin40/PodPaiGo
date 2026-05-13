@@ -254,9 +254,9 @@ function hashCacheKey(input: string): string {
   return Math.abs(h).toString(36);
 }
 
-function logGoogleRoutesCache(event: 'HIT' | 'MISS' | 'IN-FLIGHT', cacheKey: string, routeLabel: string) {
-  console.log(`[GoogleRoutesCache] ${event}`, { id: hashCacheKey(cacheKey), route: routeLabel });
-}
+// function logGoogleRoutesCache(event: 'HIT' | 'MISS' | 'IN-FLIGHT', cacheKey: string, routeLabel: string) {
+//   console.log(`[GoogleRoutesCache] ${event}`, { id: hashCacheKey(cacheKey), route: routeLabel });
+// }
 
 export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
@@ -300,7 +300,7 @@ export class LiveTrafficProvider implements TrafficProvider {
       const now = Date.now();
       const cached = ROUTE_CACHE.get(cacheKey);
       if (cached && now - cached.ts < CACHE_TTL_MS) {
-        logGoogleRoutesCache('HIT', cacheKey, routeLabel);
+        // logGoogleRoutesCache('HIT', cacheKey, routeLabel);
         return cached.estimate;
       }
       if (cached) {
@@ -309,11 +309,11 @@ export class LiveTrafficProvider implements TrafficProvider {
 
       const existingInFlight = ROUTE_INFLIGHT.get(cacheKey);
       if (existingInFlight) {
-        logGoogleRoutesCache('IN-FLIGHT', cacheKey, routeLabel);
+        // logGoogleRoutesCache('IN-FLIGHT', cacheKey, routeLabel);
         return await existingInFlight;
       }
 
-      logGoogleRoutesCache('MISS', cacheKey, routeLabel);
+      // logGoogleRoutesCache('MISS', cacheKey, routeLabel);
 
       const inflightPromise = (async () => {
         // Geocode origin and destination where possible
@@ -763,17 +763,17 @@ export class MockProvider implements DataProvider {
             ? routeEstimate.duration
             : null;
 
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[Parking route debug]', {
-            name: option.name,
-            address: option.address,
-            routeDestination,
-            routeDuration: routeEstimate.duration,
-            routeTrustStatus: routeEstimate.trustStatus,
-            routeUnavailable: routeEstimate.routeUnavailable,
-            originalOptionDistance: option.distance,
-          });
-        }
+        // if (process.env.NODE_ENV === 'development') {
+        //   console.log('[Parking route debug]', {
+        //     name: option.name,
+        //     address: option.address,
+        //     routeDestination,
+        //     routeDuration: routeEstimate.duration,
+        //     routeTrustStatus: routeEstimate.trustStatus,
+        //     routeUnavailable: routeEstimate.routeUnavailable,
+        //     originalOptionDistance: option.distance,
+        //   });
+        // }
 
         return {
           ...option,
@@ -846,14 +846,14 @@ export class MockProvider implements DataProvider {
       taxiSearchUrl: this.buildGoogleMapsSearchLink(taxiQuery),
     });
 
-    if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
-      console.log('[Rideshare estimates]', {
-        routeTrustStatus: routeEstimate.trustStatus,
-        duration: routeEstimate.duration,
-        distanceMeters: routeEstimate.distanceMeters,
-        optionCount: rideshareOptions.length,
-      });
-    }
+    // if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
+    //   console.log('[Rideshare estimates]', {
+    //     routeTrustStatus: routeEstimate.trustStatus,
+    //     duration: routeEstimate.duration,
+    //     distanceMeters: routeEstimate.distanceMeters,
+    //     optionCount: rideshareOptions.length,
+    //   });
+    // }
 
     return rideshareOptions;
   }

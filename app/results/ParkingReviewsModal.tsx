@@ -17,6 +17,17 @@ function googleReviewsUrl(placeId?: string) {
     return `https://www.google.com/maps/search/?api=1&query=Google%20reviews&query_place_id=${encodeURIComponent(placeId)}`;
 }
 
+function parkingReviewKey(parking: ParkingOption | null, airportCode?: string | null): string {
+    if (!parking) return "";
+
+    return [
+        airportCode || "UNKNOWN",
+        parking.providerLotId || parking.id,
+        parking.name,
+        parking.address || parking.normalizedAddress || parking.routeDestination || "",
+    ].join("|");
+}
+
 export default function ParkingReviewsModal({
     parking,
     open,
@@ -31,7 +42,13 @@ export default function ParkingReviewsModal({
     onResolvedParking?: (parking: ParkingOption) => void;
 }) {
     const [sort, setSort] = useState<SortMode>("most_relevant");
-    const [resolvedParking, setResolvedParking] = useState<ParkingOption | null>(parking);
+    const parkingKey = parkingReviewKey(parking, airportCode);
+    const [resolvedParkingState, setResolvedParkingState] = useState<{
+        key: string;
+        parking: ParkingOption | null;
+    }>({ key: "", parking: null });
+    const resolvedParking =
+        resolvedParkingState.key === parkingKey ? resolvedParkingState.parking : parking;
     const [loadingGoogleData, setLoadingGoogleData] = useState(false);
     const modalFetchAttemptedKeysRef = useRef(new Set<string>());
     const onResolvedParkingRef = useRef(onResolvedParking);
@@ -66,10 +83,6 @@ export default function ParkingReviewsModal({
     }, [reviews, sort]);
 
     useEffect(() => {
-        setResolvedParking(parking);
-    }, [parking]);
-
-    useEffect(() => {
         onResolvedParkingRef.current = onResolvedParking;
     }, [onResolvedParking]);
 
@@ -94,12 +107,7 @@ export default function ParkingReviewsModal({
                 return;
             }
 
-            const attemptKey = [
-                airportCode || "UNKNOWN",
-                parking.providerLotId || parking.id,
-                parking.name,
-                parking.address || parking.normalizedAddress || parking.routeDestination || "",
-            ].join("|");
+            const attemptKey = parkingReviewKey(parking, airportCode);
 
             if (modalFetchAttemptedKeysRef.current.has(attemptKey)) {
                 return;
@@ -117,7 +125,7 @@ export default function ParkingReviewsModal({
             }
 
             if (!cancelled) {
-                setResolvedParking(enriched);
+                setResolvedParkingState({ key: attemptKey, parking: enriched });
                 onResolvedParkingRef.current?.(enriched);
                 setLoadingGoogleData(false);
             }

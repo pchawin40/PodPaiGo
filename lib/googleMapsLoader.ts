@@ -1,5 +1,11 @@
 /// <reference types="google.maps" />
 
+declare global {
+    interface Window {
+        initGoogleMaps?: () => void;
+    }
+}
+
 let googleMapsPromise: Promise<void> | null = null;
 
 export async function loadGoogleMaps(apiKey: string): Promise<void> {
@@ -16,7 +22,7 @@ export async function loadGoogleMaps(apiKey: string): Promise<void> {
             return;
         }
 
-        (globalThis as any).initGoogleMaps = () => resolve();
+        window.initGoogleMaps = () => resolve();
 
         const script = document.createElement('script');
         script.id = 'google-maps-script';

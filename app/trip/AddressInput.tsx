@@ -92,11 +92,13 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [hasTouchedInput, setHasTouchedInput] = useState(false);
 
   const [recentOrigins, setRecentOrigins] = useState<string[]>([]);
-  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
-    setHasMounted(true);
-    setRecentOrigins(getRecentOrigins());
+    const timeout = window.setTimeout(() => {
+      setRecentOrigins(getRecentOrigins());
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
   }, []);
 
   const [highlightedIndex, setHighlightedIndex] = useState(-1);

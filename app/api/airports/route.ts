@@ -1,6 +1,24 @@
 import { NextResponse } from 'next/server';
 import { AIRPORTS_CATALOG } from '../../../lib/airports/catalog';
 
+type SupabaseAirportRow = {
+    id: string;
+    label: string;
+    destination_name?: string | null;
+    routing_address?: string | null;
+    parking_search_query?: string | null;
+    rideshare_destination_name?: string | null;
+    lat: number;
+    lng: number;
+    checkin_note?: string | null;
+    generic_guidance?: string | null;
+    official_parking_url?: string | null;
+    official_airport_url?: string | null;
+    indoor_map?: unknown;
+    airport_map_url?: string | null;
+    airport_map_label?: string | null;
+};
+
 export async function GET() {
     try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,9 +40,9 @@ export async function GET() {
             return NextResponse.json({ airports: AIRPORTS_CATALOG, source: 'fallback' });
         }
 
-        const rows = await res.json();
+        const rows = (await res.json()) as SupabaseAirportRow[];
 
-        const airports = rows.map((row: any) => ({
+        const airports = rows.map((row) => ({
             id: row.id,
             label: row.label,
             destinationName: row.destination_name,

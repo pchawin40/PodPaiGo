@@ -172,6 +172,37 @@ function intentToTripType(intent: Intent): TripType {
   }
 }
 
+function generateTripId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function storeTripSearchParams(params: URLSearchParams): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const tripId = generateTripId();
+  const key = `podpaigo-trip-${tripId}`;
+
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        createdAt: new Date().toISOString(),
+        tripData: Object.fromEntries(params.entries()),
+        query: params.toString(),
+      })
+    );
+
+    return tripId;
+  } catch {
+    return null;
+  }
+}
+
 function intentCopy(intent: Intent) {
   switch (intent) {
     case 'flying-out':
@@ -654,7 +685,8 @@ export default function TripFlow() {
       params.set('airportTripTime', state.time);
     }
 
-    router.push(`/results?${params.toString()}`);
+    const tripId = storeTripSearchParams(params);
+    router.push(tripId ? `/results/${encodeURIComponent(tripId)}` : `/results?${params.toString()}`);
   };
 
   useEffect(() => {

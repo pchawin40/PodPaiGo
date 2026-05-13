@@ -179,91 +179,11 @@ function formatMiniMinutes(minutes: number): string {
 }
 
 function parkingTimeParts(option: ParkingOption) {
-  const optionWithDuration = option as ParkingOption & {
-    duration?: number | null;
-    routeToParkingMinutes?: number | null;
-    originToParkingMinutes?: number | null;
-    routeToLotMinutes?: number | null;
-    driveTimeMinutes?: number | null;
-    drivingMinutes?: number | null;
-    routeMinutes?: number | null;
-    driveMinutes?: number | null;
-    durationMinutes?: number | null;
-    routeDurationMinutes?: number | null;
-    distanceMinutes?: number | null;
+  const breakdown = parkingTimeBreakdown(option);
+  return {
+    total: breakdown.totalMinutes,
+    parts: breakdown.parts,
   };
-
-  const drive =
-    [
-      optionWithDuration.duration,
-      optionWithDuration.routeToParkingMinutes,
-      optionWithDuration.originToParkingMinutes,
-      optionWithDuration.routeToLotMinutes,
-      optionWithDuration.driveTimeMinutes,
-      optionWithDuration.drivingMinutes,
-      optionWithDuration.routeMinutes,
-      optionWithDuration.driveMinutes,
-      optionWithDuration.durationMinutes,
-      optionWithDuration.routeDurationMinutes,
-      optionWithDuration.distanceMinutes,
-      option.distance,
-    ].find(
-      (minutes) =>
-        typeof minutes === 'number' &&
-        Number.isFinite(minutes) &&
-        minutes > 0
-    ) ?? 0;
-
-  const park =
-    typeof option.parkingBufferMinutes === 'number'
-      ? option.parkingBufferMinutes
-      : option.transferType === 'airport-garage'
-        ? 8
-        : 15;
-
-  const shuttleWait =
-    option.transferType === 'shuttle'
-      ? typeof option.shuttleWaitMinutes === 'number'
-        ? option.shuttleWaitMinutes
-        : 8
-      : 0;
-
-  const transfer =
-    typeof option.transferToTerminalMinutes === 'number'
-      ? option.transferToTerminalMinutes
-      : option.transferType === 'airport-garage' || option.transferType === 'walk'
-        ? 5
-        : option.transferType === 'shuttle'
-          ? 12
-          : 10;
-
-  const walkInside =
-    option.transferType === 'airport-garage' || option.transferType === 'walk'
-      ? 5
-      : 2;
-
-  const buffer = 5;
-
-  const parts: Array<{ label: string; minutes: number }> = [
-    { label: 'Drive', minutes: drive },
-    { label: option.transferType === 'airport-garage' ? 'Park' : 'Park/check-in', minutes: park },
-    { label: 'Shuttle wait', minutes: shuttleWait },
-    {
-      label:
-        option.transferType === 'airport-garage' || option.transferType === 'walk'
-          ? 'Walk to terminal'
-          : option.transferType === 'shuttle'
-            ? 'Shuttle'
-            : 'Transfer',
-      minutes: transfer,
-    },
-    { label: 'Walk inside airport', minutes: walkInside },
-    { label: 'Buffer', minutes: buffer },
-  ].filter((part) => part.minutes > 0);
-
-  const total = parts.reduce((sum, part) => sum + part.minutes, 0);
-
-  return { total, parts };
 }
 
 function ParkingTimeSummary({
@@ -2527,9 +2447,25 @@ function securitySummaryLabel(
   return 'TSA';
 }
 
-export default function ResultsContent() {
+type ResultsContentProps = {
+  storedSearchParams?: string;
+};
+
+export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const routeSearchParams = useSearchParams();
+  const searchParams = useMemo(() => {
+    const params = new URLSearchParams(storedSearchParams || routeSearchParams.toString());
+
+    if (storedSearchParams) {
+      const routeParams = new URLSearchParams(routeSearchParams.toString());
+      routeParams.forEach((value, key) => {
+        params.set(key, value);
+      });
+    }
+
+    return params;
+  }, [routeSearchParams, storedSearchParams]);
 
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
