@@ -10,192 +10,53 @@ type ParkingBookingComparisonProps = {
   aprLiveChecking?: boolean;
 };
 
-export default function ParkingBookingComparison({
-  parkingOptions,
-  tripData,
-  aprLivePrices = {},
-  aprLiveChecking = false,
-}: ParkingBookingComparisonProps) {
-  if (!parkingOptions || parkingOptions.length === 0) return null;
+export default function ParkingBookingComparison({ parkingOptions, aprLivePrices = {} }: ParkingBookingComparisonProps) {
+  if (!parkingOptions?.length) return null;
+  const options = parkingOptions.map((o) => withAprLivePrice(o, aprLivePrices));
 
-  const parkingOptionsWithLive = parkingOptions.map((option) => withAprLivePrice(option, aprLivePrices));
+  const rows = options.flatMap((o) => {
+    const fromSources = (o.bookingSources || []).map((s) => ({
+      lot: o.name,
+      provider: s.providerName,
+      url: s.url || o.sourceLink,
+      status: s.priceConfidence === 'live' ? 'Live' : s.priceConfidence === 'estimated' ? 'Estimated' : 'Check live',
+      price: typeof s.pricePerDay === 'number' ? `$${s.pricePerDay.toFixed(2)}/day` : 'Check live price',
+    }));
 
-  // Build a list of known booking rows based on providers present.
-  // For safety, do not invent live prices.
-  const rows: Array<{ provider: string; price: string; notes: string; link?: string; sortOrder: number }> = [];
+    if (fromSources.length) return fromSources;
 
-  // Helper to push unique provider rows
-  function pushRow(provider: string, price: string, notes: string, link?: string, sortOrder = 2) {
-    if (!rows.find(r => r.provider === provider)) rows.push({ provider, price, notes, link, sortOrder });
-  }
-
-  const airportCode = ((tripData as (TripData & { airportCode?: string }) | null)?.airportCode || 'Airport').toUpperCase();
-
-  function trustedLink(option: ParkingOption): string | undefined {
-    const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
-    const link = option.sourceLink;
-    const url = String(link || '').toLowerCase();
-
-    if (provider.includes('way.com') || /\bway\b/.test(provider)) return undefined;
-
-    if (provider.includes('parkwhiz')) {
-      if (!link) return undefined;
-      if (
-        url === 'https://www.parkwhiz.com' ||
-        url === 'https://parkwhiz.com' ||
-        url.includes('/airport-parking') ||
-        url.includes('/search')
-      ) {
-        return undefined;
-      }
-      if (option.trustStatus !== 'live' && option.trustStatus !== 'verified-source') return undefined;
-    }
-
-    return link;
-  }
-
-  // Find official reserved/general options when present.
-  const seaReserved = parkingOptionsWithLive.find(p => p.id === 'sea-reserved' || p.name?.toLowerCase().includes('reserved'));
-  const seaGeneral = parkingOptionsWithLive.find(p => p.id === 'sea-general' || p.name?.toLowerCase().includes('general'));
-
-  if (seaReserved) {
-    const isLiveSelected = seaReserved.trustStatus === 'live' && String(seaReserved.priceNote || '').toLowerCase().includes('selected-date');
-    const price = isLiveSelected
-      ? `Live ${seaReserved.price ? `$${seaReserved.price}/day` : 'Check live'}`
-      : seaReserved.priceDisplay === 'from-per-day'
-        ? `From ${seaReserved.price ? `$${seaReserved.price}/day` : 'Check live'}`
-        : 'Check live';
-    pushRow(
-      `Official ${airportCode} (Reserved)`,
-      price,
-      isLiveSelected ? 'Live selected-date' : 'Official',
-      trustedLink(seaReserved),
-      isLiveSelected ? 0 : 1
-    );
-  }
-
-  if (seaGeneral) {
-    const isLiveSelected = seaGeneral.trustStatus === 'live' && String(seaGeneral.priceNote || '').toLowerCase().includes('selected-date');
-    const price = isLiveSelected
-      ? `Live ${seaGeneral.price ? `$${seaGeneral.price}/day` : 'Check live'}`
-      : seaGeneral.priceDisplay === 'from-per-day'
-        ? `From ${seaGeneral.price ? `$${seaGeneral.price}/day` : 'Check live'}`
-        : 'Check live';
-    pushRow(
-      `Official ${airportCode} (General)`,
-      price,
-      isLiveSelected ? 'Live selected-date' : 'Official',
-      trustedLink(seaGeneral),
-      isLiveSelected ? 0 : 1
-    );
-  }
-
-  // Offsite lots - for each one, add direct site + marketplace rows
-  const offsites = parkingOptionsWithLive.filter((p) => {
-    const unavailable =
-      p.availabilityStatus === 'unavailable' ||
-      p.isAvailable === false ||
-      p.priceDisplay === 'unavailable' ||
-      String(p.priceNote || '').toLowerCase().includes('sold out');
-
-    return p.type === 'off-airport' && !unavailable;
+    return [{
+      lot: o.name,
+      provider: o.sourceName || o.bookingProvider || 'Provider',
+      url: o.sourceLink,
+      status: o.trustStatus === 'live' ? 'Live' : 'Estimated',
+      price: o.price ? `$${o.price.toFixed(2)}/day` : 'Check live price',
+    }];
   });
-  offsites.forEach(p => {
-    const baseProviderName = p.name;
-    const isSelectedPrice = String(p.priceNote || '').toLowerCase().includes('selected-date');
-    const hasLivePrice = p.trustStatus === 'live' && isSelectedPrice;
-    const isAwaitingApr = aprLiveChecking && p.bookingProvider === 'AirportParkingReservations' && !hasLivePrice;
-    const directPrice = hasLivePrice
-      ? `Live ${p.price ? `$${p.price}/day` : 'Check live'}`
-      : p.priceDisplay === 'from-per-day'
-        ? p.price
-          ? `From $${p.price}/day`
-          : 'Check live'
-        : p.priceDisplay === 'estimated'
-          ? `Est. $${p.price}`
-          : 'Check live';
-
-    pushRow(
-      `${baseProviderName} (Direct)`,
-      directPrice,
-      hasLivePrice
-        ? 'Live selected-date'
-        : isAwaitingApr
-          ? 'Checking latest price...'
-          : directPrice.startsWith('From')
-            ? 'Listed rate'
-            : 'Check live',
-      trustedLink(p),
-      hasLivePrice ? 0 : 2
-    );
-    // Keep only broadly reliable generic marketplace search. Hide Way.com/ParkWhiz generated tabs for now.
-    pushRow('SpotHero', 'Check live', 'Marketplace', 'https://spothero.com', 3);
-  });
-
-  // If no offsites, still show a marketplace example.
-  if (offsites.length === 0) {
-    pushRow('SpotHero', 'Check live', 'Marketplace', 'https://spothero.com', 3);
-  }
-
-  const sortedRows = [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.provider.localeCompare(b.provider));
 
   return (
     <details className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      <summary className="w-full cursor-pointer bg-zinc-50 px-5 py-4 text-base font-semibold text-zinc-900">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-              Parking prices
+      <summary className="cursor-pointer bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">Compare booking sources</summary>
+      <div className="grid gap-3 p-3 sm:p-4">
+        {rows.map((r, i) => (
+          <div key={`${r.lot}-${r.provider}-${i}`} className="min-w-0 rounded-2xl border border-zinc-200 p-3 text-sm">
+            <div className="break-words font-semibold text-zinc-900">{r.provider}</div>
+            <div className="mt-1 break-words text-xs text-zinc-600">{r.lot}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 whitespace-normal">
+              <span className="rounded-full bg-zinc-900 px-2 py-1 text-xs text-white">{r.price}</span>
+              <span className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-700">{r.status}</span>
             </div>
-            <div className="mt-1">Compare booking options</div>
-            <div className="mt-1 text-sm font-normal text-zinc-600">
-              Official, direct, and marketplace links with price confidence.
+            <div className="mt-3">
+              {r.url ? (
+                <a href={r.url} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white">
+                  Check live price
+                </a>
+              ) : (
+                <span className="text-xs text-zinc-500">Link unavailable</span>
+              )}
             </div>
           </div>
-          <span className="text-sm text-zinc-500">Open</span>
-        </div>
-      </summary>
-
-      <div className="border-t border-zinc-100 px-4 pb-4 pt-3">
-        <div className="space-y-3">
-          {sortedRows.map((r) => (
-            <div
-              key={r.provider}
-              className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-zinc-900">
-                    {r.provider}
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold text-white">
-                      {r.price}
-                    </span>
-
-                    <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600">
-                      {r.notes}
-                    </span>
-                  </div>
-                </div>
-
-                {r.link ? (
-                  <a
-                    href={r.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-                  >
-                    Open
-                  </a>
-                ) : (
-                  <span className="shrink-0 text-xs text-zinc-500">Unavailable</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        ))}
       </div>
     </details>
   );

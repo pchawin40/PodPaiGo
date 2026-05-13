@@ -390,6 +390,14 @@ export default function ParkingSmartPick({
 
       <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
+          <div className="mb-3 overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100">
+            {best.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={best.imageUrl} alt={best.imageAlt || best.name} className="h-36 w-full object-cover" />
+            ) : (
+              <div className="flex h-36 items-center justify-center text-sm text-zinc-600">Parking image</div>
+            )}
+          </div>
           <h2 className="text-xl font-semibold text-zinc-900">{best.name}</h2>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">

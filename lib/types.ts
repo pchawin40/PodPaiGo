@@ -78,6 +78,16 @@ export type ParkingPriceSource =
 
 export type PriceConfidence = 'high' | 'medium' | 'low';
 
+export type ParkingCategory =
+  | 'airport-garage'
+  | 'offsite-shuttle'
+  | 'park-and-ride'
+  | 'hotel-parking'
+  | 'marketplace'
+  | 'unknown';
+
+export type ParkingPriceConfidence = 'live' | 'estimated' | 'unavailable';
+
 export type RideshareEstimateConfidence =
   | 'live-route-estimate'
   | 'baseline-estimate'
@@ -198,6 +208,18 @@ export type ParkingOption = {
   shuttleReliabilityLabel?: string;
 
   trueTotalCost?: number;
+  category?: ParkingCategory;
+  imageUrl?: string;
+  imageAlt?: string;
+  tags?: string[];
+  bookingSources?: {
+    providerName: string;
+    url?: string;
+    pricePerDay?: number;
+    totalPrice?: number;
+    priceConfidence: ParkingPriceConfidence;
+    label?: string;
+  }[];
 };
 
 export type ParkingGoogleReview = {
@@ -273,6 +295,18 @@ export type RideshareOption = {
   weatherPenaltyLabel?: string;
 
   trueTotalCost?: number;
+  category?: ParkingCategory;
+  imageUrl?: string;
+  imageAlt?: string;
+  tags?: string[];
+  bookingSources?: {
+    providerName: string;
+    url?: string;
+    pricePerDay?: number;
+    totalPrice?: number;
+    priceConfidence: ParkingPriceConfidence;
+    label?: string;
+  }[];
 };
 
 export type TransitOption = {
@@ -312,6 +346,18 @@ export type TransitOption = {
   weatherPenaltyLabel?: string;
 
   trueTotalCost?: number;
+  category?: ParkingCategory;
+  imageUrl?: string;
+  imageAlt?: string;
+  tags?: string[];
+  bookingSources?: {
+    providerName: string;
+    url?: string;
+    pricePerDay?: number;
+    totalPrice?: number;
+    priceConfidence: ParkingPriceConfidence;
+    label?: string;
+  }[];
 };
 
 export type TransitSegment = {

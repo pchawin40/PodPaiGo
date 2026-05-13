@@ -12,6 +12,7 @@ import { calculateParkingAvailabilityScore } from '../parking/availabilityScore'
 import { normalizeParkingPriceForTrip } from '../parking/parkingPriceNormalizer';
 import { withStableParkingRouteStatus } from '../parking/routeStatus';
 import { cleanParkingProviderInventoryName } from '../parking/googlePlaceMatchUtils';
+import { getDynamicParkingOptions } from '../parking/providerEngine';
 import {
   getCachedAprLotsForDateRange,
   getLatestParkingPriceSnapshots,
@@ -616,8 +617,7 @@ export async function getLiveParkingOptions(args: {
         ].filter(Boolean),
       });
     })
-    .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b))
-    .slice(0, 8);
+    .sort((a, b) => scoreAprParkingOption(a) - scoreAprParkingOption(b));
 
   const pricedProviderOptions = [
     ...parkWhizOptions,
@@ -719,6 +719,8 @@ export async function getLiveParkingOptions(args: {
     });
   });
 
+  const dynamicProviderOptions = await getDynamicParkingOptions(airport.id);
+
   const shouldUseSeaCuratedLots = false;
 
   const curatedSeaLots: ParkingOption[] = shouldUseSeaCuratedLots
@@ -749,6 +751,7 @@ export async function getLiveParkingOptions(args: {
 
   return dedupeParkingOptions([
     ...fallbackLots.filter((p) => p.type === 'official'),
+    ...dynamicProviderOptions,
     ...snapshotOptions,
     ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
     ...parkWhizOptions,
