@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
+    "codex": "^0.2.3",
     "dotenv": "^17.4.2",
     "next": "16.2.4",
     "pg": "^8.20.0",

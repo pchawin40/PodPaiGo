@@ -1775,7 +1775,7 @@ function OptionCard({
                                   }
                                   className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
                                 >
-                                  {r.ctaLabel === 'Check live' ? 'Copy + open' : r.ctaLabel}
+                                  {r.ctaLabel === 'Check live' ? 'Check live price' : r.ctaLabel}
                                 </button>
                               </td>
                             </tr>

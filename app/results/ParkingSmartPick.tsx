@@ -17,6 +17,7 @@ import {
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherImpact } from '@/lib/weather/types';
+import ParkingBookingSources from './ParkingBookSources';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -487,6 +488,8 @@ export default function ParkingSmartPick({
           <div className="mt-2 text-xs font-medium text-emerald-700">
             Smart pick for this airport today
           </div>
+
+          <ParkingBookingSources option={best} tripData={tripData} />
 
           <details className="mt-4">
             <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">
