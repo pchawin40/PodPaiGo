@@ -178,14 +178,40 @@ function formatMiniMinutes(minutes: number): string {
 }
 
 function parkingTimeParts(option: ParkingOption) {
-  const optionWithDuration = option as ParkingOption & { duration?: number };
+  const optionWithDuration = option as ParkingOption & {
+    duration?: number | null;
+    routeToParkingMinutes?: number | null;
+    originToParkingMinutes?: number | null;
+    routeToLotMinutes?: number | null;
+    driveTimeMinutes?: number | null;
+    drivingMinutes?: number | null;
+    routeMinutes?: number | null;
+    driveMinutes?: number | null;
+    durationMinutes?: number | null;
+    routeDurationMinutes?: number | null;
+    distanceMinutes?: number | null;
+  };
 
   const drive =
-    typeof optionWithDuration.duration === 'number' && optionWithDuration.duration > 0
-      ? optionWithDuration.duration
-      : typeof option.distance === 'number' && option.distance > 0
-        ? option.distance
-        : 0;
+    [
+      optionWithDuration.duration,
+      optionWithDuration.routeToParkingMinutes,
+      optionWithDuration.originToParkingMinutes,
+      optionWithDuration.routeToLotMinutes,
+      optionWithDuration.driveTimeMinutes,
+      optionWithDuration.drivingMinutes,
+      optionWithDuration.routeMinutes,
+      optionWithDuration.driveMinutes,
+      optionWithDuration.durationMinutes,
+      optionWithDuration.routeDurationMinutes,
+      optionWithDuration.distanceMinutes,
+      option.distance,
+    ].find(
+      (minutes) =>
+        typeof minutes === 'number' &&
+        Number.isFinite(minutes) &&
+        minutes > 0
+    ) ?? 0;
 
   const park =
     typeof option.parkingBufferMinutes === 'number'
