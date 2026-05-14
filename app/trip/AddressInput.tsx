@@ -267,30 +267,29 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
+      const friendlyLocationLabel = 'Current location';
 
-      if (window.google && window.google.maps && window.google.maps.Geocoder) {
-        const geocoder = new window.google.maps.Geocoder();
-        geocoder.geocode({ location: { lat, lng: lon } }, (results: GeocoderResult[], status: string) => {
-          if (status === 'OK' && results[0]) {
-            onChange(results[0].formatted_address);
-            setInputValue(results[0].formatted_address);
-            saveRecentOrigin(results[0].formatted_address);
-            setRecentOrigins(getRecentOrigins());
-          } else {
-            onChange(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-            setInputValue(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-          }
-          setIsLocating(false);
-          setIsOpen(false);
-        });
-      } else {
-        onChange(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-        setInputValue(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-        saveRecentOrigin(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-        setRecentOrigins(getRecentOrigins());
-        setIsLocating(false);
-        setIsOpen(false);
+      let resolvedAddress = '';
+
+      try {
+        const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lon}`);
+
+        if (res.ok) {
+          const data = await res.json();
+          resolvedAddress = data.formattedAddress || '';
+        }
+      } catch {
+        resolvedAddress = '';
       }
+
+      const displayLabel = resolvedAddress || 'Current location';
+
+      onChange(displayLabel);
+      setInputValue(displayLabel);
+      saveRecentOrigin(displayLabel);
+      setRecentOrigins(getRecentOrigins());
+      setIsLocating(false);
+      setIsOpen(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to get location';
       setLocateError(message);

@@ -38,7 +38,7 @@ function buildRows(option: ParkingOption, tripData: TripData | null): BookingSou
     option.sourceLink ||
     option.mapLink ||
     'https://www.google.com/search?q=' +
-      encodeURIComponent(`${option.name} airport parking`);
+    encodeURIComponent(`${option.name} airport parking`);
 
   const trustClassName =
     option.trustStatus === 'live' || option.trustStatus === 'verified-source'
@@ -90,102 +90,89 @@ function openBookingLink(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-export default function ParkingBookingSources({
-  option,
-  tripData,
-}: ParkingBookingSourcesProps) {
-  const rows = buildRows(option, tripData);
-  const days = estimateParkingDays(tripData);
+// export default function ParkingBookingSources({
+//   option,
+//   tripData,
+// }: ParkingBookingSourcesProps) {
+//   const rows = buildRows(option, tripData);
+//   const days = estimateParkingDays(tripData);
 
-  return (
-    <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm font-medium text-zinc-900">
-          Compare booking sources
-        </div>
-        <div className="text-xs text-zinc-500">
-          Known/baseline prices are labeled; confirm final rate before booking.
-        </div>
-      </div>
+//   return (
+//     <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+//       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+//         <div className="text-sm font-medium text-zinc-900">
+//           Compare booking sources
+//         </div>
+//         <div className="text-xs text-zinc-500">
+//           Known/baseline prices are labeled; confirm final rate before booking.
+//         </div>
+//       </div>
 
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full table-fixed text-sm">
-          <thead>
-            <tr className="text-left text-xs text-zinc-500">
-              <th className="w-[26%] py-2">Provider</th>
-              <th className="w-[18%] py-2">Price</th>
-              <th className="w-[14%] py-2">Trust</th>
-              <th className="w-[30%] py-2">Notes</th>
-              <th className="w-[12%] py-2 text-right">CTA</th>
-            </tr>
-          </thead>
+//       <div className="mt-3 space-y-3">
+//         {rows.map((r) => {
+//           const priceCell =
+//             r.pricePerDay == null
+//               ? 'Check live price'
+//               : r.priceDisplay === 'live'
+//                 ? `Live ${formatMoneyCents(r.pricePerDay)}/day`
+//                 : `Est. ${formatMoney(r.pricePerDay)}/day`;
 
-          <tbody>
-            {rows.map((r) => {
-              const priceCell =
-                r.pricePerDay == null
-                  ? 'Check live price'
-                  : r.priceDisplay === 'live'
-                    ? `Live ${formatMoneyCents(r.pricePerDay)}/day`
-                    : `Est. ${formatMoney(r.pricePerDay)}/day`;
+//           return (
+//             <div
+//               key={r.provider}
+//               className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+//             >
+//               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+//                 <div className="min-w-0 space-y-2">
+//                   <div className="text-sm font-medium text-zinc-900">
+//                     {r.provider}
+//                   </div>
 
-              return (
-                <tr key={r.provider} className="border-t border-zinc-100">
-                  <td className="break-words py-3 font-medium text-zinc-900">
-                    {r.provider}
-                  </td>
+//                   <div className="flex flex-wrap gap-2">
+//                     <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] font-medium text-zinc-700">
+//                       {r.type}
+//                     </span>
 
-                  <td className="break-words py-3 text-zinc-900">
-                    {priceCell}
-                  </td>
+//                     <span
+//                       className={
+//                         'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' +
+//                         r.trustClassName
+//                       }
+//                     >
+//                       {r.trustLabel}
+//                     </span>
+//                   </div>
+//                 </div>
 
-                  <td className="py-3">
-                    <span
-                      className={
-                        'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' +
-                        r.trustClassName
-                      }
-                    >
-                      {r.trustLabel}
-                    </span>
-                  </td>
+//                 <div className="flex flex-col items-start gap-3 sm:items-end">
+//                   <div className="text-sm font-semibold text-zinc-900">
+//                     {priceCell}
+//                   </div>
 
-                  <td className="py-3 text-zinc-700">
-                    <div className="flex flex-col gap-1">
-                      <div>
-                        <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700">
-                          {r.type}
-                        </span>
-                      </div>
+//                   <button
+//                     type="button"
+//                     onClick={() => openBookingLink(r.link)}
+//                     className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
+//                   >
+//                     {r.ctaLabel}
+//                   </button>
+//                 </div>
+//               </div>
 
-                      <div className="space-y-1 text-xs text-zinc-700">
-                        <div>{r.notes}</div>
+//               <div className="mt-3 space-y-2 text-xs text-zinc-700">
+//                 <div>{r.notes}</div>
 
-                        {r.estimatedTripTotal != null && (
-                          <div>
-                            <span className="font-medium">Trip total:</span>{' '}
-                            {formatMoneyCents(r.estimatedTripTotal)} for {days} day(s)
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => openBookingLink(r.link)}
-                      className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-                    >
-                      Check price
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+//                 {r.estimatedTripTotal != null && (
+//                   <div>
+//                     <span className="font-medium">Trip total:</span>{' '}
+//                     {formatMoneyCents(r.estimatedTripTotal)} for {days} day(s)
+//                   </div>
+//                 )}
+//               </div>
+//             </div>
+//           );
+//         })}
+//       </div>
+//     </div>
+//   );
+// }
