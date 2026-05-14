@@ -33,18 +33,18 @@ const steps = [
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
+    <main className="airport-page-bg min-h-screen text-slate-950">
       <SiteHeader />
 
-      <section className="mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-[1.1fr_0.9fr] md:items-center md:py-24">
+      <section className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.1fr_0.9fr] md:items-center md:py-20">
         <div>
           <HeroBadge />
 
-          <h1 className="max-w-4xl text-4xl font-bold tracking-tight text-slate-950 md:text-6xl">
+          <h1 className="max-w-4xl text-4xl font-bold text-slate-950 sm:text-5xl md:text-6xl">
             Find the easiest way to get to your airport.
           </h1>
 
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
+          <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">
             PodPaiGo compares airport parking, rideshare, and transit with
             leave-by timing, estimated total cost, weather impact, walking
             burden, and trip stress in one place.
@@ -72,8 +72,8 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="rounded-2xl bg-slate-950 p-5 text-white">
+        <div className="rounded-3xl border border-sky-100 bg-white/90 p-4 shadow-[0_18px_60px_rgba(14,116,144,0.14)] sm:p-6">
+          <div className="rounded-2xl bg-slate-950 p-5 text-white shadow-inner">
             <div className="text-sm text-slate-300">Recommended option</div>
             <div className="mt-2 text-2xl font-bold">Park at SEA Garage</div>
             <div className="mt-4 grid gap-3 text-sm">
@@ -107,12 +107,12 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 pb-16">
+      <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
         <div className="grid gap-4 md:grid-cols-4">
           {features.map((feature) => (
             <div
               key={feature.title}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+              className="rounded-2xl border border-sky-100 bg-white/90 p-5 shadow-sm shadow-sky-900/5"
             >
               <h2 className="font-semibold text-slate-950">{feature.title}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -123,10 +123,10 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-y border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-6xl gap-8 px-6 py-16 md:grid-cols-2">
+      <section className="border-y border-sky-100 bg-white/75 backdrop-blur">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:px-6 md:grid-cols-2">
           <div>
-            <h2 className="text-3xl font-bold tracking-tight">
+            <h2 className="text-3xl font-bold">
               Airport planning should not require five tabs.
             </h2>
             <p className="mt-4 text-slate-600">

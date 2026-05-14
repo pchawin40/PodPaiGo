@@ -520,7 +520,7 @@ function formatProviderPrice(it: PriceableOption): { primary: string; secondary?
 
 function PriceLegend() {
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-700">
+    <div className="rounded-2xl border border-sky-100 bg-white/90 p-4 text-sm text-slate-700 shadow-sm shadow-sky-900/5">
       <div className="font-semibold text-zinc-900">Price legend</div>
       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
@@ -571,7 +571,7 @@ function PricingLinksSection({
   const isTransitSection = title.toLowerCase().includes('transit');
 
   return (
-    <div className="divide-y divide-zinc-100 bg-white">
+    <div className="divide-y divide-slate-100 bg-white">
       {items.map((it: ProviderLinkItem) => {
         const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
         const rideshareConfidence = rideshareConfidenceMeta(it.rideshareEstimateConfidence);
@@ -618,10 +618,10 @@ function PricingLinksSection({
         const sourceAndMapSame = Boolean(link && it.mapLink && link === it.mapLink);
 
         return (
-          <div key={it.id || it.name} className="px-5 py-4">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
-              <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-bold text-zinc-900">
+          <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-sky-200 hover:shadow-md sm:p-4">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-slate-900 ring-1 ring-sky-100 sm:h-12 sm:w-12">
                   {providerIcon(it.name)}
                 </div>
 
@@ -719,7 +719,7 @@ function SortTabs({ value, onChange }: { value: SortTab; onChange: (v: SortTab) 
   ];
 
   return (
-    <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-sm">
+    <div className="grid grid-cols-3 gap-1 rounded-2xl border border-sky-100 bg-white/95 p-1.5 shadow-sm sm:gap-2 sm:p-2">
       {tabs.map((t) => {
         const active = value === t.key;
         return (
@@ -728,8 +728,8 @@ function SortTabs({ value, onChange }: { value: SortTab; onChange: (v: SortTab) 
             type="button"
             onClick={() => onChange(t.key)}
             className={
-              'rounded-xl px-3 py-2 text-left transition ' +
-              (active ? 'bg-blue-600 text-white' : 'bg-white text-zinc-900 hover:bg-zinc-50')
+              'rounded-xl px-2 py-2 text-left transition sm:px-3 ' +
+              (active ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20' : 'bg-white text-zinc-900 hover:bg-sky-50')
             }
           >
             <div className="text-sm font-semibold">{t.label}</div>
@@ -1448,7 +1448,7 @@ function OptionCard({
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
-        'rounded-2xl border bg-white p-5 shadow-sm ' +
+        'rounded-3xl border bg-white/95 p-4 shadow-sm shadow-sky-900/5 transition hover:border-sky-200 sm:p-5 ' +
         (!routeUnavailable && timing.status === 'too-late' ? 'border-red-200' : 'border-zinc-200')
       }
     >
@@ -1458,10 +1458,10 @@ function OptionCard({
         </div>
       )}
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-base font-semibold text-zinc-900">{opt.name}</div>
+            <div className="text-base font-semibold leading-tight text-slate-950 sm:text-lg">{opt.name}</div>
 
             {!compact && (
               <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
@@ -1731,7 +1731,7 @@ function OptionCard({
           )} */}
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2 sm:items-stretch">
+        <div className="flex w-full shrink-0 flex-col gap-2 md:w-auto md:min-w-40 md:items-stretch">
           {compact ? (
             <div className="flex flex-col gap-2">
               {!routeUnavailable && sourceLink && (
@@ -1742,7 +1742,7 @@ function OptionCard({
                       ? copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
                       : window.open(sourceLink, '_blank', 'noopener,noreferrer')
                   }
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
                 >
                   {item.type === 'parking'
                     ? opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
@@ -1764,7 +1764,7 @@ function OptionCard({
                   href={parkingLotRouteLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
                 >
                   Route to parking
                 </a>
@@ -1775,7 +1775,7 @@ function OptionCard({
                   href={parkingToTerminalRouteLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
                 >
                   Parking to terminal
                 </a>
@@ -1795,7 +1795,7 @@ function OptionCard({
                   onClick={() =>
                     copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
                   }
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
                 >
                   {opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
                     ? 'View deal'
@@ -1808,7 +1808,7 @@ function OptionCard({
                   href={sourceLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
                 >
                   {item.type === 'rideshare' &&
                     (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
@@ -1824,7 +1824,7 @@ function OptionCard({
                   href={parkingLotRouteLink}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-xl border border-zinc-200 px-4 py-3 text-center text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   Route to parking
                 </a>
@@ -1835,7 +1835,7 @@ function OptionCard({
                   href={parkingToTerminalRouteLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
                 >
                   Parking to terminal
                 </a>
@@ -1852,7 +1852,7 @@ function OptionCard({
                   href={routeLink}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
                 >
                   View route
                 </a>
@@ -2168,7 +2168,7 @@ function ProviderDropdownSection({
                 {title}
               </h3>
 
-              <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold uppercase text-blue-700">
                 Compare options
               </span>
             </div>
@@ -3606,7 +3606,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   if (loading) {
     return (
-      <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50">
+      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
         <div className="text-lg text-zinc-700">Loading options…</div>
       </div>
     );
@@ -3614,7 +3614,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   if (!tripData || !recommendation) {
     return (
-      <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 px-4">
+      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center px-4">
         <div className="text-lg font-medium text-zinc-900">
           {invalidTripMessage ? 'Trip details are incomplete' : 'We couldn’t read your trip.'}
         </div>
@@ -4076,18 +4076,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   }
 
   return (
-    <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
-      <main className="flex-1 w-full max-w-5xl mx-auto px-4 pb-24 pt-8">
+    <div className="airport-page-bg flex flex-1 flex-col font-sans">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-3 pb-24 pt-6 sm:px-4 sm:pt-8">
         {/* Hero */}
-        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
             {/* Left: main decision */}
             <div>
-              <div className="text-sm font-medium text-zinc-500">
+              <div className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase text-sky-800">
                 {searchParams.get('airport') || 'SEA'}
               </div>
 
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900">
+              <h1 className="mt-3 text-2xl font-semibold text-slate-950 sm:text-3xl">
                 {airportRouteUnavailable
                   ? 'Route unavailable from this origin'
                   : noViableFlyingOut
@@ -4121,7 +4121,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               )}
 
-              <p className="mt-2 text-sm text-zinc-600">
+              <p className="mt-3 text-sm leading-6 text-slate-600">
                 {displayDestination}
                 {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
                 {airlineOrFlight ? ` • ${airlineOrFlight}` : ''}
@@ -4167,9 +4167,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
 
             {/* Right: supporting context */}
-            <div className="space-y-3 lg:border-l lg:border-zinc-100 lg:pl-5">
+            <div className="space-y-3 lg:border-l lg:border-sky-100 lg:pl-5">
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
-                <div className="flex items-center gap-3 rounded-xl bg-zinc-50 p-3 text-sm">
+                <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
                     {recommendation.weatherImpact?.condition === 'rain'
                       ? '🌧️'
@@ -4214,8 +4214,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               {parkingWeather.length > 0 && (
-                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                <div className="rounded-2xl border border-sky-100 bg-white p-3">
+                  <div className="text-xs font-semibold uppercase text-zinc-500">
                     Weather for your travel dates
                   </div>
 
@@ -4255,7 +4255,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               {heroAirportTiming && (
-                <div className="rounded-2xl bg-zinc-50 p-4">
+                <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
                   <div className="text-sm text-zinc-500">
                     {airportRouteUnavailable
                       ? 'Airport timing only — route unavailable'
@@ -4309,12 +4309,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-zinc-50 p-4">
+          <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
             <div className="text-xs font-medium text-zinc-500">Origin</div>
             <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
           </div>
 
-          <div className="rounded-xl bg-zinc-50 p-4">
+          <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
             <div className="text-xs font-medium text-zinc-500">Destination</div>
             <div className="mt-1 text-sm font-semibold text-zinc-900">
               {displayDestination}
@@ -4322,7 +4322,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </div>
 
           {!airportRouteUnavailable && (
-            <div className="rounded-xl bg-zinc-50 p-4">
+            <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
               <div className="text-xs font-medium text-zinc-500">
                 Traffic estimate
               </div>
@@ -4359,7 +4359,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         {/* Edit panel */}
         {
           isEditing && editingData && (
-            <div id="edit-trip-panel" className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div id="edit-trip-panel" className="mt-6 rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-sm sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
@@ -4378,7 +4378,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <section
                   ref={editTripRef}
                   className={
-                    'scroll-mt-6 rounded-3xl border bg-white p-6 shadow-sm transition-all duration-300 ' +
+                    'scroll-mt-6 rounded-3xl border bg-white p-4 shadow-sm transition-all duration-300 sm:p-6 ' +
                     (editTripJustOpened
                       ? 'border-blue-400 shadow-[0_0_0_4px_rgba(37,99,235,0.15)]'
                       : 'border-zinc-200')
@@ -4456,7 +4456,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         {
           showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
             <div className="mt-6">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-bold">
                   {allParkingRoutesUnavailable
                     ? `Parking options near ${currentAirport.id}`

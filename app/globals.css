@@ -27,6 +27,35 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html {
+  background:
+    radial-gradient(circle at top left, rgba(186, 230, 253, 0.48), transparent 34rem),
+    linear-gradient(180deg, #f8fbff 0%, #eef7ff 42%, #f8fafc 100%);
+}
+
+body {
+  min-width: 320px;
+}
+
+* {
+  min-width: 0;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.airport-page-bg {
+  background:
+    radial-gradient(circle at 15% -10%, rgba(125, 211, 252, 0.35), transparent 28rem),
+    radial-gradient(circle at 90% 10%, rgba(191, 219, 254, 0.5), transparent 24rem),
+    linear-gradient(180deg, #f8fbff 0%, #edf7ff 38%, #f8fafc 100%);
+}
+
 input,
 textarea,
 select {

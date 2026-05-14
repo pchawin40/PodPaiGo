@@ -875,16 +875,16 @@ export class MockProvider implements DataProvider {
       }
     });
 
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[Parking route enrichment]', {
-        totalParkingOptions: parkingSource.length,
-        uniqueRouteDestinations: uniqueRouteKeys.size,
-        liveRouteLimit,
-        routesActuallyFetched: Math.max(0, liveRouteKeys.size - selectedCachedRoutes - selectedInFlightRoutes),
-        routesSkippedCached: selectedCachedRoutes + selectedInFlightRoutes,
-        routesDeferred: Math.max(0, uniqueRouteKeys.size - liveRouteKeys.size),
-      });
-    }
+    // if (process.env.NODE_ENV === 'development') {
+    //   console.log('[Parking route enrichment]', {
+    //     totalParkingOptions: parkingSource.length,
+    //     uniqueRouteDestinations: uniqueRouteKeys.size,
+    //     liveRouteLimit,
+    //     routesActuallyFetched: Math.max(0, liveRouteKeys.size - selectedCachedRoutes - selectedInFlightRoutes),
+    //     routesSkippedCached: selectedCachedRoutes + selectedInFlightRoutes,
+    //     routesDeferred: Math.max(0, uniqueRouteKeys.size - liveRouteKeys.size),
+    //   });
+    // }
 
     const parkingRouteEstimates = new Map<string, Promise<TrafficEstimate>>();
     const getParkingRouteEstimate = (entry: typeof parkingRouteEntries[number]): Promise<TrafficEstimate> => {

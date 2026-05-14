@@ -391,19 +391,21 @@ export default function ParkingSmartPick({
   };
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+    <section className="overflow-hidden rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
+      <div className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase text-blue-700">
         Smart parking pick
       </div>
 
-      <ParkingLotVisual option={best} />
+      <div className="mt-4">
+        <ParkingLotVisual option={best} />
+      </div>
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-zinc-900">{best.name}</h2>
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold leading-tight text-slate-950 sm:text-2xl">{best.name}</h2>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-100">
               Best Overall
             </span>
 
@@ -435,11 +437,11 @@ export default function ParkingSmartPick({
             )}
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-              {best.transferType === 'shuttle'
-                ? 'Shuttle'
-                : best.transferType === 'transit'
-                  ? 'Transit'
-                  : 'Walk'}
+              {best.transferType === 'walk'
+                ? 'Walk'
+                : best.transferType === 'airport-garage'
+                  ? 'Airport garage'
+                  : 'Shuttle'}
             </span>
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
@@ -463,7 +465,7 @@ export default function ParkingSmartPick({
             )}
           </div>
 
-          <div className="mt-4 text-2xl font-bold text-zinc-900">
+          <div className="mt-4 text-2xl font-bold text-slate-950">
             {bestPriceDisplay.primary}
           </div>
 
@@ -597,13 +599,13 @@ export default function ParkingSmartPick({
           </details>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2">
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:min-w-40">
           {best.sourceLink && (
             <a
               href={best.sourceLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+              className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
             >
               {ctaLabel}
             </a>
@@ -614,7 +616,7 @@ export default function ParkingSmartPick({
               href={bestRouteLinks.routeToParkingUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
             >
               Route to parking
             </a>
@@ -625,7 +627,7 @@ export default function ParkingSmartPick({
               href={bestRouteLinks.parkingToAirportUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
             >
               Parking to terminal
             </a>

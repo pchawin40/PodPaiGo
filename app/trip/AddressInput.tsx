@@ -453,13 +453,13 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
   return (
     <div className="space-y-2 relative">
-      <div className="flex items-end justify-between gap-3">
-        <label className="block text-sm font-medium text-zinc-800">{label}</label>
+      <div className="flex flex-col gap-2 min-[390px]:flex-row min-[390px]:items-end min-[390px]:justify-between min-[390px]:gap-3">
+        <label className="block text-sm font-semibold text-slate-800">{label}</label>
         <button
           type="button"
           onClick={detectLocation}
           disabled={isLocating}
-          className="text-sm text-blue-700 hover:text-blue-800 disabled:opacity-50"
+          className="inline-flex w-fit items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-sky-100 hover:text-blue-800 disabled:opacity-50"
         >
           {isLocating ? 'Detecting…' : 'Use current location'}
         </button>
@@ -484,14 +484,14 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         }}
         onBlur={() => setTimeout(() => setIsOpen(false), 150)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
       />
 
       {isOpen && inputValue.trim().length >= 3 && (
         <div
           id="address-suggestion-list"
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-zinc-200 bg-white shadow-lg"
+          className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
         >
           {loadingPredictions && (
             <div className="px-4 py-3 text-sm text-zinc-600">Searching…</div>
@@ -527,15 +527,15 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
       )}
 
       {recentOrigins.length > 0 && !isOpen && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-3 mt-2">
-          <div className="text-xs font-medium text-zinc-700 mb-2">Recent origins</div>
+        <div className="mt-3 rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm">
+          <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Recent origins</div>
           <ul className="flex flex-wrap gap-2">
             {recentOrigins.map((origin) => (
               <li key={origin}>
                 <button
                   type="button"
                   onClick={() => onRecentClick(origin)}
-                  className="rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs text-zinc-800 hover:bg-zinc-200"
+                  className="max-w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-sky-50"
                 >
                   {origin}
                 </button>

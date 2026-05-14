@@ -295,10 +295,10 @@ function Card({
       type="button"
       onClick={onClick}
       className={
-        `group w-full rounded-2xl border p-5 text-left shadow-sm transition ` +
+        `group w-full rounded-2xl border p-4 text-left shadow-sm transition sm:p-5 ` +
         (selected
-          ? 'border-blue-500 bg-blue-50'
-          : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50')
+          ? 'border-blue-500 bg-blue-50 shadow-blue-900/10'
+          : 'border-slate-200 bg-white/95 hover:border-sky-200 hover:bg-sky-50/40')
       }
     >
       <div className="text-base font-semibold text-zinc-900">{title}</div>
@@ -738,13 +738,16 @@ export default function TripFlow() {
   }, [state.airportCode]);
 
   return (
-    <div className="flex flex-col flex-1 bg-zinc-50 font-sans">
-      <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-10">
+    <div className="airport-page-bg flex flex-1 flex-col font-sans">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-3 py-8 sm:px-4 sm:py-10">
         <div className="mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+          <div className="mb-3 inline-flex rounded-full border border-sky-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase text-sky-800 shadow-sm">
+            Airport trip planner
+          </div>
+          <h1 className="text-3xl font-semibold text-slate-950 sm:text-4xl">
             Plan a calmer {selectedAirport.id} trip
           </h1>
-          <p className="mt-2 text-zinc-600">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
             Tell us what you’re doing — we’ll compare parking, rides, and transit and give you a clear “leave by” time.
           </p>
         </div>
@@ -752,7 +755,7 @@ export default function TripFlow() {
         {errors.length > 0 && (
           <div
             id="trip-error-summary"
-            className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4"
+            className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm"
           >
             <div className="text-sm font-medium text-red-900">Please fix:</div>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-800">
@@ -843,11 +846,11 @@ export default function TripFlow() {
 
         {step === 2 && intent && (
           <form onSubmit={onSubmit} className="space-y-6">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
+            <div className="rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="text-sm font-medium text-zinc-500">Step 1</div>
-                  <h2 className="mt-1 text-xl font-semibold text-zinc-900">
+                  <div className="text-xs font-semibold uppercase text-sky-700">Trip setup</div>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-950">
                     {intentCopy(intent).title}
                   </h2>
                   <p className="mt-1 text-sm text-zinc-600">{intentCopy(intent).helper}</p>
@@ -861,14 +864,14 @@ export default function TripFlow() {
                 </button> */}
               </div>
 
-              <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div className="md:col-span-2">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-zinc-800">Airport</label>
                     <select
                       value={state.airportCode}
                       onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                     >
                       {airports.map((airport) => (
                         <option key={airport.id} value={airport.id}>
@@ -876,7 +879,7 @@ export default function TripFlow() {
                         </option>
                       ))}
                     </select>
-                    <div className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                    <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-3 text-xs leading-5 text-slate-600">
                       <div className="font-medium text-zinc-800">
                         {selectedAirport.id} guidance
                       </div>
@@ -902,8 +905,8 @@ export default function TripFlow() {
                           className={
                             'w-full rounded-2xl border p-4 text-left shadow-sm transition ' +
                             (selected
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50')
+                              ? 'border-blue-500 bg-blue-50 shadow-blue-900/10'
+                              : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40')
                           }
                         >
                           <div className="text-sm font-semibold text-zinc-900">{opt.title}</div>
@@ -925,7 +928,7 @@ export default function TripFlow() {
                 </div>
 
                 {intent === 'flying-out' && (
-                  <div className="md:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4 md:col-span-2">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-medium text-zinc-900">Airport readiness</div>
@@ -950,7 +953,7 @@ export default function TripFlow() {
 
                     <div className="mt-4 space-y-4">
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        <div className="text-xs font-semibold uppercase text-zinc-500">
                           Bags
                         </div>
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -982,7 +985,7 @@ export default function TripFlow() {
                       </div>
 
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        <div className="text-xs font-semibold uppercase text-zinc-500">
                           Security
                         </div>
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1019,7 +1022,7 @@ export default function TripFlow() {
                       </div>
 
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        <div className="text-xs font-semibold uppercase text-zinc-500">
                           Flight type
                         </div>
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1051,7 +1054,7 @@ export default function TripFlow() {
                       </div>
 
                       <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        <div className="text-xs font-semibold uppercase text-zinc-500">
                           Cabin
                         </div>
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1133,7 +1136,7 @@ export default function TripFlow() {
                         });
                       }}
                       className={
-                        'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                        'mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
                         (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
                         (highlightedField === 'time' ? 'animate-pulse' : '')
                       }
@@ -1175,7 +1178,7 @@ export default function TripFlow() {
                       }}
                       aria-label="Choose parking start date from calendar"
                       className={
-                        'w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                        'w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
                         (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
                         (highlightedField === 'date' ? 'animate-pulse' : '')
                       }
@@ -1252,7 +1255,7 @@ export default function TripFlow() {
                           }}
                           aria-label="Choose return or parking check-out date from calendar"
                           className={
-                            'w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
+                            'w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
                             (fieldErrors.parkingCheckOutDate ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200')
                           }
                         />
@@ -1324,7 +1327,7 @@ export default function TripFlow() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
                     <div className="text-sm font-medium text-zinc-900">Destination</div>
                     <div className="mt-1 text-base font-semibold text-zinc-900">
                       {(getAirportById(state.airportCode) || getAirportById('SEA')!)?.destinationName}
@@ -1381,14 +1384,14 @@ export default function TripFlow() {
                 <button
                   type="button"
                   onClick={onBack}
-                  className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-base font-medium text-zinc-900 hover:bg-zinc-50"
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-base font-medium text-slate-900 hover:bg-slate-50"
                 >
                   Back
                 </button>
 
                 <button
                   type="submit"
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-base font-medium text-white shadow-sm hover:bg-blue-700"
+                  className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-base font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
                 >
                   See options
                 </button>

@@ -314,7 +314,7 @@ export async function getParkWhizParkingOptions(args: {
     const timeout = setTimeout(() => controller.abort(), 2500);
 
     try {
-        console.log('[ParkWhiz] fetching', url.toString());
+        // console.log('[ParkWhiz] fetching', url.toString());
 
         const response = await fetch(url.toString(), {
             headers: {
@@ -350,12 +350,12 @@ export async function getParkWhizParkingOptions(args: {
             console.warn('ParkWhiz cache save failed', error);
         });
 
-        console.log('[ParkWhiz] fetched and cached', {
-            airportCode: airport.id,
-            startTime,
-            endTime,
-            count: options.length,
-        });
+        // console.log('[ParkWhiz] fetched and cached', {
+        //     airportCode: airport.id,
+        //     startTime,
+        //     endTime,
+        //     count: options.length,
+        // });
 
         return options;
     } catch (error) {
