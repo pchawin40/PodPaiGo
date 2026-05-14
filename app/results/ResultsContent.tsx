@@ -2449,9 +2449,9 @@ type RecommendationRequestRef = {
   inFlight: boolean;
 };
 
-const GOOGLE_PLACE_MATCH_CONCURRENCY = 4;
-const INITIAL_GOOGLE_PLACE_MATCH_LIMIT = 6;
-const EXPANDED_GOOGLE_PLACE_MATCH_LIMIT = 10;
+const GOOGLE_PLACE_MATCH_CONCURRENCY = 2;
+const INITIAL_GOOGLE_PLACE_MATCH_LIMIT = 4;
+const EXPANDED_GOOGLE_PLACE_MATCH_LIMIT = 8;
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -3846,10 +3846,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     if (sort === 'cheapest') {
       const priced = routeAvailable.filter((option) => hasRealParkingPrice(option));
-      return priced.length > 0 ? priced : routeAvailable;
+      if (priced.length > 0) return priced;
+
+      const fallbackPriced = canonical.filter((option) => hasRealParkingPrice(option));
+      return fallbackPriced.length > 0 ? fallbackPriced : canonical;
     }
 
-    return routeAvailable;
+    return routeAvailable.length > 0 ? routeAvailable : canonical;
   })();
 
   const parkingDisplayOptions = (() => {
@@ -3882,12 +3885,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const smartPickOption = cheapestSmartPickOptions[0] || null;
 
-  const collapsedParkingDisplayCount = 5;
-  const expandedParkingDisplayCount = 10;
+  const collapsedParkingDisplayCount = 6;
+  const expandedParkingDisplayCount = 20;
 
-  const reachableParkingDisplayOptions = airportRouteUnavailable
-    ? []
-    : parkingDisplayOptions.filter((parkingOption) => !isParkingRouteUnavailable(parkingOption));
+  const reachableParkingDisplayOptions = parkingDisplayOptions;
 
   const remainingParking = parkingDisplayOptions
     .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)

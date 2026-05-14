@@ -229,49 +229,64 @@ async function getGoogleParkingPlaces(args: {
 }): Promise<ParkingOption[]> {
   const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   const airport = getAirportById(args.airportCode || '') || getAirportById('SEA')!;
-  const parkingSearchName = `parking near ${args.destination}`;
+  const searchQueries = [
+    `airport parking near ${airport.label}`,
+    `cheap airport parking near ${airport.id}`,
+    `off airport parking near ${airport.label}`,
+    `airport parking reservations near ${airport.label}`,
+    `park and ride to ${airport.label}`,
+    `park and ride to ${airport.id}`,
+  ];
 
   const parkingSearchRadiusMeters = Number(
-    process.env.PARKING_SEARCH_RADIUS_METERS || 20000
+    process.env.PARKING_SEARCH_RADIUS_METERS || 50000
   );
+
+  async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key!,
+        'X-Goog-FieldMask': [
+          'places.id',
+          'places.displayName',
+          'places.formattedAddress',
+          'places.googleMapsUri',
+          'places.rating',
+          'places.userRatingCount',
+          'places.businessStatus',
+          'places.location',
+          'places.photos',
+        ].join(','),
+      },
+      body: JSON.stringify({
+        textQuery,
+        locationBias: {
+          circle: {
+            center: {
+              latitude: airport.geoLocation.lat,
+              longitude: airport.geoLocation.lng,
+            },
+            radius: parkingSearchRadiusMeters,
+          },
+        },
+      }),
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return Array.isArray(data.places) ? data.places : [];
+  }
 
   if (!key) return [];
 
-  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': [
-        'places.id',
-        'places.displayName',
-        'places.formattedAddress',
-        'places.googleMapsUri',
-        'places.rating',
-        'places.userRatingCount',
-        'places.businessStatus',
-        'places.location',
-        'places.photos',
-      ].join(','),
-    },
-    body: JSON.stringify({
-      textQuery: parkingSearchName,
-      locationBias: {
-        circle: {
-          center: {
-            latitude: airport.geoLocation.lat,
-            longitude: airport.geoLocation.lng,
-          },
-          radius: parkingSearchRadiusMeters,
-        },
-      },
-    })
-  });
+  const placesByQuery = await Promise.all(
+    searchQueries.map((query) => fetchPlacesForQuery(query))
+  );
 
-  if (!res.ok) return [];
-
-  const data = await res.json();
-  const places = Array.isArray(data.places) ? data.places : [];
+  const places = placesByQuery.flat();
 
   const mapped = await Promise.all(
     places
@@ -302,6 +317,11 @@ async function getGoogleParkingPlaces(args: {
 
         const name = place.displayName?.text || `${airport.id} Parking`;
         const lowerName = name.toLowerCase();
+        const isParkAndRide =
+          lowerName.includes('park & ride') ||
+          lowerName.includes('park and ride') ||
+          lowerName.includes('station parking') ||
+          lowerName.includes('northgate');
         const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
 
         const lotKey = resolveLotKeyFromName(name);
@@ -352,12 +372,12 @@ async function getGoogleParkingPlaces(args: {
             : staticPricing.bookingProvider,
           trustStatus: dynamicPricing?.status === 'found' ? 'verified-source' : 'estimated',
           sourceName: 'Google Places',
-          searchQuery: parkingSearchName,
+          searchQuery: searchQueries.join(' | '),
           distance: 10,
           availability: 50,
           routeUnavailable: false,
-          sourceLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
-          mapLink: place.googleMapsUri || googleMapsSearchUrl(parkingSearchName),
+          sourceLink: place.googleMapsUri || googleMapsSearchUrl(name),
+          mapLink: place.googleMapsUri || googleMapsSearchUrl(place.formattedAddress || name),
           googlePlaceId: place.id,
           googleMapsUri: place.googleMapsUri,
           address: place.formattedAddress,
@@ -369,8 +389,8 @@ async function getGoogleParkingPlaces(args: {
           routeDestination: place.formattedAddress || name,
           lastUpdated: dynamicPricing?.lastChecked || new Date().toISOString(),
           parkingBufferMinutes: 15,
-          transferToTerminalMinutes: 12,
-          transferType: isOfficial ? 'walk' : 'shuttle',
+          transferToTerminalMinutes: isParkAndRide ? 45 : isOfficial ? 5 : 12,
+          transferType: isParkAndRide ? 'transit' : isOfficial ? 'walk' : 'shuttle',
           assumptions: [
             'Live parking listing from Google Places.',
             place.rating
@@ -382,8 +402,8 @@ async function getGoogleParkingPlaces(args: {
                 ? 'Using known baseline price because live crawler did not find a current price.'
                 : 'Open provider to confirm live price/coupon.',
           ],
-          walkingMinutes: isOfficial ? 5 : 2,
-          shuttleMinutes: isOfficial ? 0 : 12,
+          walkingMinutes: isParkAndRide ? 8 : isOfficial ? 5 : 2,
+          shuttleMinutes: isParkAndRide || isOfficial ? undefined : 12,
           covered: isCovered,
           reviewScore: rating,
           reviewCount,
@@ -392,6 +412,7 @@ async function getGoogleParkingPlaces(args: {
             rating && rating >= 4.4 ? 'Best Reviews' : '',
             isCovered ? 'Best Weather' : '',
             isOfficial ? 'Closest Walk' : 'Compare Listed Deal',
+            isParkAndRide ? 'Park & Ride' : '',
           ].filter(Boolean),
         };
 
@@ -402,7 +423,7 @@ async function getGoogleParkingPlaces(args: {
 
   return mapped
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
-    .slice(0, 12);
+    .slice(0, 30);
 }
 
 function normalizeSnapshotName(name: string): string {

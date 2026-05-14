@@ -823,9 +823,9 @@ export class MockProvider implements DataProvider {
       true
     );
 
-    if (airportRouteEstimate.routeUnavailable) {
-      return [];
-    }
+    // Do not hide parking lots just because the home → airport route failed.
+    // Parking discovery can still be useful; individual lot routes can be checked separately.
+    const airportDriveUnavailable = Boolean(airportRouteEstimate.routeUnavailable);
 
     const routeDestinationFor = (option: ParkingOption): string =>
       option.routeDestination ||
@@ -940,7 +940,7 @@ export class MockProvider implements DataProvider {
             ...commonRouteFields,
             duration: optionWithDuration.duration ?? option.distance,
             routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
-            routeUnavailable: option.routeUnavailable,
+            routeUnavailable: false,
             routeUnavailableReason: option.routeUnavailableReason,
             assumptions: [
               ...option.assumptions,
@@ -966,35 +966,35 @@ export class MockProvider implements DataProvider {
         //   });
         // }
 
+        const routeFailed = routeEstimate.routeUnavailable === true || liveDriveMinutes == null;
+
         return {
           ...option,
           ...commonRouteFields,
 
-          // In this app, ParkingOption.distance is being used as DRIVE MINUTES.
-          // Only use Google/live route minutes. Do NOT fall back to option.distance here,
-          // because that creates fake 10/25/28/35 minute drive times.
-          distance: liveDriveMinutes ?? 0,
-          duration: liveDriveMinutes ?? 0,
+          // Use live route when available. If live route fails, keep provider option visible.
+          distance: liveDriveMinutes ?? airportRouteEstimate.duration ?? option.distance ?? 0,
+          duration: liveDriveMinutes ?? airportRouteEstimate.duration ?? option.distance ?? 0,
 
-          routeTrustStatus: routeEstimate.trustStatus,
-          routeUnavailable: routeEstimate.routeUnavailable === true || liveDriveMinutes == null,
-          routeUnavailableReason:
-            routeEstimate.routeUnavailable === true || liveDriveMinutes == null
-              ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
-              : undefined,
+          routeTrustStatus: routeFailed
+            ? airportRouteEstimate.trustStatus ?? option.routeTrustStatus ?? option.trustStatus
+            : routeEstimate.trustStatus,
 
-          availability:
-            routeEstimate.routeUnavailable === true || liveDriveMinutes == null
-              ? 0
-              : option.availability,
+          // Do NOT mark the parking option unusable just because Google failed one route check.
+          routeUnavailable: false,
+          routeUnavailableReason: routeFailed
+            ? routeEstimate.routeUnavailableReason || airportRouteEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
+            : undefined,
+
+          availability: option.availability,
 
           assumptions: [
             ...option.assumptions,
-            routeEstimate.routeUnavailable || liveDriveMinutes == null
-              ? routeEstimate.routeUnavailableReason || 'Route unavailable from this origin.'
+            routeFailed
+              ? 'Live route check failed for this parking lot; showing provider option with estimated/deferred route timing.'
               : `Route from ${origin} to ${routeDestination}`,
-            routeEstimate.routeUnavailable || liveDriveMinutes == null
-              ? 'This parking option is not usable from the selected origin.'
+            routeFailed
+              ? routeEstimate.routeUnavailableReason || 'Open map directions to confirm drive time.'
               : routeEstimate.trustStatus === 'live'
                 ? `Based on live routing: ${liveDriveMinutes} min drive`
                 : `Estimated route time: ${liveDriveMinutes} min drive`,
