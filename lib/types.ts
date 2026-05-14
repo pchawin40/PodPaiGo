@@ -154,6 +154,7 @@ export type ParkingOption = {
   googleMapsUri?: string;
   imageUrl?: string;
   images?: string[];
+  photoAttributions?: string[];
   availabilityScore?: number; // internal score for availability, used in ranking
   bookingProvider?: string; // e.g. "ParkWhiz", for marketplace options
   bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options

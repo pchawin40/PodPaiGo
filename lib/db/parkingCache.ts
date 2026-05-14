@@ -1,6 +1,53 @@
 import { debugLog } from '../utils/debug';
 import { db } from './client';
 import { ParkingOption } from '../types';
+import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { withTimeout } from '../utils/asyncTimeout';
+
+const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 1200);
+const PARKING_DB_WRITE_TIMEOUT_MS = Number(process.env.PARKING_DB_WRITE_TIMEOUT_MS || 800);
+
+function parkingDbCacheDisabled(): boolean {
+    return process.env.DISABLE_PARKING_DB_CACHE === 'true';
+}
+
+function emptyRowsResult<T extends QueryResultRow = QueryResultRow>(): QueryResult<T> {
+    return {
+        command: 'SELECT',
+        rowCount: 0,
+        oid: 0,
+        fields: [],
+        rows: [],
+    };
+}
+
+async function withParkingDbRead<T>(
+    label: string,
+    run: () => Promise<T>,
+    fallback: T
+): Promise<T> {
+    if (parkingDbCacheDisabled()) return fallback;
+
+    try {
+        return await withTimeout(run(), PARKING_DB_READ_TIMEOUT_MS, label);
+    } catch (error) {
+        console.warn(`${label} failed`, error);
+        return fallback;
+    }
+}
+
+async function withParkingDbWrite(
+    label: string,
+    run: () => Promise<void>
+): Promise<void> {
+    if (parkingDbCacheDisabled()) return;
+
+    try {
+        await withTimeout(run(), PARKING_DB_WRITE_TIMEOUT_MS, label);
+    } catch (error) {
+        console.warn(`${label} failed`, error);
+    }
+}
 
 export type CachedAprPrice = {
     bookingUrl: string;
@@ -37,8 +84,10 @@ export async function getCachedAprPrices(params: {
 }): Promise<CachedAprPrice[]> {
     if (params.bookingUrls.length === 0) return [];
 
-    const result = await db.query(
-        `
+    const result = await withParkingDbRead(
+        'APR price cache read',
+        () => db.query(
+            `
     select distinct on (booking_url)
       booking_url as "bookingUrl",
       lot_id as "lotId",
@@ -65,6 +114,8 @@ export async function getCachedAprPrices(params: {
             params.checkOutDate,
             params.bookingUrls,
         ],
+        ),
+        emptyRowsResult(),
     );
 
     return result.rows;
@@ -73,14 +124,15 @@ export async function getCachedAprPrices(params: {
 export async function saveAprPrices(prices: SaveAprPriceInput[]): Promise<void> {
     if (prices.length === 0) return;
 
-    const client = await db.connect();
+    await withParkingDbWrite('APR price cache save', async () => {
+        const client = await db.connect();
 
-    try {
-        await client.query('begin');
+        try {
+            await client.query('begin');
 
-        for (const price of prices) {
-            await client.query(
-                `
+            for (const price of prices) {
+                await client.query(
+                    `
 insert into parking_price_snapshots (
   lot_id,
   lot_name,
@@ -126,15 +178,18 @@ do update set
                     price.ttlHours ?? 12,
                 ],
             );
-        }
+            }
 
-        await client.query('commit');
-    } catch (error) {
-        await client.query('rollback');
-        throw error;
-    } finally {
-        client.release();
-    }
+            await client.query('commit');
+        } catch (error) {
+            await client.query('rollback').catch((rollbackError) => {
+                console.warn('APR price cache rollback failed', rollbackError);
+            });
+            throw error;
+        } finally {
+            client.release();
+        }
+    });
 }
 
 export type CachedAprLotSnapshot = {
@@ -151,8 +206,10 @@ export async function getCachedAprLotsForDateRange(params: {
     checkInDate?: string;
     checkOutDate?: string;
 }): Promise<CachedAprLotSnapshot[]> {
-    const result = await db.query(
-        `
+    const result = await withParkingDbRead(
+        'Cached APR lots DB read',
+        () => db.query(
+            `
     select distinct on (booking_url)
       booking_url as "bookingUrl",
       lot_id as "lotId",
@@ -172,7 +229,9 @@ export async function getCachedAprLotsForDateRange(params: {
       case when source = 'apr-tracking' then 0 else 1 end,
       fetched_at desc
     `,
-        [params.airportCode, params.checkInDate ?? null, params.checkOutDate ?? null],
+            [params.airportCode, params.checkInDate ?? null, params.checkOutDate ?? null],
+        ),
+        emptyRowsResult(),
     );
 
     // debugLog('[DB cached APR rows latest by airport]', result.rows);
@@ -210,8 +269,10 @@ export async function getCachedParkWhizQuotes(params: {
 }): Promise<CachedParkWhizQuotes | null> {
     const cacheKey = buildParkWhizCacheKey(params);
 
-    const result = await db.query(
-        `
+    const result = await withParkingDbRead(
+        'ParkWhiz quote cache read',
+        () => db.query(
+            `
         select
           options_json as "options",
           fetched_at::text as "fetchedAt",
@@ -222,7 +283,9 @@ export async function getCachedParkWhizQuotes(params: {
         order by fetched_at desc
         limit 1
         `,
-        [cacheKey],
+            [cacheKey],
+        ),
+        emptyRowsResult(),
     );
 
     if (result.rows.length === 0) return null;
@@ -248,14 +311,16 @@ export async function saveParkingPriceSnapshotsFromOptions(params: {
 
     if (priced.length === 0) return;
 
-    const client = await db.connect();
+    await withParkingDbWrite('Parking price snapshot save', async () => {
+        let client: PoolClient | null = null;
 
-    try {
-        await client.query('begin');
+        try {
+            client = await db.connect();
+            await client.query('begin');
 
-        for (const option of priced) {
-            await client.query(
-                `
+            for (const option of priced) {
+                await client.query(
+                    `
         insert into parking_price_snapshots (
           lot_id,
           lot_name,
@@ -310,15 +375,20 @@ export async function saveParkingPriceSnapshotsFromOptions(params: {
                     params.ttlHours ?? 2,
                 ]
             );
-        }
+            }
 
-        await client.query('commit');
-    } catch (error) {
-        await client.query('rollback');
-        throw error;
-    } finally {
-        client.release();
-    }
+            await client.query('commit');
+        } catch (error) {
+            if (client) {
+                await client.query('rollback').catch((rollbackError) => {
+                    console.warn('Parking price snapshot rollback failed', rollbackError);
+                });
+            }
+            throw error;
+        } finally {
+            client?.release();
+        }
+    });
 }
 
 export type LatestParkingPriceSnapshot = {
@@ -341,8 +411,10 @@ export async function getLatestParkingPriceSnapshots(params: {
 }): Promise<LatestParkingPriceSnapshot[]> {
     if (!params.checkInDate || !params.checkOutDate) return [];
 
-    const result = await db.query(
-        `
+    const result = await withParkingDbRead(
+        'Latest parking price snapshots DB read',
+        () => db.query(
+            `
     select distinct on (lower(lot_name), source)
       lot_name as "lotName",
       airport_code as "airportCode",
@@ -372,6 +444,8 @@ export async function getLatestParkingPriceSnapshots(params: {
             params.checkInDate,
             params.checkOutDate,
         ],
+        ),
+        emptyRowsResult(),
     );
 
     return result.rows;
@@ -394,8 +468,10 @@ export async function saveParkWhizQuotes(params: {
         distanceMiles,
     });
 
-    await db.query(
-        `
+    await withParkingDbWrite(
+        'ParkWhiz quote cache save',
+        () => db.query(
+            `
         insert into parkwhiz_quote_snapshots (
           airport_code,
           check_in_at,
@@ -415,14 +491,15 @@ export async function saveParkWhizQuotes(params: {
           fetched_at = now(),
           expires_at = excluded.expires_at
         `,
-        [
-            params.airportCode.toUpperCase(),
-            params.checkInAt,
-            params.checkOutAt,
-            distanceMiles,
-            cacheKey,
-            JSON.stringify(params.options),
-            params.ttlHours ?? 2,
-        ],
+            [
+                params.airportCode.toUpperCase(),
+                params.checkInAt,
+                params.checkOutAt,
+                distanceMiles,
+                cacheKey,
+                JSON.stringify(params.options),
+                params.ttlHours ?? 2,
+            ],
+        ).then(() => undefined),
     );
 }

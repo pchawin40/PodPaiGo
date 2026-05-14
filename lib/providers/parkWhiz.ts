@@ -339,7 +339,7 @@ export async function getParkWhizParkingOptions(args: {
             })
         );
 
-        await saveParkWhizQuotes({
+        void saveParkWhizQuotes({
             airportCode: airport.id,
             checkInAt: startTime,
             checkOutAt: endTime,

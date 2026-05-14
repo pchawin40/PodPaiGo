@@ -1,5 +1,12 @@
 import { db } from '../db/client';
 import { getAirportById } from '../airports/catalog';
+import { withTimeout } from '../utils/asyncTimeout';
+
+const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 1200);
+
+function parkingDbCacheDisabled(): boolean {
+    return process.env.DISABLE_PARKING_DB_CACHE === 'true';
+}
 
 export type ParkingLotInventoryInput = {
     airportCode: string;
@@ -114,8 +121,12 @@ export async function getParkingLotsByAirport(
         return [];
     }
 
-    const result = await db.query(
-        `
+    if (parkingDbCacheDisabled()) return [];
+
+    try {
+        const result = await withTimeout(
+            db.query(
+                `
     with airport as (
       select
         $2::float8 as airport_lat,
@@ -177,7 +188,14 @@ export async function getParkingLotsByAirport(
             radiusMiles,
             limit,
         ],
-    );
+            ),
+            PARKING_DB_READ_TIMEOUT_MS,
+            'Parking inventory DB read',
+        );
 
-    return result.rows;
+        return result.rows;
+    } catch (error) {
+        console.warn('Parking inventory DB read failed', error);
+        return [];
+    }
 }

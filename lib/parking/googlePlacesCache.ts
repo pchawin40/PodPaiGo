@@ -1,12 +1,25 @@
 import { db } from '../db/client';
 import { getAirportById } from '../airports/catalog';
 import { ParkingOption, ParkingGooglePlaceSnapshot, ParkingGoogleReview } from '../types';
+import type { PoolClient } from 'pg';
+import { withTimeout } from '../utils/asyncTimeout';
 import {
   buildParkingGoogleCacheKey,
   cleanGoogleParkingSearchName,
   normalizeParkingLotName,
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
+
+const GOOGLE_PLACE_DB_READ_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_READ_TIMEOUT_MS || 1000);
+const GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS || 800);
+const GOOGLE_PLACE_PHOTO_NAME_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+const photoNameCache = new Map<string, { ts: number; photoName: string | null }>();
+const photoNameInFlight = new Map<string, Promise<string | null>>();
+
+function googlePlaceDbCacheDisabled(): boolean {
+  return process.env.DISABLE_PARKING_DB_CACHE === 'true';
+}
 
 type GoogleLegacyReview = {
   author_name?: string;
@@ -105,6 +118,18 @@ function simplifyParkingProductName(name: string): string {
     .trim();
 }
 
+function buildAirportParkingContext(
+  airportCode?: string | null,
+  airportContext?: string | null
+): string | null {
+  const code = airportCode?.trim().toUpperCase();
+
+  if (code === 'SEA') return 'SeaTac WA airport parking';
+  if (code) return `${code} airport parking`;
+
+  return airportContext?.trim() || null;
+}
+
 function buildParkingSearchQuery(args: {
   lotName: string;
   lotAddress?: string | null;
@@ -113,8 +138,13 @@ function buildParkingSearchQuery(args: {
 }): string {
   const name = cleanGoogleParkingSearchName(args.lotName) || args.lotName;
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
+  const airportParkingContext = buildAirportParkingContext(
+    args.airportCode,
+    args.airportContext,
+  );
   const context = [
     args.lotAddress,
+    airportParkingContext,
     args.airportContext,
     airport?.label,
     airport?.destinationName,
@@ -136,11 +166,17 @@ function buildParkingSearchQueries(args: {
 }): string[] {
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
   const simplifiedName = simplifyParkingProductName(args.lotName);
+  const airportParkingContext =
+    buildAirportParkingContext(args.airportCode, args.airportContext) ||
+    airport?.label ||
+    airport?.destinationName ||
+    null;
   const context = args.airportContext || airport?.label || airport?.destinationName || args.airportCode || null;
   const queries = [
-    [simplifiedName, args.lotAddress].filter(Boolean).join(' '),
-    [simplifiedName, context].filter(Boolean).join(' '),
-    [args.lotName, args.lotAddress].filter(Boolean).join(' '),
+    [args.lotName, args.lotAddress, airportParkingContext].filter(Boolean).join(' '),
+    [simplifiedName, args.lotAddress, airportParkingContext].filter(Boolean).join(' '),
+    [args.lotName, args.lotAddress, context, 'parking'].filter(Boolean).join(' '),
+    [simplifiedName, context, 'parking'].filter(Boolean).join(' '),
     [args.lotName, context, 'parking'].filter(Boolean).join(' '),
     buildParkingSearchQuery(args),
   ];
@@ -266,8 +302,12 @@ function mapRowToRecord(row: Record<string, unknown>): ParkingGooglePlaceCacheRe
 }
 
 async function getCachedRecordByKey(cacheKey: string): Promise<ParkingGooglePlaceCacheRecord | null> {
-  const result = await db.query(
-    `
+  if (googlePlaceDbCacheDisabled()) return null;
+
+  try {
+    const result = await withTimeout(
+      db.query(
+        `
       select
         cache_key,
         parking_lot_id,
@@ -291,17 +331,28 @@ async function getCachedRecordByKey(cacheKey: string): Promise<ParkingGooglePlac
       order by updated_at desc
       limit 1
     `,
-    [cacheKey],
-  );
+        [cacheKey],
+      ),
+      GOOGLE_PLACE_DB_READ_TIMEOUT_MS,
+      'Google Places stale cache read',
+    );
 
-  if (result.rows.length === 0) return null;
+    if (result.rows.length === 0) return null;
 
-  return mapRowToRecord(result.rows[0]);
+    return mapRowToRecord(result.rows[0]);
+  } catch (error) {
+    console.warn('Google Places stale cache read failed', error);
+    return null;
+  }
 }
 
 async function getFreshCachedRecordByKey(cacheKey: string): Promise<ParkingGooglePlaceCacheRecord | null> {
-  const result = await db.query(
-    `
+  if (googlePlaceDbCacheDisabled()) return null;
+
+  try {
+    const result = await withTimeout(
+      db.query(
+        `
       select
         cache_key,
         parking_lot_id,
@@ -326,22 +377,35 @@ async function getFreshCachedRecordByKey(cacheKey: string): Promise<ParkingGoogl
       order by updated_at desc
       limit 1
     `,
-    [cacheKey],
-  );
+        [cacheKey],
+      ),
+      GOOGLE_PLACE_DB_READ_TIMEOUT_MS,
+      'Google Places fresh cache read',
+    );
 
-  if (result.rows.length === 0) return null;
+    if (result.rows.length === 0) return null;
 
-  return mapRowToRecord(result.rows[0]);
+    return mapRowToRecord(result.rows[0]);
+  } catch (error) {
+    console.warn('Google Places fresh cache read failed', error);
+    return null;
+  }
 }
 
 async function saveRecord(record: ParkingGooglePlaceCacheRecord): Promise<ParkingGooglePlaceCacheRecord> {
-  const client = await db.connect();
+  if (googlePlaceDbCacheDisabled()) return record;
 
   try {
-    await client.query('begin');
+    await withTimeout(
+      (async () => {
+        let client: PoolClient | null = null;
 
-    await client.query(
-      `
+        try {
+          client = await db.connect();
+          await client.query('begin');
+
+          await client.query(
+            `
         insert into parking_lot_google_place_snapshots (
           cache_key,
           parking_lot_id,
@@ -386,32 +450,44 @@ async function saveRecord(record: ParkingGooglePlaceCacheRecord): Promise<Parkin
           updated_at = excluded.updated_at,
           expires_at = excluded.expires_at
       `,
-      [
-        record.cacheKey,
-        record.parkingLotId ?? null,
-        record.airportCode.toUpperCase(),
-        record.lotName,
-        record.normalizedLotName,
-        record.lotAddress ?? null,
-        record.googlePlaceId ?? null,
-        record.googlePlaceName ?? null,
-        record.googleFormattedAddress ?? null,
-        record.googleMapsUri ?? null,
-        record.rating ?? null,
-        record.reviewCount ?? null,
-        JSON.stringify(record.reviews ?? []),
-        record.matchConfidence ?? null,
-      ],
-    );
+            [
+              record.cacheKey,
+              record.parkingLotId ?? null,
+              record.airportCode.toUpperCase(),
+              record.lotName,
+              record.normalizedLotName,
+              record.lotAddress ?? null,
+              record.googlePlaceId ?? null,
+              record.googlePlaceName ?? null,
+              record.googleFormattedAddress ?? null,
+              record.googleMapsUri ?? null,
+              record.rating ?? null,
+              record.reviewCount ?? null,
+              JSON.stringify(record.reviews ?? []),
+              record.matchConfidence ?? null,
+            ],
+          );
 
-    await client.query('commit');
-    return record;
+          await client.query('commit');
+        } catch (error) {
+          if (client) {
+            await client.query('rollback').catch((rollbackError) => {
+              console.warn('Google Places cache rollback failed', rollbackError);
+            });
+          }
+          throw error;
+        } finally {
+          client?.release();
+        }
+      })(),
+      GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS,
+      'Google Places cache write',
+    );
   } catch (error) {
-    await client.query('rollback');
-    throw error;
-  } finally {
-    client.release();
+    console.warn('Google Places cache write failed', error);
   }
+
+  return record;
 }
 
 function scoreSearchResult(result: GoogleLegacyPlaceSearchResult, args: {
@@ -672,31 +748,56 @@ export async function fetchGooglePlacePhotoName(
   timeoutMs = 1500
 ): Promise<string | null> {
   const apiKey = getServerApiKey();
-  if (!apiKey || !placeId) return null;
+  const normalizedPlaceId = placeId.trim();
+  if (!apiKey || !normalizedPlaceId) return null;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const cached = photoNameCache.get(normalizedPlaceId);
+  if (cached && Date.now() - cached.ts < GOOGLE_PLACE_PHOTO_NAME_CACHE_TTL_MS) {
+    return cached.photoName;
+  }
+
+  if (cached) {
+    photoNameCache.delete(normalizedPlaceId);
+  }
+
+  const inFlight = photoNameInFlight.get(normalizedPlaceId);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'photos',
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      }).catch(() => null);
+
+      if (!res?.ok) {
+        await logGooglePlacesError('places-new-photo', res);
+        return null;
+      }
+
+      const json = (await res.json()) as GoogleNewPlace;
+      return firstGooglePhotoName(json.photos) || null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+
+  photoNameInFlight.set(normalizedPlaceId, promise);
 
   try {
-    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'photos',
-      },
-      cache: 'no-store',
-      signal: controller.signal,
-    }).catch(() => null);
-
-    if (!res?.ok) {
-      await logGooglePlacesError('places-new-photo', res);
-      return null;
-    }
-
-    const json = (await res.json()) as GoogleNewPlace;
-    return firstGooglePhotoName(json.photos) || null;
+    const photoName = await promise;
+    photoNameCache.set(normalizedPlaceId, { ts: Date.now(), photoName });
+    return photoName;
   } finally {
-    clearTimeout(timeout);
+    photoNameInFlight.delete(normalizedPlaceId);
   }
 }
 
@@ -805,11 +906,9 @@ export async function resolveParkingGooglePlace(args: {
     source: 'google-places',
   };
 
-  try {
-    await saveRecord(record);
-  } catch (error) {
-    console.error('Failed to cache Google Places parking data', error);
-  }
+  void saveRecord(record).catch((error) => {
+    console.warn('Failed to cache Google Places parking data', error);
+  });
 
   return record;
 }

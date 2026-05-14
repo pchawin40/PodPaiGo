@@ -22,11 +22,29 @@ export default function ParkingBookingComparison({
 
   // Build a list of known booking rows based on providers present.
   // For safety, do not invent live prices.
-  const rows: Array<{ provider: string; price: string; notes: string; link?: string; sortOrder: number }> = [];
+  const rows: Array<{
+    provider: string;
+    price: string;
+    notes: string;
+    link?: string;
+    sortOrder: number;
+    imageUrl?: string;
+    imageAlt?: string;
+  }> = [];
 
   // Helper to push unique provider rows
-  function pushRow(provider: string, price: string, notes: string, link?: string, sortOrder = 2) {
-    if (!rows.find(r => r.provider === provider)) rows.push({ provider, price, notes, link, sortOrder });
+  function pushRow(
+    provider: string,
+    price: string,
+    notes: string,
+    link?: string,
+    sortOrder = 2,
+    imageUrl?: string,
+    imageAlt?: string
+  ) {
+    if (!rows.find(r => r.provider === provider)) {
+      rows.push({ provider, price, notes, link, sortOrder, imageUrl, imageAlt });
+    }
   }
 
   const airportCode = ((tripData as (TripData & { airportCode?: string }) | null)?.airportCode || 'Airport').toUpperCase();
@@ -70,7 +88,9 @@ export default function ParkingBookingComparison({
       price,
       isLiveSelected ? 'Live selected-date' : 'Official',
       trustedLink(seaReserved),
-      isLiveSelected ? 0 : 1
+      isLiveSelected ? 0 : 1,
+      seaReserved.images?.[0] || seaReserved.imageUrl,
+      seaReserved.name
     );
   }
 
@@ -86,7 +106,9 @@ export default function ParkingBookingComparison({
       price,
       isLiveSelected ? 'Live selected-date' : 'Official',
       trustedLink(seaGeneral),
-      isLiveSelected ? 0 : 1
+      isLiveSelected ? 0 : 1,
+      seaGeneral.images?.[0] || seaGeneral.imageUrl,
+      seaGeneral.name
     );
   }
 
@@ -126,7 +148,9 @@ export default function ParkingBookingComparison({
             ? 'Listed rate'
             : 'Check live',
       trustedLink(p),
-      hasLivePrice ? 0 : 2
+      hasLivePrice ? 0 : 2,
+      p.images?.[0] || p.imageUrl,
+      p.name
     );
     // Keep only broadly reliable generic marketplace search. Hide Way.com/ParkWhiz generated tabs for now.
     pushRow('SpotHero', 'Check live', 'Marketplace', 'https://spothero.com', 3);
@@ -164,7 +188,22 @@ export default function ParkingBookingComparison({
               className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 gap-3">
+                  {r.imageUrl && (
+                    <div className="h-16 w-20 shrink-0 overflow-hidden rounded-xl bg-zinc-100">
+                      <img
+                        src={r.imageUrl}
+                        alt={`${r.imageAlt || r.provider} parking`}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-zinc-900">
                     {r.provider}
                   </div>
@@ -177,6 +216,7 @@ export default function ParkingBookingComparison({
                     <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600">
                       {r.notes}
                     </span>
+                  </div>
                   </div>
                 </div>
 

@@ -244,6 +244,51 @@ export class MockTrafficProvider implements TrafficProvider {
 const ROUTE_CACHE = new Map<string, { ts: number; estimate: TrafficEstimate }>();
 const ROUTE_INFLIGHT = new Map<string, Promise<TrafficEstimate>>();
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT = 6;
+
+function normalizeRouteCachePart(value: string): string {
+  const raw = String(value || '').trim();
+  const lower = raw.toLowerCase();
+
+  if (
+    raw.toUpperCase() === 'SEA' ||
+    lower.includes('seattle-tacoma international airport') ||
+    lower.includes('seatac airport') ||
+    lower.includes('sea-tac airport') ||
+    lower.includes('17801 international blvd')
+  ) {
+    return 'sea airport';
+  }
+
+  return lower
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function initialLiveParkingRouteLimit(): number {
+  const configured = Number(process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT);
+  if (Number.isFinite(configured) && configured >= 0) return Math.floor(configured);
+
+  return DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT;
+}
+
+function buildRouteEstimateCacheKey(args: {
+  origin: string;
+  destination: string;
+  dateTime: string;
+  mode?: string;
+}): string {
+  return [
+    args.mode || 'DRIVE',
+    normalizeRouteCachePart(args.origin),
+    normalizeRouteCachePart(args.destination),
+    String(args.dateTime || '').trim(),
+  ].join('|');
+}
 
 function hashCacheKey(input: string): string {
   // Non-cryptographic hash for log correlation without leaking address strings.
@@ -254,9 +299,36 @@ function hashCacheKey(input: string): string {
   return Math.abs(h).toString(36);
 }
 
-// function logGoogleRoutesCache(event: 'HIT' | 'MISS' | 'IN-FLIGHT', cacheKey: string, routeLabel: string) {
-//   console.log(`[GoogleRoutesCache] ${event}`, { id: hashCacheKey(cacheKey), route: routeLabel });
-// }
+function getCachedRouteEstimate(cacheKey: string): TrafficEstimate | null {
+  const cached = ROUTE_CACHE.get(cacheKey);
+
+  if (!cached) return null;
+
+  if (Date.now() - cached.ts >= CACHE_TTL_MS) {
+    ROUTE_CACHE.delete(cacheKey);
+    return null;
+  }
+
+  return cached.estimate;
+}
+
+function cacheRouteEstimate(cacheKey: string, estimate: TrafficEstimate): TrafficEstimate {
+  ROUTE_CACHE.set(cacheKey, { ts: Date.now(), estimate });
+  return estimate;
+}
+
+function logRoutesApiCache(
+  message: 'Routes API cache hit' | 'Routes API in-flight hit' | 'Routes API fetch',
+  cacheKey: string,
+  routeLabel: string
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.log(message, {
+    id: hashCacheKey(cacheKey),
+    route: routeLabel,
+  });
+}
 
 export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
@@ -280,7 +352,12 @@ export class LiveTrafficProvider implements TrafficProvider {
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
     // dateTime can be undefined at runtime (e.g., tests). Default to "now" to keep routing functional.
     const resolvedDateTime = (dateTime ?? new Date().toISOString());
-    const cacheKey = `${origin.trim()}|${destination.trim()}|${resolvedDateTime.trim()}`;
+    const cacheKey = buildRouteEstimateCacheKey({
+      origin,
+      destination,
+      dateTime: resolvedDateTime,
+      mode: 'DRIVE',
+    });
     const routeKey = normalizeTrafficRoute(origin, destination);
     const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
 
@@ -297,23 +374,17 @@ export class LiveTrafficProvider implements TrafficProvider {
         throw new Error('Google Maps server API key not configured');
       }
 
-      const now = Date.now();
-      const cached = ROUTE_CACHE.get(cacheKey);
-      if (cached && now - cached.ts < CACHE_TTL_MS) {
-        // logGoogleRoutesCache('HIT', cacheKey, routeLabel);
-        return cached.estimate;
-      }
+      const cached = getCachedRouteEstimate(cacheKey);
       if (cached) {
-        ROUTE_CACHE.delete(cacheKey);
+        logRoutesApiCache('Routes API cache hit', cacheKey, routeLabel);
+        return cached;
       }
 
       const existingInFlight = ROUTE_INFLIGHT.get(cacheKey);
       if (existingInFlight) {
-        // logGoogleRoutesCache('IN-FLIGHT', cacheKey, routeLabel);
+        logRoutesApiCache('Routes API in-flight hit', cacheKey, routeLabel);
         return await existingInFlight;
       }
-
-      // logGoogleRoutesCache('MISS', cacheKey, routeLabel);
 
       const inflightPromise = (async () => {
         // Geocode origin and destination where possible
@@ -362,6 +433,8 @@ export class LiveTrafficProvider implements TrafficProvider {
           'X-Goog-Api-Key': this.serverKey!,
           'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,staticDuration,distanceMeters,status,condition',
         };
+
+        logRoutesApiCache('Routes API fetch', cacheKey, routeLabel);
 
         // Perform the network call
         const res = await fetch(url, {
@@ -457,10 +530,13 @@ export class LiveTrafficProvider implements TrafficProvider {
         else if (element?.staticDuration) hasDuration = true;
 
         if (res.status === 200 && condition && condition !== 'ROUTE_EXISTS') {
-          return unavailableTrafficEstimate(
-            routeKey,
-            'Google Routes API',
-            'Google Routes could not calculate a driving route for this origin and destination.'
+          return cacheRouteEstimate(
+            cacheKey,
+            unavailableTrafficEstimate(
+              routeKey,
+              'Google Routes API',
+              'Google Routes could not calculate a driving route for this origin and destination.'
+            )
           );
         }
 
@@ -546,15 +622,8 @@ export class LiveTrafficProvider implements TrafficProvider {
           assumptions: ['Real-time traffic data from Google Routes API', 'May vary by time of day'],
         };
 
-        // store in cache
-        try {
-          ROUTE_CACHE.set(cacheKey, { ts: Date.now(), estimate });
-        } catch (e) {
-          // ignore
-        }
-
         if (process.env.NODE_ENV === 'development') console.log('Routes API: success (live) HTTP status OK');
-        return estimate;
+        return cacheRouteEstimate(cacheKey, estimate);
       })();
 
       ROUTE_INFLIGHT.set(cacheKey, inflightPromise);
@@ -571,11 +640,12 @@ export class LiveTrafficProvider implements TrafficProvider {
         console.error('Live traffic API failed, falling back to mock:', safeMsg);
       }
 
-      return unavailableTrafficEstimate(
+      const fallback = unavailableTrafficEstimate(
         routeKey,
         'Google Routes API',
         'Route unavailable from this origin to the airport area.'
       );
+      return cacheRouteEstimate(cacheKey, fallback);
     }
   }
 }
@@ -606,6 +676,7 @@ function buildParkingDateRange(dateTime: string, parkingDurationMinutes?: number
 export class MockProvider implements DataProvider {
   private trafficProvider: TrafficProvider;
   private routeCache = new Map<string, TrafficEstimate>();
+  private routeInFlight = new Map<string, Promise<TrafficEstimate>>();
 
   constructor() {
     const trafficProviderType =
@@ -653,32 +724,58 @@ export class MockProvider implements DataProvider {
     dateTime: string,
     allowLive: boolean
   ): Promise<TrafficEstimate> {
-    const cacheKey = `${origin}|${destination}|${dateTime}|${allowLive}`;
+    const cacheKey = buildRouteEstimateCacheKey({
+      origin,
+      destination,
+      dateTime,
+      mode: allowLive ? 'DRIVE_LIVE' : 'DRIVE_ESTIMATED',
+    });
 
     if (this.routeCache.has(cacheKey)) {
+      if (allowLive) {
+        logRoutesApiCache('Routes API cache hit', cacheKey, 'provider-route');
+      }
       return this.routeCache.get(cacheKey)!;
     }
 
-    let estimate: TrafficEstimate;
-
-    if (isClearlyNonDrivableRoute(origin, destination)) {
-      estimate = unavailableTrafficEstimate(
-        normalizeTrafficRoute(origin, destination),
-        'Route validation',
-        'Route unavailable from this origin to the airport area.'
-      );
-    } else if (allowLive) {
-      estimate = await this.trafficProvider.getTrafficEstimate(
-        origin,
-        destination,
-        dateTime
-      );
-    } else {
-      estimate = this.estimateRouteDuration(origin, destination, 35);
+    const inFlight = this.routeInFlight.get(cacheKey);
+    if (inFlight) {
+      if (allowLive) {
+        logRoutesApiCache('Routes API in-flight hit', cacheKey, 'provider-route');
+      }
+      return inFlight;
     }
 
-    this.routeCache.set(cacheKey, estimate);
-    return estimate;
+    const promise = (async () => {
+      let estimate: TrafficEstimate;
+
+      if (isClearlyNonDrivableRoute(origin, destination)) {
+        estimate = unavailableTrafficEstimate(
+          normalizeTrafficRoute(origin, destination),
+          'Route validation',
+          'Route unavailable from this origin to the airport area.'
+        );
+      } else if (allowLive) {
+        estimate = await this.trafficProvider.getTrafficEstimate(
+          origin,
+          destination,
+          dateTime
+        );
+      } else {
+        estimate = this.estimateRouteDuration(origin, destination, 35);
+      }
+
+      this.routeCache.set(cacheKey, estimate);
+      return estimate;
+    })();
+
+    this.routeInFlight.set(cacheKey, promise);
+
+    try {
+      return await promise;
+    } finally {
+      this.routeInFlight.delete(cacheKey);
+    }
   }
 
   async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
@@ -730,20 +827,87 @@ export class MockProvider implements DataProvider {
       return [];
     }
 
-    return Promise.all(
-      parkingSource.map(async (option) => {
-        const routeDestination =
-          option.routeDestination ||
-          option.address ||
-          option.name ||
-          airportDestination;
+    const routeDestinationFor = (option: ParkingOption): string =>
+      option.routeDestination ||
+      option.address ||
+      option.name ||
+      airportDestination;
 
-        const routeEstimate = await this.getRouteEstimate(
+    const parkingRouteEntries = parkingSource.map((option) => {
+      const routeDestination = routeDestinationFor(option);
+
+      return {
+        option,
+        routeDestination,
+        routeCacheKey: buildRouteEstimateCacheKey({
           origin,
-          routeDestination,
+          destination: routeDestination,
           dateTime,
-          true
-        );
+          mode: 'DRIVE_LIVE',
+        }),
+        liveRouteCacheKey: buildRouteEstimateCacheKey({
+          origin,
+          destination: routeDestination,
+          dateTime,
+          mode: 'DRIVE',
+        }),
+      };
+    });
+
+    const liveRouteLimit = initialLiveParkingRouteLimit();
+    const uniqueRouteKeys = new Set(parkingRouteEntries.map((entry) => entry.routeCacheKey));
+    const liveRouteKeys = new Set(
+      parkingRouteEntries
+        .slice(0, liveRouteLimit)
+        .map((entry) => entry.routeCacheKey)
+    );
+
+    let selectedCachedRoutes = 0;
+    let selectedInFlightRoutes = 0;
+    liveRouteKeys.forEach((routeCacheKey) => {
+      const entry = parkingRouteEntries.find((item) => item.routeCacheKey === routeCacheKey);
+      if (!entry) return;
+
+      if (this.routeCache.has(routeCacheKey) || getCachedRouteEstimate(entry.liveRouteCacheKey)) {
+        selectedCachedRoutes += 1;
+      } else if (this.routeInFlight.has(routeCacheKey) || ROUTE_INFLIGHT.has(entry.liveRouteCacheKey)) {
+        selectedInFlightRoutes += 1;
+      }
+    });
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Parking route enrichment]', {
+        totalParkingOptions: parkingSource.length,
+        uniqueRouteDestinations: uniqueRouteKeys.size,
+        liveRouteLimit,
+        routesActuallyFetched: Math.max(0, liveRouteKeys.size - selectedCachedRoutes - selectedInFlightRoutes),
+        routesSkippedCached: selectedCachedRoutes + selectedInFlightRoutes,
+        routesDeferred: Math.max(0, uniqueRouteKeys.size - liveRouteKeys.size),
+      });
+    }
+
+    const parkingRouteEstimates = new Map<string, Promise<TrafficEstimate>>();
+    const getParkingRouteEstimate = (entry: typeof parkingRouteEntries[number]): Promise<TrafficEstimate> => {
+      const existing = parkingRouteEstimates.get(entry.routeCacheKey);
+
+      if (existing) {
+        logRoutesApiCache('Routes API in-flight hit', entry.routeCacheKey, 'parking-route');
+        return existing;
+      }
+
+      const promise = this.getRouteEstimate(origin, entry.routeDestination, dateTime, true);
+      parkingRouteEstimates.set(entry.routeCacheKey, promise);
+
+      return promise;
+    };
+
+    return Promise.all(
+      parkingRouteEntries.map(async (entry) => {
+        const { option, routeDestination } = entry;
+
+        const routeEstimate = liveRouteKeys.has(entry.routeCacheKey)
+          ? await getParkingRouteEstimate(entry)
+          : null;
 
         const meta = resolveParkingTransferMeta(option);
         const parkingBufferMinutes =
@@ -757,6 +921,33 @@ export class MockProvider implements DataProvider {
           option.sourceLink && option.sourceLink.includes('example.com')
             ? undefined
             : option.sourceLink;
+        const commonRouteFields = {
+          parkingBufferMinutes,
+          transferToTerminalMinutes,
+          transferType,
+          routeOrigin: routeOrigins,
+          routeDestination,
+          sourceLink,
+          mapLink,
+          lastUpdated: new Date().toISOString(),
+        };
+
+        if (!routeEstimate) {
+          const optionWithDuration = option as ParkingOption & { duration?: number };
+
+          return {
+            ...option,
+            ...commonRouteFields,
+            duration: optionWithDuration.duration ?? option.distance,
+            routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
+            routeUnavailable: option.routeUnavailable,
+            routeUnavailableReason: option.routeUnavailableReason,
+            assumptions: [
+              ...option.assumptions,
+              'Live route calculation deferred for parking options outside the initially visible set.',
+            ],
+          };
+        }
 
         const liveDriveMinutes =
           !routeEstimate.routeUnavailable && typeof routeEstimate.duration === 'number'
@@ -777,9 +968,7 @@ export class MockProvider implements DataProvider {
 
         return {
           ...option,
-          parkingBufferMinutes,
-          transferToTerminalMinutes,
-          transferType,
+          ...commonRouteFields,
 
           // In this app, ParkingOption.distance is being used as DRIVE MINUTES.
           // Only use Google/live route minutes. Do NOT fall back to option.distance here,
@@ -799,11 +988,6 @@ export class MockProvider implements DataProvider {
               ? 0
               : option.availability,
 
-          routeOrigin: routeOrigins,
-          routeDestination,
-          sourceLink,
-          mapLink,
-          lastUpdated: new Date().toISOString(),
           assumptions: [
             ...option.assumptions,
             routeEstimate.routeUnavailable || liveDriveMinutes == null

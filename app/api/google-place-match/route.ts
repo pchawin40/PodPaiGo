@@ -10,6 +10,9 @@ import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from '../../../lib/parking/googlePlaceMatchUtils';
+import { TimeoutError, withTimeout } from '../../../lib/utils/asyncTimeout';
+
+const GOOGLE_PLACE_MATCH_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_MATCH_TIMEOUT_MS || 2500);
 
 async function readBody(req: NextRequest): Promise<Record<string, unknown>> {
   try {
@@ -38,6 +41,18 @@ function unavailableFields() {
   };
 }
 
+function airportParkingContext(
+  airportCode: string | null,
+  fallbackContext: string | null
+): string | null {
+  const code = airportCode?.trim().toUpperCase();
+
+  if (code === 'SEA') return 'SeaTac WA airport parking';
+  if (code) return `${code} airport parking`;
+
+  return fallbackContext;
+}
+
 async function withPhotoName(
   place: ParkingGooglePlaceCacheRecord
 ): Promise<ParkingGooglePlaceCacheRecord> {
@@ -64,6 +79,7 @@ async function handleRequest(input: Record<string, unknown>) {
   const address = toString(input.address);
   const googlePlaceId = toString(input.googlePlaceId);
   const airportContext = toString(input.airportContext) || toString(input.destination);
+  const resolvedAirportContext = airportParkingContext(airport, airportContext);
   const provider = toString(input.provider);
   const source = toString(input.source);
   const parkingLotId = input.parkingLotId ?? input.providerLotId ?? input.parking_lot_id;
@@ -98,42 +114,91 @@ async function handleRequest(input: Record<string, unknown>) {
     return NextResponse.json(result);
   }
 
-  const place = await resolveParkingGooglePlace({
-    airportCode: airport || null,
-    parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
-    lotName: name,
-    lotAddress: address,
-    googlePlaceId,
-    airportContext,
-    provider,
-    source,
-  }).catch(() => null);
+  let placeWithPhoto: ParkingGooglePlaceCacheRecord | null = null;
 
-  const placeWithPhoto = place ? await withPhotoName(place) : null;
+  try {
+    placeWithPhoto = await withTimeout(
+      (async () => {
+        const place = await resolveParkingGooglePlace({
+          airportCode: airport || null,
+          parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+          lotName: name,
+          lotAddress: address,
+          googlePlaceId,
+          airportContext: resolvedAirportContext,
+          provider,
+          source,
+        });
+
+        return place ? await withPhotoName(place) : null;
+      })(),
+      GOOGLE_PLACE_MATCH_TIMEOUT_MS,
+      'Google place match',
+    );
+  } catch (error) {
+    if (error instanceof TimeoutError) {
+      return NextResponse.json({
+        ...unavailableFields(),
+        status: 'timeout',
+        place: null,
+        cacheKey,
+        source: 'timeout',
+      });
+    }
+
+    console.error('google-place-match failed', error);
+
+    return NextResponse.json(
+      {
+        ...unavailableFields(),
+        status: 'error',
+        place: null,
+        cacheKey,
+        source: 'error',
+        message:
+          process.env.NODE_ENV === 'development' && error instanceof Error
+            ? error.message
+            : 'Google place match failed',
+        stack:
+          process.env.NODE_ENV === 'development' && error instanceof Error
+            ? error.stack
+            : undefined,
+      },
+      { status: 500 },
+    );
+  }
   const imageUrl = googlePlacePhotoImageUrl(placeWithPhoto?.photoName);
   const photoUrl = imageUrl;
+  const placeId = placeWithPhoto?.googlePlaceId || null;
+  const displayName = placeWithPhoto?.googlePlaceName || placeWithPhoto?.lotName || null;
+  const formattedAddress =
+    placeWithPhoto?.googleFormattedAddress || placeWithPhoto?.lotAddress || null;
+  const rating = typeof placeWithPhoto?.rating === 'number' ? placeWithPhoto.rating : null;
+  const userRatingCount =
+    typeof placeWithPhoto?.reviewCount === 'number' ? placeWithPhoto.reviewCount : null;
+  const googleMapsUri = placeWithPhoto?.googleMapsUri || null;
 
   const result = placeWithPhoto
     ? {
-        placeId: placeWithPhoto.googlePlaceId || null,
-        displayName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName || null,
-        formattedAddress: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress || null,
-        rating: typeof placeWithPhoto.rating === 'number' ? placeWithPhoto.rating : null,
-        userRatingCount: typeof placeWithPhoto.reviewCount === 'number' ? placeWithPhoto.reviewCount : null,
+        placeId,
+        displayName,
+        formattedAddress,
+        rating,
+        userRatingCount,
         photoUrl,
         imageUrl,
-        status: imageUrl ? 'available' : 'unavailable',
+        status: 'matched',
         place: {
-          placeId: placeWithPhoto.googlePlaceId,
-          googlePlaceId: placeWithPhoto.googlePlaceId,
-          name: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName,
-          displayName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName,
-          googleMapsUri: placeWithPhoto.googleMapsUri,
-          rating: placeWithPhoto.rating,
-          reviewCount: placeWithPhoto.reviewCount,
-          userRatingCount: placeWithPhoto.reviewCount,
-          address: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress,
-          formattedAddress: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress,
+          placeId,
+          googlePlaceId: placeId,
+          name: displayName,
+          displayName,
+          googleMapsUri,
+          rating,
+          reviewCount: userRatingCount,
+          userRatingCount,
+          address: formattedAddress,
+          formattedAddress,
           reviews: placeWithPhoto.reviews,
           fetchedAt: placeWithPhoto.fetchedAt,
           expiresAt: placeWithPhoto.expiresAt,
@@ -144,7 +209,7 @@ async function handleRequest(input: Record<string, unknown>) {
           imageUrl,
         },
         cacheKey: placeWithPhoto.cacheKey,
-        source: placeWithPhoto.source,
+        source: 'google-places',
       }
     : {
         ...unavailableFields(),

@@ -1,6 +1,5 @@
 import { ParkingOption, TripData } from '../types';
 import {
-  buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
 import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
@@ -10,6 +9,7 @@ type AttachGooglePlaceOptions = {
   force?: boolean;
 };
 
+const GOOGLE_PLACE_MATCH_CLIENT_TIMEOUT_MS = 2500;
 const matchResultCache = new Map<string, MatchCacheEntry>();
 const matchInFlightCache = new Map<string, Promise<MatchCacheEntry>>();
 
@@ -18,12 +18,20 @@ function getAirportCode(tripData: TripData | null, fallback?: string | null): st
 }
 
 function buildMatchKey(parking: ParkingOption, airportCode: string | null): string {
-  return buildParkingGoogleCacheKey({
-    airportCode,
-    parkingLotId: parking.providerLotId || parking.id,
-    lotName: parking.name,
-    lotAddress: parking.address || parking.normalizedAddress || parking.routeDestination || null,
-  });
+  const normalize = (value: string | null | undefined) =>
+    String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  return [
+    String(airportCode || 'UNKNOWN').toUpperCase(),
+    `name:${normalize(parking.name)}`,
+    `addr:${normalize(parking.address || parking.normalizedAddress || parking.routeDestination)}`,
+    `provider:${normalize(parking.bookingProvider)}`,
+    `source:${normalize(parking.sourceName)}`,
+  ].join('|');
 }
 
 function buildRequestBody(parking: ParkingOption, airportCode: string | null) {
@@ -36,6 +44,19 @@ function buildRequestBody(parking: ParkingOption, airportCode: string | null) {
     source: parking.sourceName || null,
     googlePlaceId: parking.googlePlaceId || null,
   };
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
 }
 
 export async function attachGooglePlaceToParking(
@@ -67,6 +88,9 @@ export async function attachGooglePlaceToParking(
   const body = buildRequestBody(parking, airportCode);
 
   const promise = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GOOGLE_PLACE_MATCH_CLIENT_TIMEOUT_MS);
+
     try {
       const res = await fetch('/api/google-place-match', {
         method: 'POST',
@@ -74,6 +98,7 @@ export async function attachGooglePlaceToParking(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -83,22 +108,45 @@ export async function attachGooglePlaceToParking(
 
       const data = await res.json();
 
-      const place = data.place || {};
-      const placeId = place?.googlePlaceId || place?.placeId || data.placeId;
+      const place = data.place || data || {};
 
-      if (!placeId) {
-        if (!options.force) {
-          matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
-        }
-        return withStableParkingRouteStatus(parking);
-      }
+      const placeId =
+        place?.googlePlaceId ||
+        place?.placeId ||
+        data.googlePlaceId ||
+        data.placeId ||
+        data.id;
 
-      const imageUrl =
+      const responseImages = uniqueStrings([
         place?.imageUrl ||
         place?.photoUrl ||
         data.imageUrl ||
         data.photoUrl ||
-        parking.imageUrl;
+        data.photo ||
+        null,
+        ...stringArray(place?.images),
+        ...stringArray(data.images),
+        parking.imageUrl,
+        ...(parking.images || []),
+      ]);
+
+      const imageUrl = responseImages[0];
+
+      if (!placeId) {
+        const fallbackWithImage = imageUrl
+          ? ({
+            ...parking,
+            imageUrl,
+            images: responseImages.length ? responseImages : [imageUrl],
+          } as ParkingOption)
+          : withStableParkingRouteStatus(parking);
+
+        if (!options.force) {
+          matchResultCache.set(cacheKey, withStableParkingRouteStatus(fallbackWithImage));
+        }
+
+        return withStableParkingRouteStatus(fallbackWithImage);
+      }
 
       const enriched: ParkingOption = mergeParkingRouteStatus(parking, {
         ...parking,
@@ -119,7 +167,7 @@ export async function attachGooglePlaceToParking(
         normalizedAddress: place.formattedAddress ?? place.address ?? parking.normalizedAddress,
         address: place.formattedAddress ?? place.address ?? parking.address,
         imageUrl: imageUrl || undefined,
-        images: imageUrl ? [imageUrl] : parking.images,
+        images: imageUrl ? responseImages : parking.images,
       }) as ParkingOption;
 
       matchResultCache.set(cacheKey, enriched);
@@ -130,6 +178,7 @@ export async function attachGooglePlaceToParking(
       }
       return withStableParkingRouteStatus(parking);
     } finally {
+      clearTimeout(timeout);
       matchInFlightCache.delete(cacheKey);
     }
   })();

@@ -122,9 +122,16 @@ function mergeGoogleEnrichedParking(
 
   if (!enriched) return option;
 
+  const imageUrl = enriched.imageUrl ?? enriched.images?.[0] ?? option.imageUrl;
+  const images = enriched.imageUrl
+    ? [enriched.imageUrl]
+    : enriched.images ?? option.images;
+
   return {
     ...option,
     ...enriched,
+    imageUrl: imageUrl || undefined,
+    images: images?.length ? images : undefined,
   };
 }
 

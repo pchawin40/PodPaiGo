@@ -5,10 +5,17 @@ function googleMapsApiKey(): string | null {
 }
 
 function unavailableResponse() {
-  return NextResponse.json({
-    imageUrl: null,
-    status: 'unavailable',
-  });
+  return NextResponse.json(
+    {
+      imageUrl: null,
+      status: 'unavailable',
+    },
+    {
+      headers: {
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
+      },
+    }
+  );
 }
 
 function normalizedMaxWidth(value: string | null): number {
@@ -55,7 +62,7 @@ export async function GET(req: NextRequest) {
     headers.set('Content-Type', contentType);
     headers.set(
       'Cache-Control',
-      upstream.headers.get('cache-control') || 'no-store'
+      upstream.headers.get('cache-control') || 'public, max-age=86400, stale-while-revalidate=604800'
     );
 
     const contentLength = upstream.headers.get('content-length');

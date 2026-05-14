@@ -21,6 +21,7 @@ import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
+import ParkingLotVisual from './ParkingLotVisual';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import {
   parkingPriceLine,
@@ -70,7 +71,6 @@ import { getAirportSecurityEstimate } from '@/lib/airports/airportSecurity';
 import ParkingReviewsModal from './ParkingReviewsModal';
 import { attachGooglePlaceToParking } from '@/lib/parking/googlePlaceMatch';
 import {
-  buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from '../../lib/parking/googlePlaceMatchUtils';
 import type { WeatherContext, WeatherImpact } from '@/lib/weather/types';
@@ -1327,14 +1327,14 @@ function OptionCard({
       ? trustedParkingBookingLink(opt)
       : opt.sourceLink || null;
 
-  const routeParkingOption =
+  const displayParkingOption =
     item.type === 'parking'
       ? (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption
       : null;
 
   const parkingRoutes =
-    routeParkingOption
-      ? parkingRouteLinks(routeParkingOption, tripData)
+    displayParkingOption
+      ? parkingRouteLinks(displayParkingOption, tripData)
       : null;
 
   const routeUnavailable =
@@ -1452,6 +1452,12 @@ function OptionCard({
         (!routeUnavailable && timing.status === 'too-late' ? 'border-red-200' : 'border-zinc-200')
       }
     >
+      {item.type === 'parking' && displayParkingOption && (
+        <div className="mb-4">
+          <ParkingLotVisual option={displayParkingOption} />
+        </div>
+      )}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -2437,21 +2443,62 @@ type ResultsContentProps = {
   storedSearchParams?: string;
 };
 
+type RecommendationRequestRef = {
+  key: string;
+  controller: AbortController;
+  inFlight: boolean;
+};
+
+const GOOGLE_PLACE_MATCH_CONCURRENCY = 4;
+const INITIAL_GOOGLE_PLACE_MATCH_LIMIT = 6;
+const EXPANDED_GOOGLE_PLACE_MATCH_LIMIT = 10;
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
+}
+
+function debugRequestId(input: string): string {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) | 0;
+  }
+
+  return Math.abs(hash).toString(36);
+}
+
+function logRecommendationsFetch(
+  event: 'start' | 'abort' | 'success' | 'fail' | 'finally',
+  requestKey: string,
+  details: Record<string, unknown> = {}
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.debug(`recommendations fetch ${event}`, {
+    id: debugRequestId(requestKey),
+    ...details,
+  });
+}
+
 export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
   const routeSearchParams = useSearchParams();
+  const routeSearchParamsString = routeSearchParams.toString();
   const searchParams = useMemo(() => {
-    const params = new URLSearchParams(storedSearchParams || routeSearchParams.toString());
+    const params = new URLSearchParams(storedSearchParams || routeSearchParamsString);
 
     if (storedSearchParams) {
-      const routeParams = new URLSearchParams(routeSearchParams.toString());
+      const routeParams = new URLSearchParams(routeSearchParamsString);
       routeParams.forEach((value, key) => {
         params.set(key, value);
       });
     }
 
     return params;
-  }, [routeSearchParams, storedSearchParams]);
+  }, [routeSearchParamsString, storedSearchParams]);
+  const searchParamsString = useMemo(() => searchParams.toString(), [searchParams]);
 
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
@@ -2486,14 +2533,26 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const priceMatchKeyRef = useRef('');
   const googlePlaceAttemptedKeysRef = useRef(new Set<string>());
   const googlePlaceInFlightKeysRef = useRef(new Map<string, Promise<ParkingOption>>());
+  const recommendationsRequestRef = useRef<RecommendationRequestRef | null>(null);
+  const recommendationsLoadedKeyRef = useRef('');
+  const liveRefreshInFlightKeyRef = useRef('');
+  const liveRefreshLoadedKeyRef = useRef('');
 
   function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
-    return buildParkingGoogleCacheKey({
-      airportCode,
-      parkingLotId: parking.providerLotId || parking.id,
-      lotName: parking.name,
-      lotAddress: parking.address || parking.normalizedAddress || parking.routeDestination || null,
-    });
+    const normalize = (value: string | null | undefined) =>
+      String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return [
+      String(airportCode || 'UNKNOWN').toUpperCase(),
+      `name:${normalize(parking.name)}`,
+      `addr:${normalize(parking.address || parking.normalizedAddress || parking.routeDestination)}`,
+      `provider:${normalize(parking.bookingProvider)}`,
+      `source:${normalize(parking.sourceName)}`,
+    ].join('|');
   }
 
   function mergeGoogleEnrichedParkingOption(
@@ -2501,14 +2560,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     enriched: ParkingOption
   ): ParkingOption {
     const merged = mergeParkingRouteStatus(base, enriched) as ParkingOption;
-    const enrichedImageUrl = enriched.imageUrl || enriched.images?.[0] || null;
-
-    if (!enrichedImageUrl) return merged;
+    const imageUrl = enriched.imageUrl ?? enriched.images?.[0] ?? base.imageUrl;
+    const images = enriched.imageUrl
+      ? [enriched.imageUrl]
+      : enriched.images ?? base.images;
 
     return {
       ...merged,
-      imageUrl: enrichedImageUrl,
-      images: [enrichedImageUrl],
+      imageUrl: imageUrl || undefined,
+      images: images?.length ? images : undefined,
     };
   }
 
@@ -2595,33 +2655,45 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         const key = parkingGoogleMatchKey(parking, airportCode);
         return !googleEnrichedParking[parking.id] && !googlePlaceAttemptedKeysRef.current.has(key);
       })
-      .slice(0, 12);
+      .slice(0, showMoreParking ? EXPANDED_GOOGLE_PLACE_MATCH_LIMIT : INITIAL_GOOGLE_PLACE_MATCH_LIMIT);
 
     if (parkingOptions.length === 0) return;
 
     let cancelled = false;
 
     const enrichParking = async () => {
-      const enrichedPairs = await Promise.all(
-        parkingOptions.slice(0, 8).map(async (parking) => {
-          const key = parkingGoogleMatchKey(parking, airportCode);
-          googlePlaceAttemptedKeysRef.current.add(key);
+      const enrichedPairs: Array<readonly [string, ParkingOption]> = [];
 
-          const inflight = googlePlaceInFlightKeysRef.current.get(key);
-          if (inflight) {
-            const enriched = mergeGoogleEnrichedParkingOption(parking, await inflight);
-            googlePlaceInFlightKeysRef.current.delete(key);
-            return [parking.id, enriched] as const;
-          }
+      for (let index = 0; index < parkingOptions.length; index += GOOGLE_PLACE_MATCH_CONCURRENCY) {
+        const batch = parkingOptions.slice(index, index + GOOGLE_PLACE_MATCH_CONCURRENCY);
+        const batchPairs = await Promise.all(
+          batch.map(async (parking) => {
+            const key = parkingGoogleMatchKey(parking, airportCode);
+            googlePlaceAttemptedKeysRef.current.add(key);
 
-          const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
-          googlePlaceInFlightKeysRef.current.set(key, promise);
+            const inflight = googlePlaceInFlightKeysRef.current.get(key);
+            if (inflight) {
+              const enriched = mergeGoogleEnrichedParkingOption(parking, await inflight);
+              return [parking.id, enriched] as const;
+            }
 
-          const enriched = mergeGoogleEnrichedParkingOption(parking, await promise);
-          googlePlaceInFlightKeysRef.current.delete(key);
-          return [parking.id, enriched] as const;
-        })
-      );
+            const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
+            googlePlaceInFlightKeysRef.current.set(key, promise);
+
+            try {
+              const enriched = mergeGoogleEnrichedParkingOption(parking, await promise);
+              return [parking.id, enriched] as const;
+            } finally {
+              if (googlePlaceInFlightKeysRef.current.get(key) === promise) {
+                googlePlaceInFlightKeysRef.current.delete(key);
+              }
+            }
+          })
+        );
+
+        if (cancelled) return;
+        enrichedPairs.push(...batchPairs);
+      }
 
       if (cancelled) return;
 
@@ -2646,7 +2718,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return () => {
       cancelled = true;
     };
-  }, [rankedOptions, tripData, googleEnrichedParking]);
+  }, [rankedOptions, tripData, googleEnrichedParking, showMoreParking]);
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
@@ -2899,6 +2971,39 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     if (data) {
+      const requestKey = JSON.stringify(data);
+      const currentRequest = recommendationsRequestRef.current;
+
+      if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
+        setLoading(false);
+        return;
+      }
+
+      if (
+        currentRequest?.inFlight &&
+        currentRequest.key === requestKey &&
+        !currentRequest.controller.signal.aborted
+      ) {
+        logRecommendationsFetch('start', requestKey, {
+          skipped: 'same-request-in-flight',
+        });
+        return;
+      }
+
+      if (currentRequest?.inFlight && !currentRequest.controller.signal.aborted) {
+        logRecommendationsFetch('abort', currentRequest.key, {
+          reason: 'replaced-by-new-request',
+        });
+        currentRequest.controller.abort();
+      }
+
+      const controller = new AbortController();
+      recommendationsRequestRef.current = {
+        key: requestKey,
+        controller,
+        inFlight: true,
+      };
+
       // Always show loading state for URL-driven recomputes (date/time/origin changes, etc.)
       setInvalidTripMessage(null);
       setLoading(true);
@@ -2906,12 +3011,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       setRecommendation(null);
       setRankedOptions([]);
 
+      logRecommendationsFetch('start', requestKey);
+
       fetch('/api/recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(data),
+        signal: controller.signal,
       })
         .then(async (response) => {
           const text = await response.text();
@@ -2929,6 +3037,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           return JSON.parse(text) as Recommendation;
         })
         .then((rec: Recommendation) => {
+          if (controller.signal.aborted) {
+            logRecommendationsFetch('abort', requestKey, {
+              reason: 'aborted-before-success',
+              hasNewerRequest:
+                recommendationsRequestRef.current?.controller !== controller &&
+                recommendationsRequestRef.current?.inFlight === true,
+            });
+            return;
+          }
+
+          recommendationsLoadedKeyRef.current = requestKey;
           setRecommendation(rec);
           setTripData(data);
 
@@ -2940,13 +3059,83 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             rec.tsaEstimate
           );
           setRankedOptions(ranked);
+          logRecommendationsFetch('success', requestKey, {
+            parking: rec.parking?.length ?? 0,
+            rideshare: rec.rideshare?.length ?? 0,
+            transit: rec.transit?.length ?? 0,
+          });
         })
         .catch((error) => {
+          const current = recommendationsRequestRef.current;
+          const hasNewerRequest =
+            current?.controller !== controller && current?.inFlight === true;
+
+          if (controller.signal.aborted || isAbortError(error)) {
+            logRecommendationsFetch('abort', requestKey, {
+              reason: controller.signal.aborted ? 'controller-aborted' : 'abort-error',
+              hasNewerRequest,
+            });
+
+            if (!hasNewerRequest && current?.controller === controller) {
+              setLoading(false);
+            }
+
+            return;
+          }
+
+          logRecommendationsFetch('fail', requestKey, {
+            message: error instanceof Error ? error.message : String(error),
+          });
           console.error('Error fetching recommendations:', error);
-          setLoading(false);
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          const current = recommendationsRequestRef.current;
+          const isCurrentRequest = current?.controller === controller;
+          const hasNewerRequest =
+            current?.controller !== controller && current?.inFlight === true;
+
+          logRecommendationsFetch('finally', requestKey, {
+            aborted: controller.signal.aborted,
+            isCurrentRequest,
+            hasNewerRequest,
+          });
+
+          if (isCurrentRequest) {
+            recommendationsRequestRef.current = {
+              key: requestKey,
+              controller,
+              inFlight: false,
+            };
+          }
+
+          if (isCurrentRequest || !hasNewerRequest) {
+            setLoading(false);
+          }
+        });
+
+      return () => {
+        const current = recommendationsRequestRef.current;
+        const isCurrentRequest = current?.controller === controller;
+
+        logRecommendationsFetch('abort', requestKey, {
+          reason: 'effect-cleanup',
+          isCurrentRequest,
+        });
+
+        controller.abort();
+
+        if (isCurrentRequest) {
+          recommendationsRequestRef.current = {
+            key: requestKey,
+            controller,
+            inFlight: false,
+          };
+          setLoading(false);
+        }
+      };
     } else {
+      recommendationsRequestRef.current?.controller.abort();
+      recommendationsLoadedKeyRef.current = '';
       setInvalidTripMessage(
         'This trip is missing required details. Start a new trip to see live results.'
       );
@@ -2955,7 +3144,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       setRankedOptions([]);
       setLoading(false);
     }
-  }, [searchParams]);
+  }, [searchParamsString]);
 
   const weatherToneBg =
     recommendation?.weatherImpact?.riskLevel === 'high'
@@ -3233,23 +3422,45 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const hasRecommendationForRefresh = Boolean(recommendation);
 
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
+    if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;
+
+    const tripExtras = tripData as TripDataWithExtras;
+    const body = {
+      airportCode: getTripAirportCode(tripData),
+      destination: tripData.destination,
+      checkInDate: tripExtras.parkingCheckInDate,
+      checkOutDate: tripExtras.parkingCheckOutDate,
+    };
+    const refreshKey = JSON.stringify(body);
+
+    if (
+      liveRefreshInFlightKeyRef.current === refreshKey ||
+      liveRefreshLoadedKeyRef.current === refreshKey
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    liveRefreshInFlightKeyRef.current = refreshKey;
 
     const refresh = async () => {
       try {
         const res = await fetch('/api/parking/live-refresh', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            airportCode: tripData.airportCode,
-            destination: tripData.destination,
-            checkInDate: tripData.parkingCheckInDate,
-            checkOutDate: tripData.parkingCheckOutDate,
-          }),
+          body: JSON.stringify(body),
+          signal: controller.signal,
         });
 
+        if (!res.ok) {
+          throw new Error(`Live parking refresh failed ${res.status}`);
+        }
+
         const data = await res.json();
+        liveRefreshLoadedKeyRef.current = refreshKey;
 
         if (Array.isArray(data?.parking) && data.parking.length > 0) {
           setRecommendation((prev) => {
@@ -3275,14 +3486,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             };
           });
         }
-      } catch {
+      } catch (error) {
+        if (controller.signal.aborted || isAbortError(error)) return;
         console.warn('live parking refresh failed');
+      } finally {
+        if (liveRefreshInFlightKeyRef.current === refreshKey) {
+          liveRefreshInFlightKeyRef.current = '';
+        }
       }
     };
 
     refresh();
+
+    return () => {
+      controller.abort();
+      if (liveRefreshInFlightKeyRef.current === refreshKey) {
+        liveRefreshInFlightKeyRef.current = '';
+      }
+    };
   }, [
     tripData,
+    loading,
     hasRecommendationForRefresh,
     recommendationRouteUnavailableForRefresh,
   ]);

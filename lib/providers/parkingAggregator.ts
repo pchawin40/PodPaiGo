@@ -31,6 +31,11 @@ type GooglePlace = {
   rating?: number;
   userRatingCount?: number;
   businessStatus?: string;
+  photos?: Array<{
+    name?: string;
+    widthPx?: number;
+    heightPx?: number;
+  }>;
 };
 
 type ParkingMarketplace = {
@@ -88,6 +93,13 @@ function googleSearchUrl(query: string): string {
 
 function googleMapsSearchUrl(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+function googlePlacePhotoImageUrl(photoName?: string | null): string | undefined {
+  const name = photoName?.trim();
+  if (!name) return undefined;
+
+  return `/api/google-place-photo?name=${encodeURIComponent(name)}&maxWidthPx=900`;
 }
 
 function scoreGoogleParkingOption(p: ParkingOption): number {
@@ -239,6 +251,7 @@ async function getGoogleParkingPlaces(args: {
         'places.userRatingCount',
         'places.businessStatus',
         'places.location',
+        'places.photos',
       ].join(','),
     },
     body: JSON.stringify({
@@ -289,6 +302,7 @@ async function getGoogleParkingPlaces(args: {
 
         const name = place.displayName?.text || `${airport.id} Parking`;
         const lowerName = name.toLowerCase();
+        const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
 
         const lotKey = resolveLotKeyFromName(name);
 
@@ -347,6 +361,8 @@ async function getGoogleParkingPlaces(args: {
           googlePlaceId: place.id,
           googleMapsUri: place.googleMapsUri,
           address: place.formattedAddress,
+          imageUrl,
+          images: imageUrl ? [imageUrl] : undefined,
           lat: place.location?.latitude,
           lng: place.location?.longitude,
           normalizedAddress: place.formattedAddress,
@@ -492,7 +508,7 @@ export async function getLiveParkingOptions(args: {
     args.checkInDate &&
     args.checkOutDate
   ) {
-    await saveParkingPriceSnapshotsFromOptions({
+    void saveParkingPriceSnapshotsFromOptions({
       airportCode: airport.id,
       checkInDate: args.checkInDate,
       checkOutDate: args.checkOutDate,
