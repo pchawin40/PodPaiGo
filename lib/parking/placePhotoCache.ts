@@ -32,7 +32,7 @@ export async function readPlacePhotoCache(placeId: string): Promise<CachedPlaceP
         `,
         [placeId]
       ),
-      700,
+      2500,
       'Place photo cache read'
     );
 
@@ -92,7 +92,7 @@ export async function savePlacePhotoCache(input: {
           JSON.stringify(input.attributions ?? []),
         ]
       ),
-      700,
+      2500,
       'Place photo cache save'
     );
   } catch {

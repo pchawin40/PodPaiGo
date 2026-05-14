@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import ParkingPhotoGalleryModal from './ParkingPhotoGalleryModal';
 
 type ParkingLike = {
     name?: string;
@@ -43,15 +42,12 @@ export default function ParkingLotVisual({ option }: { option: ParkingLike }) {
     const images = getImages(option);
     const hasPhotos = images.length > 0;
     const [failedSrc, setFailedSrc] = useState<string | null>(null);
-    const [galleryOpen, setGalleryOpen] = useState(false);
     const label = getFallbackLabel(option);
 
     if (src && failedSrc !== src && hasPhotos) {
         return (
             <>
-                <button
-                    type="button"
-                    onClick={() => setGalleryOpen(true)}
+                <div
                     className="group relative h-36 w-full overflow-hidden rounded-2xl bg-slate-100 text-left shadow-sm outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500 sm:h-40"
                     aria-label={`View ${option.name ?? 'parking lot'} photos`}
                 >
@@ -67,20 +63,8 @@ export default function ParkingLotVisual({ option }: { option: ParkingLike }) {
                         <span className="max-w-[60%] truncate rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-zinc-900 shadow-sm">
                             {label}
                         </span>
-                        <span className="shrink-0 rounded-full bg-zinc-950/80 px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
-                            View photos
-                        </span>
                     </div>
-                </button>
-
-                {galleryOpen && (
-                    <ParkingPhotoGalleryModal
-                        images={images}
-                        attributions={option.photoAttributions}
-                        title={option.name || label}
-                        onClose={() => setGalleryOpen(false)}
-                    />
-                )}
+                </div>
             </>
         );
     }

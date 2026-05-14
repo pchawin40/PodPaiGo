@@ -10,8 +10,8 @@ import {
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
 
-const GOOGLE_PLACE_DB_READ_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_READ_TIMEOUT_MS || 1000);
-const GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS || 800);
+const GOOGLE_PLACE_DB_READ_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_READ_TIMEOUT_MS || 2500);
+const GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS || 2500);
 const GOOGLE_PLACE_PHOTO_NAME_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 const photoNameCache = new Map<string, { ts: number; photoName: string | null }>();
@@ -230,6 +230,19 @@ function toReviewFromNew(review: GoogleNewReview, index: number, placeId: string
 
 function firstGooglePhotoName(photos: GoogleNewPhoto[] | null | undefined): string | undefined {
   return photos?.find((photo) => typeof photo.name === 'string' && photo.name.trim())?.name;
+}
+
+function googlePhotoNames(
+  photos: GoogleNewPhoto[] | null | undefined,
+  limit = 4
+): string[] {
+  return Array.from(
+    new Set(
+      (photos ?? [])
+        .map((photo) => photo.name)
+        .filter((name): name is string => typeof name === 'string' && Boolean(name.trim()))
+    )
+  ).slice(0, limit);
 }
 
 export function googlePlacePhotoImageUrl(
@@ -798,6 +811,34 @@ export async function fetchGooglePlacePhotoName(
     return photoName;
   } finally {
     photoNameInFlight.delete(normalizedPlaceId);
+  }
+}
+
+export async function fetchGooglePlacePhotoNames(
+  placeId: string | null | undefined,
+  limit = 4
+): Promise<string[]> {
+  const normalizedPlaceId = typeof placeId === 'string' ? placeId.trim() : '';
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_SERVER_API_KEY;
+
+  if (!normalizedPlaceId || !apiKey) return [];
+
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(normalizedPlaceId)}`, {
+      method: 'GET',
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'photos',
+      },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) return [];
+
+    const json = (await res.json()) as { photos?: GoogleNewPhoto[] };
+    return googlePhotoNames(json.photos, limit);
+  } catch {
+    return [];
   }
 }
 

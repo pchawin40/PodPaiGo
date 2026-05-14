@@ -4,8 +4,8 @@ import { ParkingOption } from '../types';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { withTimeout } from '../utils/asyncTimeout';
 
-const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 1200);
-const PARKING_DB_WRITE_TIMEOUT_MS = Number(process.env.PARKING_DB_WRITE_TIMEOUT_MS || 800);
+const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 2500);
+const PARKING_DB_WRITE_TIMEOUT_MS = Number(process.env.PARKING_DB_WRITE_TIMEOUT_MS || 2500);
 
 function parkingDbCacheDisabled(): boolean {
     return process.env.DISABLE_PARKING_DB_CACHE === 'true';

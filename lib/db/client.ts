@@ -24,7 +24,7 @@ export function getDb(): Pool {
     connectionString: getConnectionString(),
     ssl: { rejectUnauthorized: false },
 
-    // Vercel/serverless-safe. Use Supabase Transaction Pooler, usually port 6543.
+    // Vercel/serverless-safe. Use Supabfase Transaction Pooler, usually port 6543.
     max: 1,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 5_000,
