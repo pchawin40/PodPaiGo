@@ -174,7 +174,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
   const browserApiKey =
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY ||
     process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   // Load Google Maps JS Places Library as an optional browser fallback.

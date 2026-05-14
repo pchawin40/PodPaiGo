@@ -73,7 +73,7 @@ export default function ParkingLotsMap({
             const airport = getAirportById(airportCode) || getAirportById('SEA');
             if (!airport || !mapRef.current) return;
 
-            const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY;
+            const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
             if (!apiKey) return;
 
             await loadGoogleMaps(apiKey);
@@ -136,9 +136,9 @@ export default function ParkingLotsMap({
                 const transferText =
                     lot.transferType === 'shuttle'
                         ? `Shuttle ${lot.shuttleMinutes ?? lot.transferToTerminalMinutes ?? 12} min`
-                        : lot.transferType === 'transit'
-                            ? `Transit ${lot.transferToTerminalMinutes ?? 45} min`
-                        : `Walk ${lot.walkingMinutes ?? lot.transferToTerminalMinutes ?? 5} min`;
+                        : lot.transferType === 'airport-garage'
+                            ? 'Airport garage'
+                            : `Walk ${lot.walkingMinutes ?? lot.transferToTerminalMinutes ?? 5} min`;
                 const trustedSourceLink = trustedParkingSourceLink(lot);
 
                 const info = new google.maps.InfoWindow({
@@ -234,7 +234,9 @@ export default function ParkingLotsMap({
             }
         }
 
-        initMap();
+        initMap().catch((error) => {
+            console.error('Failed to initialize parking map:', error);
+        });
     }, [airportCode, parkingOptions, onSelectParking]);
 
     return <div ref={mapRef} className="h-full min-h-[520px] w-full" />;
