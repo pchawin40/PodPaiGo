@@ -2496,6 +2496,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     });
   }
 
+  function mergeGoogleEnrichedParkingOption(
+    base: ParkingOption,
+    enriched: ParkingOption
+  ): ParkingOption {
+    const merged = mergeParkingRouteStatus(base, enriched) as ParkingOption;
+    const enrichedImageUrl = enriched.imageUrl || enriched.images?.[0] || null;
+
+    if (!enrichedImageUrl) return merged;
+
+    return {
+      ...merged,
+      imageUrl: enrichedImageUrl,
+      images: [enrichedImageUrl],
+    };
+  }
+
   function mergeGooglePlaceResultIntoParking(
     selectedParking: ParkingOption,
     enrichedParking: ParkingOption
@@ -2504,14 +2520,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     if (!parkingId) return;
 
     const mergedParking: ParkingOption = {
-      ...mergeParkingRouteStatus(selectedParking, enrichedParking),
+      ...mergeGoogleEnrichedParkingOption(selectedParking, enrichedParking),
       id: parkingId,
     } as ParkingOption;
 
     setGoogleEnrichedParking((prev) => ({
       ...prev,
       [parkingId]: {
-        ...mergeParkingRouteStatus(prev[parkingId] || selectedParking, enrichedParking),
+        ...mergeGoogleEnrichedParkingOption(prev[parkingId] || selectedParking, enrichedParking),
         id: parkingId,
       } as ParkingOption,
     }));
@@ -2526,7 +2542,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         return {
           ...item,
           option: {
-            ...mergeParkingRouteStatus(option, enrichedParking),
+            ...mergeGoogleEnrichedParkingOption(option, enrichedParking),
             id: parkingId,
           } as ParkingOption,
         };
@@ -2540,7 +2556,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           parking: prev.parking.map((option) =>
             option.id === parkingId
               ? ({
-                ...mergeParkingRouteStatus(option, enrichedParking),
+                ...mergeGoogleEnrichedParkingOption(option, enrichedParking),
                 id: parkingId,
               } as ParkingOption)
               : option
@@ -2551,7 +2567,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     setReviewsParking((current) =>
       current?.id === parkingId
-        ? mergeParkingRouteStatus(current, mergedParking) as ParkingOption
+        ? mergeGoogleEnrichedParkingOption(current, mergedParking)
         : current
     );
   }
@@ -2593,7 +2609,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
           const inflight = googlePlaceInFlightKeysRef.current.get(key);
           if (inflight) {
-            const enriched = mergeParkingRouteStatus(parking, await inflight) as ParkingOption;
+            const enriched = mergeGoogleEnrichedParkingOption(parking, await inflight);
             googlePlaceInFlightKeysRef.current.delete(key);
             return [parking.id, enriched] as const;
           }
@@ -2601,7 +2617,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
           googlePlaceInFlightKeysRef.current.set(key, promise);
 
-          const enriched = mergeParkingRouteStatus(parking, await promise) as ParkingOption;
+          const enriched = mergeGoogleEnrichedParkingOption(parking, await promise);
           googlePlaceInFlightKeysRef.current.delete(key);
           return [parking.id, enriched] as const;
         })
@@ -2613,7 +2629,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         const next = { ...prev };
 
         enrichedPairs.forEach(([id, enriched]) => {
-          next[id] = mergeParkingRouteStatus(next[id] || parkingOptions.find((p) => p.id === id) || enriched, enriched) as ParkingOption;
+          next[id] = mergeGoogleEnrichedParkingOption(next[id] || parkingOptions.find((p) => p.id === id) || enriched, enriched);
         });
 
         return next;
@@ -2897,7 +2913,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         },
         body: JSON.stringify(data),
       })
-        .then((response) => response.json())
+        .then(async (response) => {
+          const text = await response.text();
+
+          if (!response.ok) {
+            throw new Error(
+              `Recommendations failed ${response.status}: ${text || 'No response body'}`
+            );
+          }
+
+          if (!text) {
+            throw new Error('Recommendations returned an empty response body');
+          }
+
+          return JSON.parse(text) as Recommendation;
+        })
         .then((rec: Recommendation) => {
           setRecommendation(rec);
           setTripData(data);
@@ -3763,7 +3793,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     try {
-      const enriched = mergeParkingRouteStatus(parking, await promise) as ParkingOption;
+      const enriched = mergeGoogleEnrichedParkingOption(parking, await promise);
       mergeGooglePlaceResultIntoParking(parking, enriched);
       setReviewsParking(enriched);
     } finally {

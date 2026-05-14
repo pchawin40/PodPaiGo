@@ -17,6 +17,12 @@ type GoogleLegacyReview = {
   time?: number;
 };
 
+type GoogleNewPhoto = {
+  name?: string;
+  widthPx?: number;
+  heightPx?: number;
+};
+
 type GoogleLegacyPlaceSearchResult = {
   place_id?: string;
   name?: string;
@@ -25,6 +31,7 @@ type GoogleLegacyPlaceSearchResult = {
   user_ratings_total?: number;
   vicinity?: string;
   types?: string[];
+  photoName?: string;
 };
 
 type GoogleLegacyPlaceDetailsResult = {
@@ -35,6 +42,7 @@ type GoogleLegacyPlaceDetailsResult = {
   user_ratings_total?: number;
   url?: string;
   reviews?: GoogleLegacyReview[];
+  photoName?: string;
 };
 
 type GoogleNewReview = {
@@ -65,10 +73,12 @@ type GoogleNewPlace = {
   googleMapsUri?: string;
   types?: string[];
   reviews?: GoogleNewReview[];
+  photos?: GoogleNewPhoto[];
 };
 
 export type ParkingGooglePlaceCacheRecord = ParkingGooglePlaceSnapshot & {
   cacheKey: string;
+  photoName?: string;
   matchConfidence?: 'strong' | 'weak' | 'direct';
   source: 'supabase-cache' | 'google-places' | 'stale-fallback' | 'unavailable';
 };
@@ -139,7 +149,7 @@ function buildParkingSearchQueries(args: {
 }
 
 function getServerApiKey(): string | null {
-  return process.env.GOOGLE_MAPS_SERVER_API_KEY || null;
+  return process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || null;
 }
 
 async function logGooglePlacesError(scope: string, res: Response | null): Promise<void> {
@@ -182,6 +192,24 @@ function toReviewFromNew(review: GoogleNewReview, index: number, placeId: string
   };
 }
 
+function firstGooglePhotoName(photos: GoogleNewPhoto[] | null | undefined): string | undefined {
+  return photos?.find((photo) => typeof photo.name === 'string' && photo.name.trim())?.name;
+}
+
+export function googlePlacePhotoImageUrl(
+  photoName: string | null | undefined,
+  maxWidthPx = 900
+): string | null {
+  const name = typeof photoName === 'string' ? photoName.trim() : '';
+  if (!name) return null;
+
+  const width = Number.isFinite(maxWidthPx) && maxWidthPx > 0
+    ? Math.round(maxWidthPx)
+    : 900;
+
+  return `/api/google-place-photo?name=${encodeURIComponent(name)}&maxWidthPx=${width}`;
+}
+
 function newPlaceToLegacy(place: GoogleNewPlace | null | undefined): GoogleLegacyPlaceDetailsResult | null {
   if (!place?.id) return null;
 
@@ -192,6 +220,7 @@ function newPlaceToLegacy(place: GoogleNewPlace | null | undefined): GoogleLegac
     rating: place.rating,
     user_ratings_total: place.userRatingCount,
     url: place.googleMapsUri,
+    photoName: firstGooglePhotoName(place.photos),
     reviews: (place.reviews || []).map((review, index) => ({
       author_name: review.authorAttribution?.displayName,
       rating: review.rating,
@@ -482,6 +511,7 @@ async function searchGooglePlaceNew(args: {
           'places.userRatingCount',
           'places.googleMapsUri',
           'places.types',
+          'places.photos',
         ].join(','),
       },
       body: JSON.stringify(body),
@@ -504,6 +534,7 @@ async function searchGooglePlaceNew(args: {
           rating: place.rating,
           user_ratings_total: place.userRatingCount,
           types: place.types,
+          photoName: firstGooglePhotoName(place.photos),
         } satisfies GoogleLegacyPlaceSearchResult,
         score: scoreSearchResult(
           {
@@ -513,6 +544,7 @@ async function searchGooglePlaceNew(args: {
             rating: place.rating,
             user_ratings_total: place.userRatingCount,
             types: place.types,
+            photoName: firstGooglePhotoName(place.photos),
           },
           args,
         ),
@@ -602,6 +634,7 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<GoogleLegacyPla
         'userRatingCount',
         'googleMapsUri',
         'reviews',
+        'photos',
       ].join(','),
     },
     cache: 'no-store',
@@ -632,6 +665,39 @@ async function fetchGooglePlaceDetails(placeId: string): Promise<GoogleLegacyPla
 
   const json = await res.json();
   return (json?.result as GoogleLegacyPlaceDetailsResult | undefined) || null;
+}
+
+export async function fetchGooglePlacePhotoName(
+  placeId: string,
+  timeoutMs = 1500
+): Promise<string | null> {
+  const apiKey = getServerApiKey();
+  if (!apiKey || !placeId) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'photos',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+    }).catch(() => null);
+
+    if (!res?.ok) {
+      await logGooglePlacesError('places-new-photo', res);
+      return null;
+    }
+
+    const json = (await res.json()) as GoogleNewPlace;
+    return firstGooglePhotoName(json.photos) || null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function resolveParkingGooglePlace(args: {
@@ -668,6 +734,7 @@ export async function resolveParkingGooglePlace(args: {
 
   const placeId = args.googlePlaceId || staleCached?.googlePlaceId || null;
   let details: GoogleLegacyPlaceDetailsResult | null = null;
+  let matchedPhotoName: string | undefined;
 
   if (placeId) {
     details = await fetchGooglePlaceDetails(placeId).catch(() => null);
@@ -680,6 +747,8 @@ export async function resolveParkingGooglePlace(args: {
       provider: args.provider,
       source: args.source,
     }).catch(() => null);
+
+    matchedPhotoName = matched?.photoName;
 
     if (!matched?.place_id) {
       if (staleCached) {
@@ -725,6 +794,7 @@ export async function resolveParkingGooglePlace(args: {
     googlePlaceName: details?.name || undefined,
     googleFormattedAddress: details?.formatted_address || undefined,
     googleMapsUri: details?.url || undefined,
+    photoName: details?.photoName || matchedPhotoName || staleCached?.photoName || undefined,
     rating: typeof details?.rating === 'number' ? details.rating : undefined,
     reviewCount: typeof details?.user_ratings_total === 'number' ? details.user_ratings_total : undefined,
     reviews,
@@ -745,6 +815,8 @@ export async function resolveParkingGooglePlace(args: {
 }
 
 export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheRecord): Partial<ParkingOption> {
+  const imageUrl = googlePlacePhotoImageUrl(place.photoName);
+
   return {
     googlePlaceId: place.googlePlaceId,
     googleReviews: place.reviews,
@@ -756,5 +828,7 @@ export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheR
     reviewScore: typeof place.rating === 'number' ? place.rating : undefined,
     reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : undefined,
     normalizedAddress: place.googleFormattedAddress || undefined,
+    imageUrl: imageUrl || undefined,
+    images: imageUrl ? [imageUrl] : undefined,
   };
 }

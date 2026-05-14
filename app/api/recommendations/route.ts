@@ -17,6 +17,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(recommendation);
   } catch (error) {
     console.error('Error generating recommendations:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        error: 'recommendations_failed',
+        message: error instanceof Error ? error.message : String(error),
+        stack:
+          process.env.NODE_ENV === 'development' && error instanceof Error
+            ? error.stack
+            : undefined,
+      },
+      { status: 500 }
+    );
   }
 }

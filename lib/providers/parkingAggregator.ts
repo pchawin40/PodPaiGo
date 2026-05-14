@@ -512,6 +512,9 @@ export async function getLiveParkingOptions(args: {
       ? await getGoogleParkingPlaces({
         airportCode: airport.id,
         destination: args.destination,
+      }).catch((error) => {
+        console.warn('Google parking places unavailable; continuing without Google discovery', error);
+        return [];
       })
       : [];
 
@@ -521,6 +524,9 @@ export async function getLiveParkingOptions(args: {
         airportCode: airport.id,
         checkInDate: args.checkInDate,
         checkOutDate: args.checkOutDate,
+      }).catch((error) => {
+        console.warn('Cached APR lots unavailable; continuing without APR cache', error);
+        return [];
       })
       : [];
 
@@ -633,6 +639,9 @@ export async function getLiveParkingOptions(args: {
     airportCode: airport.id,
     checkInDate: args.checkInDate,
     checkOutDate: args.checkOutDate,
+  }).catch((error) => {
+    console.warn('Latest parking price snapshots unavailable; continuing without snapshots', error);
+    return [];
   });
 
   const snapshotOptions: ParkingOption[] = latestPriceSnapshots

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  fetchGooglePlacePhotoName,
+  googlePlacePhotoImageUrl,
   parkingGooglePlaceToOptionUpdate,
   resolveParkingGooglePlace,
 } from '../../../lib/parking/googlePlacesCache';
+import type { ParkingGooglePlaceCacheRecord } from '../../../lib/parking/googlePlacesCache';
 import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
@@ -20,6 +23,28 @@ function toString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function unavailableFields() {
+  return {
+    placeId: null,
+    displayName: null,
+    formattedAddress: null,
+    rating: null,
+    userRatingCount: null,
+    photoUrl: null,
+    imageUrl: null,
+    status: 'unavailable',
+  };
+}
+
+async function withPhotoName(
+  place: ParkingGooglePlaceCacheRecord
+): Promise<ParkingGooglePlaceCacheRecord> {
+  if (place.photoName || !place.googlePlaceId) return place;
+
+  const photoName = await fetchGooglePlacePhotoName(place.googlePlaceId).catch(() => null);
+  return photoName ? { ...place, photoName } : place;
 }
 
 export async function GET(req: NextRequest) {
@@ -44,8 +69,15 @@ async function handleRequest(input: Record<string, unknown>) {
   const parkingLotId = input.parkingLotId ?? input.providerLotId ?? input.parking_lot_id;
 
   if (!name) {
-    return NextResponse.json({ place: null, source: 'missing-name' });
+    return NextResponse.json({ ...unavailableFields(), place: null, source: 'missing-name' });
   }
+
+  const cacheKey = buildParkingGoogleCacheKey({
+    airportCode: airport || null,
+    parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+    lotName: name,
+    lotAddress: address,
+  });
 
   if (
     !shouldAttemptGooglePlaceMatch({
@@ -57,13 +89,9 @@ async function handleRequest(input: Record<string, unknown>) {
     })
   ) {
     const result = {
+      ...unavailableFields(),
       place: null,
-      cacheKey: buildParkingGoogleCacheKey({
-        airportCode: airport || null,
-        parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
-        lotName: name,
-        lotAddress: address,
-      }),
+      cacheKey,
       source: 'skipped-non-parking',
     };
 
@@ -79,35 +107,49 @@ async function handleRequest(input: Record<string, unknown>) {
     airportContext,
     provider,
     source,
-  });
+  }).catch(() => null);
 
-  const result = place
+  const placeWithPhoto = place ? await withPhotoName(place) : null;
+  const imageUrl = googlePlacePhotoImageUrl(placeWithPhoto?.photoName);
+  const photoUrl = imageUrl;
+
+  const result = placeWithPhoto
     ? {
+        placeId: placeWithPhoto.googlePlaceId || null,
+        displayName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName || null,
+        formattedAddress: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress || null,
+        rating: typeof placeWithPhoto.rating === 'number' ? placeWithPhoto.rating : null,
+        userRatingCount: typeof placeWithPhoto.reviewCount === 'number' ? placeWithPhoto.reviewCount : null,
+        photoUrl,
+        imageUrl,
+        status: imageUrl ? 'available' : 'unavailable',
         place: {
-          googlePlaceId: place.googlePlaceId,
-          name: place.googlePlaceName || place.lotName,
-          googleMapsUri: place.googleMapsUri,
-          rating: place.rating,
-          reviewCount: place.reviewCount,
-          address: place.googleFormattedAddress || place.lotAddress,
-          reviews: place.reviews,
-          fetchedAt: place.fetchedAt,
-          expiresAt: place.expiresAt,
-          source: place.source,
-          matchConfidence: place.matchConfidence,
-          ...parkingGooglePlaceToOptionUpdate(place),
+          placeId: placeWithPhoto.googlePlaceId,
+          googlePlaceId: placeWithPhoto.googlePlaceId,
+          name: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName,
+          displayName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName,
+          googleMapsUri: placeWithPhoto.googleMapsUri,
+          rating: placeWithPhoto.rating,
+          reviewCount: placeWithPhoto.reviewCount,
+          userRatingCount: placeWithPhoto.reviewCount,
+          address: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress,
+          formattedAddress: placeWithPhoto.googleFormattedAddress || placeWithPhoto.lotAddress,
+          reviews: placeWithPhoto.reviews,
+          fetchedAt: placeWithPhoto.fetchedAt,
+          expiresAt: placeWithPhoto.expiresAt,
+          source: placeWithPhoto.source,
+          matchConfidence: placeWithPhoto.matchConfidence,
+          ...parkingGooglePlaceToOptionUpdate(placeWithPhoto),
+          photoUrl,
+          imageUrl,
         },
-        cacheKey: place.cacheKey,
-        source: place.source,
+        cacheKey: placeWithPhoto.cacheKey,
+        source: placeWithPhoto.source,
       }
     : {
+        ...unavailableFields(),
         place: null,
-        cacheKey: buildParkingGoogleCacheKey({
-          airportCode: airport || null,
-          parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
-          lotName: name,
-          lotAddress: address,
-        }),
+        cacheKey,
         source: 'unavailable',
       };
 

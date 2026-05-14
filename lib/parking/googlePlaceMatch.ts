@@ -83,28 +83,43 @@ export async function attachGooglePlaceToParking(
 
       const data = await res.json();
 
-      const place = data.place;
+      const place = data.place || {};
+      const placeId = place?.googlePlaceId || place?.placeId || data.placeId;
 
-      if (!place?.googlePlaceId) {
+      if (!placeId) {
         if (!options.force) {
           matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
         }
         return withStableParkingRouteStatus(parking);
       }
 
+      const imageUrl =
+        place?.imageUrl ||
+        place?.photoUrl ||
+        data.imageUrl ||
+        data.photoUrl ||
+        parking.imageUrl;
+
       const enriched: ParkingOption = mergeParkingRouteStatus(parking, {
         ...parking,
-        googlePlaceId: place.googlePlaceId,
-        googleReviews: place.reviews,
-        googleReviewsFetchedAt: place.fetchedAt,
-        googleReviewsExpiresAt: place.expiresAt,
-        googlePlaceName: place.name ?? parking.googlePlaceName,
-        googlePlaceAddress: place.address ?? parking.googlePlaceAddress,
+        googlePlaceId: placeId,
+        googleReviews: place.reviews ?? parking.googleReviews,
+        googleReviewsFetchedAt: place.fetchedAt ?? parking.googleReviewsFetchedAt,
+        googleReviewsExpiresAt: place.expiresAt ?? parking.googleReviewsExpiresAt,
+        googlePlaceName: place.displayName ?? place.name ?? parking.googlePlaceName,
+        googlePlaceAddress: place.formattedAddress ?? place.address ?? parking.googlePlaceAddress,
         googleMapsUri: place.googleMapsUri ?? parking.googleMapsUri,
         reviewScore: typeof place.rating === 'number' ? place.rating : parking.reviewScore,
-        reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : parking.reviewCount,
-        normalizedAddress: place.address ?? parking.normalizedAddress,
-        address: place.address ?? parking.address,
+        reviewCount:
+          typeof place.userRatingCount === 'number'
+            ? place.userRatingCount
+            : typeof place.reviewCount === 'number'
+              ? place.reviewCount
+              : parking.reviewCount,
+        normalizedAddress: place.formattedAddress ?? place.address ?? parking.normalizedAddress,
+        address: place.formattedAddress ?? place.address ?? parking.address,
+        imageUrl: imageUrl || undefined,
+        images: imageUrl ? [imageUrl] : parking.images,
       }) as ParkingOption;
 
       matchResultCache.set(cacheKey, enriched);

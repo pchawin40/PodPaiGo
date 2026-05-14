@@ -18,6 +18,7 @@ import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import ParkingBookingSources from './ParkingBookSources';
+import ParkingLotVisual from './ParkingLotVisual';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -388,7 +389,9 @@ export default function ParkingSmartPick({
         Smart parking pick
       </div>
 
-      <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <ParkingLotVisual option={best} />
+
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-zinc-900">{best.name}</h2>
 
