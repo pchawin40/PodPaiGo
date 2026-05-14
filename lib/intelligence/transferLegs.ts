@@ -48,7 +48,16 @@ export function buildParkingTransferLegs(
         option.walkingMinutes ??
         option.checkpointWalkMinutes;
 
-    if (option.transferType === 'shuttle') {
+    if (option.transferType === 'transit') {
+        legs.push({
+            type: 'transit',
+            from: option.name,
+            to: 'SEA terminal',
+            durationMinutes: transferMinutes,
+            confidence: 'estimated',
+            note: 'Park-and-ride transit timing is estimated.',
+        });
+    } else if (option.transferType === 'shuttle') {
         legs.push({
             type: 'shuttle',
             from: option.name,

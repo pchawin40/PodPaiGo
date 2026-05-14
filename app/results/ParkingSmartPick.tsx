@@ -435,7 +435,11 @@ export default function ParkingSmartPick({
             )}
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-              {best.transferType === 'shuttle' ? 'Shuttle' : 'Walk'}
+              {best.transferType === 'shuttle'
+                ? 'Shuttle'
+                : best.transferType === 'transit'
+                  ? 'Transit'
+                  : 'Walk'}
             </span>
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">

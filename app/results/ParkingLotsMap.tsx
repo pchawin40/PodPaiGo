@@ -136,6 +136,8 @@ export default function ParkingLotsMap({
                 const transferText =
                     lot.transferType === 'shuttle'
                         ? `Shuttle ${lot.shuttleMinutes ?? lot.transferToTerminalMinutes ?? 12} min`
+                        : lot.transferType === 'transit'
+                            ? `Transit ${lot.transferToTerminalMinutes ?? 45} min`
                         : `Walk ${lot.walkingMinutes ?? lot.transferToTerminalMinutes ?? 5} min`;
                 const trustedSourceLink = trustedParkingSourceLink(lot);
 

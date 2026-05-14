@@ -124,6 +124,8 @@ export function parkingTimeBreakdown(option: ParkingOption): {
           label:
             option.transferType === 'shuttle'
               ? 'Shuttle'
+              : option.transferType === 'transit'
+                ? 'Transit to terminal'
               : option.transferType === 'airport-garage'
                 ? 'Garage to terminal'
                 : 'Walk to terminal',

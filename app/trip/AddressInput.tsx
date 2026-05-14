@@ -8,6 +8,12 @@ type Prediction = {
   place_id: string;
 };
 
+type AutocompleteApiResponse = {
+  predictions?: unknown;
+  error?: string;
+  message?: string;
+};
+
 type GeocoderResult = {
   formatted_address: string;
 };
@@ -31,6 +37,15 @@ type AutocompleteSuggestionApi = {
 
 type PlacesLibrary = {
   AutocompleteSuggestion?: AutocompleteSuggestionApi;
+  AutocompleteService?: new () => {
+    getPlacePredictions: (
+      request: {
+        input: string;
+        componentRestrictions?: { country: string };
+      },
+      callback: (predictions: Prediction[] | null, status: string) => void
+    ) => void;
+  };
 };
 
 const LOCAL_STORAGE_KEY = 'podpaigo-recent-origins';
@@ -57,6 +72,55 @@ function saveRecentOrigin(origin: string) {
   } catch {
     // ignore
   }
+}
+
+function normalizePrediction(value: unknown): Prediction | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const maybePrediction = value as Partial<Prediction>;
+  const description =
+    typeof maybePrediction.description === 'string' ? maybePrediction.description.trim() : '';
+  const placeId =
+    typeof maybePrediction.place_id === 'string' ? maybePrediction.place_id.trim() : description;
+
+  if (!description) return null;
+
+  return {
+    description,
+    place_id: placeId || description,
+  };
+}
+
+async function fetchServerAutocomplete(
+  input: string,
+  signal: AbortSignal
+): Promise<Prediction[]> {
+  const response = await fetch(
+    `/api/geocode/autocomplete?input=${encodeURIComponent(input)}`,
+    { signal }
+  );
+
+  let data: AutocompleteApiResponse | null = null;
+
+  try {
+    data = (await response.json()) as AutocompleteApiResponse;
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.error || data?.message || `Autocomplete failed with ${response.status}`);
+  }
+
+  if (!Array.isArray(data?.predictions)) return [];
+
+  return data.predictions
+    .map(normalizePrediction)
+    .filter((prediction): prediction is Prediction => Boolean(prediction));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 interface Props {
@@ -89,6 +153,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loadingPredictions, setLoadingPredictions] = useState(false);
+  const [predictionError, setPredictionError] = useState<string | null>(null);
   const [hasTouchedInput, setHasTouchedInput] = useState(false);
 
   const [recentOrigins, setRecentOrigins] = useState<string[]>([]);
@@ -108,18 +173,19 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY;
-  const apiKeyPresent = Boolean(apiKey);
+  const browserApiKey =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  // Load Google Maps JS Places Library if not loaded and apiKey present
+  // Load Google Maps JS Places Library as an optional browser fallback.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!apiKey) return;
+    if (!browserApiKey) return;
 
     let cancelled = false;
 
     async function initPlaces() {
-      await loadGoogleMaps(apiKey!);
+      await loadGoogleMaps(browserApiKey!);
 
       if (cancelled) return;
 
@@ -140,78 +206,157 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [apiKey]);
+  }, [browserApiKey]);
 
-  // Fetch predictions based on input value, debounce to avoid setState in effect
+  // Fetch predictions based on input value, debounce to avoid noisy Google requests.
   useEffect(() => {
     if (!hasTouchedInput) return;
 
-    if (
-      !autocompleteSuggestion.current ||
-      !apiKeyPresent ||
-      inputValue.trim().length < 3
-    ) {
+    const query = inputValue.trim();
+
+    if (query.length < 3) {
       setLoadingPredictions(false);
-      // Delay clearing suggestions in next tick to avoid hook conflicts
+      setPredictionError(null);
       const t = setTimeout(() => setPredictions([]), 0);
       return () => clearTimeout(t);
     }
 
     setLoadingPredictions(true);
-    const request = {
-      input: inputValue,
-      // No types restrictions, Google deprecated types: ['address', etc.]
-    };
+    setPredictionError(null);
 
-    // Wrap callback in async timeout to avoid setState in effect directly
+    const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-
-      const suggestionApi = autocompleteSuggestion.current;
-      if (!suggestionApi) {
+      const applyPredictions = (nextPredictions: Prediction[]) => {
+        setPredictions(nextPredictions);
+        setIsOpen(true);
+        setHighlightedIndex(-1);
         setLoadingPredictions(false);
-        setPredictions([]);
-        return;
-      }
+        setPredictionError(null);
+      };
 
-      suggestionApi
-        .fetchAutocompleteSuggestions(request)
-        .then(({ suggestions = [] }) => {
-          const nextPredictions = suggestions
-            .map((suggestion) => {
-              const prediction = suggestion.placePrediction;
-              const primary = prediction?.structuredFormat?.mainText?.text;
-              const secondary = prediction?.structuredFormat?.secondaryText?.text;
-              const description =
-                prediction?.text?.text ||
-                [primary, secondary].filter(Boolean).join(', ');
+      const runLegacyAutocomplete = (): Promise<Prediction[]> =>
+        new Promise((resolve) => {
+          const places = window.google?.maps?.places as PlacesLibrary | undefined;
 
-              if (!description) return null;
+          if (!places?.AutocompleteService) {
+            resolve([]);
+            return;
+          }
 
-              return {
-                description,
-                place_id: prediction?.placeId || description,
-              };
-            })
-            .filter((prediction): prediction is Prediction => Boolean(prediction));
+          const service = new places.AutocompleteService();
 
-          setPredictions(nextPredictions);
-          setIsOpen(true);
-          setHighlightedIndex(-1);
-        })
-        .catch(() => {
-          setPredictions([]);
-        })
-        .finally(() => {
-          setLoadingPredictions(false);
+          service.getPlacePredictions(
+            {
+              input: query,
+              componentRestrictions: { country: 'us' },
+            },
+            (results) => {
+              resolve(
+                (results || []).map((p) => ({
+                  description: p.description,
+                  place_id: p.place_id,
+                }))
+              );
+            }
+          );
         });
+
+      const fetchBrowserAutocomplete = async (): Promise<Prediction[]> => {
+        const suggestionApi = autocompleteSuggestion.current;
+
+        if (suggestionApi) {
+          try {
+            const { suggestions = [] } = await suggestionApi.fetchAutocompleteSuggestions({
+              input: query,
+            });
+            const nextPredictions = suggestions
+              .map((suggestion) => {
+                const prediction = suggestion.placePrediction;
+                const primary = prediction?.structuredFormat?.mainText?.text;
+                const secondary = prediction?.structuredFormat?.secondaryText?.text;
+                const description =
+                  prediction?.text?.text ||
+                  [primary, secondary].filter(Boolean).join(', ');
+
+                if (!description) return null;
+
+                return {
+                  description,
+                  place_id: prediction?.placeId || description,
+                };
+              })
+              .filter((prediction): prediction is Prediction => Boolean(prediction));
+
+            if (nextPredictions.length > 0) return nextPredictions;
+          } catch {
+            // Fall through to the legacy browser autocomplete service.
+          }
+        }
+
+        return runLegacyAutocomplete();
+      };
+
+      const runAutocomplete = async () => {
+        let serverError: unknown = null;
+
+        try {
+          const serverPredictions = await fetchServerAutocomplete(query, controller.signal);
+
+          if (controller.signal.aborted) return;
+
+          if (serverPredictions.length > 0) {
+            applyPredictions(serverPredictions);
+            return;
+          }
+        } catch (error) {
+          if (isAbortError(error)) return;
+
+          serverError = error;
+          console.error('Address autocomplete API failed', error);
+        }
+
+        try {
+          const browserPredictions = await fetchBrowserAutocomplete();
+
+          if (controller.signal.aborted) return;
+
+          if (browserPredictions.length > 0) {
+            applyPredictions(browserPredictions);
+            return;
+          }
+        } catch (error) {
+          if (isAbortError(error)) return;
+
+          console.error('Google Maps browser autocomplete failed', error);
+        }
+
+        if (controller.signal.aborted) return;
+
+        setPredictions([]);
+        setIsOpen(true);
+        setHighlightedIndex(-1);
+        setLoadingPredictions(false);
+
+        if (serverError) {
+          setPredictionError('Unable to load suggestions. Try again in a moment.');
+        } else {
+          setPredictionError(null);
+        }
+      };
+
+      runAutocomplete();
     }, 250);
 
-    return () => clearTimeout(timeoutId);
-  }, [inputValue, apiKeyPresent, hasTouchedInput]);
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [inputValue, hasTouchedInput]);
 
   const onSelectPrediction = (prediction: Prediction) => {
     setInputValue(prediction.description);
     setIsOpen(false);
+    setPredictionError(null);
     onChange(prediction.description);
     saveRecentOrigin(prediction.description);
     setRecentOrigins(getRecentOrigins());
@@ -223,6 +368,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     setInputValue(e.target.value);
     onChange(e.target.value);
     setIsOpen(true);
+    setPredictionError(null);
     setHighlightedIndex(-1);
   };
 
@@ -254,6 +400,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     }
 
     setLocateError(null);
+    setPredictionError(null);
     setIsLocating(true);
 
     try {
@@ -267,7 +414,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
-      const friendlyLocationLabel = 'Current location';
 
       let resolvedAddress = '';
 
@@ -301,6 +447,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const onRecentClick = (value: string) => {
     onChange(value);
     setInputValue(value);
+    setPredictionError(null);
     setIsOpen(false);
   };
 
@@ -350,7 +497,11 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
             <div className="px-4 py-3 text-sm text-zinc-600">Searching…</div>
           )}
 
-          {!loadingPredictions && predictions.length === 0 && inputValue.trim().length >= 3 && (
+          {!loadingPredictions && predictionError && (
+            <div className="px-4 py-3 text-sm text-red-700">{predictionError}</div>
+          )}
+
+          {!loadingPredictions && !predictionError && predictions.length === 0 && inputValue.trim().length >= 3 && (
             <div className="px-4 py-3 text-sm text-zinc-600">No matches found</div>
           )}
 

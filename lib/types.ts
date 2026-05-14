@@ -108,9 +108,9 @@ export type ParkingOption = {
   type: 'official' | 'off-airport';
   /** Minutes to park, pay, unload, etc. */
   parkingBufferMinutes?: number;
-  /** Minutes from lot/garage to terminal (walk or shuttle). */
+  /** Minutes from lot/garage to terminal by walk, shuttle, garage connector, or transit. */
   transferToTerminalMinutes?: number;
-  transferType?: 'walk' | 'shuttle' | 'airport-garage';
+  transferType?: 'walk' | 'shuttle' | 'airport-garage' | 'transit';
   /**
    * Internal numeric price used by the recommendation engine.
    * UI may hide this if `priceDisplay` is not `live`.
