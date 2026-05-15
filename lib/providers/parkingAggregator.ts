@@ -102,6 +102,26 @@ function googlePlacePhotoImageUrl(photoName?: string | null): string | undefined
   return `/api/google-place-photo?name=${encodeURIComponent(name)}&maxWidthPx=900`;
 }
 
+function milesBetween(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const radiusMiles = 3958.8;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+  return 2 * radiusMiles * Math.asin(Math.sqrt(h));
+}
+
 function scoreGoogleParkingOption(p: ParkingOption): number {
   const reviewScore = p.reviewScore ?? 0;
   const reviewCount = p.reviewCount ?? 0;
@@ -242,6 +262,10 @@ async function getGoogleParkingPlaces(args: {
     process.env.PARKING_SEARCH_RADIUS_METERS || 50000
   );
 
+  const maxParkingDistanceMiles = Number(
+    process.env.PARKING_MAX_DISTANCE_MILES || 25
+  );
+
   async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
@@ -292,23 +316,33 @@ async function getGoogleParkingPlaces(args: {
     places
       .filter((place: GooglePlace) => {
         const name = String(place.displayName?.text || '').toLowerCase();
-        return (
+
+        const looksLikeParking =
           name.includes('parking') ||
           name.includes('park') ||
           name.includes('garage') ||
-          name.includes('wally') ||
-          name.includes('master') ||
-          name.includes('doug') ||
-          name.includes('ajax') ||
-          name.includes('jiffy') ||
-          name.includes('mvp') ||
           name.includes('shuttle') ||
-          name.includes('extra car') ||
-          name.includes('seatacpark') ||
-          name.includes('seatac park') ||
-          name.includes('park n jet') ||
-          name.includes('park and jet')
-        );
+          name.includes('airport');
+
+        if (!looksLikeParking) return false;
+
+        const lat = place.location?.latitude;
+        const lng = place.location?.longitude;
+
+        // Hard guard: do not allow SEA lots to leak into BLI/PAE/etc.
+        // Google locationBias is not strict, so we enforce distance ourselves.
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          const milesFromAirport = milesBetween(
+            { lat: airport.geoLocation.lat, lng: airport.geoLocation.lng },
+            { lat, lng }
+          );
+
+          if (milesFromAirport > maxParkingDistanceMiles) {
+            return false;
+          }
+        }
+
+        return true;
       })
       .slice(0, 40)
       .map(async (place: GooglePlace): Promise<ParkingOption> => {

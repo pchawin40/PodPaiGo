@@ -1,9 +1,8 @@
 import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate, SecurityOption } from './types';
 import { mockParkingOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
-import { getAirportById } from './airports/catalog';
+import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
-import { SeaTacAirportData } from './airports';
 import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
 
@@ -76,6 +75,44 @@ function resolveAirportDestinationForRouting(destinationKey: string): string {
   }
 
   return destinationKey;
+}
+
+function resolveAirportFromDestination(destination: string, airportCode?: string) {
+  const explicitAirport = airportCode ? getAirportById(airportCode.toUpperCase()) : null;
+  if (explicitAirport) return explicitAirport;
+
+  const raw = String(destination || '').trim();
+  const upper = raw.toUpperCase();
+  const lower = raw.toLowerCase();
+
+  // Direct airport code, like "SEA" or "BLI"
+  const direct = getAirportById(upper);
+  if (direct) return direct;
+
+  // Airport code inside destination string, like "Bellingham International Airport (BLI)"
+  const codeMatch = upper.match(/\(([A-Z]{3})\)/);
+  if (codeMatch) {
+    const byCodeInParentheses = getAirportById(codeMatch[1]);
+    if (byCodeInParentheses) return byCodeInParentheses;
+  }
+
+  // Dynamic catalog match by label, destination name, routing address, or rideshare name.
+  const matched = AIRPORTS_CATALOG.find((airport) => {
+    const values = [
+      airport.id,
+      airport.label,
+      airport.destinationName,
+      airport.routingAddress,
+      airport.rideshareDestinationName,
+    ];
+
+    return values.some((value) => {
+      const airportText = String(value || '').toLowerCase();
+      return airportText && (lower.includes(airportText) || airportText.includes(lower));
+    });
+  });
+
+  return matched || null;
 }
 
 function normalizeTrafficRoute(origin: string, destination: string): string {
@@ -791,7 +828,7 @@ export class MockProvider implements DataProvider {
   ): Promise<ParkingOption[]> {
     const routeOrigins = origin;
 
-    const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
+    const airport = resolveAirportFromDestination(destination);
     const airportCode = airport?.id || 'SEA';
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
@@ -1130,7 +1167,7 @@ export class MockProvider implements DataProvider {
     securityOption: SecurityOption = 'standard',
     plannedAirportArrivalAt?: string
   ): Promise<TsaEstimate> {
-    const airport = getAirportById(destination) || getAirportById(destination.slice(0, 3));
+    const airport = resolveAirportFromDestination(destination);
     const code = airport?.id || 'SEA';
 
     return await getAirportTsaEstimate({
