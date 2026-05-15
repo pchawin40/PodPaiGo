@@ -870,51 +870,32 @@ export default function TripFlow() {
                     destination: '',
                     destinationKind: 'general',
                     parkingDurationHours: '8',
-                  }))
-                }
-              />
-
-              {/* <Card
-                title="Picking someone up"
-                subtitle="Meeting arrivals? Time your drive, traffic, and pickup."
-                selected={state.intent === 'picking-up'}
-                onClick={() =>
-                  setState((s) => ({
-                    ...s,
-                    intent: 'picking-up',
-                    date: '',
-                    time: '',
+                    parkingCheckOutDate: '',
+                    parkingCheckOutTime: '',
                   }))
                 }
               />
 
               <Card
-                title="Dropping someone off"
-                subtitle="Helping someone depart? Plan curbside timing."
-                selected={state.intent === 'dropping-off'}
+                title="Airport trip"
+                subtitle="Flying out or parking at the airport? Compare airport parking, rideshare, transit, and when to leave."
+                selected={state.intent === 'flying-out'}
                 onClick={() =>
                   setState((s) => ({
                     ...s,
-                    intent: 'dropping-off',
+                    intent: 'flying-out',
                     date: '',
                     time: '',
+                    destination: '',
+                    destinationKind: 'airport',
+                    parkingDurationHours: '',
+                    parkingCheckOutDate: '',
+                    parkingCheckOutTime: '',
+                    airportCode: s.airportCode || 'SEA',
+                    timeAnchor: 'flight-departure',
                   }))
                 }
-              /> */}
-
-              {/* <Card
-                title="Airport parking"
-                subtitle="Compare garage, shuttle lots, and booking options."
-                selected={state.intent === 'parking-trip'}
-                onClick={() =>
-                  setState((s) => ({
-                    ...s,
-                    intent: 'parking-trip',
-                    date: '',
-                    time: '',
-                  }))
-                }
-              /> */}
+              />
             </div>
 
             <div className="pt-2">
