@@ -81,13 +81,6 @@ function queryFromStoredPayload(value: string | null): StoredTripState {
     const params = new URLSearchParams(query);
     const hasBase = Boolean(params.get('origin') && params.get('destination'));
 
-    console.log('PodPaiGo saved trip loaded:', {
-      query,
-      params: Object.fromEntries(params.entries()),
-      hasBase,
-      strictValidationPasses: hasRequiredTripFields(query),
-    });
-
     // During A-to-B rollout, do not block saved trips if the base route exists.
     // The /trip form already validated this before saving.
     if (!hasBase) {
@@ -149,12 +142,6 @@ export default function StoredResultsPage() {
         const raw = window.localStorage.getItem(key);
         const parsed = queryFromStoredPayload(raw);
 
-        console.log('PodPaiGo saved results debug:', {
-          tripId,
-          key,
-          raw,
-          parsed,
-        });
 
         setStoredTrip(parsed);
       } catch (error) {

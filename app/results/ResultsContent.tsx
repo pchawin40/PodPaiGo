@@ -2983,6 +2983,51 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       if (airportTripDate && airportTripTime && origin && destination) {
         data = { type, origin, destination, airportTripDate, airportTripTime, transportAvailability, transitPayment };
       }
+    } else if (type === 'general-trip') {
+      const arrivalDate = searchParams.get('arrivalDate') || '';
+      const arrivalTime = searchParams.get('arrivalTime') || '';
+
+      const destinationKindRaw = searchParams.get('destinationKind') || 'general';
+      const destinationKind = [
+        'airport',
+        'office',
+        'downtown',
+        'stadium',
+        'event',
+        'hospital',
+        'restaurant',
+        'hotel',
+        'general',
+      ].includes(destinationKindRaw)
+        ? destinationKindRaw
+        : 'general';
+
+      const destinationName =
+        searchParams.get('destinationName') ||
+        searchParams.get('destination') ||
+        destination;
+
+      const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
+      const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
+
+      if (arrivalDate && arrivalTime && origin && destination) {
+        data = {
+          type,
+          origin,
+          destination,
+          destinationKind,
+          destinationName,
+          arrivalDate,
+          arrivalTime,
+          parkingDuration,
+          parkingCheckInDate,
+          parkingCheckInTime,
+          parkingCheckOutDate,
+          parkingCheckOutTime,
+          transportAvailability,
+          transitPayment,
+        } as TripData;
+      }
     }
 
     if (data) { // Ensure airport code is included in trip data for consistent processing, even if not explicitly in URL params for some trip types
