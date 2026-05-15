@@ -10,6 +10,7 @@ type FareProfile = {
   perMile: number;
   perMinute: number;
   serviceFee: number;
+  airportFee: number;
   minimumFare: number;
   rangePercent: number;
   pickupWaitMinutes: number;
@@ -33,12 +34,13 @@ const FARE_PROFILES: FareProfile[] = [
     id: 'uber',
     name: 'UberX',
     providerKind: 'uber',
-    baseFare: 3.5,
-    perMile: 1.75,
-    perMinute: 0.36,
-    serviceFee: 5.25,
-    minimumFare: 14,
-    rangePercent: 0.28,
+    baseFare: 4.25,
+    perMile: 2.15,
+    perMinute: 0.44,
+    serviceFee: 8.75,
+    airportFee: 6,
+    minimumFare: 18,
+    rangePercent: 0.38,
     pickupWaitMinutes: 5,
     availability: 85,
   },
@@ -46,12 +48,13 @@ const FARE_PROFILES: FareProfile[] = [
     id: 'lyft',
     name: 'Lyft',
     providerKind: 'lyft',
-    baseFare: 3.25,
-    perMile: 1.7,
-    perMinute: 0.34,
-    serviceFee: 5,
-    minimumFare: 13,
-    rangePercent: 0.28,
+    baseFare: 4.25,
+    perMile: 2.25,
+    perMinute: 0.46,
+    serviceFee: 8.95,
+    airportFee: 6,
+    minimumFare: 18,
+    rangePercent: 0.40,
     pickupWaitMinutes: 5,
     availability: 84,
   },
@@ -63,6 +66,7 @@ const FARE_PROFILES: FareProfile[] = [
     perMile: 3.15,
     perMinute: 0.48,
     serviceFee: 4,
+    airportFee: 0,
     minimumFare: 18,
     rangePercent: 0.16,
     pickupWaitMinutes: 6,
@@ -72,12 +76,13 @@ const FARE_PROFILES: FareProfile[] = [
     id: 'premium-xl',
     name: 'Uber Premium / XL',
     providerKind: 'uber',
-    baseFare: 6,
-    perMile: 2.65,
-    perMinute: 0.55,
-    serviceFee: 7,
-    minimumFare: 26,
-    rangePercent: 0.32,
+    baseFare: 7,
+    perMile: 3.05,
+    perMinute: 0.62,
+    serviceFee: 10,
+    airportFee: 8,
+    minimumFare: 32,
+    rangePercent: 0.42,
     pickupWaitMinutes: 7,
     availability: 72,
   },
@@ -154,12 +159,20 @@ function estimateFareRange(args: {
   const { profile, durationMinutes, distanceMiles, congestion, confidence } = args;
   const demandMultiplier =
     profile.providerKind === 'taxi' ? 1 : congestionMultiplier(congestion);
+  const airportTripMultiplier =
+    profile.providerKind === 'taxi'
+      ? 1
+      : 1.12;
+
   const baseline =
     profile.baseFare +
     profile.serviceFee +
+    profile.airportFee +
     distanceMiles * profile.perMile +
     durationMinutes * profile.perMinute;
-  const fare = Math.max(profile.minimumFare, baseline * demandMultiplier);
+
+  const adjustedBaseline = baseline * airportTripMultiplier;
+  const fare = Math.max(profile.minimumFare, adjustedBaseline * demandMultiplier);
   const confidenceRangeExtra = confidence === 'baseline-estimate' ? 0.12 : 0;
   const rangePercent = profile.rangePercent + confidenceRangeExtra;
   const min = roundFare(fare * (1 - rangePercent));
