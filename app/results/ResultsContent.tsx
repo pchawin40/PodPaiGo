@@ -7,6 +7,7 @@ import {
   rankRecommendations,
   sortRankedRecommendations,
   RecommendationSortMode,
+  calculateParkingDuration,
 } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
@@ -60,7 +61,8 @@ import {
   TrustStatus,
   ParkingOption,
   RideshareEstimateConfidence,
-  TransitPaymentOption
+  TransitPaymentOption,
+  TransitOption
 } from '../../lib/types';
 import {
   costOf,
@@ -2153,11 +2155,20 @@ function ProviderDropdownSection({
   defaultOpen?: boolean;
   transitPayment?: TransitPaymentOption;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    setOpen(defaultOpen);
+  }, [defaultOpen]);
+
   if (!items || items.length === 0) return null;
 
   return (
     <details
-      open={defaultOpen}
+      open={open}
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
       className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:border-zinc-300"
     >
       <summary className="cursor-pointer list-none border-b border-zinc-200 bg-zinc-50 px-5 py-4 marker:hidden">
@@ -2532,6 +2543,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
   const [showMapModal, setShowMapModal] = useState(false);
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
+  const [openProviderSection, setOpenProviderSection] = useState<'ride' | 'transit' | null>(null);
 
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
@@ -4380,6 +4392,426 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           <PriceLegend />
         </div>
 
+
+        <section className="mt-6 rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-sm sm:p-5">
+          {(() => {
+            const parkingDurationMinutes = calculateParkingDuration(tripData);
+            const isOvernightTrip =
+              (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
+              parkingDurationMinutes >= 18 * 60;
+
+            const bestParking = smartPickOption || parkingDisplayOptions[0] || null;
+
+            const parkingBreakdown = bestParking
+              ? parkingTimeBreakdown(bestParking)
+              : null;
+
+            const parkingTotal =
+              bestParking
+                ? getParkingTotalPrice(bestParking, tripData) ?? bestParking.price ?? null
+                : null;
+
+            const bestRide = sortedOptions.find((o) => o.type === 'rideshare') || null;
+            const bestRideOption = bestRide?.option as RideshareOption | undefined;
+
+            const ridePrice =
+              typeof bestRide?.cost === 'number' && bestRide.cost < 999999
+                ? bestRide.cost
+                : bestRideOption?.price ?? null;
+
+            const rideDuration =
+              typeof bestRide?.duration === 'number' && bestRide.duration < 999999
+                ? bestRide.duration
+                : bestRideOption?.duration ?? null;
+
+            const bestTransit = sortedOptions.find((o) => o.type === 'transit') || null;
+            const bestTransitOption = bestTransit?.option as TransitOption | undefined;
+
+            const transitCost =
+              typeof bestTransit?.cost === 'number' && bestTransit.cost < 999999
+                ? bestTransit.cost
+                : bestTransitOption?.price ?? null;
+
+            const transitDuration =
+              typeof bestTransit?.duration === 'number' && bestTransit.duration < 999999
+                ? bestTransit.duration
+                : bestTransitOption?.duration ?? null;
+
+            const hasReliableTransit =
+              Boolean(bestTransit) &&
+              bestTransitOption?.trustStatus !== 'fallback' &&
+              transitDuration !== null;
+
+            const cheapestMode = (() => {
+              const candidates = [
+                parkingTotal !== null && bestParking
+                  ? { key: 'parking', label: 'Parking', cost: parkingTotal }
+                  : null,
+                ridePrice !== null && bestRide
+                  ? { key: 'rideshare', label: 'Rideshare', cost: ridePrice }
+                  : null,
+                transitCost !== null && hasReliableTransit
+                  ? { key: 'transit', label: 'Transit', cost: transitCost }
+                  : null,
+              ].filter(Boolean) as Array<{ key: string; label: string; cost: number }>;
+
+              return candidates.sort((a, b) => a.cost - b.cost)[0] || null;
+            })();
+
+            const fastestMode = (() => {
+              const candidates = [
+                parkingBreakdown?.totalMinutes && bestParking
+                  ? { key: 'parking', label: 'Parking', minutes: parkingBreakdown.totalMinutes }
+                  : null,
+                rideDuration !== null && bestRide
+                  ? { key: 'rideshare', label: 'Rideshare', minutes: rideDuration }
+                  : null,
+                transitDuration !== null && hasReliableTransit
+                  ? { key: 'transit', label: 'Transit', minutes: transitDuration }
+                  : null,
+              ].filter(Boolean) as Array<{ key: string; label: string; minutes: number }>;
+
+              return candidates.sort((a, b) => a.minutes - b.minutes)[0] || null;
+            })();
+
+            const modeScores = [
+              bestParking
+                ? {
+                  key: 'parking',
+                  label: 'Parking',
+                  cost: parkingTotal ?? 999999,
+                  minutes: parkingBreakdown?.totalMinutes ?? 999999,
+                  reliable: !isParkingRouteUnavailable(bestParking),
+                  baseScore: 0,
+                }
+                : null,
+              bestRide
+                ? {
+                  key: 'rideshare',
+                  label: 'Rideshare',
+                  cost: ridePrice ?? 999999,
+                  minutes: rideDuration ?? 999999,
+                  reliable: true,
+                  baseScore: 0,
+                }
+                : null,
+              hasReliableTransit
+                ? {
+                  key: 'transit',
+                  label: 'Transit',
+                  cost: transitCost ?? 999999,
+                  minutes: transitDuration ?? 999999,
+                  reliable: true,
+                  baseScore: -12,
+                }
+                : null,
+            ].filter(Boolean) as Array<{
+              key: string;
+              label: string;
+              cost: number;
+              minutes: number;
+              reliable: boolean;
+              baseScore: number;
+            }>;
+
+            const scoredModes = modeScores.map((mode) => {
+              let score = 100 + mode.baseScore;
+
+              if (!mode.reliable) score -= 80;
+
+              if (sort === 'cheapest') {
+                score -= mode.cost * 0.65;
+                score -= mode.minutes * 0.12;
+              } else if (sort === 'fastest') {
+                score -= mode.minutes * 0.9;
+                score -= mode.cost * 0.15;
+              } else {
+                // easiest / default
+                score -= mode.minutes * 0.35;
+                score -= mode.cost * 0.25;
+
+                if (mode.key === 'rideshare') score += 12;
+                if (mode.key === 'parking') score += isOvernightTrip ? 14 : 4;
+                if (mode.key === 'transit') score -= isOvernightTrip ? 20 : 8;
+              }
+
+              // Overnight airport trip safety:
+              // Park & Ride is avoided, but normal airport/off-airport parking is still allowed.
+              if (isOvernightTrip && mode.key === 'parking') score += 8;
+
+              return {
+                ...mode,
+                score,
+              };
+            });
+
+            const bestMode = scoredModes.sort((a, b) => b.score - a.score)[0];
+
+            const recommendationMode = bestMode?.key || 'check-live';
+
+            const shortParkingName = bestParking?.name
+              ? bestParking.name
+                .replace('Seattle Airport South Lot - Self Uncovered', 'Airport South Lot')
+                .replace('Seattle-Tacoma International Airport', 'SEA')
+              : '';
+
+            const recommendedTitle =
+              recommendationMode === 'parking'
+                ? shortParkingName
+                  ? `Park at ${shortParkingName}`
+                  : 'Park at the best available lot'
+                : recommendationMode === 'rideshare'
+                  ? `Take ${bestRideOption?.name || 'rideshare'}`
+                  : recommendationMode === 'transit'
+                    ? 'Take transit'
+                    : 'Check live options';
+
+            const recommendedReason =
+              recommendationMode === 'parking'
+                ? isOvernightTrip
+                  ? 'Best fit for this overnight airport trip because Park & Ride is not treated as airport parking.'
+                  : 'Best fit if you want control, luggage space, and a predictable airport arrival.'
+                : recommendationMode === 'rideshare'
+                  ? 'Best fit if you want the lowest effort and do not want to leave a car parked.'
+                  : recommendationMode === 'transit'
+                    ? 'Best fit if cost matters most and your schedule has enough buffer.'
+                    : 'Live provider checks are needed before making a final decision.';
+
+            const modeRows = [
+              {
+                key: 'parking',
+                icon: '🅿️',
+                label: 'Parking',
+                name: bestParking?.name || 'No parking option found',
+                cost: parkingTotal !== null ? `$${Math.round(parkingTotal)}` : 'Check price',
+                time: parkingBreakdown?.totalMinutes
+                  ? formatMinutes(parkingBreakdown.totalMinutes)
+                  : 'Check route',
+                verdict: bestParking
+                  ? recommendationMode === 'parking'
+                    ? 'Best pick'
+                    : 'Good backup'
+                  : 'Unavailable',
+              },
+              {
+                key: 'rideshare',
+                icon: '🚗',
+                label: 'Rideshare',
+                name: bestRideOption?.name || 'Uber / Lyft',
+                cost: ridePrice !== null ? `$${Math.round(ridePrice)}` : 'Check app',
+                time: rideDuration !== null ? formatMinutes(rideDuration) : 'Check app',
+                verdict: bestRide
+                  ? recommendationMode === 'rideshare'
+                    ? 'Best pick'
+                    : 'Easy backup'
+                  : 'Check live',
+              },
+              {
+                key: 'transit',
+                icon: '🚆',
+                label: 'Transit',
+                name: bestTransitOption?.name || 'Google Maps / Sound Transit',
+                cost: transitCost !== null && hasReliableTransit ? `$${Math.round(transitCost)}` : 'Check route',
+                time: transitDuration !== null && hasReliableTransit ? formatMinutes(transitDuration) : 'Not ready',
+                verdict: hasReliableTransit
+                  ? recommendationMode === 'transit'
+                    ? 'Best pick'
+                    : 'Budget option'
+                  : 'Live route needed',
+              },
+              {
+                key: 'park-ride',
+                icon: '🚌',
+                label: 'Park & Ride',
+                name: isOvernightTrip
+                  ? 'Not for overnight airport parking'
+                  : 'Only if lot rules allow it',
+                cost: 'Varies',
+                time: 'Depends',
+                verdict: isOvernightTrip ? 'Avoid' : 'Verify rules',
+              },
+            ];
+
+            const scrollToBestSection = (target: string) => {
+              const el = document.getElementById(target);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            };
+
+            const cardActionFor = (key: string) => {
+              if (key === 'parking') {
+                return {
+                  label: 'View parking details',
+                  onClick: () => scrollToBestSection('parking-options-section'),
+                };
+              }
+
+              if (key === 'rideshare') {
+                return {
+                  label: 'Check live ride price',
+                  onClick: () => {
+                    setOpenProviderSection('ride');
+
+                    window.setTimeout(() => {
+                      scrollToBestSection('provider-links-section');
+                    }, 50);
+                  },
+                };
+              }
+
+              if (key === 'transit') {
+                return {
+                  label: 'View transit links',
+                  onClick: () => {
+                    setOpenProviderSection('transit');
+
+                    window.setTimeout(() => {
+                      scrollToBestSection('provider-links-section');
+                    }, 50);
+                  },
+                };
+              }
+
+              if (key === 'park-ride') {
+                return {
+                  label: 'Why avoid?',
+                  onClick: () => {
+                    setOpenProviderSection('transit');
+
+                    window.setTimeout(() => {
+                      scrollToBestSection('provider-links-section');
+                    }, 50);
+                  },
+                };
+              }
+
+              return {
+                label: 'View details',
+                onClick: () => scrollToBestSection('provider-links-section'),
+              };
+            };
+
+            return (
+              <>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800">
+                      Smart recommendation
+                    </div>
+                    <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-slate-950">
+                      {recommendedTitle}
+                    </h2>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                      {recommendedReason}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm text-slate-700 sm:min-w-52">
+                    <div className="text-xs font-semibold uppercase text-sky-800">
+                      Leave-by
+                    </div>
+                    <div className="mt-1 text-lg font-bold text-slate-950">
+                      {recommendation.leaveByTime
+                        ? formatTimeFriendly(recommendation.leaveByTime)
+                        : 'Check timing'}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Includes airport timing when available
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
+                  {modeRows.map((row) => {
+                    const selected = row.key === recommendationMode;
+
+                    const action = cardActionFor(row.key);
+
+                    return (
+                      <button
+                        key={row.key}
+                        type="button"
+                        onClick={action.onClick}
+                        className={
+                          'cursor-pointer text-left transition hover:-translate-y-0.5 hover:shadow-md ' +
+                          'rounded-2xl border p-4 shadow-sm ' +
+                          (selected
+                            ? 'border-blue-300 bg-blue-50/80'
+                            : 'border-zinc-200 bg-white')
+                        }
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-2xl">{row.icon}</div>
+                          <span
+                            className={
+                              'rounded-full px-2.5 py-1 text-xs font-semibold ' +
+                              (selected
+                                ? 'bg-blue-600 text-white'
+                                : row.verdict === 'Avoid'
+                                  ? 'bg-red-50 text-red-700'
+                                  : 'bg-zinc-100 text-zinc-700')
+                            }
+                          >
+                            {row.verdict}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 text-sm font-bold text-zinc-950">
+                          {row.label}
+                        </div>
+
+                        <div className="mt-1 line-clamp-2 text-sm text-zinc-700">
+                          {row.name}
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-white/80 p-2">
+                            <div className="text-zinc-500">Cost</div>
+                            <div className="mt-0.5 font-semibold text-zinc-950">
+                              {row.cost}
+                            </div>
+                          </div>
+                          <div className="rounded-xl bg-white/80 p-2">
+                            <div className="text-zinc-500">Time</div>
+                            <div className="mt-0.5 font-semibold text-zinc-950">
+                              {row.time}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 inline-flex text-xs font-semibold text-blue-700">
+                          {action.label} →
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+                  {isOvernightTrip ? (
+                    <>
+                      <span className="font-semibold text-zinc-950">Overnight trip detected:</span>{' '}
+                      Park & Ride is hidden or marked avoid unless overnight parking is verified.
+                      Use airport/off-airport parking or rideshare instead.
+                    </>
+                  ) : cheapestMode && fastestMode ? (
+                    <>
+                      <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
+                      Cheapest is {cheapestMode.label} around ${Math.round(cheapestMode.cost)}.
+                      Fastest is {fastestMode.label} around {formatMinutes(fastestMode.minutes)}.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
+                      Some live route or price data is missing, so confirm final pricing before booking.
+                    </>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </section>
+
         {/* Edit panel */}
         {
           isEditing && editingData && (
@@ -4479,7 +4911,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
         {
           showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
-            <div className="mt-6">
+            <div id="parking-options-section" className="mt-6 scroll-mt-6">
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-bold">
                   {allParkingRoutesUnavailable
@@ -4724,7 +5156,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           ) : (
             <>
               {displayableRemainingParking.length > 0 && !airportRouteUnavailable && (
-                <section className="mt-8">
+                <section id="more-parking-options-section" className="mt-8 scroll-mt-6">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <h2 className="text-lg font-semibold text-zinc-900">
@@ -4868,13 +5300,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
         {/* Pricing links */}
         {!airportRouteUnavailable &&
-          <div className="mt-8 grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+          <div id="provider-links-section" className="mt-8 grid scroll-mt-6 grid-cols-1 items-start gap-4 lg:grid-cols-2">
             {showRideProviders && (
               <ProviderDropdownSection
                 title="Ride providers"
                 subtitle="Compare estimated fares and provider links."
                 items={rideProviderItems}
-                defaultOpen={false}
+                defaultOpen={openProviderSection === 'ride'}
               />
             )}
 
@@ -4882,7 +5314,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               title="Transit options"
               subtitle="Compare route planning, fares, confidence, and links."
               items={[...(transitOptions), ...extraTransitProviders]}
-              defaultOpen={false}
+              defaultOpen={openProviderSection === 'transit'}
               transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
             />
 

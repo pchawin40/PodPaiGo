@@ -406,8 +406,19 @@ export class RecommendationEngine {
 
     // If the user doesn't have a car today, remove park-and-ride style trips (drive segments)
     // and provide transit-only options.
-    if (!allowCarOptions && allowTransit) {
+    const parkingDurationMinutes = calculateParkingDuration(tripData);
+    const requiresOvernightParking =
+      (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
+      parkingDurationMinutes >= 18 * 60;
+
+    // If the user doesn't have a car today, remove park-and-ride style trips.
+    // Also remove drive-to-park-and-ride options for overnight airport trips because
+    // most P&R lots should not be treated as airport parking without verified overnight rules.
+    if ((!allowCarOptions && allowTransit) || requiresOvernightParking) {
       transit = transit.filter((t) => !hasDriveSegment(t));
+    }
+
+    if (!allowCarOptions && allowTransit) {
       transit = [...transit, ...buildTransitOnlyJourneys(tripData.origin, tripData.destination)];
     }
 
