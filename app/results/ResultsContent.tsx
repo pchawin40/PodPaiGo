@@ -2979,6 +2979,30 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       const requestKey = JSON.stringify(data);
       const currentRequest = recommendationsRequestRef.current;
 
+      const isNewTripRequest = recommendationsLoadedKeyRef.current !== requestKey;
+
+      if (isNewTripRequest) {
+        // Clear stale enrichment from previous airport/date/origin.
+        // Prevents smaller-airport lots/photos/prices from leaking into SEA after edit recalculation.
+        setReviewsParking(null);
+        setGoogleEnrichedParking({});
+        setMatchedParkingPrices({});
+        setAprLivePrices({});
+        setAprLivePartial(false);
+        setAprLiveChecking(false);
+        setParkingPricesChecking(false);
+        setParkingWeather([]);
+        setShowMoreParking(false);
+        setSelectedParkingId(null);
+
+        googlePlaceAttemptedKeysRef.current.clear();
+        googlePlaceInFlightKeysRef.current.clear();
+
+        priceMatchKeyRef.current = '';
+        liveRefreshLoadedKeyRef.current = '';
+        liveRefreshInFlightKeyRef.current = '';
+      }
+
       if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
         setLoading(false);
         return;

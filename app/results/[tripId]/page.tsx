@@ -20,9 +20,21 @@ type StoredTripState =
 function hasRequiredTripFields(query: string): boolean {
   const params = new URLSearchParams(query);
   const type = params.get('type');
-  const hasBase = Boolean(params.get('origin') && params.get('destination'));
 
+  const hasBase = Boolean(params.get('origin') && params.get('destination'));
   if (!hasBase) return false;
+
+  if (type === 'point-to-point') {
+    const hasDepartureTime = Boolean(
+      params.get('departureDate') && params.get('departureTime')
+    );
+
+    const hasArrivalTime = Boolean(
+      params.get('desiredArrivalDate') && params.get('desiredArrivalTime')
+    );
+
+    return hasDepartureTime || hasArrivalTime;
+  }
 
   if (type === 'one-way-departure') {
     return Boolean(params.get('departureDate') && params.get('departureTime'));
@@ -35,9 +47,9 @@ function hasRequiredTripFields(query: string): boolean {
   if (type === 'round-trip') {
     return Boolean(
       params.get('departureDate') &&
-        params.get('departureTime') &&
-        params.get('returnDate') &&
-        params.get('returnTime')
+      params.get('departureTime') &&
+      params.get('returnDate') &&
+      params.get('returnTime')
     );
   }
 
