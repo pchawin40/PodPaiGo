@@ -249,7 +249,7 @@ function intentCopy(intent: Intent) {
       };
     case 'general-trip':
       return {
-        title: 'Point A to Point B',
+        title: 'Compare a local trip',
         timeLabel: 'When do you need to arrive?',
         helper: 'Compare driving, parking, rideshare, transit, and park & ride where available.',
         wantsAirline: false,

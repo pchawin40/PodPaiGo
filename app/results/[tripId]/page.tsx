@@ -24,16 +24,24 @@ function hasRequiredTripFields(query: string): boolean {
   const hasBase = Boolean(params.get('origin') && params.get('destination'));
   if (!hasBase) return false;
 
-  if (type === 'point-to-point') {
-    const hasDepartureTime = Boolean(
+  if (type === 'general-trip' || type === 'point-to-point') {
+    const hasGeneralArrivalTime = Boolean(
+      params.get('arrivalDate') && params.get('arrivalTime')
+    );
+
+    const hasPointToPointDepartureTime = Boolean(
       params.get('departureDate') && params.get('departureTime')
     );
 
-    const hasArrivalTime = Boolean(
+    const hasPointToPointDesiredArrivalTime = Boolean(
       params.get('desiredArrivalDate') && params.get('desiredArrivalTime')
     );
 
-    return hasDepartureTime || hasArrivalTime;
+    return (
+      hasGeneralArrivalTime ||
+      hasPointToPointDepartureTime ||
+      hasPointToPointDesiredArrivalTime
+    );
   }
 
   if (type === 'one-way-departure') {
