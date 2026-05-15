@@ -2544,6 +2544,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [showMapModal, setShowMapModal] = useState(false);
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
   const [openProviderSection, setOpenProviderSection] = useState<'ride' | 'transit' | null>(null);
+  const [showParkRideReason, setShowParkRideReason] = useState(false);
 
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
@@ -4624,11 +4625,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 icon: '🚌',
                 label: 'Park & Ride',
                 name: isOvernightTrip
-                  ? 'Not for overnight airport parking'
+                  ? 'Not available for overnight airport parking'
                   : 'Only if lot rules allow it',
-                cost: 'Varies',
-                time: 'Depends',
-                verdict: isOvernightTrip ? 'Avoid' : 'Verify rules',
+                cost: isOvernightTrip ? 'N/A' : 'Varies',
+                time: isOvernightTrip ? 'N/A' : 'Depends',
+                verdict: isOvernightTrip ? 'Unavailable' : 'Verify rules',
+                unavailable: isOvernightTrip,
               },
             ];
 
@@ -4675,13 +4677,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               if (key === 'park-ride') {
                 return {
-                  label: 'Why avoid?',
+                  label: isOvernightTrip ? 'See why unavailable' : 'Check lot rules',
                   onClick: () => {
-                    setOpenProviderSection('transit');
-
-                    window.setTimeout(() => {
-                      scrollToBestSection('provider-links-section');
-                    }, 50);
+                    setShowParkRideReason((v) => !v);
                   },
                 };
               }
@@ -4734,11 +4732,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         type="button"
                         onClick={action.onClick}
                         className={
-                          'cursor-pointer text-left transition hover:-translate-y-0.5 hover:shadow-md ' +
-                          'rounded-2xl border p-4 shadow-sm ' +
-                          (selected
-                            ? 'border-blue-300 bg-blue-50/80'
-                            : 'border-zinc-200 bg-white')
+                          'cursor-pointer rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ' +
+                          (row.unavailable
+                            ? 'border-zinc-200 bg-zinc-100/80 opacity-75'
+                            : selected
+                              ? 'border-blue-300 bg-blue-50/80'
+                              : 'border-zinc-200 bg-white')
                         }
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -4746,11 +4745,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           <span
                             className={
                               'rounded-full px-2.5 py-1 text-xs font-semibold ' +
-                              (selected
-                                ? 'bg-blue-600 text-white'
-                                : row.verdict === 'Avoid'
-                                  ? 'bg-red-50 text-red-700'
-                                  : 'bg-zinc-100 text-zinc-700')
+                              (row.unavailable
+                                ? 'bg-zinc-200 text-zinc-600'
+                                : selected
+                                  ? 'bg-blue-600 text-white'
+                                  : row.verdict === 'Avoid' || row.verdict === 'Unavailable'
+                                    ? 'bg-red-50 text-red-700'
+                                    : 'bg-zinc-100 text-zinc-700')
                             }
                           >
                             {row.verdict}
@@ -4791,8 +4792,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   {isOvernightTrip ? (
                     <>
                       <span className="font-semibold text-zinc-950">Overnight trip detected:</span>{' '}
-                      Park & Ride is hidden or marked avoid unless overnight parking is verified.
-                      Use airport/off-airport parking or rideshare instead.
+                      {showParkRideReason && (
+                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                          <div className="font-semibold">
+                            Why Park & Ride is unavailable for this trip
+                          </div>
+                          <div className="mt-1">
+                            This trip appears to require overnight parking. Most Park & Ride lots are meant for
+                            same-day commuter use, and PodPaiGo should not recommend leaving your car overnight
+                            unless the lot has verified overnight parking rules.
+                          </div>
+                          <div className="mt-2 text-xs text-amber-800">
+                            Safer choices: use airport/off-airport parking, rideshare, taxi, or a verified overnight parking provider.
+                          </div>
+                        </div>
+                      )}
                     </>
                   ) : cheapestMode && fastestMode ? (
                     <>
