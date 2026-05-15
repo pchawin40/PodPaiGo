@@ -146,6 +146,28 @@ function buildLocalDateTime(date: string, time: string): Date | null {
   return value;
 }
 
+function formatLocalTimeInputValue(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function addMinutesToLocalDateTime(
+  date: string,
+  time: string,
+  minutes: number
+): { date: string; time: string } | null {
+  const start = buildLocalDateTime(date, time);
+  if (!start || !Number.isFinite(minutes)) return null;
+
+  const end = new Date(start.getTime() + minutes * 60_000);
+
+  return {
+    date: formatLocalDateInputValue(end),
+    time: formatLocalTimeInputValue(end),
+  };
+}
+
 function calculateParkingDurationMinutes({
   checkInDate,
   checkInTime,
@@ -705,11 +727,13 @@ export default function TripFlow() {
     }
 
     if (tripType === 'general-trip') {
+      const arrivalTime = state.time || '09:00';
+
       params.set('arrivalDate', normalizedDate!);
-      params.set('arrivalTime', state.time || '09:00');
+      params.set('arrivalTime', arrivalTime);
 
       params.set('parkingCheckInDate', normalizedDate!);
-      params.set('parkingCheckInTime', state.time || '09:00');
+      params.set('parkingCheckInTime', arrivalTime);
 
       const hours = state.parkingDurationHours
         ? Number(state.parkingDurationHours)
@@ -719,6 +743,17 @@ export default function TripFlow() {
 
       if (Number.isFinite(minutes) && minutes > 0) {
         params.set('parkingDuration', String(minutes));
+
+        const checkout = addMinutesToLocalDateTime(
+          normalizedDate!,
+          arrivalTime,
+          minutes
+        );
+
+        if (checkout) {
+          params.set('parkingCheckOutDate', checkout.date);
+          params.set('parkingCheckOutTime', checkout.time);
+        }
       }
     } else if (tripType === 'one-way-departure') {
       params.set('departureDate', normalizedDate!);

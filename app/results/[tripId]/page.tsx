@@ -19,40 +19,32 @@ type StoredTripState =
 
 function hasRequiredTripFields(query: string): boolean {
   const params = new URLSearchParams(query);
-  const type = params.get('type');
 
   const hasBase = Boolean(params.get('origin') && params.get('destination'));
   if (!hasBase) return false;
 
+  const type = params.get('type');
+
   if (type === 'general-trip' || type === 'point-to-point') {
-    const hasGeneralArrivalTime = Boolean(
-      params.get('arrivalDate') && params.get('arrivalTime')
-    );
-
-    const hasPointToPointDepartureTime = Boolean(
-      params.get('departureDate') && params.get('departureTime')
-    );
-
-    const hasPointToPointDesiredArrivalTime = Boolean(
-      params.get('desiredArrivalDate') && params.get('desiredArrivalTime')
-    );
-
-    return (
-      hasGeneralArrivalTime ||
-      hasPointToPointDepartureTime ||
-      hasPointToPointDesiredArrivalTime
+    return Boolean(
+      (params.get('arrivalDate') && params.get('arrivalTime')) ||
+      (params.get('parkingCheckInDate') && params.get('parkingCheckInTime')) ||
+      (params.get('date') && params.get('time'))
     );
   }
 
-  if (type === 'one-way-departure') {
-    return Boolean(params.get('departureDate') && params.get('departureTime'));
+  if (type === 'one-way-departure' || type === 'airport-departure') {
+    return Boolean(
+      (params.get('departureDate') && params.get('departureTime')) ||
+      (params.get('parkingCheckInDate') && params.get('parkingDuration'))
+    );
   }
 
-  if (type === 'one-way-arrival') {
+  if (type === 'one-way-arrival' || type === 'airport-arrival') {
     return Boolean(params.get('arrivalDate') && params.get('arrivalTime'));
   }
 
-  if (type === 'round-trip') {
+  if (type === 'round-trip' || type === 'airport-round-trip') {
     return Boolean(
       params.get('departureDate') &&
       params.get('departureTime') &&
@@ -61,11 +53,11 @@ function hasRequiredTripFields(query: string): boolean {
     );
   }
 
-  if (type === 'dropoff-pickup') {
+  if (type === 'dropoff-pickup' || type === 'airport-dropoff-pickup') {
     return Boolean(params.get('airportTripDate') && params.get('airportTripTime'));
   }
 
-  return false;
+  return true;
 }
 
 function queryFromStoredPayload(value: string | null): StoredTripState {
@@ -82,13 +74,29 @@ function queryFromStoredPayload(value: string | null): StoredTripState {
     }
 
     if (!query) {
+      console.warn('PodPaiGo saved trip has no query:', payload);
       return { status: 'invalid', query: null };
     }
 
-    return hasRequiredTripFields(query)
-      ? { status: 'ready', query }
-      : { status: 'invalid', query: null };
-  } catch {
+    const params = new URLSearchParams(query);
+    const hasBase = Boolean(params.get('origin') && params.get('destination'));
+
+    console.log('PodPaiGo saved trip loaded:', {
+      query,
+      params: Object.fromEntries(params.entries()),
+      hasBase,
+      strictValidationPasses: hasRequiredTripFields(query),
+    });
+
+    // During A-to-B rollout, do not block saved trips if the base route exists.
+    // The /trip form already validated this before saving.
+    if (!hasBase) {
+      return { status: 'invalid', query: null };
+    }
+
+    return { status: 'ready', query };
+  } catch (error) {
+    console.error('PodPaiGo saved trip parse error:', error);
     return { status: 'invalid', query: null };
   }
 }
@@ -138,8 +146,19 @@ export default function StoredResultsPage() {
       }
 
       try {
-        setStoredTrip(queryFromStoredPayload(window.localStorage.getItem(key)));
-      } catch {
+        const raw = window.localStorage.getItem(key);
+        const parsed = queryFromStoredPayload(raw);
+
+        console.log('PodPaiGo saved results debug:', {
+          tripId,
+          key,
+          raw,
+          parsed,
+        });
+
+        setStoredTrip(parsed);
+      } catch (error) {
+        console.error('PodPaiGo saved results localStorage error:', error);
         setStoredTrip({ status: 'missing', query: null });
       }
     }, 0);
