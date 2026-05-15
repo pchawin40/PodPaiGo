@@ -142,24 +142,45 @@ function getStressScore(
 
 // Trip duration calculation
 export function calculateTripDuration(tripData: TripData): number {
-  if (tripData.type !== 'round-trip') {
+  const type = String(tripData.type);
+
+  if (type !== 'round-trip' && type !== 'airport-round-trip') {
+    return 0;
+  }
+
+  if (
+    !('departureDate' in tripData) ||
+    !('departureTime' in tripData) ||
+    !('returnDate' in tripData) ||
+    !('returnTime' in tripData)
+  ) {
     return 0;
   }
 
   const departureDateTime = new Date(`${tripData.departureDate}T${tripData.departureTime}`);
   const returnDateTime = new Date(`${tripData.returnDate}T${tripData.returnTime}`);
+
   const durationMs = returnDateTime.getTime() - departureDateTime.getTime();
+
   return Math.max(0, Math.ceil(durationMs / (1000 * 60)));
 }
 
 export function calculateParkingDuration(tripData: TripData): number {
+  // General point A → B trips should be hourly by default.
+  // Example: office, downtown, stadium, restaurant, hospital.
+  if (tripData.type === 'general-trip') {
+    return tripData.parkingDuration ?? (8 * 60);
+  }
+
+  // Airport round trip: usually parking spans departure → return.
   if (tripData.type === 'round-trip') {
     return tripData.parkingDuration ?? calculateTripDuration(tripData);
   }
 
+  // Airport departure / airport parking flow:
+  // default to 24 hours only for airport-style trips.
   if (tripData.type === 'one-way-departure') {
-    // Use user-provided duration if available, otherwise MVP default: short-stay parking
-    return tripData.parkingDuration ?? (1 * 24 * 60);
+    return tripData.parkingDuration ?? (24 * 60);
   }
 
   return 0;

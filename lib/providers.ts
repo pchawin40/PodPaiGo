@@ -1,4 +1,14 @@
-import { ParkingOption, RideshareOption, TransitJourney, TrafficEstimate, FlightInfo, LocationInfo, TsaEstimate, SecurityOption } from './types';
+import {
+  DestinationKind,
+  ParkingOption,
+  RideshareOption,
+  TransitJourney,
+  TrafficEstimate,
+  FlightInfo,
+  LocationInfo,
+  TsaEstimate,
+  SecurityOption,
+} from './types';
 import { mockParkingOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
@@ -223,12 +233,22 @@ function resolveParkingTransferMeta(option: ParkingOption): {
   return { parkingBufferMinutes: 8, transferToTerminalMinutes: 5, transferType: 'walk' };
 }
 
+type ParkingOptionsRequestContext = {
+  destinationKind?: DestinationKind;
+};
+
 export interface TrafficProvider {
   getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate>;
 }
 
 export interface ParkingProvider {
-  getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]>;
+  getParkingOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOption[]>;
 }
 
 export interface FlightProvider {
@@ -250,7 +270,13 @@ export interface AirportInfoProvider {
 export interface DataProvider extends TrafficProvider, ParkingProvider, FlightProvider, TsaProvider, AirportInfoProvider {
   getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]>;
   getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]>;
-  getParkingOptions(origin: string, destination: string, dateTime: string, parkingDurationMinutes?: number): Promise<ParkingOption[]>;
+  getParkingOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOption[]>;
 }
 
 export class MockTrafficProvider implements TrafficProvider {
@@ -824,51 +850,74 @@ export class MockProvider implements DataProvider {
     origin: string,
     destination: string,
     dateTime: string,
-    parkingDurationMinutes?: number
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]> {
     const routeOrigins = origin;
 
-    const airport = resolveAirportFromDestination(destination);
+    const destinationKind = context?.destinationKind ?? 'airport';
+    const isAirportDestination = destinationKind === 'airport';
+
+    const airport = isAirportDestination
+      ? resolveAirportFromDestination(destination)
+      : null;
+
     const airportCode = airport?.id || 'SEA';
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
+    const isGeneralDestination =
+      !airport ||
+      destination.toLowerCase().includes('general-trip') ||
+      !['SEA', 'PAE', 'BLI', 'GEG', 'PSC', 'YKM'].includes(airportCode);
+
     const liveParkingOptions = await import('./providers/parkingAggregator')
-      .then(({ getLiveParkingOptions }) =>
-        getLiveParkingOptions({
-          airportCode,
-          destination,
-          checkInDate: parkingDates.checkInDate,
-          checkOutDate: parkingDates.checkOutDate,
-        })
+      .then(({ getLiveParkingOptions, getDestinationParkingOptions }) =>
+        isAirportDestination
+          ? getLiveParkingOptions({
+            airportCode,
+            destination,
+            checkInDate: parkingDates.checkInDate,
+            checkOutDate: parkingDates.checkOutDate,
+          })
+          : getDestinationParkingOptions({
+            origin,
+            destination,
+            dateTime,
+            parkingDurationMinutes,
+          })
       )
       .catch((error) => {
-        console.warn('Live parking options unavailable; using mock parking options', error);
+        console.warn('Live parking options unavailable; using fallback parking options', error);
         return [];
       });
 
     const parkingSource =
       liveParkingOptions.length > 0
         ? liveParkingOptions
-        : mockParkingOptions;
+        : airport
+          ? mockParkingOptions
+          : [];
 
-    const airportDestination = resolveAirportDestinationForRouting(destination);
-    const airportRouteEstimate = await this.getRouteEstimate(
+    const routeDestination = isAirportDestination
+      ? resolveAirportDestinationForRouting(destination)
+      : destination;
+    const destinationRouteEstimate = await this.getRouteEstimate(
       origin,
-      airportDestination,
+      routeDestination,
       dateTime,
       true
     );
 
     // Do not hide parking lots just because the home → airport route failed.
     // Parking discovery can still be useful; individual lot routes can be checked separately.
-    const airportDriveUnavailable = Boolean(airportRouteEstimate.routeUnavailable);
+    const destinationDriveUnavailable = Boolean(destinationRouteEstimate.routeUnavailable);
 
     const routeDestinationFor = (option: ParkingOption): string =>
       option.routeDestination ||
       option.address ||
       option.name ||
-      airportDestination;
+      routeDestination;
 
     const parkingRouteEntries = parkingSource.map((option) => {
       const routeDestination = routeDestinationFor(option);
@@ -1010,17 +1059,15 @@ export class MockProvider implements DataProvider {
           ...commonRouteFields,
 
           // Use live route when available. If live route fails, keep provider option visible.
-          distance: liveDriveMinutes ?? airportRouteEstimate.duration ?? option.distance ?? 0,
-          duration: liveDriveMinutes ?? airportRouteEstimate.duration ?? option.distance ?? 0,
+          distance: liveDriveMinutes ?? option.distance ?? 0,
+          duration: liveDriveMinutes ?? option.distance ?? 0,
 
           routeTrustStatus: routeFailed
-            ? airportRouteEstimate.trustStatus ?? option.routeTrustStatus ?? option.trustStatus
+            ? option.routeTrustStatus ?? option.trustStatus
             : routeEstimate.trustStatus,
 
-          // Do NOT mark the parking option unusable just because Google failed one route check.
-          routeUnavailable: false,
           routeUnavailableReason: routeFailed
-            ? routeEstimate.routeUnavailableReason || airportRouteEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
+            ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
             : undefined,
 
           availability: option.availability,

@@ -11,6 +11,7 @@ import {
   TransitPaymentOption,
   TripData,
   TripType,
+  DestinationKind,
 } from '../../lib/types';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
@@ -20,7 +21,12 @@ import { formatMoney } from '../utils/formatter';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
-type Intent = 'flying-out' | 'picking-up' | 'dropping-off' | 'parking-trip';
+type Intent =
+  | 'general-trip'
+  | 'flying-out'
+  | 'picking-up'
+  | 'dropping-off'
+  | 'parking-trip';
 
 type Step = 1 | 2;
 
@@ -57,6 +63,8 @@ type FormState = {
   cabin: CabinClass;
   airportCode: string; // selected Washington airport for routing and airport guidance
   timeAnchor: 'flight-departure' | 'airport-arrival';
+  destination: string;
+  destinationKind: DestinationKind;
 };
 
 function formatLocalDateInputValue(date: Date): string {
@@ -161,14 +169,16 @@ function calculateParkingDurationMinutes({
 
 function intentToTripType(intent: Intent): TripType {
   switch (intent) {
+    case 'general-trip':
+      return 'general-trip';
     case 'flying-out':
-      return 'one-way-departure';
+      return 'airport-departure';
     case 'parking-trip':
-      return 'one-way-departure';
+      return 'airport-departure';
     case 'picking-up':
-      return 'dropoff-pickup';
+      return 'airport-dropoff-pickup';
     case 'dropping-off':
-      return 'dropoff-pickup';
+      return 'airport-dropoff-pickup';
   }
 }
 
@@ -234,6 +244,14 @@ function intentCopy(intent: Intent) {
         title: 'Airport parking',
         timeLabel: 'When do you want to arrive at the airport?',
         helper: 'We’ll compare official garage vs nearby lots and rides.',
+        wantsAirline: false,
+        wantsParkingDuration: true,
+      };
+    case 'general-trip':
+      return {
+        title: 'Point A to Point B',
+        timeLabel: 'When do you need to arrive?',
+        helper: 'Compare driving, parking, rideshare, transit, and park & ride where available.',
         wantsAirline: false,
         wantsParkingDuration: true,
       };
@@ -348,9 +366,13 @@ export default function TripFlow() {
     securityOption: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
-    airportCode: 'SEA', // default airport, not hardcoded app airport
+    airportCode: 'SEA', // default airport, not hardcoded app airport,
+    destination: '',
+    destinationKind: 'general',
   });
   const intent = state.intent;
+  const isGeneralTrip = intent === 'general-trip';
+  const isAirportTrip = !isGeneralTrip;
 
   const ENABLE_AIRPORT_TIMING_FIELDS = false;
   const showTimingFields = ENABLE_AIRPORT_TIMING_FIELDS || intent !== 'parking-trip';
@@ -399,6 +421,10 @@ export default function TripFlow() {
     // Step 2 validates the full form.
     if (!state.intent) next.push('Please choose what you’re doing today.');
     if (!state.origin.trim()) next.push('Origin is required.');
+
+    if (state.intent === 'general-trip' && !state.destination.trim()) {
+      next.push('Destination is required.');
+    }
 
     // Parking check-in/check-out required for date-range flows
     if (!state.date) {
@@ -591,6 +617,10 @@ export default function TripFlow() {
       }
     }
 
+    if (state.intent === 'general-trip' && !state.destination.trim()) {
+      nextFieldErrors.destination = 'Enter where you are going.';
+    }
+
     setErrors(next);
     setFieldErrors(nextFieldErrors);
 
@@ -618,26 +648,55 @@ export default function TripFlow() {
     }));
 
     const tripType = intentToTripType(state.intent!);
-    const destination = airportGuide.destination;
+    const isGeneralTrip = state.intent === 'general-trip';
+
+    const destination = isGeneralTrip
+      ? state.destination.trim()
+      : airportGuide.destination;
 
     const params = new URLSearchParams();
+
     params.set('type', tripType);
     params.set('origin', state.origin);
     params.set('destination', destination);
-    params.set('airport', selectedAirport.id);
     params.set('intent', state.intent!);
     params.set('transport', state.transportAvailability);
     params.set('transitPayment', state.transitPayment);
-    params.set('airportName', selectedAirport.label);
-    params.set('airportCheckinNote', airportGuide.note ?? '');
-    params.set('rideshareDestinationName', airportGuide.rideshareDestinationName);
-    params.set('timeAnchor', state.timeAnchor);
+    params.set('destinationKind', isGeneralTrip ? state.destinationKind : 'airport');
+
+    if (isGeneralTrip) {
+      params.set('destinationName', state.destination.trim());
+      params.set('timeAnchor', 'arrival-time');
+    } else {
+      params.set('airport', selectedAirport.id);
+      params.set('airportCode', selectedAirport.id);
+      params.set('airportName', selectedAirport.label);
+      params.set('airportCheckinNote', airportGuide.note ?? '');
+      params.set('rideshareDestinationName', airportGuide.rideshareDestinationName);
+      params.set('timeAnchor', state.timeAnchor);
+    }
 
     if (state.airlineOrFlight.trim()) {
       params.set('airlineOrFlight', state.airlineOrFlight.trim());
     }
 
-    if (tripType === 'one-way-departure') {
+    if (tripType === 'general-trip') {
+      params.set('arrivalDate', normalizedDate!);
+      params.set('arrivalTime', state.time || '09:00');
+
+      params.set('parkingCheckInDate', normalizedDate!);
+      params.set('parkingCheckInTime', state.time || '09:00');
+
+      const hours = state.parkingDurationHours
+        ? Number(state.parkingDurationHours)
+        : 8;
+
+      const minutes = Math.round(hours * 60);
+
+      if (Number.isFinite(minutes) && minutes > 0) {
+        params.set('parkingDuration', String(minutes));
+      }
+    } else if (tripType === 'airport-departure' || tripType === 'one-way-departure') {
       params.set('departureDate', normalizedDate!);
       params.set('departureTime', state.time || '12:00');
       params.set('parkingCheckInDate', normalizedDate!);
@@ -680,7 +739,7 @@ export default function TripFlow() {
         params.set('parkingDuration', String(24 * 60));
       }
     } else {
-      // dropoff-pickup
+      // airport pickup/dropoff
       params.set('airportTripDate', normalizedDate!);
       params.set('airportTripTime', state.time);
     }
@@ -781,7 +840,7 @@ export default function TripFlow() {
                 onClick={() =>
                   setState((s) => ({
                     ...s,
-                    intent: 'flying-out',
+                    intent: 'general-trip',
                     date: '',
                     time: '',
                   }))
@@ -866,26 +925,49 @@ export default function TripFlow() {
 
               <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-zinc-800">Airport</label>
-                    <select
-                      value={state.airportCode}
-                      onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
-                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                    >
-                      {airports.map((airport) => (
-                        <option key={airport.id} value={airport.id}>
-                          {airport.id} — {airport.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-3 text-xs leading-5 text-slate-600">
-                      <div className="font-medium text-zinc-800">
-                        {selectedAirport.id} guidance
+                  {isAirportTrip && (
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-zinc-800">Airport</label>
+                      <select
+                        value={state.airportCode}
+                        onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                      >
+                        {airports.map((airport) => (
+                          <option key={airport.id} value={airport.id}>
+                            {airport.id} — {airport.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-3 text-xs leading-5 text-slate-600">
+                        <div className="font-medium text-zinc-800">
+                          {selectedAirport.id} guidance
+                        </div>
+                        <div className="mt-1">{airportGuide.note}</div>
                       </div>
-                      <div className="mt-1">{airportGuide.note}</div>
                     </div>
-                  </div>
+                  )}
+                  {isGeneralTrip && (
+                    <div id="destination-field" className="md:col-span-2">
+                      <label className="block text-sm font-medium text-zinc-800">
+                        Where are you going?
+                      </label>
+                      <AddressInput
+                        label="Where are you going?"
+                        value={state.destination}
+                        onChange={(value) =>
+                          setState((s) => ({
+                            ...s,
+                            destination: value,
+                          }))
+                        }
+                        placeholder="Office, stadium, restaurant, hotel, hospital, or address"
+                      />
+                      <p className="mt-2 text-xs text-zinc-500">
+                        For now, PodPaiGo is optimized for Washington State trips.
+                      </p>
+                    </div>
+                  )}
                   <div className="mt-6 text-sm font-medium text-zinc-900">What can you use today?</div>
                   <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {(
@@ -1226,7 +1308,7 @@ export default function TripFlow() {
                     </div>
                   )}
 
-                {(intent === 'flying-out' || intent === 'parking-trip') && (
+                {isAirportTrip && (intent === 'flying-out' || intent === 'parking-trip') && (
                   <>
                     <div id="parking-checkout-field">
                       <label className="block text-sm font-medium text-zinc-800">
@@ -1341,23 +1423,43 @@ export default function TripFlow() {
                   </div>
                 </div>
 
-                {/* {intentCopy(intent).wantsParkingDuration && (
-                  <div className="md:col-span-2">
+                {isGeneralTrip && intentCopy(intent).wantsParkingDuration && (
+                  <div id="parking-duration-field" className="md:col-span-2">
                     <label className="block text-sm font-medium text-zinc-800">
-                      Parking duration (hours)
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                      {isGeneralTrip ? 'How long will you park?' : 'Parking duration'}
+                      <span className="ml-1 text-xs font-normal text-zinc-500">
+                        Optional
+                      </span>
                     </label>
+
                     <input
                       type="number"
                       value={state.parkingDurationHours}
-                      onChange={(e) => setState((s) => ({ ...s, parkingDurationHours: e.target.value }))}
-                      placeholder="e.g., 24 for 1 day"
+                      onChange={(e) =>
+                        setState((s) => ({
+                          ...s,
+                          parkingDurationHours: e.target.value,
+                        }))
+                      }
+                      placeholder={isGeneralTrip ? '8' : '24'}
                       min="0.5"
                       step="0.5"
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                     />
+
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                      {isGeneralTrip
+                        ? 'Use hours for office, downtown, stadium, restaurant, event, or hospital parking. Example: 2, 4, or 8 hours.'
+                        : 'Airport trips can use the return/check-out date above. Use this only if you prefer entering total hours manually.'}
+                    </p>
+
+                    {isGeneralTrip && !state.parkingDurationHours && (
+                      <div className="mt-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                        Default: 8 hours if left blank.
+                      </div>
+                    )}
                   </div>
-                )} */}
+                )}
               </div>
 
               {/* Near-time warning (non-blocking) - only show after user edited/selected time */}

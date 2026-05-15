@@ -12,7 +12,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "lint": "eslint",
-    "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\""
+    "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

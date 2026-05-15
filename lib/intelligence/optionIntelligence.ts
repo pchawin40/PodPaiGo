@@ -53,6 +53,10 @@ function labelFromScore(score: number, low: string, medium: string, high: string
 }
 
 function getTripDateTime(trip: TripData): string {
+  if (trip.type === 'general-trip') {
+    return `${trip.arrivalDate}T${trip.arrivalTime}`;
+  }
+
   if (trip.type === 'one-way-departure') {
     return `${trip.departureDate}T${trip.departureTime}`;
   }

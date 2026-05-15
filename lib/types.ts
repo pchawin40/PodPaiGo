@@ -2,10 +2,27 @@ import { WeatherContext, WeatherImpact } from './weather/types';
 import type { OptionIntelligence } from './intelligence/optionIntelligence';
 
 export type TripType =
+  | 'airport-departure'
+  | 'airport-arrival'
+  | 'airport-round-trip'
+  | 'airport-dropoff-pickup'
+  | 'general-trip'
+  // Legacy names kept so old saved URLs do not break yet
   | 'one-way-departure'
   | 'one-way-arrival'
   | 'round-trip'
   | 'dropoff-pickup';
+
+export type DestinationKind =
+  | 'airport'
+  | 'office'
+  | 'downtown'
+  | 'stadium'
+  | 'event'
+  | 'hospital'
+  | 'restaurant'
+  | 'hotel'
+  | 'general';
 
 export type TransportAvailability = 'car' | 'rideshare' | 'transit' | 'all';
 
@@ -18,14 +35,51 @@ export type TransitPaymentOption = 'normal' | 'orca-pass';
 type BaseTripData = {
   origin: string;
   destination: string;
+
+  /**
+   * airport = flight/airport logic applies
+   * anything else = generic point A → B logic
+   */
+  destinationKind?: DestinationKind;
+
+  /**
+   * Airport-only. Keep optional so general trips do not need it.
+   */
   airportCode?: string;
+
+  /**
+   * Optional display label from autocomplete or user input.
+   */
+  destinationName?: string;
+
+  /**
+   * Optional coordinates from autocomplete/geocoding later.
+   */
+  destinationLat?: number;
+  destinationLng?: number;
+
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;
+
+  /**
+   * Parking is always stored in minutes internally.
+   * Airport UI may display days.
+   * General A → B UI should display hours.
+   */
+  parkingDuration?: number;
   parkingCheckInDate?: string;
+  parkingCheckInTime?: string;
   parkingCheckOutDate?: string;
+  parkingCheckOutTime?: string;
 };
 
 export type TripData =
+  | (BaseTripData & {
+    type: 'general-trip';
+    arrivalDate: string;
+    arrivalTime: string;
+    parkingDuration?: number;
+  })
   | (BaseTripData & {
     type: 'one-way-departure';
     departureDate: string;
@@ -67,7 +121,7 @@ export type PriceDisplay =
   | 'from-per-day'
   | 'unavailable';
 
-export type PriceUnit = 'total' | 'per-day';
+export type PriceUnit = 'total' | 'per-day' | 'per-hour';
 
 export type ParkingPriceSource =
   | 'official-rate'
@@ -105,7 +159,7 @@ export type TransferLeg = {
 export type ParkingOption = {
   id: string;
   name: string;
-  type: 'official' | 'off-airport';
+  type: 'official' | 'off-airport' | 'park-and-ride';
   /** Minutes to park, pay, unload, etc. */
   parkingBufferMinutes?: number;
   /** Minutes from lot/garage to terminal by walk, shuttle, garage connector, or transit. */

@@ -40,6 +40,34 @@ type TransitSegmentLike = {
 
 type TransitSegmentMode = NonNullable<TransitJourney['segments']>[number]['mode'];
 
+function tripTypeValue(tripData: TripData): string {
+  return String(tripData.type);
+}
+
+function isGeneralTrip(tripData: TripData): boolean {
+  return tripTypeValue(tripData) === 'general-trip' || tripData.destinationKind !== 'airport';
+}
+
+function isAirportDepartureTrip(tripData: TripData): boolean {
+  const type = tripTypeValue(tripData);
+  return type === 'airport-departure' || type === 'one-way-departure';
+}
+
+function isAirportArrivalTrip(tripData: TripData): boolean {
+  const type = tripTypeValue(tripData);
+  return type === 'airport-arrival' || type === 'one-way-arrival';
+}
+
+function isAirportRoundTrip(tripData: TripData): boolean {
+  const type = tripTypeValue(tripData);
+  return type === 'airport-round-trip' || type === 'round-trip';
+}
+
+function isAirportDropoffPickupTrip(tripData: TripData): boolean {
+  const type = tripTypeValue(tripData);
+  return type === 'airport-dropoff-pickup' || type === 'dropoff-pickup';
+}
+
 function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
   const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
     .filter(Boolean)
@@ -137,6 +165,10 @@ function genericRideshareFallback(): RideshareOption[] {
 }
 
 function buildTripDateTime(tripData: TripData): string {
+  if (tripData.type === 'general-trip') {
+    return `${tripData.arrivalDate}T${tripData.arrivalTime}`;
+  }
+
   if (tripData.type === 'one-way-arrival') {
     return `${tripData.arrivalDate}T${tripData.arrivalTime}`;
   }
@@ -285,12 +317,23 @@ export class RecommendationEngine {
   }
 
   static async generateRecommendations(tripData: TripData): Promise<Recommendation> {
+    const isGeneralTrip =
+      tripData.type === 'general-trip' || tripData.destinationKind !== 'airport';
+
+    const isAirportTrip = !isGeneralTrip;
+
     const tripDateTime = buildTripDateTime(tripData);
-    const route = tripData.type === 'one-way-arrival' ? 'airport-home' : 'home-airport';
+    const route =
+      isAirportArrivalTrip(tripData)
+        ? 'airport-home'
+        : 'home-airport';
     void route;
 
     const transportAvailability = resolveTransportAvailability(tripData);
-    const plannedAirportArrivalAt = plannedAirportArrivalDateTime(tripData);
+
+    const plannedAirportArrivalAt = isAirportTrip
+      ? plannedAirportArrivalDateTime(tripData)
+      : undefined;
 
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
     const allowRideshare =
@@ -312,7 +355,10 @@ export class RecommendationEngine {
           tripData.origin,
           tripData.destination,
           tripDateTime,
-          calculateParkingDuration(tripData)
+          calculateParkingDuration(tripData),
+          {
+            destinationKind: tripData.destinationKind ?? 'airport',
+          }
         )
         : Promise.resolve([]),
 
@@ -332,13 +378,25 @@ export class RecommendationEngine {
         )
         : Promise.resolve([]),
 
-      this.provider.getTsaEstimate(
-        tripData.destination,
-        tripData.type === 'one-way-departure'
-          ? tripData.securityOption || 'standard'
-          : 'standard',
-        plannedAirportArrivalAt
-      ),
+      isAirportTrip
+        ? this.provider.getTsaEstimate(
+          tripData.destination,
+          isAirportDepartureTrip(tripData) && 'securityOption' in tripData
+            ? tripData.securityOption || 'standard'
+            : 'standard',
+          plannedAirportArrivalAt
+        )
+        : Promise.resolve({
+          destination: tripData.destination,
+          waitTime: 0,
+          status: 'fallback',
+          sourceName: 'Not applicable',
+          trustStatus: 'estimated' as const,
+          lastUpdated: new Date().toISOString(),
+          assumptions: [
+            'TSA/security timing does not apply to general point A to point B trips.',
+          ],
+        } satisfies TsaEstimate),
 
       this.provider.getTrafficEstimate(
         tripData.origin,
@@ -346,14 +404,13 @@ export class RecommendationEngine {
         tripDateTime
       ),
 
-      this.provider.getFlightInfo(
-        tripData.destination,
-        tripDateTime
-      ),
+      isAirportTrip
+        ? this.provider.getFlightInfo(tripData.destination, tripDateTime)
+        : Promise.resolve(null),
 
-      this.provider.getAirportInfo(
-        tripData.destination
-      ),
+      isAirportTrip
+        ? this.provider.getAirportInfo(tripData.destination)
+        : Promise.resolve(null),
     ]);
 
     const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);
@@ -362,10 +419,12 @@ export class RecommendationEngine {
     let rideshare = rawRideshare;
     let transit = rawTransit;
 
-    const airportCode = ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase();
+    const airportCode = isAirportTrip
+      ? ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase()
+      : 'GENERAL';
 
     parking =
-      airportCode === 'SEA'
+      isAirportTrip && airportCode === 'SEA'
         ? parking.map((p) =>
           attachSeaCheckpointRoute(
             p,
@@ -379,13 +438,19 @@ export class RecommendationEngine {
         )
         : parking;
 
-    const weatherResult = await getWeatherForAirport({
-      airportCode,
-      targetDateTime: tripDateTime,
-    }).catch((): WeatherLookupResult => ({
-      weatherImpact: null,
-      context: 'unavailable' as const,
-    }));
+    const weatherResult = isAirportTrip
+      ? await getWeatherForAirport({
+        airportCode,
+        targetDateTime: tripDateTime,
+      }).catch((): WeatherLookupResult => ({
+        weatherImpact: null,
+        context: 'unavailable' as const,
+      }))
+      : {
+        weatherImpact: null,
+        context: 'unavailable' as const,
+      };
+
     const weatherImpact = weatherResult.weatherImpact;
 
     if (airportCode !== 'SEA') {
@@ -428,9 +493,11 @@ export class RecommendationEngine {
 
     const tripDuration = calculateTripDuration(tripData);
     const parkingDuration = calculateParkingDuration(tripData);
-    const availableParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-      ? parking
-      : [];
+    const availableParking =
+      tripData.type === 'general-trip' ||
+        isAirportDepartureTrip(tripData) || isAirportRoundTrip(tripData)
+        ? parking
+        : [];
 
     const parkingWithCosts = availableParking.map(p => ({
       ...p,
@@ -648,8 +715,8 @@ export class RecommendationEngine {
       leaveByTime,
       tripDuration,
       trafficEstimate,
-      flightInfo,
-      locationInfo,
+      flightInfo: flightInfo ?? undefined,
+      locationInfo: locationInfo ?? undefined,
     };
   }
 

@@ -62,7 +62,8 @@ import {
   ParkingOption,
   RideshareEstimateConfidence,
   TransitPaymentOption,
-  TransitOption
+  TransitOption,
+  RideshareOption
 } from '../../lib/types';
 import {
   costOf,
@@ -5561,12 +5562,28 @@ function EditTripForm({
 
     let data: TripData;
 
-    if (initialData.type === 'one-way-departure') {
+    if (initialData.type === 'general-trip') {
+      data = {
+        type: 'general-trip',
+        origin,
+        destination: destination || initialData.destination,
+        destinationKind: initialData.destinationKind || 'general',
+        destinationName: initialData.destinationName || destination || initialData.destination,
+        arrivalDate,
+        arrivalTime,
+        parkingDuration: parkingDuration ?? initialData.parkingDuration,
+        parkingCheckInDate: arrivalDate,
+        parkingCheckInTime: arrivalTime,
+        transportAvailability,
+        transitPayment,
+      };
+    } else if (initialData.type === 'one-way-departure') {
       data = {
         type: initialData.type,
         origin,
         destination,
         airportCode: selectedAirport.id,
+        destinationKind: 'airport',
         departureDate,
         departureTime,
         timeAnchor: (initialData as TripDataWithExtras).timeAnchor || 'flight-departure',
@@ -5590,6 +5607,7 @@ function EditTripForm({
         airportTripTime,
         transportAvailability,
         airportCode: selectedAirport.id,
+        destinationKind: 'airport',
         transitPayment,
       };
     } else if (initialData.type === 'one-way-arrival') {
@@ -5601,14 +5619,16 @@ function EditTripForm({
         arrivalTime,
         transportAvailability,
         airportCode: selectedAirport.id,
+        destinationKind: 'airport',
         transitPayment,
       };
     } else {
       data = {
-        type: initialData.type,
+        type: 'round-trip',
         origin,
         destination,
         airportCode: selectedAirport.id,
+        destinationKind: 'airport',
         departureDate,
         departureTime,
         returnDate,
