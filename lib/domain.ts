@@ -285,7 +285,10 @@ export function rankRecommendations(
 ): RankedRecommendation[] {
   const parkingDuration = calculateParkingDuration(tripData);
   const recommendations: RankedRecommendation[] = [];
-  const useParking = tripData.type === 'one-way-departure' || tripData.type === 'round-trip';
+  const useParking =
+    tripData.type === 'general-trip' ||
+    tripData.type === 'one-way-departure' ||
+    tripData.type === 'round-trip';
 
   const transportPreference =
     'transportAvailability' in tripData ? tripData.transportAvailability || 'all' : 'all';

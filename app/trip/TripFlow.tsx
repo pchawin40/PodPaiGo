@@ -172,13 +172,13 @@ function intentToTripType(intent: Intent): TripType {
     case 'general-trip':
       return 'general-trip';
     case 'flying-out':
-      return 'airport-departure';
+      return 'one-way-departure';
     case 'parking-trip':
-      return 'airport-departure';
+      return 'one-way-departure';
     case 'picking-up':
-      return 'airport-dropoff-pickup';
+      return 'dropoff-pickup';
     case 'dropping-off':
-      return 'airport-dropoff-pickup';
+      return 'dropoff-pickup';
   }
 }
 
@@ -333,7 +333,7 @@ function Card({
 
 export default function TripFlow() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(2);
+  const [step, setStep] = useState<Step>(1);
   const [errors, setErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
@@ -351,7 +351,7 @@ export default function TripFlow() {
 
 
   const [state, setState] = useState<FormState>({
-    intent: 'flying-out',
+    intent: 'general-trip',
     timeAnchor: 'flight-departure',
     transportAvailability: 'all',
     transitPayment: 'normal',
@@ -361,7 +361,7 @@ export default function TripFlow() {
     time: '',
     parkingCheckOutDate: '',
     parkingCheckOutTime: '',
-    parkingDurationHours: '',
+    parkingDurationHours: '8',
     checkingBags: false,
     securityOption: 'standard',
     flightType: 'domestic',
@@ -428,9 +428,9 @@ export default function TripFlow() {
 
     // Parking check-in/check-out required for date-range flows
     if (!state.date) {
-      next.push('Parking check-in date is required.');
+      next.push(state.intent === 'general-trip' ? 'Trip date is required.' : 'Parking check-in date is required.');
     } else if (!normalizedDate) {
-      next.push('Enter the parking check-in date as MM/DD/YYYY or YYYY-MM-DD.');
+      next.push(state.intent === 'general-trip' ? 'Enter the trip date as MM/DD/YYYY or YYYY-MM-DD.' : 'Enter the parking check-in date as MM/DD/YYYY or YYYY-MM-DD.');
     }
 
     if (ENABLE_AIRPORT_TIMING_FIELDS && state.intent !== 'parking-trip' && !state.time) {
@@ -505,7 +505,13 @@ export default function TripFlow() {
       let nextTime = s.time; // preserve if already provided
 
       if (!nextTime) {
-        if (state.intent === 'flying-out') {
+        if (state.intent === 'general-trip') {
+          const d = new Date();
+          d.setMinutes(d.getMinutes() + 60);
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          nextTime = `${hh}:${mm}`;
+        } else if (state.intent === 'flying-out') {
           // keep time blank for flying out to avoid confusion
           nextTime = '';
         } else if (state.intent === 'picking-up' || state.intent === 'parking-trip') {
@@ -530,9 +536,13 @@ export default function TripFlow() {
         date: nextDate,
         time: nextTime,
         parkingCheckOutDate:
-          !parkingCheckoutTouched && isFullDate(nextDate)
+          s.intent !== 'general-trip' && !parkingCheckoutTouched && isFullDate(nextDate)
             ? addDays(nextDate, 7)
             : s.parkingCheckOutDate,
+        parkingDurationHours:
+          s.intent === 'general-trip' && !s.parkingDurationHours
+            ? '8'
+            : s.parkingDurationHours,
       };
     });
 
@@ -575,9 +585,9 @@ export default function TripFlow() {
     }
 
     if (!state.date) {
-      nextFieldErrors.date = 'Select your parking check-in date.';
+      next.push(state.intent === 'general-trip' ? 'Trip date is required.' : 'Parking check-in date is required.');
     } else if (!normalizedDate) {
-      nextFieldErrors.date = 'Use MM/DD/YYYY or YYYY-MM-DD.';
+      next.push(state.intent === 'general-trip' ? 'Enter the trip date as MM/DD/YYYY or YYYY-MM-DD.' : 'Enter the parking check-in date as MM/DD/YYYY or YYYY-MM-DD.');
     }
 
     if (!state.time) {
@@ -594,11 +604,25 @@ export default function TripFlow() {
       const now = new Date();
 
       if (Number.isNaN(combined.getTime())) {
-        nextFieldErrors.date = 'Date or time is invalid.';
-        nextFieldErrors.time = 'Date or time is invalid.';
+        nextFieldErrors.date =
+          state.intent === 'general-trip'
+            ? 'Trip date is invalid.'
+            : 'Parking check-in date is invalid.';
+
+        nextFieldErrors.time =
+          state.intent === 'general-trip'
+            ? 'Arrival time is invalid.'
+            : 'Flight or trip time is invalid.';
       } else if (combined.getTime() < now.getTime()) {
-        nextFieldErrors.date = 'Trip date/time cannot be in the past.';
-        nextFieldErrors.time = 'Trip date/time cannot be in the past.';
+        nextFieldErrors.date =
+          state.intent === 'general-trip'
+            ? 'Trip date/time cannot be in the past.'
+            : 'Parking check-in date/time cannot be in the past.';
+
+        nextFieldErrors.time =
+          state.intent === 'general-trip'
+            ? 'Arrival time cannot be in the past.'
+            : 'Flight or trip time cannot be in the past.';
       }
     }
 
@@ -696,7 +720,7 @@ export default function TripFlow() {
       if (Number.isFinite(minutes) && minutes > 0) {
         params.set('parkingDuration', String(minutes));
       }
-    } else if (tripType === 'airport-departure' || tripType === 'one-way-departure') {
+    } else if (tripType === 'one-way-departure') {
       params.set('departureDate', normalizedDate!);
       params.set('departureTime', state.time || '12:00');
       params.set('parkingCheckInDate', normalizedDate!);
@@ -801,13 +825,13 @@ export default function TripFlow() {
       <main className="mx-auto w-full max-w-3xl flex-1 px-3 py-8 sm:px-4 sm:py-10">
         <div className="mb-8">
           <div className="mb-3 inline-flex rounded-full border border-sky-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase text-sky-800 shadow-sm">
-            Airport trip planner
+            Trip decision helper
           </div>
           <h1 className="text-3xl font-semibold text-slate-950 sm:text-4xl">
-            Plan a calmer {selectedAirport.id} trip
+            Compare the best way to get there
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-            Tell us what you’re doing — we’ll compare parking, rides, and transit and give you a clear “leave by” time.
+            Enter where you’re starting and where you’re going. PodPaiGo compares driving, parking, rideshare, transit, and park & ride when available.
           </p>
         </div>
 
@@ -828,21 +852,24 @@ export default function TripFlow() {
         {step === 1 && (
           <section className="space-y-6">
             <div>
-              <h2 className="text-lg font-semibold text-zinc-900">What are you doing today?</h2>
-              <p className="mt-1 text-sm text-zinc-600">Choose one to get the right defaults.</p>
+              <h2 className="text-lg font-semibold text-zinc-900">What kind of trip are you planning?</h2>
+              <p className="mt-1 text-sm text-zinc-600">Choose one so PodPaiGo can use the right timing and parking logic.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Card
-                title="Flying out"
-                subtitle="Catching a flight? Compare parking, rideshare, and transit."
-                selected={state.intent === 'flying-out'}
+                title="Compare a local trip"
+                subtitle="Going to work, downtown, an event, hotel, hospital, restaurant, or anywhere in WA."
+                selected={state.intent === 'general-trip'}
                 onClick={() =>
                   setState((s) => ({
                     ...s,
                     intent: 'general-trip',
                     date: '',
                     time: '',
+                    destination: '',
+                    destinationKind: 'general',
+                    parkingDurationHours: '8',
                   }))
                 }
               />
@@ -1200,9 +1227,11 @@ export default function TripFlow() {
                   {/* 2) time input second */}
                   <div id="time-field" className="mt-4">
                     <label className="block text-sm font-medium text-zinc-800">
-                      {state.timeAnchor === 'flight-departure'
-                        ? 'Flight departure time'
-                        : 'Airport arrival time'}
+                      {isGeneralTrip
+                        ? 'Arrival time'
+                        : state.timeAnchor === 'flight-departure'
+                          ? 'Flight departure time'
+                          : 'Airport arrival time'}
                     </label>
 
                     <input
@@ -1232,9 +1261,11 @@ export default function TripFlow() {
 
                 <div id="date-field">
                   <label className="block text-sm font-medium text-zinc-800">
-                    {(intent === 'flying-out' || intent === 'parking-trip')
-                      ? 'Parking start date'
-                      : 'Date'}
+                    {isGeneralTrip
+                      ? 'Trip date'
+                      : (intent === 'flying-out' || intent === 'parking-trip')
+                        ? 'Parking start date'
+                        : 'Date'}
                   </label>
                   <div className="mt-2">
                     <input
@@ -1408,20 +1439,22 @@ export default function TripFlow() {
                   )}
                 </div>
 
-                <div className="md:col-span-2">
-                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
-                    <div className="text-sm font-medium text-zinc-900">Destination</div>
-                    <div className="mt-1 text-base font-semibold text-zinc-900">
-                      {(getAirportById(state.airportCode) || getAirportById('SEA')!)?.destinationName}
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-600">
-                      {airportGuide.note || 'We’ll route you to the correct check-in area.'}
-                    </div>
-                    <div className="mt-2 text-xs text-zinc-500">
-                      Rideshare/taxi drop-off: {airportGuide.rideshareDestinationName}
+                {isAirportTrip && (
+                  <div className="md:col-span-2">
+                    <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                      <div className="text-sm font-medium text-zinc-900">Destination</div>
+                      <div className="mt-1 text-base font-semibold text-zinc-900">
+                        {(getAirportById(state.airportCode) || getAirportById('SEA')!)?.destinationName}
+                      </div>
+                      <div className="mt-1 text-sm text-zinc-600">
+                        {airportGuide.note || 'We’ll route you to the correct check-in area.'}
+                      </div>
+                      <div className="mt-2 text-xs text-zinc-500">
+                        Rideshare/taxi drop-off: {airportGuide.rideshareDestinationName}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {isGeneralTrip && intentCopy(intent).wantsParkingDuration && (
                   <div id="parking-duration-field" className="md:col-span-2">
