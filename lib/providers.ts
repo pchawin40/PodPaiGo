@@ -1025,18 +1025,36 @@ export class MockProvider implements DataProvider {
         };
 
         if (!routeEstimate) {
-          const optionWithDuration = option as ParkingOption & { duration?: number };
+          const estimatedDriveMinutes =
+            !destinationDriveUnavailable && typeof destinationRouteEstimate.duration === 'number'
+              ? destinationRouteEstimate.duration
+              : undefined;
 
           return {
             ...option,
             ...commonRouteFields,
-            duration: optionWithDuration.duration ?? option.distance,
-            routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
-            routeUnavailable: false,
-            routeUnavailableReason: option.routeUnavailableReason,
+
+            // Do not fall back to provider distance: 10.
+            // Deferred parking routes should use the origin → airport estimate,
+            // because these lots are near the airport and that is much closer to reality.
+            distance: estimatedDriveMinutes ?? option.distance ?? 0,
+            duration: estimatedDriveMinutes ?? option.distance ?? 0,
+            routeToParkingMinutes: estimatedDriveMinutes,
+
+            routeTrustStatus: estimatedDriveMinutes
+              ? destinationRouteEstimate.trustStatus
+              : option.routeTrustStatus ?? option.trustStatus,
+
+            routeUnavailable: !estimatedDriveMinutes,
+            routeUnavailableReason: estimatedDriveMinutes
+              ? undefined
+              : option.routeUnavailableReason,
+
             assumptions: [
               ...option.assumptions,
-              'Live route calculation deferred for parking options outside the initially visible set.',
+              estimatedDriveMinutes
+                ? `Parking lot route deferred; using origin → airport route estimate: ${estimatedDriveMinutes} min drive.`
+                : 'Live route calculation deferred for this parking option; open map directions to confirm drive time.',
             ],
           };
         }
@@ -1065,8 +1083,23 @@ export class MockProvider implements DataProvider {
           ...commonRouteFields,
 
           // Use live route when available. If live route fails, keep provider option visible.
-          distance: liveDriveMinutes ?? option.distance ?? 0,
-          duration: liveDriveMinutes ?? option.distance ?? 0,
+          distance:
+            liveDriveMinutes ??
+            (!destinationDriveUnavailable && typeof destinationRouteEstimate.duration === 'number'
+              ? destinationRouteEstimate.duration
+              : option.distance ?? 0),
+
+          duration:
+            liveDriveMinutes ??
+            (!destinationDriveUnavailable && typeof destinationRouteEstimate.duration === 'number'
+              ? destinationRouteEstimate.duration
+              : option.distance ?? 0),
+
+          routeToParkingMinutes:
+            liveDriveMinutes ??
+            (!destinationDriveUnavailable && typeof destinationRouteEstimate.duration === 'number'
+              ? destinationRouteEstimate.duration
+              : undefined),
 
           routeTrustStatus: routeFailed
             ? option.routeTrustStatus ?? option.trustStatus
