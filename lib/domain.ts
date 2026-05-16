@@ -3,6 +3,7 @@ import {
   isParkingRouteUnavailable,
   parkingRouteUnavailableReason,
 } from './parking/routeStatus';
+import { getParkingTotalMinutes } from './parking/routeMinutes';
 
 
 /**
@@ -101,12 +102,12 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
   return parking.type === 'off-airport' ? 12 : 4;
 }
 
-function getParkingTotalMinutes(parking: ParkingOption): number {
-  const driveMinutes = parking.distance || 0;
-  const parkingBufferMinutes = parking.parkingBufferMinutes ?? 0;
-  const transferToTerminalMinutes = parking.transferToTerminalMinutes ?? 0;
-  return driveMinutes + parkingBufferMinutes + transferToTerminalMinutes;
-}
+// function getParkingTotalMinutes(parking: ParkingOption): number {
+//   const driveMinutes = parking.distance || 0;
+//   const parkingBufferMinutes = parking.parkingBufferMinutes ?? 0;
+//   const transferToTerminalMinutes = parking.transferToTerminalMinutes ?? 0;
+//   return driveMinutes + parkingBufferMinutes + transferToTerminalMinutes;
+// }
 
 function getStressScore(
   type: 'parking' | 'rideshare' | 'transit',

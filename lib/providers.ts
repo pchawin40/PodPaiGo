@@ -280,8 +280,13 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
 }
 
 export class MockTrafficProvider implements TrafficProvider {
-  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+  async getTrafficEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string
+  ): Promise<TrafficEstimate> {
     const route = normalizeTrafficRoute(origin, destination);
+
     if (isClearlyNonDrivableRoute(origin, destination)) {
       return unavailableTrafficEstimate(
         route,
@@ -290,16 +295,17 @@ export class MockTrafficProvider implements TrafficProvider {
       );
     }
 
-    // Mock traffic data
-    return mockTrafficEstimates[route] || {
+    const fallbackEstimate = mockTrafficEstimates[route];
+
+    if (fallbackEstimate) {
+      return fallbackEstimate;
+    }
+
+    return unavailableTrafficEstimate(
       route,
-      duration: 25,
-      congestion: 'medium',
-      trustStatus: 'estimated',
-      sourceName: 'Mock traffic model',
-      lastUpdated: new Date().toISOString(),
-      assumptions: ['Fallback estimate', 'Based on typical traffic patterns'],
-    };
+      'Mock traffic model',
+      'No live route available. Avoid showing a fake fallback drive time.'
+    );
   }
 }
 

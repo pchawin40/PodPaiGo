@@ -255,6 +255,15 @@ export type ParkingOption = {
   shuttleReliabilityLabel?: string;
 
   trueTotalCost?: number;
+
+  routeToParkingMinutes?: number | null;
+  routeToParkingDistanceMeters?: number | null;
+  routeCalculationStatus?: 'lot-live' | 'destination-fallback' | 'deferred' | 'unavailable';
+
+  quotedTotalPrice?: number | null;
+  quotedUnitPrice?: number | null;
+  quoteStatus?: 'live' | 'cached' | 'estimated' | 'unknown';
+  quoteProvider?: 'ParkWhiz' | 'AirportParkingReservations' | 'Google Places' | 'Official';
 };
 
 export type ParkingGoogleReview = {
