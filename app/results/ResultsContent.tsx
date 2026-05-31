@@ -41,6 +41,7 @@ import {
   parkingRouteUnavailableReason,
   withStableParkingRouteStatus,
 } from '../../lib/parking/routeStatus';
+import { RIDESHARE_ESTIMATE_DISCLAIMER } from '../../lib/rideshare/estimate';
 
 import {
   parseHHMMToMinutes,
@@ -319,13 +320,9 @@ function rideshareConfidenceMeta(
 ): { label: string; className: string } | null {
   switch (confidence) {
     case 'live-route-estimate':
-      return {
-        label: 'Live-route estimate',
-        className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-      };
     case 'baseline-estimate':
       return {
-        label: 'Baseline estimate',
+        label: 'Estimated',
         className: 'bg-amber-50 text-amber-900 border-amber-200',
       };
     case 'unavailable':
@@ -336,6 +333,22 @@ function rideshareConfidenceMeta(
     default:
       return null;
   }
+}
+
+function ridesharePricePrimary(option: AppOption): string | null {
+  if (typeof option.priceMin === 'number' && typeof option.priceMax === 'number') {
+    return `Estimated $${option.priceMin}–$${option.priceMax} rideshare range`;
+  }
+
+  if (option.priceRangeLabel) {
+    return `Estimated ${option.priceRangeLabel} rideshare range`;
+  }
+
+  if (typeof option.price === 'number' && option.price > 0) {
+    return `Estimated ${formatMoney(option.price)} rideshare range`;
+  }
+
+  return null;
 }
 
 function getTripAirportCode(tripData: TripData | null): string {
@@ -646,17 +659,15 @@ function PricingLinksSection({
         const primaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
             ? '$0'
-            : isRideSection && it.priceRangeLabel
-              ? `Est. ${it.priceRangeLabel}`
-              : isRideSection && typeof it.price === 'number'
-                ? `Est. ${formatMoney(it.price)}`
-                : price.primary;
+            : isRideSection
+              ? ridesharePricePrimary(it as AppOption) || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
+              : price.primary;
 
         const secondaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
             ? 'Covered by ORCA pass'
             : isRideSection
-              ? it.priceNote || 'Prices vary by demand, traffic, and pickup time'
+              ? it.priceNote || RIDESHARE_ESTIMATE_DISCLAIMER
               : it.priceNote || price.secondary;
 
         const primaryCta =
@@ -1495,8 +1506,8 @@ function OptionCard({
     : null;
 
   const nonParkingPrice =
-    item.type === 'rideshare' && opt.priceRangeLabel
-      ? `Est. ${opt.priceRangeLabel}`
+    item.type === 'rideshare'
+      ? ridesharePricePrimary(opt) || visiblePrice.primary
       : typeof opt.price === 'number' && opt.price > 0
         ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
         : visiblePrice.primary;
@@ -1558,10 +1569,18 @@ function OptionCard({
               )}
             </div>
 
+            {item.type === 'rideshare' && (
+              <p className="mt-1 text-xs text-zinc-600">
+                {opt.priceNote || RIDESHARE_ESTIMATE_DISCLAIMER}
+              </p>
+            )}
+
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
-                {trust.label}
-              </div>
+              {item.type !== 'rideshare' && (
+                <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
+                  {trust.label}
+                </div>
+              )}
 
               {rideshareConfidence && (
                 <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + rideshareConfidence.className}>

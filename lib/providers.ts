@@ -1095,10 +1095,7 @@ export class MockProvider implements DataProvider {
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
-
-    if (routeEstimate.routeUnavailable) {
-      return [];
-    }
+    const airport = resolveAirportFromDestination(destination);
 
     const directionsUrl = this.buildGoogleDirectionsLink(origin, routeDestination);
     const taxiQuery = origin?.trim() ? `Taxi near ${origin}` : 'Taxi near airport';
@@ -1108,7 +1105,7 @@ export class MockProvider implements DataProvider {
       'dropoff[formatted_address]': routeDestination,
     }).toString()}`;
 
-    const rideshareOptions = buildRideshareEstimateOptions({
+    return buildRideshareEstimateOptions({
       origin,
       destination: routeDestination,
       routeEstimate,
@@ -1116,18 +1113,9 @@ export class MockProvider implements DataProvider {
       uberUrl,
       lyftUrl: 'https://lyft.com/ride',
       taxiSearchUrl: this.buildGoogleMapsSearchLink(taxiQuery),
+      departureDateTime: dateTime,
+      airportCode: airport?.id,
     });
-
-    // if (process.env.NODE_ENV === 'development' && process.env.DEBUG_LOGS === 'true') {
-    //   console.log('[Rideshare estimates]', {
-    //     routeTrustStatus: routeEstimate.trustStatus,
-    //     duration: routeEstimate.duration,
-    //     distanceMeters: routeEstimate.distanceMeters,
-    //     optionCount: rideshareOptions.length,
-    //   });
-    // }
-
-    return rideshareOptions;
   }
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {

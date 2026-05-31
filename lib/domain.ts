@@ -453,7 +453,7 @@ export function rankRecommendations(
     if (rideshare.duration < 30) reasons.push('Quick ride');
     if (rideshare.availability > 80) reasons.push('High availability');
     if (rideshare.rideshareEstimateConfidence === 'live-route-estimate') {
-      reasons.push('Estimated from live route');
+      reasons.push('Route-based price estimate');
     }
     if (rideshare.trustStatus === 'live') reasons.push('Live availability');
     if (rideshare.trustStatus === 'verified-source') reasons.push('Verified source');
