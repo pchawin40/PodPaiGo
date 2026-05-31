@@ -101,9 +101,9 @@ alter table public.parking_price_snapshots
   alter column expires_at type timestamptz
   using expires_at::timestamptz;
 
-alter table public.parking_price_snapshots
-  alter column id type bigint
-  using id::bigint;
+-- alter table public.parking_price_snapshots
+--   alter column id type bigint
+--   using id::bigint;
 
 do $$
 begin

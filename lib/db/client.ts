@@ -35,7 +35,7 @@ export function getDb(): Pool {
       : { rejectUnauthorized: false },
 
     // Vercel/serverless-safe. Use Supabfase Transaction Pooler, usually port 6543.
-    max: 1,
+    max: Number(process.env.PARKING_DB_POOL_MAX || 4),
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 5_000,
   });

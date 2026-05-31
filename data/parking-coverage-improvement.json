@@ -1,132 +1,132 @@
 {
   "baselineGeneratedAt": "2026-05-31T05:26:50.768Z",
-  "afterGeneratedAt": "2026-05-31T05:58:04.345Z",
+  "afterGeneratedAt": "2026-05-31T06:29:17.464Z",
   "airports": [
     {
       "airportCode": "SEA",
       "gradeBefore": "C",
       "gradeAfter": "A",
       "mergedBefore": 9,
-      "mergedAfter": 15,
-      "mergedDelta": 6,
+      "mergedAfter": 36,
+      "mergedDelta": 27,
       "liveBefore": 8,
       "liveAfter": 14,
       "liveDelta": 6,
       "providerCountBefore": 2,
-      "providerCountAfter": 4,
+      "providerCountAfter": 6,
       "improved": true
     },
     {
       "airportCode": "PAE",
       "gradeBefore": "F",
-      "gradeAfter": "F",
+      "gradeAfter": "C",
       "mergedBefore": 1,
-      "mergedAfter": 1,
-      "mergedDelta": 0,
+      "mergedAfter": 28,
+      "mergedDelta": 27,
       "liveBefore": 0,
       "liveAfter": 0,
       "liveDelta": 0,
       "providerCountBefore": 1,
-      "providerCountAfter": 1,
-      "improved": false
+      "providerCountAfter": 3,
+      "improved": true
     },
     {
       "airportCode": "LAX",
       "gradeBefore": "A",
       "gradeAfter": "A",
       "mergedBefore": 37,
-      "mergedAfter": 37,
-      "mergedDelta": 0,
+      "mergedAfter": 52,
+      "mergedDelta": 15,
       "liveBefore": 36,
       "liveAfter": 36,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "JFK",
       "gradeBefore": "B",
-      "gradeAfter": "B",
+      "gradeAfter": "A",
       "mergedBefore": 18,
-      "mergedAfter": 18,
-      "mergedDelta": 0,
+      "mergedAfter": 38,
+      "mergedDelta": 20,
       "liveBefore": 17,
       "liveAfter": 17,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "ORD",
       "gradeBefore": "C",
-      "gradeAfter": "C",
+      "gradeAfter": "A",
       "mergedBefore": 9,
-      "mergedAfter": 9,
-      "mergedDelta": 0,
+      "mergedAfter": 24,
+      "mergedDelta": 15,
       "liveBefore": 8,
       "liveAfter": 8,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "ATL",
       "gradeBefore": "C",
-      "gradeAfter": "C",
+      "gradeAfter": "A",
       "mergedBefore": 8,
-      "mergedAfter": 8,
-      "mergedDelta": 0,
+      "mergedAfter": 30,
+      "mergedDelta": 22,
       "liveBefore": 7,
       "liveAfter": 7,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "DFW",
       "gradeBefore": "C",
-      "gradeAfter": "C",
+      "gradeAfter": "A",
       "mergedBefore": 7,
-      "mergedAfter": 7,
-      "mergedDelta": 0,
+      "mergedAfter": 23,
+      "mergedDelta": 16,
       "liveBefore": 6,
       "liveAfter": 6,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "LAS",
       "gradeBefore": "B",
-      "gradeAfter": "B",
+      "gradeAfter": "A",
       "mergedBefore": 13,
-      "mergedAfter": 13,
-      "mergedDelta": 0,
+      "mergedAfter": 25,
+      "mergedDelta": 12,
       "liveBefore": 12,
       "liveAfter": 12,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     },
     {
       "airportCode": "MCO",
       "gradeBefore": "B",
-      "gradeAfter": "B",
+      "gradeAfter": "A",
       "mergedBefore": 16,
-      "mergedAfter": 16,
-      "mergedDelta": 0,
+      "mergedAfter": 35,
+      "mergedDelta": 19,
       "liveBefore": 15,
       "liveAfter": 15,
       "liveDelta": 0,
       "providerCountBefore": 2,
-      "providerCountAfter": 2,
-      "improved": false
+      "providerCountAfter": 5,
+      "improved": true
     }
   ],
   "belowGradeBBefore": [
@@ -137,19 +137,16 @@
     "DFW"
   ],
   "belowGradeBAfter": [
-    "PAE",
-    "ORD",
-    "ATL",
-    "DFW"
+    "PAE"
   ],
   "newlyAboveGradeB": [
-    "SEA"
-  ],
-  "stillBelowGradeB": [
-    "PAE",
+    "SEA",
     "ORD",
     "ATL",
     "DFW"
   ],
-  "summary": "1/9 airports improved; 1 moved to grade B or above; 4 still below B."
+  "stillBelowGradeB": [
+    "PAE"
+  ],
+  "summary": "9/9 airports improved; 4 moved to grade B or above; 1 still below B."
 }

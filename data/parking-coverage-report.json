@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-31T05:58:04.345Z",
+  "generatedAt": "2026-05-31T06:29:17.464Z",
   "checkInDate": "2026-06-14",
   "checkOutDate": "2026-06-17",
   "environment": {
@@ -13,19 +13,19 @@
       "airportCode": "SEA",
       "airportLabel": "Seattle–Tacoma International Airport",
       "destination": "Seattle-Tacoma International Airport (SEA), 17801 International Blvd, SeaTac, WA 98158",
-      "providerCount": 4,
-      "parkingOptionCount": 20,
+      "providerCount": 6,
+      "parkingOptionCount": 80,
       "livePriceCount": 14,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 22,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 15,
+      "mergedOptionCount": 36,
       "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 20,
         "parkwhiz": 8,
-        "google": 0,
-        "apr": 5,
-        "snapshot": 6,
+        "google": 30,
+        "apr": 8,
+        "snapshot": 13,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -33,67 +33,64 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 100,
-          "resultsReturned": 0,
+          "searchDurationMs": 627,
+          "resultsReturned": 20,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:01.469Z"
+          "estimatedPriceCount": 20,
+          "lastSuccess": "2026-05-31T06:29:09.466Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 568,
+          "searchDurationMs": 704,
           "resultsReturned": 8,
           "livePriceCount": 8,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:01.949Z"
+          "lastSuccess": "2026-05-31T06:29:09.548Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 280,
-          "resultsReturned": 0,
+          "searchDurationMs": 696,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:01.661Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:09.542Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 83,
-          "resultsReturned": 5,
+          "searchDurationMs": 682,
+          "resultsReturned": 8,
           "livePriceCount": 0,
-          "estimatedPriceCount": 5,
-          "lastSuccess": "2026-05-31T05:58:01.477Z"
+          "estimatedPriceCount": 8,
+          "lastSuccess": "2026-05-31T06:29:09.533Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 84,
-          "resultsReturned": 6,
-          "livePriceCount": 6,
+          "searchDurationMs": 654,
+          "resultsReturned": 13,
+          "livePriceCount": 13,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:01.479Z"
+          "lastSuccess": "2026-05-31T06:29:09.506Z"
         },
         {
           "provider": "marketplace",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 43,
+          "searchDurationMs": 16,
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:01.438Z"
+          "lastSuccess": "2026-05-31T06:29:08.868Z"
         }
       ],
-      "missingProviders": [
-        "inventory",
-        "google"
-      ],
+      "missingProviders": [],
       "notes": [
         "APR cache available for SEA only.",
         "Marketplace adds link-only SpotHero card (not live inventory)."
@@ -103,17 +100,17 @@
       "airportCode": "PAE",
       "airportLabel": "Seattle Paine Field International Airport",
       "destination": "Paine Field Passenger Terminal (PAE), 3308 100th St SW, Everett, WA 98204",
-      "providerCount": 1,
-      "parkingOptionCount": 1,
+      "providerCount": 3,
+      "parkingOptionCount": 35,
       "livePriceCount": 0,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 28,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 1,
-      "coverageGrade": "F",
+      "mergedOptionCount": 28,
+      "coverageGrade": "C",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 4,
         "parkwhiz": 0,
-        "google": 0,
+        "google": 30,
         "apr": 0,
         "snapshot": 0,
         "marketplace": 1
@@ -123,67 +120,65 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 22,
-          "resultsReturned": 0,
+          "searchDurationMs": 91,
+          "resultsReturned": 4,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.014Z"
+          "estimatedPriceCount": 4,
+          "lastSuccess": "2026-05-31T06:29:10.114Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 122,
+          "searchDurationMs": 409,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.114Z"
+          "lastSuccess": "2026-05-31T06:29:10.432Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 131,
-          "resultsReturned": 0,
+          "searchDurationMs": 273,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.123Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:10.296Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 7,
+          "searchDurationMs": 1,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.002Z"
+          "lastSuccess": "2026-05-31T06:29:10.025Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 22,
+          "searchDurationMs": 155,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.017Z"
+          "lastSuccess": "2026-05-31T06:29:10.179Z"
         },
         {
           "provider": "marketplace",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 7,
+          "searchDurationMs": 1,
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:02.002Z"
+          "lastSuccess": "2026-05-31T06:29:10.025Z"
         }
       ],
       "missingProviders": [
-        "inventory",
         "parkwhiz",
-        "google",
         "apr",
         "snapshot"
       ],
@@ -197,19 +192,19 @@
       "airportCode": "LAX",
       "airportLabel": "Los Angeles International Airport",
       "destination": "Los Angeles International Airport (LAX), Los Angeles, CA",
-      "providerCount": 2,
-      "parkingOptionCount": 37,
+      "providerCount": 5,
+      "parkingOptionCount": 107,
       "livePriceCount": 36,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 16,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 37,
+      "mergedOptionCount": 52,
       "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 14,
         "parkwhiz": 36,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 26,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -217,51 +212,51 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 12,
-          "resultsReturned": 0,
+          "searchDurationMs": 92,
+          "resultsReturned": 14,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.274Z"
+          "estimatedPriceCount": 14,
+          "lastSuccess": "2026-05-31T06:29:10.771Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 387,
+          "searchDurationMs": 238,
           "resultsReturned": 36,
           "livePriceCount": 36,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.649Z"
+          "lastSuccess": "2026-05-31T06:29:10.917Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 34,
-          "resultsReturned": 0,
+          "searchDurationMs": 582,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.296Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:11.261Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.265Z"
+          "lastSuccess": "2026-05-31T06:29:10.680Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 12,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 113,
+          "resultsReturned": 26,
+          "livePriceCount": 26,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.276Z"
+          "lastSuccess": "2026-05-31T06:29:10.793Z"
         },
         {
           "provider": "marketplace",
@@ -271,14 +266,11 @@
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:02.264Z"
+          "lastSuccess": "2026-05-31T06:29:10.680Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -289,19 +281,19 @@
       "airportCode": "JFK",
       "airportLabel": "John F. Kennedy International Airport",
       "destination": "John F. Kennedy International Airport (JFK), New York, NY",
-      "providerCount": 2,
-      "parkingOptionCount": 18,
+      "providerCount": 5,
+      "parkingOptionCount": 84,
       "livePriceCount": 17,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 21,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 18,
-      "coverageGrade": "B",
+      "mergedOptionCount": 38,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 19,
         "parkwhiz": 17,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 17,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -309,68 +301,65 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 50,
-          "resultsReturned": 0,
+          "searchDurationMs": 83,
+          "resultsReturned": 19,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.759Z"
+          "estimatedPriceCount": 19,
+          "lastSuccess": "2026-05-31T06:29:11.888Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 266,
+          "searchDurationMs": 172,
           "resultsReturned": 17,
           "livePriceCount": 17,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.975Z"
+          "lastSuccess": "2026-05-31T06:29:11.977Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 39,
-          "resultsReturned": 0,
+          "searchDurationMs": 289,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.748Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:12.094Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.713Z"
+          "lastSuccess": "2026-05-31T06:29:11.806Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 49,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 170,
+          "resultsReturned": 17,
+          "livePriceCount": 17,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:02.761Z"
+          "lastSuccess": "2026-05-31T06:29:11.976Z"
         },
         {
           "provider": "marketplace",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:02.713Z"
+          "lastSuccess": "2026-05-31T06:29:11.806Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -381,19 +370,19 @@
       "airportCode": "ORD",
       "airportLabel": "Chicago O'Hare International Airport",
       "destination": "Chicago O'Hare International Airport (ORD), Chicago, IL",
-      "providerCount": 2,
-      "parkingOptionCount": 9,
+      "providerCount": 5,
+      "parkingOptionCount": 62,
       "livePriceCount": 8,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 16,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 9,
-      "coverageGrade": "C",
+      "mergedOptionCount": 24,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 15,
         "parkwhiz": 8,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 8,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -401,31 +390,31 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 13,
-          "resultsReturned": 0,
+          "searchDurationMs": 1208,
+          "resultsReturned": 15,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.032Z"
+          "estimatedPriceCount": 15,
+          "lastSuccess": "2026-05-31T06:29:13.566Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 195,
+          "searchDurationMs": 1287,
           "resultsReturned": 8,
           "livePriceCount": 8,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.214Z"
+          "lastSuccess": "2026-05-31T06:29:13.645Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 37,
-          "resultsReturned": 0,
+          "searchDurationMs": 294,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.056Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:12.652Z"
         },
         {
           "provider": "apr",
@@ -435,34 +424,31 @@
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.021Z"
+          "lastSuccess": "2026-05-31T06:29:12.359Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 13,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 1375,
+          "resultsReturned": 8,
+          "livePriceCount": 8,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.034Z"
+          "lastSuccess": "2026-05-31T06:29:13.733Z"
         },
         {
           "provider": "marketplace",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 0,
+          "searchDurationMs": 1,
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:03.021Z"
+          "lastSuccess": "2026-05-31T06:29:12.359Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -473,19 +459,19 @@
       "airportCode": "ATL",
       "airportLabel": "Hartsfield Jackson Atlanta International Airport",
       "destination": "Hartsfield Jackson Atlanta International Airport (ATL), Atlanta, GA",
-      "providerCount": 2,
-      "parkingOptionCount": 8,
+      "providerCount": 5,
+      "parkingOptionCount": 62,
       "livePriceCount": 7,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 23,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 8,
-      "coverageGrade": "C",
+      "mergedOptionCount": 30,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 18,
         "parkwhiz": 7,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 6,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -493,31 +479,31 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 4,
-          "resultsReturned": 0,
+          "searchDurationMs": 580,
+          "resultsReturned": 18,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.255Z"
+          "estimatedPriceCount": 18,
+          "lastSuccess": "2026-05-31T06:29:14.643Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 173,
+          "searchDurationMs": 656,
           "resultsReturned": 7,
           "livePriceCount": 7,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.424Z"
+          "lastSuccess": "2026-05-31T06:29:14.719Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 35,
-          "resultsReturned": 0,
+          "searchDurationMs": 309,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.286Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:14.372Z"
         },
         {
           "provider": "apr",
@@ -527,17 +513,17 @@
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.253Z"
+          "lastSuccess": "2026-05-31T06:29:14.064Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 4,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 739,
+          "resultsReturned": 6,
+          "livePriceCount": 6,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.257Z"
+          "lastSuccess": "2026-05-31T06:29:14.803Z"
         },
         {
           "provider": "marketplace",
@@ -547,14 +533,11 @@
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:03.253Z"
+          "lastSuccess": "2026-05-31T06:29:14.064Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -565,19 +548,19 @@
       "airportCode": "DFW",
       "airportLabel": "Dallas Fort Worth International Airport",
       "destination": "Dallas Fort Worth International Airport (DFW), Dallas-Fort Worth, TX",
-      "providerCount": 2,
-      "parkingOptionCount": 7,
+      "providerCount": 5,
+      "parkingOptionCount": 56,
       "livePriceCount": 6,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 17,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 7,
-      "coverageGrade": "C",
+      "mergedOptionCount": 23,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 13,
         "parkwhiz": 6,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 6,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -585,68 +568,65 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 5,
-          "resultsReturned": 0,
+          "searchDurationMs": 179,
+          "resultsReturned": 13,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.472Z"
+          "estimatedPriceCount": 13,
+          "lastSuccess": "2026-05-31T06:29:15.266Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 239,
+          "searchDurationMs": 255,
           "resultsReturned": 6,
           "livePriceCount": 6,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.707Z"
+          "lastSuccess": "2026-05-31T06:29:15.342Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 37,
-          "resultsReturned": 0,
+          "searchDurationMs": 496,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.505Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:15.583Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.470Z"
+          "lastSuccess": "2026-05-31T06:29:15.088Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 5,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 341,
+          "resultsReturned": 6,
+          "livePriceCount": 6,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.474Z"
+          "lastSuccess": "2026-05-31T06:29:15.429Z"
         },
         {
           "provider": "marketplace",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:03.470Z"
+          "lastSuccess": "2026-05-31T06:29:15.088Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -657,19 +637,19 @@
       "airportCode": "LAS",
       "airportLabel": "Harry Reid International Airport",
       "destination": "Harry Reid International Airport (LAS), Las Vegas, NV",
-      "providerCount": 2,
-      "parkingOptionCount": 13,
+      "providerCount": 5,
+      "parkingOptionCount": 62,
       "livePriceCount": 12,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 13,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 13,
-      "coverageGrade": "B",
+      "mergedOptionCount": 25,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 7,
         "parkwhiz": 12,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 12,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -677,51 +657,51 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 5,
-          "resultsReturned": 0,
+          "searchDurationMs": 98,
+          "resultsReturned": 7,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.756Z"
+          "estimatedPriceCount": 7,
+          "lastSuccess": "2026-05-31T06:29:16.139Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 304,
+          "searchDurationMs": 107,
           "resultsReturned": 12,
           "livePriceCount": 12,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.055Z"
+          "lastSuccess": "2026-05-31T06:29:16.148Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 45,
-          "resultsReturned": 0,
+          "searchDurationMs": 275,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.796Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:16.316Z"
         },
         {
           "provider": "apr",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 1,
+          "searchDurationMs": 0,
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.753Z"
+          "lastSuccess": "2026-05-31T06:29:16.042Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 7,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 182,
+          "resultsReturned": 12,
+          "livePriceCount": 12,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:03.759Z"
+          "lastSuccess": "2026-05-31T06:29:16.224Z"
         },
         {
           "provider": "marketplace",
@@ -731,14 +711,11 @@
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:03.753Z"
+          "lastSuccess": "2026-05-31T06:29:16.042Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -749,19 +726,19 @@
       "airportCode": "MCO",
       "airportLabel": "Orlando International Airport",
       "destination": "Orlando International Airport (MCO), Orlando, FL",
-      "providerCount": 2,
-      "parkingOptionCount": 16,
+      "providerCount": 5,
+      "parkingOptionCount": 79,
       "livePriceCount": 15,
-      "estimatedPriceCount": 1,
+      "estimatedPriceCount": 20,
       "unknownPriceCount": 0,
-      "mergedOptionCount": 16,
-      "coverageGrade": "B",
+      "mergedOptionCount": 35,
+      "coverageGrade": "A",
       "providerBreakdown": {
-        "inventory": 0,
+        "inventory": 19,
         "parkwhiz": 15,
-        "google": 0,
+        "google": 30,
         "apr": 0,
-        "snapshot": 0,
+        "snapshot": 14,
         "marketplace": 1
       },
       "providerDiagnostics": [
@@ -769,31 +746,31 @@
           "provider": "inventory",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 16,
-          "resultsReturned": 0,
+          "searchDurationMs": 87,
+          "resultsReturned": 19,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.109Z"
+          "estimatedPriceCount": 19,
+          "lastSuccess": "2026-05-31T06:29:16.654Z"
         },
         {
           "provider": "parkwhiz",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 204,
+          "searchDurationMs": 165,
           "resultsReturned": 15,
           "livePriceCount": 15,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.297Z"
+          "lastSuccess": "2026-05-31T06:29:16.732Z"
         },
         {
           "provider": "google",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 42,
-          "resultsReturned": 0,
+          "searchDurationMs": 456,
+          "resultsReturned": 30,
           "livePriceCount": 0,
-          "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.135Z"
+          "estimatedPriceCount": 30,
+          "lastSuccess": "2026-05-31T06:29:17.023Z"
         },
         {
           "provider": "apr",
@@ -803,17 +780,17 @@
           "resultsReturned": 0,
           "livePriceCount": 0,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.095Z"
+          "lastSuccess": "2026-05-31T06:29:16.567Z"
         },
         {
           "provider": "snapshot",
           "enabled": true,
           "healthStatus": "healthy",
-          "searchDurationMs": 16,
-          "resultsReturned": 0,
-          "livePriceCount": 0,
+          "searchDurationMs": 254,
+          "resultsReturned": 14,
+          "livePriceCount": 14,
           "estimatedPriceCount": 0,
-          "lastSuccess": "2026-05-31T05:58:04.111Z"
+          "lastSuccess": "2026-05-31T06:29:16.821Z"
         },
         {
           "provider": "marketplace",
@@ -823,14 +800,11 @@
           "resultsReturned": 1,
           "livePriceCount": 0,
           "estimatedPriceCount": 1,
-          "lastSuccess": "2026-05-31T05:58:04.095Z"
+          "lastSuccess": "2026-05-31T06:29:16.567Z"
         }
       ],
       "missingProviders": [
-        "inventory",
-        "google",
-        "apr",
-        "snapshot"
+        "apr"
       ],
       "notes": [
         "APR provider enabled but returns no lots outside SEA.",
@@ -838,9 +812,7 @@
       ]
     }
   ],
-  "poorCoverageAirports": [
-    "PAE"
-  ],
-  "recommendedNextProvider": "Enable inventory DB + run /api/parking/discover cron for each hub airport",
-  "summary": "4/9 airports at grade C or below; 1 at D/F."
+  "poorCoverageAirports": [],
+  "recommendedNextProvider": "ParkWhiz API expansion (already integrated; improve geo/dates coverage)",
+  "summary": "1/9 airports at grade C or below; 0 at D/F."
 }

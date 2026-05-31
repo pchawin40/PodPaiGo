@@ -2,7 +2,8 @@ import { db } from '../db/client';
 import { getAirportById } from '../airports/catalog';
 import { withTimeout } from '../utils/asyncTimeout';
 
-const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 1200);
+const PARKING_DB_READ_TIMEOUT_MS =
+  Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 4000);
 
 function parkingDbCacheDisabled(): boolean {
     return process.env.DISABLE_PARKING_DB_CACHE === 'true';
