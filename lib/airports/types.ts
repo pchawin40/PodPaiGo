@@ -6,14 +6,27 @@ export type AirportInfo = {
   parkingSearchQuery: string;
   rideshareDestinationName: string;
   geoLocation: { lat: number; lng: number };
+  city?: string | null;
   checkinNote?: string;
   genericGuidance?: string;
   officialParkingUrl?: string;
   officialAirportUrl?: string;
   airportMapUrl?: string;
   airportMapLabel?: string;
+  indoorMap?: {
+    provider?: string;
+    label?: string;
+    url?: string;
+    embedUrl?: string;
+    embeddable?: boolean;
+    sourceName?: string;
+    mapType?: string;
+  };
   state?: string;
   country?: string;
+  iata?: string | null;
+  icao?: string | null;
+  timezone?: string | null;
   isActive?: boolean;
   sortOrder?: number;
 };

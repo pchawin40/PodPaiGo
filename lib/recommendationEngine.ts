@@ -24,6 +24,7 @@ import {
   buildTransitTransferLegs,
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
+import { getAirportById } from './airports/catalog';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -45,7 +46,9 @@ function tripTypeValue(tripData: TripData): string {
 }
 
 function isGeneralTrip(tripData: TripData): boolean {
-  return tripTypeValue(tripData) === 'general-trip' || tripData.destinationKind !== 'airport';
+  if (tripTypeValue(tripData) === 'general-trip') return true;
+  if (tripData.destinationKind && tripData.destinationKind !== 'airport') return true;
+  return false;
 }
 
 function isAirportDepartureTrip(tripData: TripData): boolean {
@@ -66,16 +69,6 @@ function isAirportRoundTrip(tripData: TripData): boolean {
 function isAirportDropoffPickupTrip(tripData: TripData): boolean {
   const type = tripTypeValue(tripData);
   return type === 'airport-dropoff-pickup' || type === 'dropoff-pickup';
-}
-
-function isSeaTacOnlyOption(option: { id?: string; name?: string; sourceName?: string; sourceLink?: string; mapLink?: string }): boolean {
-  const text = [option.id, option.name, option.sourceName, option.sourceLink, option.mapLink]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return ['seatac', 'sea-tac', 'seattle-tacoma', 'sound transit', 'northgate', 'wallypark', 'masterpark']
-    .some((s) => text.includes(s));
 }
 
 function resolveSelectedTsaEstimate(
@@ -103,9 +96,11 @@ function resolveSelectedTsaEstimate(
 }
 
 function genericParkingFallback(airportCode: string, destination: string): ParkingOption[] {
+  const code = airportCode.toUpperCase();
   return [{
     id: 'generic-parking',
-    name: `${airportCode} Airport Parking`,
+    name: `${code} Airport Parking`,
+    serviceAirportCode: code,
     type: 'official',
     price: 40,
     distance: 10,
@@ -121,7 +116,7 @@ function genericParkingFallback(airportCode: string, destination: string): Parki
     sourceName: 'Generic airport parking search',
     sourceLink: `https://www.google.com/search?q=${encodeURIComponent(`${airportCode} airport parking`)}`,
     mapLink: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${airportCode} airport parking`)}`,
-    assumptions: ['Generic fallback parking option for non-SEA airports.'],
+    assumptions: ['Limited parking data available. Search providers for current rates and availability.'],
   }];
 }
 
@@ -317,10 +312,7 @@ export class RecommendationEngine {
   }
 
   static async generateRecommendations(tripData: TripData): Promise<Recommendation> {
-    const isGeneralTrip =
-      tripData.type === 'general-trip' || tripData.destinationKind !== 'airport';
-
-    const isAirportTrip = !isGeneralTrip;
+    const isAirportTrip = !isGeneralTrip(tripData);
 
     const tripDateTime = buildTripDateTime(tripData);
     const route =
@@ -358,6 +350,11 @@ export class RecommendationEngine {
           calculateParkingDuration(tripData),
           {
             destinationKind: tripData.destinationKind ?? 'airport',
+            airportCode: isAirportTrip
+              ? ((tripData as TripDataWithTransport).airportCode || undefined)
+              : undefined,
+            destinationLat: tripData.destinationLat,
+            destinationLng: tripData.destinationLng,
           }
         )
         : Promise.resolve([]),
@@ -453,20 +450,18 @@ export class RecommendationEngine {
 
     const weatherImpact = weatherResult.weatherImpact;
 
-    if (airportCode !== 'SEA') {
-      parking = parking.filter((p) => !isSeaTacOnlyOption(p));
-      rideshare = rideshare.filter((r) => !isSeaTacOnlyOption(r));
-      transit = transit.filter((t) => !isSeaTacOnlyOption(t));
+    if (isAirportTrip) {
+      if (airportCode !== 'SEA') {
+        if (allowCarOptions && parking.length === 0) {
+          parking = genericParkingFallback(airportCode, tripData.destination);
+        }
 
-      if (allowCarOptions && parking.length === 0) {
-        parking = genericParkingFallback(airportCode, tripData.destination);
+        if (allowRideshare && rideshare.length === 0 && !trafficEstimate.routeUnavailable) {
+          rideshare = genericRideshareFallback();
+        }
+
+        transit = [];
       }
-
-      if (allowRideshare && rideshare.length === 0 && !trafficEstimate.routeUnavailable) {
-        rideshare = genericRideshareFallback();
-      }
-
-      transit = [];
     }
 
     // If the user doesn't have a car today, remove park-and-ride style trips (drive segments)

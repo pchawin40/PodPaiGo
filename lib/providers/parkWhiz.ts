@@ -195,6 +195,8 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
         return {
             id: `parkwhiz-${quote.location_id}-${option.id}`,
             name: `${locationName}${option.name ? ` - ${option.name}` : ''}`,
+            serviceAirportCode: airportCode.toUpperCase(),
+            distanceToAirport: distanceMiles ?? undefined,
             type: 'off-airport',
             price: totalPrice ?? basePrice ?? 999,
             priceDisplay: totalPrice ? 'live' : 'check-live',
@@ -264,13 +266,16 @@ function toParkWhizDateTime(value: string, fallbackTime: string): string {
 }
 
 export async function getParkWhizParkingOptions(args: {
-    airportCode?: string;
+    airportCode: string;
+    airportCoordinates?: { lat: number; lng: number };
     checkInDate?: string;
     checkOutDate?: string;
 }): Promise<ParkingOption[]> {
-    const airport = getAirportById(args.airportCode || 'SEA') || getAirportById('SEA');
+    const airportCode = args.airportCode.toUpperCase();
+    const airport = getAirportById(airportCode);
+    const geoLocation = args.airportCoordinates ?? airport?.geoLocation;
 
-    if (!airport?.geoLocation?.lat || !airport?.geoLocation?.lng) return [];
+    if (!geoLocation?.lat || !geoLocation?.lng) return [];
     if (!args.checkInDate || !args.checkOutDate) return [];
 
     const startTime = toParkWhizDateTime(args.checkInDate, '12:00');
@@ -278,7 +283,7 @@ export async function getParkWhizParkingOptions(args: {
     const distanceMiles = 5;
 
     const cached = await getCachedParkWhizQuotes({
-        airportCode: airport.id,
+        airportCode,
         checkInAt: startTime,
         checkOutAt: endTime,
         distanceMiles,
@@ -290,6 +295,7 @@ export async function getParkWhizParkingOptions(args: {
     if (cached?.options?.length) {
         return cached.options.map((option) => withStableParkingRouteStatus({
             ...option,
+            serviceAirportCode: option.serviceAirportCode?.toUpperCase() ?? airportCode,
             priceUnit:
                 option.sourceName === 'ParkWhiz' || option.bookingProvider === 'ParkWhiz'
                     ? 'total'
@@ -304,7 +310,7 @@ export async function getParkWhizParkingOptions(args: {
     const url = new URL('https://api.parkwhiz.com/v4/quotes/');
     url.searchParams.set(
         'q',
-        `coordinates:${airport.geoLocation.lat},${airport.geoLocation.lng} distance:${distanceMiles}`
+        `coordinates:${geoLocation.lat},${geoLocation.lng} distance:${distanceMiles}`
     );
     url.searchParams.set('start_time', startTime);
     url.searchParams.set('end_time', endTime);
@@ -335,12 +341,12 @@ export async function getParkWhizParkingOptions(args: {
         const options = json.flatMap((quote) =>
             normalizeParkWhizQuoteToParkingOptions({
                 quote: quote as ParkWhizQuote,
-                airportCode: airport.id,
+                airportCode,
             })
         );
 
         void saveParkWhizQuotes({
-            airportCode: airport.id,
+            airportCode,
             checkInAt: startTime,
             checkOutAt: endTime,
             distanceMiles,

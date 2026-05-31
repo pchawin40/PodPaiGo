@@ -9,7 +9,7 @@ import {
   TsaEstimate,
   SecurityOption,
 } from './types';
-import { mockParkingOptions, mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
+import { mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
@@ -235,6 +235,9 @@ function resolveParkingTransferMeta(option: ParkingOption): {
 
 type ParkingOptionsRequestContext = {
   destinationKind?: DestinationKind;
+  airportCode?: string;
+  destinationLat?: number;
+  destinationLng?: number;
 };
 
 export interface TrafficProvider {
@@ -858,24 +861,28 @@ export class MockProvider implements DataProvider {
     const destinationKind = context?.destinationKind ?? 'airport';
     const isAirportDestination = destinationKind === 'airport';
 
+    const authoritativeCode = context?.airportCode?.toUpperCase();
     const airport = isAirportDestination
-      ? resolveAirportFromDestination(destination)
+      ? (authoritativeCode
+          ? getAirportById(authoritativeCode)
+          : resolveAirportFromDestination(destination, authoritativeCode))
       : null;
 
-    const airportCode = airport?.id || 'SEA';
+    const airportCode = authoritativeCode || airport?.id || 'SEA';
+    const airportCoordinates =
+      airport?.geoLocation ??
+      (typeof context?.destinationLat === 'number' && typeof context?.destinationLng === 'number'
+        ? { lat: context.destinationLat, lng: context.destinationLng }
+        : undefined);
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
-
-    const isGeneralDestination =
-      !airport ||
-      destination.toLowerCase().includes('general-trip') ||
-      !['SEA', 'PAE', 'BLI', 'GEG', 'PSC', 'YKM'].includes(airportCode);
 
     const liveParkingOptions = await import('./providers/parkingAggregator')
       .then(({ getLiveParkingOptions, getDestinationParkingOptions }) =>
         isAirportDestination
           ? getLiveParkingOptions({
             airportCode,
+            airportCoordinates,
             destination,
             checkInDate: parkingDates.checkInDate,
             checkOutDate: parkingDates.checkOutDate,
@@ -888,16 +895,11 @@ export class MockProvider implements DataProvider {
           })
       )
       .catch((error) => {
-        console.warn('Live parking options unavailable; using fallback parking options', error);
+        console.warn('Live parking options unavailable; returning empty parking list', error);
         return [];
       });
 
-    const parkingSource =
-      liveParkingOptions.length > 0
-        ? liveParkingOptions
-        : airport
-          ? mockParkingOptions
-          : [];
+    const parkingSource = liveParkingOptions;
 
     const routeDestination = isAirportDestination
       ? resolveAirportDestinationForRouting(destination)
@@ -987,7 +989,7 @@ export class MockProvider implements DataProvider {
       return promise;
     };
 
-    return Promise.all(
+    const enriched = await Promise.all(
       parkingRouteEntries.map(async (entry) => {
         const { option, routeDestination } = entry;
 
@@ -1086,6 +1088,8 @@ export class MockProvider implements DataProvider {
         };
       })
     );
+
+    return enriched;
   }
 
   async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {

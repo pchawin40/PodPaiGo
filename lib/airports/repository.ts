@@ -1,18 +1,18 @@
-import { AIRPORTS_FALLBACK_CATALOG } from './fallbackCatalog';
-import { AirportInfo } from './types';
+import { airportLookupService } from './lookupService';
+import type { AirportInfo } from './types';
 
 export async function getAirports(): Promise<AirportInfo[]> {
-  try {
-    // fetch from Supabase here
-    // if successful, map snake_case DB rows to camelCase AirportInfo
-  } catch {
-    return AIRPORTS_FALLBACK_CATALOG;
-  }
-
-  return AIRPORTS_FALLBACK_CATALOG;
+  await airportLookupService.refreshFromDatabase().catch(() => false);
+  airportLookupService.ensureLoaded();
+  return airportLookupService.getPopularAirports(50);
 }
 
 export async function getAirportByIdDynamic(id: string): Promise<AirportInfo | null> {
-  const airports = await getAirports();
-  return airports.find((a) => a.id.toUpperCase() === id.toUpperCase()) || null;
+  await airportLookupService.refreshFromDatabase().catch(() => false);
+  return airportLookupService.getAirportByCode(id);
+}
+
+export async function searchAirports(query: string, limit = 10): Promise<AirportInfo[]> {
+  await airportLookupService.refreshFromDatabase().catch(() => false);
+  return airportLookupService.searchAirports(query, limit);
 }

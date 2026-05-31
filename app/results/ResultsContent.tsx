@@ -76,6 +76,10 @@ import { attachGooglePlaceToParking } from '@/lib/parking/googlePlaceMatch';
 import {
   shouldAttemptGooglePlaceMatch,
 } from '../../lib/parking/googlePlaceMatchUtils';
+import {
+  priceFreshnessBadgeClass,
+  resolveParkingFreshness,
+} from '../../lib/parking/freshnessDisplay';
 import type { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
@@ -1526,6 +1530,23 @@ function OptionCard({
                   {price.badge}
                 </div>
               )}
+
+              {item.type === 'parking' && (() => {
+                const freshness = resolveParkingFreshness(opt as ParkingOption);
+                const title = [
+                  freshness.providerSource ? `Source: ${freshness.providerSource}` : null,
+                  freshness.fetchedAt ? `Fetched: ${freshness.fetchedAt}` : null,
+                ].filter(Boolean).join(' · ') || undefined;
+
+                return (
+                  <div
+                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${priceFreshnessBadgeClass((opt as ParkingOption).priceFreshness)}`}
+                    title={title}
+                  >
+                    {freshness.label}
+                  </div>
+                );
+              })()}
 
               {item.type === 'parking' &&
                 Array.isArray(opt.bestFor) &&

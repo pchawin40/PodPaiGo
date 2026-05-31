@@ -1,0 +1,846 @@
+{
+  "generatedAt": "2026-05-31T05:58:04.345Z",
+  "checkInDate": "2026-06-14",
+  "checkOutDate": "2026-06-17",
+  "environment": {
+    "googleApiConfigured": true,
+    "inventoryEnabled": true,
+    "parkWhizDiscoveryEnabled": true,
+    "aprEnabled": true
+  },
+  "airports": [
+    {
+      "airportCode": "SEA",
+      "airportLabel": "Seattle–Tacoma International Airport",
+      "destination": "Seattle-Tacoma International Airport (SEA), 17801 International Blvd, SeaTac, WA 98158",
+      "providerCount": 4,
+      "parkingOptionCount": 20,
+      "livePriceCount": 14,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 15,
+      "coverageGrade": "A",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 8,
+        "google": 0,
+        "apr": 5,
+        "snapshot": 6,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 100,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:01.469Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 568,
+          "resultsReturned": 8,
+          "livePriceCount": 8,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:01.949Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 280,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:01.661Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 83,
+          "resultsReturned": 5,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 5,
+          "lastSuccess": "2026-05-31T05:58:01.477Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 84,
+          "resultsReturned": 6,
+          "livePriceCount": 6,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:01.479Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 43,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:01.438Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google"
+      ],
+      "notes": [
+        "APR cache available for SEA only.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "PAE",
+      "airportLabel": "Seattle Paine Field International Airport",
+      "destination": "Paine Field Passenger Terminal (PAE), 3308 100th St SW, Everett, WA 98204",
+      "providerCount": 1,
+      "parkingOptionCount": 1,
+      "livePriceCount": 0,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 1,
+      "coverageGrade": "F",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 0,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 22,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.014Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 122,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.114Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 131,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.123Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 7,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.002Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 22,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.017Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 7,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:02.002Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "parkwhiz",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "ParkWhiz returned 0 — may need dates, API timeout, or sparse market coverage.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "LAX",
+      "airportLabel": "Los Angeles International Airport",
+      "destination": "Los Angeles International Airport (LAX), Los Angeles, CA",
+      "providerCount": 2,
+      "parkingOptionCount": 37,
+      "livePriceCount": 36,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 37,
+      "coverageGrade": "A",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 36,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 12,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.274Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 387,
+          "resultsReturned": 36,
+          "livePriceCount": 36,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.649Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 34,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.296Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.265Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 12,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.276Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:02.264Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "JFK",
+      "airportLabel": "John F. Kennedy International Airport",
+      "destination": "John F. Kennedy International Airport (JFK), New York, NY",
+      "providerCount": 2,
+      "parkingOptionCount": 18,
+      "livePriceCount": 17,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 18,
+      "coverageGrade": "B",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 17,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 50,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.759Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 266,
+          "resultsReturned": 17,
+          "livePriceCount": 17,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.975Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 39,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.748Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.713Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 49,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:02.761Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:02.713Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "ORD",
+      "airportLabel": "Chicago O'Hare International Airport",
+      "destination": "Chicago O'Hare International Airport (ORD), Chicago, IL",
+      "providerCount": 2,
+      "parkingOptionCount": 9,
+      "livePriceCount": 8,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 9,
+      "coverageGrade": "C",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 8,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 13,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.032Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 195,
+          "resultsReturned": 8,
+          "livePriceCount": 8,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.214Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 37,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.056Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.021Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 13,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.034Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:03.021Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "ATL",
+      "airportLabel": "Hartsfield Jackson Atlanta International Airport",
+      "destination": "Hartsfield Jackson Atlanta International Airport (ATL), Atlanta, GA",
+      "providerCount": 2,
+      "parkingOptionCount": 8,
+      "livePriceCount": 7,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 8,
+      "coverageGrade": "C",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 7,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 4,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.255Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 173,
+          "resultsReturned": 7,
+          "livePriceCount": 7,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.424Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 35,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.286Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.253Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 4,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.257Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:03.253Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "DFW",
+      "airportLabel": "Dallas Fort Worth International Airport",
+      "destination": "Dallas Fort Worth International Airport (DFW), Dallas-Fort Worth, TX",
+      "providerCount": 2,
+      "parkingOptionCount": 7,
+      "livePriceCount": 6,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 7,
+      "coverageGrade": "C",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 6,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 5,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.472Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 239,
+          "resultsReturned": 6,
+          "livePriceCount": 6,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.707Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 37,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.505Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.470Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 5,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.474Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:03.470Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "LAS",
+      "airportLabel": "Harry Reid International Airport",
+      "destination": "Harry Reid International Airport (LAS), Las Vegas, NV",
+      "providerCount": 2,
+      "parkingOptionCount": 13,
+      "livePriceCount": 12,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 13,
+      "coverageGrade": "B",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 12,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 5,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.756Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 304,
+          "resultsReturned": 12,
+          "livePriceCount": 12,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.055Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 45,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.796Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 1,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.753Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 7,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:03.759Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:03.753Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    },
+    {
+      "airportCode": "MCO",
+      "airportLabel": "Orlando International Airport",
+      "destination": "Orlando International Airport (MCO), Orlando, FL",
+      "providerCount": 2,
+      "parkingOptionCount": 16,
+      "livePriceCount": 15,
+      "estimatedPriceCount": 1,
+      "unknownPriceCount": 0,
+      "mergedOptionCount": 16,
+      "coverageGrade": "B",
+      "providerBreakdown": {
+        "inventory": 0,
+        "parkwhiz": 15,
+        "google": 0,
+        "apr": 0,
+        "snapshot": 0,
+        "marketplace": 1
+      },
+      "providerDiagnostics": [
+        {
+          "provider": "inventory",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 16,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.109Z"
+        },
+        {
+          "provider": "parkwhiz",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 204,
+          "resultsReturned": 15,
+          "livePriceCount": 15,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.297Z"
+        },
+        {
+          "provider": "google",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 42,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.135Z"
+        },
+        {
+          "provider": "apr",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.095Z"
+        },
+        {
+          "provider": "snapshot",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 16,
+          "resultsReturned": 0,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 0,
+          "lastSuccess": "2026-05-31T05:58:04.111Z"
+        },
+        {
+          "provider": "marketplace",
+          "enabled": true,
+          "healthStatus": "healthy",
+          "searchDurationMs": 0,
+          "resultsReturned": 1,
+          "livePriceCount": 0,
+          "estimatedPriceCount": 1,
+          "lastSuccess": "2026-05-31T05:58:04.095Z"
+        }
+      ],
+      "missingProviders": [
+        "inventory",
+        "google",
+        "apr",
+        "snapshot"
+      ],
+      "notes": [
+        "APR provider enabled but returns no lots outside SEA.",
+        "Marketplace adds link-only SpotHero card (not live inventory)."
+      ]
+    }
+  ],
+  "poorCoverageAirports": [
+    "PAE"
+  ],
+  "recommendedNextProvider": "Enable inventory DB + run /api/parking/discover cron for each hub airport",
+  "summary": "4/9 airports at grade C or below; 1 at D/F."
+}

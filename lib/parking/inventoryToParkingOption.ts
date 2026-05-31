@@ -59,6 +59,8 @@ export function inventoryLotToParkingOption(args: {
     return {
         id: `inventory-${lot.id}`,
         name: lot.name,
+        serviceAirportCode: lot.airportCode.toUpperCase(),
+        distanceToAirport: lot.distanceMiles,
         type: official ? 'official' : 'off-airport',
 
         price: 0,

@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import SiteHeader from "@/app/components/SiteHeader";
 import AirportPlanner from "../AirportPlanner";
-import { AIRPORTS_CATALOG, getAirportById } from "../../../lib/airports/catalog";
+import { ENRICHED_AIRPORT_CODES, getAirportById } from "../../../lib/airports/catalog";
 
 type AirportPageProps = {
   params: Promise<{ code: string }>;
 };
 
 export function generateStaticParams() {
-  return AIRPORTS_CATALOG.map((airport) => ({
-    code: airport.id.toLowerCase(),
+  return ENRICHED_AIRPORT_CODES.map((code) => ({
+    code: code.toLowerCase(),
   }));
 }
 

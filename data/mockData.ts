@@ -7,6 +7,7 @@ export const mockParkingOptions: ParkingOption[] = [
   {
     id: 'sea-reserved',
     name: 'SEA Reserved Parking (Official)',
+    serviceAirportCode: 'SEA',
     type: 'official',
     parkingBufferMinutes: 5,
     transferToTerminalMinutes: 3,
@@ -42,6 +43,7 @@ export const mockParkingOptions: ParkingOption[] = [
   {
     id: 'sea-general',
     name: 'SEA General Parking (Official)',
+    serviceAirportCode: 'SEA',
     type: 'official',
     parkingBufferMinutes: 8,
     transferToTerminalMinutes: 5,
@@ -76,6 +78,7 @@ export const mockParkingOptions: ParkingOption[] = [
   {
     id: 'off-airport-wallypark',
     name: 'WallyPark (off-airport shuttle lot)',
+    serviceAirportCode: 'SEA',
     type: 'off-airport',
     parkingBufferMinutes: 10,
     transferToTerminalMinutes: 12,
@@ -112,6 +115,7 @@ export const mockParkingOptions: ParkingOption[] = [
   {
     id: 'off-airport-masterpark',
     name: 'MasterPark (off-airport shuttle lot)',
+    serviceAirportCode: 'SEA',
     type: 'off-airport',
     parkingBufferMinutes: 10,
     transferToTerminalMinutes: 12,

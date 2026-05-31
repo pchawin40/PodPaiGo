@@ -159,6 +159,10 @@ export type TransferLeg = {
 export type ParkingOption = {
   id: string;
   name: string;
+  /** IATA code of the airport this lot primarily serves. Required for airport trip results. */
+  serviceAirportCode?: string;
+  /** Straight-line distance from lot to service airport in miles. */
+  distanceToAirport?: number;
   type: 'official' | 'off-airport' | 'park-and-ride';
   /** Minutes to park, pay, unload, etc. */
   parkingBufferMinutes?: number;
@@ -235,6 +239,13 @@ export type ParkingOption = {
 
   intelligence?: OptionIntelligence;
   transferLegs?: TransferLeg[];
+
+  /** Provider that supplied this option (e.g. inventory, parkwhiz, google). */
+  providerSource?: string;
+  /** ISO timestamp when this option was fetched from its provider. */
+  fetchedAt?: string;
+  /** How fresh the displayed price is. */
+  priceFreshness?: 'live' | 'recent' | 'estimated' | 'unknown';
 
   walkingBurdenScore?: number;
   walkingBurdenLabel?: string;

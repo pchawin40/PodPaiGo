@@ -11,6 +11,10 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
+    "import:airports": "node scripts/generate-airports-json.mjs",
+    "import:airports:db": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-us-airports.ts",
+    "audit:parking-coverage": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/audit-parking-coverage.ts",
+    "activate:parking-providers": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/activate-parking-providers.ts",
     "lint": "eslint",
     "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\"",
     "typecheck": "tsc --noEmit"

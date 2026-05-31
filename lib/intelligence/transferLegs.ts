@@ -10,11 +10,49 @@ import {
     isParkingRouteUnavailable,
     parkingRouteUnavailableReason,
 } from '../parking/routeStatus';
+import { getAirportById } from '../airports/catalog';
+
+function resolveDestinationTerminalLabel(trip: TripData): string {
+    const code = trip.airportCode?.toUpperCase();
+    if (code) {
+        const airport = getAirportById(code);
+        if (airport) {
+            return `${airport.id} terminal`;
+        }
+        return `${code} terminal`;
+    }
+
+    return 'destination terminal';
+}
+
+function resolveTransitStationLabel(trip: TripData): string {
+    const code = trip.airportCode?.toUpperCase();
+    if (code) {
+        const airport = getAirportById(code);
+        if (airport) {
+            return `${airport.destinationName} Station`;
+        }
+        return `${code} Airport Station`;
+    }
+
+    return 'Airport Station';
+}
+
+function resolveDropoffAreaLabel(trip: TripData): string {
+    const code = trip.airportCode?.toUpperCase();
+    if (code) {
+        return `${code} dropoff area`;
+    }
+
+    return 'dropoff area';
+}
 
 export function buildParkingTransferLegs(
     option: ParkingOption,
     trip: TripData
 ): TransferLeg[] {
+    const terminalLabel = resolveDestinationTerminalLabel(trip);
+
     if (isParkingRouteUnavailable(option)) {
         return [
             {
@@ -52,7 +90,7 @@ export function buildParkingTransferLegs(
         legs.push({
             type: 'transit',
             from: option.name,
-            to: 'SEA terminal',
+            to: terminalLabel,
             durationMinutes: transferMinutes,
             confidence: 'estimated',
             note: 'Park-and-ride transit timing is estimated.',
@@ -61,7 +99,7 @@ export function buildParkingTransferLegs(
         legs.push({
             type: 'shuttle',
             from: option.name,
-            to: 'SEA terminal',
+            to: terminalLabel,
             durationMinutes: transferMinutes,
             confidence: 'estimated',
             note: option.shuttleWaitMinutes
@@ -72,7 +110,7 @@ export function buildParkingTransferLegs(
         legs.push({
             type: 'walk',
             from: option.name,
-            to: 'SEA terminal',
+            to: terminalLabel,
             durationMinutes: transferMinutes,
             confidence: 'estimated',
             note:
@@ -85,7 +123,7 @@ export function buildParkingTransferLegs(
     if (option.recommendedCheckpoint) {
         legs.push({
             type: 'terminal',
-            from: 'SEA terminal',
+            from: terminalLabel,
             to: option.recommendedCheckpoint.name,
             durationMinutes: option.recommendedCheckpoint.minutes,
             confidence: 'estimated',
@@ -100,11 +138,13 @@ export function buildRideshareTransferLegs(
     option: RideshareOption,
     trip: TripData
 ): TransferLeg[] {
+    const dropoffLabel = resolveDropoffAreaLabel(trip);
+
     return [
         {
             type: 'rideshare',
             from: trip.origin,
-            to: 'SEA dropoff area',
+            to: dropoffLabel,
             durationMinutes: option.duration,
             confidence: option.routeTrustStatus ?? option.trustStatus,
             note:
@@ -114,7 +154,7 @@ export function buildRideshareTransferLegs(
         },
         {
             type: 'terminal',
-            from: 'SEA dropoff area',
+            from: dropoffLabel,
             to: 'Check-in / TSA',
             durationMinutes: 4,
             confidence: 'estimated',
@@ -127,11 +167,14 @@ export function buildTransitTransferLegs(
     option: TransitOption,
     trip: TripData
 ): TransferLeg[] {
+    const stationLabel = resolveTransitStationLabel(trip);
+    const terminalLabel = resolveDestinationTerminalLabel(trip);
+
     return [
         {
             type: 'transit',
             from: trip.origin,
-            to: 'SeaTac/Airport Station',
+            to: stationLabel,
             durationMinutes: option.duration,
             confidence: option.routeTrustStatus ?? option.trustStatus,
             note:
@@ -141,8 +184,8 @@ export function buildTransitTransferLegs(
         },
         {
             type: 'walk',
-            from: 'SeaTac/Airport Station',
-            to: 'SEA terminal',
+            from: stationLabel,
+            to: terminalLabel,
             durationMinutes: 8,
             confidence: 'estimated',
             note: 'Walk from airport station to terminal.',

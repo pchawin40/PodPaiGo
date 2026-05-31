@@ -6,7 +6,12 @@ declare global {
 }
 
 function getConnectionString(): string {
-  const connectionString = process.env.DATABASE_URL;
+  if (process.env.NODE_ENV !== 'production' && process.env.LOCAL_DATABASE_URL?.trim()) {
+    return process.env.LOCAL_DATABASE_URL.trim();
+  }
+
+  const connectionString =
+    process.env.DATABASE_URL || process.env.LOCAL_DATABASE_URL;
 
   if (!connectionString) {
     throw new Error('DATABASE_URL is not configured');
@@ -20,9 +25,14 @@ export function getDb(): Pool {
     return global.parkingDbPool;
   }
 
+  const connectionString = getConnectionString();
+
   const pool = new Pool({
-    connectionString: getConnectionString(),
-    ssl: { rejectUnauthorized: false },
+    connectionString,
+    ssl: connectionString.includes('localhost') ||
+      connectionString.includes('127.0.0.1')
+      ? false
+      : { rejectUnauthorized: false },
 
     // Vercel/serverless-safe. Use Supabfase Transaction Pooler, usually port 6543.
     max: 1,

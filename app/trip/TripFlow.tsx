@@ -14,7 +14,8 @@ import {
   DestinationKind,
 } from '../../lib/types';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
-import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
+import { getAirportById } from '../../lib/airports/catalog';
+import AirportSearchPicker from '../components/AirportSearchPicker';
 import { parseLocalDate } from '../../lib/tripTime';
 import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney } from '../utils/formatter';
@@ -365,12 +366,8 @@ export default function TripFlow() {
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
 
-  // airport catalog
-  const [airports, setAirports] = useState(AIRPORTS_CATALOG);
-
   const [airportSecurityStatus, setAirportSecurityStatus] =
     useState<AirportSecurityStatus | null>(null);
-
 
   const [state, setState] = useState<FormState>({
     intent: 'general-trip',
@@ -388,7 +385,7 @@ export default function TripFlow() {
     securityOption: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
-    airportCode: 'SEA', // default airport, not hardcoded app airport,
+    airportCode: 'SEA',
     destination: '',
     destinationKind: 'general',
   });
@@ -400,8 +397,8 @@ export default function TripFlow() {
   const showTimingFields = ENABLE_AIRPORT_TIMING_FIELDS || intent !== 'parking-trip';
 
   const selectedAirport = useMemo(() => {
-    return airports.find((a) => a.id === state.airportCode) || airports[0] || AIRPORTS_CATALOG[0];
-  }, [airports, state.airportCode]);
+    return getAirportById(state.airportCode) || getAirportById('SEA')!;
+  }, [state.airportCode]);
 
   const airportGuide = useMemo(() => {
     const wantsAirline = intent ? intentCopy(intent).wantsAirline : false;
@@ -810,29 +807,6 @@ export default function TripFlow() {
   useEffect(() => {
     let active = true;
 
-    async function loadAirports() {
-      try {
-        const res = await fetch('/api/airports');
-        const data = await res.json();
-
-        if (active && Array.isArray(data.airports) && data.airports.length > 0) {
-          setAirports(data.airports);
-        }
-      } catch {
-        setAirports(AIRPORTS_CATALOG);
-      }
-    }
-
-    loadAirports();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
     async function loadAirportSecurity() {
       try {
         const res = await fetch(`/api/airport-security?airport=${state.airportCode}`);
@@ -971,17 +945,12 @@ export default function TripFlow() {
                   {isAirportTrip && (
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-zinc-800">Airport</label>
-                      <select
+                      <AirportSearchPicker
                         value={state.airportCode}
-                        onChange={(e) => setState((s) => ({ ...s, airportCode: e.target.value }))}
-                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                      >
-                        {airports.map((airport) => (
-                          <option key={airport.id} value={airport.id}>
-                            {airport.id} — {airport.label}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(airportCode) =>
+                          setState((s) => ({ ...s, airportCode }))
+                        }
+                      />
                       <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-3 text-xs leading-5 text-slate-600">
                         <div className="font-medium text-zinc-800">
                           {selectedAirport.id} guidance
