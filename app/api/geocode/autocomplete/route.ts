@@ -196,10 +196,12 @@ export async function GET(request: NextRequest) {
   }
 
   if (!apiKey) {
-    return jsonResponse(
-      { predictions: [], error: 'Missing GOOGLE_MAPS_SERVER_API_KEY' },
-      { status: 500 }
-    );
+    console.warn('Google address autocomplete: missing GOOGLE_MAPS_SERVER_API_KEY');
+    return jsonResponse({
+      predictions: [],
+      status: 'MISSING_API_KEY',
+      error: 'Missing GOOGLE_MAPS_SERVER_API_KEY',
+    });
   }
 
   try {
@@ -224,21 +226,19 @@ export async function GET(request: NextRequest) {
     }
 
     if (autocomplete.failed || textSearch.failed) {
-      console.error('Google address autocomplete failed', {
+      console.warn('Google address autocomplete failed', {
         input,
         autocomplete: devDetails(autocomplete) || autocomplete.status,
         textSearch: devDetails(textSearch) || textSearch.status,
       });
 
-      return jsonResponse(
-        {
-          predictions: [],
-          error: 'Google address autocomplete failed',
-          autocomplete: devDetails(autocomplete),
-          textSearch: devDetails(textSearch),
-        },
-        { status: 502 }
-      );
+      return jsonResponse({
+        predictions: [],
+        status: textSearch.status || autocomplete.status || 'GOOGLE_FAILED',
+        error: 'Google address autocomplete failed',
+        autocomplete: devDetails(autocomplete),
+        textSearch: devDetails(textSearch),
+      });
     }
 
     return jsonResponse({
@@ -247,18 +247,16 @@ export async function GET(request: NextRequest) {
       source: 'none',
     });
   } catch (error) {
-    console.error('Google address autocomplete route failed', error);
+    console.warn('Google address autocomplete route failed', error);
 
-    return jsonResponse(
-      {
-        predictions: [],
-        error: 'Google address autocomplete route failed',
-        message:
-          process.env.NODE_ENV === 'development' && error instanceof Error
-            ? error.message
-            : undefined,
-      },
-      { status: 500 }
-    );
+    return jsonResponse({
+      predictions: [],
+      status: 'ROUTE_FAILED',
+      error: 'Google address autocomplete route failed',
+      message:
+        process.env.NODE_ENV === 'development' && error instanceof Error
+          ? error.message
+          : undefined,
+    });
   }
 }

@@ -7,7 +7,9 @@ import type {
   PricingConfidenceLabel,
 } from './types';
 
-export const DEFAULT_UNKNOWN_DAILY_RANGE = { min: 20, max: 35 };
+export const DEFAULT_UNKNOWN_DAILY_RANGE = { min: 12, max: 28 };
+export const DEFAULT_OFFICIAL_UNKNOWN_DAILY_RANGE = { min: 25, max: 45 };
+export const DEFAULT_PARK_RIDE_UNKNOWN_DAILY_RANGE = { min: 5, max: 15 };
 
 function formatMoney(amount: number): string {
   return `$${Math.round(amount)}`;
@@ -184,8 +186,12 @@ export function deriveParkingDailyRange(
   }
 
   return {
-    min: DEFAULT_UNKNOWN_DAILY_RANGE.min,
-    max: DEFAULT_UNKNOWN_DAILY_RANGE.max,
+    min: option.type === 'official'
+      ? DEFAULT_OFFICIAL_UNKNOWN_DAILY_RANGE.min
+      : DEFAULT_UNKNOWN_DAILY_RANGE.min,
+    max: option.type === 'official'
+      ? DEFAULT_OFFICIAL_UNKNOWN_DAILY_RANGE.max
+      : DEFAULT_UNKNOWN_DAILY_RANGE.max,
     currency: 'USD',
   };
 }

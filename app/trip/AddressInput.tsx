@@ -109,7 +109,11 @@ async function fetchServerAutocomplete(
   }
 
   if (!response.ok) {
-    throw new Error(data?.error || data?.message || `Autocomplete failed with ${response.status}`);
+    console.warn(
+      'Address autocomplete API unavailable:',
+      data?.error || data?.message || `HTTP ${response.status}`,
+    );
+    return [];
   }
 
   if (!Array.isArray(data?.predictions)) return [];
@@ -199,7 +203,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     }
 
     initPlaces().catch(() => {
-      console.error('Failed to load Google Maps Places');
+      console.warn('Failed to load Google Maps Places browser fallback');
     });
 
     return () => {
@@ -311,7 +315,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
           if (isAbortError(error)) return;
 
           serverError = error;
-          console.error('Address autocomplete API failed', error);
+          console.warn('Address autocomplete API failed', error);
         }
 
         try {
@@ -326,7 +330,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         } catch (error) {
           if (isAbortError(error)) return;
 
-          console.error('Google Maps browser autocomplete failed', error);
+          console.warn('Google Maps browser autocomplete failed', error);
         }
 
         if (controller.signal.aborted) return;
@@ -343,7 +347,15 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         }
       };
 
-      runAutocomplete();
+      runAutocomplete().catch((error) => {
+        if (isAbortError(error) || controller.signal.aborted) return;
+
+        console.warn('Address autocomplete failed unexpectedly', error);
+        setPredictions([]);
+        setIsOpen(false);
+        setLoadingPredictions(false);
+        setPredictionError('Unable to load suggestions. You can keep typing your address.');
+      });
     }, 250);
 
     return () => {

@@ -2,7 +2,15 @@ import { ParkingOption } from '../types';
 
 type PricingResolution = Pick<
   ParkingOption,
-  'price' | 'priceDisplay' | 'priceUnit' | 'priceNote' | 'priceSource' | 'priceConfidence' | 'bookingProvider'
+  | 'price'
+  | 'priceMin'
+  | 'priceMax'
+  | 'priceDisplay'
+  | 'priceUnit'
+  | 'priceNote'
+  | 'priceSource'
+  | 'priceConfidence'
+  | 'bookingProvider'
 >;
 
 const SEA_KNOWN_PRICES: Record<string, PricingResolution> = {
@@ -71,12 +79,55 @@ const SEA_KNOWN_PRICES: Record<string, PricingResolution> = {
   },
 };
 
+export type ParkingLotKind = 'official' | 'off-airport' | 'park-and-ride';
+
+function unknownGooglePricing(lotKind: ParkingLotKind): PricingResolution {
+  if (lotKind === 'official') {
+    return {
+      price: 35,
+      priceMin: 25,
+      priceMax: 45,
+      priceDisplay: 'estimated',
+      priceUnit: 'per-day',
+      priceNote: 'Estimated official airport parking rate; confirm on airport site.',
+      priceSource: 'google-places',
+      priceConfidence: 'low',
+    };
+  }
+
+  if (lotKind === 'park-and-ride') {
+    return {
+      price: 10,
+      priceMin: 5,
+      priceMax: 15,
+      priceDisplay: 'estimated',
+      priceUnit: 'per-day',
+      priceNote: 'Typical park-and-ride or transit station parking rate; confirm on site.',
+      priceSource: 'google-places',
+      priceConfidence: 'low',
+    };
+  }
+
+  return {
+    price: 20,
+    priceMin: 12,
+    priceMax: 28,
+    priceDisplay: 'estimated',
+    priceUnit: 'per-day',
+    priceNote: 'Estimated nearby off-airport parking rate; confirm on provider.',
+    priceSource: 'google-places',
+    priceConfidence: 'low',
+  };
+}
+
 export function resolveParkingPricing(args: {
   airportCode: string;
   lotName: string;
+  lotKind?: ParkingLotKind;
 }): PricingResolution {
   const airportCode = args.airportCode.toUpperCase();
   const lotName = args.lotName.toLowerCase();
+  const lotKind = args.lotKind ?? 'off-airport';
 
   if (airportCode === 'SEA') {
     const matchedKey = Object.keys(SEA_KNOWN_PRICES).find((key) =>
@@ -88,12 +139,5 @@ export function resolveParkingPricing(args: {
     }
   }
 
-  return {
-    price: 30,
-    priceDisplay: 'check-live',
-    priceUnit: 'per-day',
-    priceNote: 'Nearby listing found; confirm price with provider.',
-    priceSource: 'google-places',
-    priceConfidence: 'low',
-  };
+  return unknownGooglePricing(lotKind);
 }

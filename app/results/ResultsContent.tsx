@@ -13,7 +13,8 @@ import { RankedRecommendation } from '../../lib/domain';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
-import { AIRPORTS_CATALOG, getAirportById } from '../../lib/airports/catalog';
+import { getAirportById } from '../../lib/airports/catalog';
+import AirportSearchPicker from '../components/AirportSearchPicker';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
@@ -2537,8 +2538,9 @@ type RecommendationRequestRef = {
 };
 
 const GOOGLE_PLACE_MATCH_CONCURRENCY = 2;
-const INITIAL_GOOGLE_PLACE_MATCH_LIMIT = 4;
-const EXPANDED_GOOGLE_PLACE_MATCH_LIMIT = 8;
+const COLLAPSED_PARKING_DISPLAY_COUNT = 6;
+const PARKING_SHOW_MORE_INCREMENT = 10;
+const MAX_GOOGLE_PLACE_MATCH_LIMIT = 20;
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -2600,7 +2602,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const editTripRef = useRef<HTMLDivElement | null>(null);
   const [editTripJustOpened, setEditTripJustOpened] = useState(false);
   const [showTooLate, setShowTooLate] = useState(false);
-  const [showMoreParking, setShowMoreParking] = useState(false);
+  const [visibleParkingCount, setVisibleParkingCount] = useState(COLLAPSED_PARKING_DISPLAY_COUNT);
   const [matchedParkingPrices, setMatchedParkingPrices] = useState<Record<string, {
     price: number;
     priceUnit?: PriceUnit;
@@ -2744,7 +2746,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         const key = parkingGoogleMatchKey(parking, airportCode);
         return !googleEnrichedParking[parking.id] && !googlePlaceAttemptedKeysRef.current.has(key);
       })
-      .slice(0, showMoreParking ? EXPANDED_GOOGLE_PLACE_MATCH_LIMIT : INITIAL_GOOGLE_PLACE_MATCH_LIMIT);
+      .slice(
+        0,
+        Math.min(visibleParkingCount, MAX_GOOGLE_PLACE_MATCH_LIMIT),
+      );
 
     if (parkingOptions.length === 0) return;
 
@@ -2807,7 +2812,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return () => {
       cancelled = true;
     };
-  }, [rankedOptions, tripData, googleEnrichedParking, showMoreParking]);
+  }, [rankedOptions, tripData, googleEnrichedParking, visibleParkingCount]);
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
@@ -3121,7 +3126,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setAprLiveChecking(false);
         setParkingPricesChecking(false);
         setParkingWeather([]);
-        setShowMoreParking(false);
+        setVisibleParkingCount(COLLAPSED_PARKING_DISPLAY_COUNT);
         setSelectedParkingId(null);
 
         googlePlaceAttemptedKeysRef.current.clear();
@@ -4043,9 +4048,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const smartPickOption = cheapestSmartPickOptions[0] || null;
 
-  const collapsedParkingDisplayCount = 6;
-  const expandedParkingDisplayCount = 20;
-
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
   const remainingParking = parkingDisplayOptions
@@ -4146,12 +4148,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     return !isParkingRouteUnavailable(option);
   });
-  const displayedParking = displayableRemainingParking.slice(
+  const displayedParking = displayableRemainingParking.slice(0, visibleParkingCount);
+  const hiddenParkingCount = Math.max(
     0,
-    showMoreParking ? expandedParkingDisplayCount : collapsedParkingDisplayCount
+    displayableRemainingParking.length - visibleParkingCount,
   );
-  const canToggleMoreParking =
-    displayableRemainingParking.length > collapsedParkingDisplayCount;
+  const nextParkingShowMoreCount = Math.min(
+    PARKING_SHOW_MORE_INCREMENT,
+    hiddenParkingCount,
+  );
+  const canShowMoreParking = hiddenParkingCount > 0;
 
   async function handleShowReviews(parking: ParkingOption) {
     const airportCode = getTripAirportCode(tripData);
@@ -5301,15 +5307,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       </p>
                     </div>
 
-                    {!airportRouteUnavailable && canToggleMoreParking && (
+                    {!airportRouteUnavailable && canShowMoreParking && (
                       <button
                         type="button"
-                        onClick={() => setShowMoreParking((v) => !v)}
+                        onClick={() =>
+                          setVisibleParkingCount((current) =>
+                            Math.min(
+                              current + PARKING_SHOW_MORE_INCREMENT,
+                              displayableRemainingParking.length,
+                            ),
+                          )
+                        }
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {showMoreParking
-                          ? 'Show top 5 only'
-                          : 'Show top 10'}
+                        {`Show ${nextParkingShowMoreCount} more parking option${
+                          nextParkingShowMoreCount === 1 ? '' : 's'
+                        }`}
                       </button>
                     )}
                   </div>
@@ -5778,21 +5791,12 @@ function EditTripForm({
         <div className="sm:col-span-2">
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-zinc-800">Airport</label>
-            <select
+            <AirportSearchPicker
               value={selectedAirportCode}
-              onChange={(e) => {
-                const nextCode = e.target.value.toUpperCase();
-                console.log('airport changed', nextCode);
-                setSelectedAirportCode(nextCode);
+              onChange={(airportCode) => {
+                setSelectedAirportCode(airportCode.toUpperCase());
               }}
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              {AIRPORTS_CATALOG.map((airport) => (
-                <option key={airport.id} value={airport.id}>
-                  {airport.id} — {airport.label}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <div className="text-sm font-medium text-zinc-900">What can you use today?</div>
           <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">

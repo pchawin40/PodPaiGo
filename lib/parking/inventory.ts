@@ -113,7 +113,7 @@ export async function saveParkingLots(
 
 export async function getParkingLotsByAirport(
     airportCode: string,
-    limit = 25,
+    limit = 50,
     radiusMiles = 25,
 ): Promise<ParkingLotInventoryRow[]> {
     const airport = getAirportById(airportCode.toUpperCase());

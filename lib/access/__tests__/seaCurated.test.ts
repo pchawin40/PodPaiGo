@@ -1,4 +1,8 @@
-import { buildSeaCuratedAccessOptions, isSeaCuratedAccessEnabled } from '../buildAccessOptions';
+import {
+  buildSeaCuratedAccessOptions,
+  isSeaCuratedAccessEnabled,
+  resetSeaCuratedAccessDiagnosticsForTests,
+} from '../buildAccessOptions';
 import type { TripData } from '../../types';
 
 const originalEnv = process.env.SEA_CURATED_ACCESS;
@@ -46,6 +50,20 @@ describe('buildSeaCuratedAccessOptions', () => {
   test('returns empty when feature flag disabled', () => {
     delete process.env.SEA_CURATED_ACCESS;
     expect(buildSeaCuratedAccessOptions(trip, 'SEA')).toEqual([]);
+  });
+
+  test('logs dev diagnostic when flag disabled for SEA', () => {
+    delete process.env.SEA_CURATED_ACCESS;
+    resetSeaCuratedAccessDiagnosticsForTests();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    buildSeaCuratedAccessOptions(trip, 'SEA');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.',
+    );
+
+    warnSpy.mockRestore();
   });
 
   test('includes overnight caveat for long parking trips', () => {

@@ -28,7 +28,7 @@ export class InventoryParkingProvider implements ParkingProvider {
     const airportCode = context.airportCode.toUpperCase();
     const airport = getAirportById(airportCode);
 
-    const inventoryLots = await getParkingLotsByAirport(airportCode, 25).catch((error) => {
+    const inventoryLots = await getParkingLotsByAirport(airportCode, 50).catch((error) => {
       console.warn('[inventory-provider] Parking inventory read failed', error);
       return [];
     });

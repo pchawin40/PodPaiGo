@@ -12,6 +12,22 @@ export function isSeaCuratedAccessEnabled(): boolean {
   return value === '1' || value.toLowerCase() === 'true';
 }
 
+let seaCuratedDisabledDiagnosticLogged = false;
+
+export function resetSeaCuratedAccessDiagnosticsForTests(): void {
+  seaCuratedDisabledDiagnosticLogged = false;
+}
+
+export function logSeaCuratedAccessDisabledDiagnostic(): void {
+  if (process.env.NODE_ENV === 'production') return;
+  if (seaCuratedDisabledDiagnosticLogged) return;
+
+  seaCuratedDisabledDiagnosticLogged = true;
+  console.warn(
+    '[access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.',
+  );
+}
+
 function isOvernightTrip(tripData: TripData): boolean {
   const parkingDurationMinutes = calculateParkingDuration(tripData);
   return (
@@ -74,7 +90,10 @@ export function buildSeaCuratedAccessOptions(
   trafficEstimate?: TrafficEstimate,
 ): AccessStrategyOption[] {
   if (airportCode.toUpperCase() !== 'SEA') return [];
-  if (!isSeaCuratedAccessEnabled()) return [];
+  if (!isSeaCuratedAccessEnabled()) {
+    logSeaCuratedAccessDisabledDiagnostic();
+    return [];
+  }
 
   const overnight = isOvernightTrip(tripData);
 

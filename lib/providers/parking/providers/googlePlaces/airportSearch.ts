@@ -25,6 +25,92 @@ type GooglePlace = {
   }>;
 };
 
+const UNRELATED_BUSINESS_PATTERNS = [
+  'restaurant',
+  'coffee',
+  'cafe',
+  'bar & grill',
+  'bar and grill',
+  'hotel front desk',
+  'gas station',
+  'fuel stop',
+  'car wash',
+  'auto repair',
+  'grocery',
+  'supermarket',
+  'pharmacy',
+  'bank',
+  'atm',
+  'church',
+  'school',
+  'daycare',
+  'gym',
+  'fitness center',
+];
+
+const PARKING_TRANSIT_NAME_PATTERNS = [
+  'parking',
+  'park and ride',
+  'park & ride',
+  'park-and-ride',
+  'park n ride',
+  'transit center',
+  'transit centre',
+  'link station',
+  'light rail',
+  'station parking',
+  'northgate transit',
+  'northgate station',
+  'airport parking',
+  'long term parking',
+  'long-term parking',
+  'shuttle parking',
+  'hotel parking',
+  'garage',
+  ' parking lot',
+  'parking garage',
+  'airport shuttle',
+  'airport garage',
+  'terminal parking',
+];
+
+export function looksLikeParkingOrTransitName(name: string): boolean {
+  const normalized = name.toLowerCase().trim();
+  if (!normalized) return false;
+
+  if (UNRELATED_BUSINESS_PATTERNS.some((pattern) => normalized.includes(pattern))) {
+    return false;
+  }
+
+  if (PARKING_TRANSIT_NAME_PATTERNS.some((pattern) => normalized.includes(pattern))) {
+    return true;
+  }
+
+  if (normalized.includes('northgate')) return true;
+
+  if (/\b(shuttle|garage|lot)\b/.test(normalized)) return true;
+
+  if (normalized.includes('airport')) return true;
+
+  if (
+    normalized.includes('park') &&
+    (normalized.includes('park and') ||
+      normalized.includes('park &') ||
+      normalized.includes('park n') ||
+      normalized.includes('park,') ||
+      normalized.includes(' park ') ||
+      normalized.endsWith(' park'))
+  ) {
+    return true;
+  }
+
+  if (/\bstation\b/.test(normalized) && !normalized.includes('gas station')) {
+    return true;
+  }
+
+  return false;
+}
+
 function scoreGoogleParkingOption(p: ParkingOption): number {
   const reviewScore = p.reviewScore ?? 0;
   const reviewCount = p.reviewCount ?? 0;
@@ -58,6 +144,50 @@ function resolveLotKeyFromName(name: string): string | null {
   return null;
 }
 
+function isParkAndRideName(name: string): boolean {
+  const lower = name.toLowerCase();
+
+  return (
+    lower.includes('park & ride') ||
+    lower.includes('park and ride') ||
+    lower.includes('park-and-ride') ||
+    lower.includes('park n ride') ||
+    lower.includes('transit center') ||
+    lower.includes('transit centre') ||
+    lower.includes('link station') ||
+    lower.includes('light rail') ||
+    lower.includes('station parking') ||
+    lower.includes('northgate')
+  );
+}
+
+function dedupeGooglePlaces(places: GooglePlace[]): GooglePlace[] {
+  const seen = new Set<string>();
+  const unique: GooglePlace[] = [];
+
+  for (const place of places) {
+    const key = (place.id || place.displayName?.text || place.formattedAddress || '').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(place);
+  }
+
+  return unique;
+}
+
+function logGoogleParkingDiagnostics(stats: {
+  airportCode: string;
+  fetched: number;
+  droppedByName: number;
+  droppedByGeo: number;
+  afterDedupe: number;
+  returned: number;
+}): void {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.log('[google-parking]', stats);
+}
+
 export async function getGoogleParkingPlaces(args: {
   airportCode?: string;
   airportCoordinates?: { lat: number; lng: number };
@@ -67,13 +197,20 @@ export async function getGoogleParkingPlaces(args: {
   const airportCode = (args.airportCode || 'SEA').toUpperCase();
   const airport = getAirportById(airportCode);
   const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;
+  const airportLabel = airport?.label ?? airportCode;
   const searchQueries = [
-    `airport parking near ${airport?.label ?? airportCode}`,
-    `cheap airport parking near ${airportCode}`,
-    `off airport parking near ${airport?.label ?? airportCode}`,
-    `airport parking reservations near ${airport?.label ?? airportCode}`,
-    `park and ride to ${airport?.label ?? airportCode}`,
+    `airport parking near ${airportLabel}`,
+    `long term parking near ${airportCode}`,
+    `parking near ${airportLabel}`,
+    `airport shuttle parking near ${airportCode}`,
+    `hotel parking near ${airportCode}`,
+    `park and ride to ${airportLabel}`,
     `park and ride to ${airportCode}`,
+    `transit center to ${airportCode}`,
+    `light rail parking to ${airportCode}`,
+    `cheap airport parking near ${airportCode}`,
+    `off airport parking near ${airportLabel}`,
+    `airport parking reservations near ${airportLabel}`,
   ];
 
   const parkingSearchRadiusMeters = Number(
@@ -82,6 +219,10 @@ export async function getGoogleParkingPlaces(args: {
 
   const maxParkingDistanceMiles = Number(
     process.env.PARKING_MAX_DISTANCE_MILES || 25,
+  );
+
+  const maxReturnedOptions = Number(
+    process.env.GOOGLE_PARKING_MAX_RESULTS || 50,
   );
 
   async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
@@ -128,68 +269,65 @@ export async function getGoogleParkingPlaces(args: {
     searchQueries.map((query) => fetchPlacesForQuery(query)),
   );
 
-  const places = placesByQuery.flat();
+  const fetchedPlaces = placesByQuery.flat();
+  const dedupedPlaces = dedupeGooglePlaces(fetchedPlaces);
+
+  let droppedByName = 0;
+  let droppedByGeo = 0;
+
+  const filteredPlaces = dedupedPlaces.filter((place: GooglePlace) => {
+    const name = String(place.displayName?.text || '');
+
+    if (!looksLikeParkingOrTransitName(name)) {
+      droppedByName += 1;
+      return false;
+    }
+
+    const lat = place.location?.latitude;
+    const lng = place.location?.longitude;
+
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      const milesFromAirport = milesBetween(
+        { lat: airportCoordinates.lat, lng: airportCoordinates.lng },
+        { lat, lng },
+      );
+
+      if (milesFromAirport > maxParkingDistanceMiles) {
+        droppedByGeo += 1;
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   const mapped = await Promise.all(
-    places
-      .filter((place: GooglePlace) => {
-        const name = String(place.displayName?.text || '').toLowerCase();
-
-        const looksLikeParking =
-          name.includes('parking') ||
-          name.includes('park') ||
-          name.includes('garage') ||
-          name.includes('shuttle') ||
-          name.includes('airport');
-
-        if (!looksLikeParking) return false;
-
-        const lat = place.location?.latitude;
-        const lng = place.location?.longitude;
-
-        if (typeof lat === 'number' && typeof lng === 'number') {
-          const milesFromAirport = milesBetween(
-            { lat: airportCoordinates.lat, lng: airportCoordinates.lng },
-            { lat, lng },
-          );
-
-          if (milesFromAirport > maxParkingDistanceMiles) {
-            return false;
-          }
-        }
-
-        return true;
-      })
-      .slice(0, 40)
-      .map(async (place: GooglePlace): Promise<ParkingOption> => {
+    filteredPlaces.map(async (place: GooglePlace): Promise<ParkingOption> => {
         const rating = typeof place.rating === 'number' ? place.rating : undefined;
         const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : undefined;
 
         const name = place.displayName?.text || `${airportCode} Parking`;
         const lowerName = name.toLowerCase();
-        const isParkAndRide =
-          lowerName.includes('park & ride') ||
-          lowerName.includes('park and ride') ||
-          lowerName.includes('station parking') ||
-          lowerName.includes('northgate');
+        const isParkAndRide = isParkAndRideName(name);
         const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
 
         const lotKey = resolveLotKeyFromName(name);
-
-        const staticPricing = resolveParkingPricing({
-          airportCode,
-          lotName: name,
-        });
-
-        const dynamicPricing = lotKey
-          ? await resolveDynamicParkingPrice(lotKey)
-          : null;
 
         const isOfficial =
           lowerName.includes(`${airportCode.toLowerCase()} parking garage`) ||
           lowerName.includes('terminal parking') ||
           lowerName.includes('official') ||
           lowerName.includes('airport garage');
+
+        const staticPricing = resolveParkingPricing({
+          airportCode,
+          lotName: name,
+          lotKind: isOfficial ? 'official' : isParkAndRide ? 'park-and-ride' : 'off-airport',
+        });
+
+        const dynamicPricing = lotKey
+          ? await resolveDynamicParkingPrice(lotKey)
+          : null;
 
         const isCovered =
           lowerName.includes('garage') ||
@@ -200,6 +338,8 @@ export async function getGoogleParkingPlaces(args: {
         const hasDynamicPrice =
           typeof dynamicPricing?.price === 'number' && dynamicPricing.price > 0;
         const price = hasDynamicPrice ? dynamicPricing.price! : staticPricing.price;
+        const priceMin = hasDynamicPrice ? undefined : staticPricing.priceMin;
+        const priceMax = hasDynamicPrice ? undefined : staticPricing.priceMax;
         const priceDisplay = hasDynamicPrice ? dynamicPricing.priceDisplay : staticPricing.priceDisplay;
         const priceUnit = hasDynamicPrice ? dynamicPricing.priceUnit : staticPricing.priceUnit;
         const priceNote = hasDynamicPrice ? dynamicPricing.priceNote : staticPricing.priceNote;
@@ -210,7 +350,9 @@ export async function getGoogleParkingPlaces(args: {
           name,
           serviceAirportCode: airportCode,
           type: isOfficial ? 'official' : 'off-airport',
-          price: price ?? 30,
+          price: price ?? staticPricing.price ?? 20,
+          priceMin,
+          priceMax,
           priceDisplay,
           priceUnit: priceUnit ?? undefined,
           priceNote,
@@ -249,7 +391,7 @@ export async function getGoogleParkingPlaces(args: {
               ? 'Dynamic price found from configured source.'
               : dynamicPricing?.status === 'fallback'
                 ? 'Using known baseline price because live crawler did not find a current price.'
-                : 'Open provider to confirm live price/coupon.',
+                : 'Estimated nearby parking rate; confirm on provider.',
           ],
           walkingMinutes: isParkAndRide ? 8 : isOfficial ? 5 : 2,
           shuttleMinutes: isParkAndRide || isOfficial ? undefined : 12,
@@ -269,7 +411,18 @@ export async function getGoogleParkingPlaces(args: {
       }),
   );
 
-  return mapped
+  const returned = mapped
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
-    .slice(0, 30);
+    .slice(0, maxReturnedOptions);
+
+  logGoogleParkingDiagnostics({
+    airportCode,
+    fetched: fetchedPlaces.length,
+    droppedByName,
+    droppedByGeo,
+    afterDedupe: dedupedPlaces.length,
+    returned: returned.length,
+  });
+
+  return returned;
 }

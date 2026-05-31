@@ -93,8 +93,10 @@ export default function ParkingLotsMap({
             const bounds = new google.maps.LatLngBounds();
             bounds.extend(airport.geoLocation);
 
+            const mapLotLimit = Number(process.env.NEXT_PUBLIC_PARKING_MAP_MAX_LOTS || 50);
+
             const lotsWithPositions = await Promise.all(
-                parkingOptions.slice(0, 20).map(async (lot) => {
+                parkingOptions.slice(0, mapLotLimit).map(async (lot) => {
                     const position = await geocodeParkingLot(lot, airport.label);
                     return position ? { lot, position } : null;
                 })
