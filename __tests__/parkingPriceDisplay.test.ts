@@ -55,7 +55,7 @@ describe('parking price display', () => {
     expect(line.confidence).toBe('final_on_provider');
   });
 
-  test('$210 official known total for 7 days displays daily equivalent and total', () => {
+  test('$210 official known total for 7 days displays total primary and daily secondary', () => {
     const option = parkingOption({
       type: 'official',
       price: 210,
@@ -68,11 +68,14 @@ describe('parking price display', () => {
     expect(getParkingDailyPrice(option, sevenDayTrip)).toBe(30);
     expect(getParkingTotalPrice(option, sevenDayTrip)).toBe(210);
     expect(canDisplayParkingPrice(option)).toBe(true);
-    expect(parkingPriceLine(option, sevenDayTrip).primary).toContain('$');
-    expect(parkingPriceLine(option, sevenDayTrip).confidence).toBe('official');
+
+    const line = parkingPriceLine(option, sevenDayTrip);
+    expect(line.primary).toContain('$210 total');
+    expect(line.secondary).toContain('$30/day for 7 days');
+    expect(line.confidence).toBe('official');
   });
 
-  test('check-live with no price displays estimated default band', () => {
+  test('check-live with no price displays estimated total and daily band', () => {
     const option = parkingOption({
       price: 0,
       priceDisplay: 'check-live',
@@ -82,8 +85,9 @@ describe('parking price display', () => {
 
     const line = parkingPriceLine(option, sevenDayTrip);
     expect(line.primary).toContain('Estimated');
+    expect(line.primary).toContain('total');
     expect(line.primary).toMatch(/\$/);
-    expect(line.secondary).toBe('Open provider to confirm current price.');
+    expect(line.secondary).toContain('/day for 7 days');
   });
 
   test('official known daily rate still displays', () => {
@@ -99,8 +103,10 @@ describe('parking price display', () => {
     });
 
     expect(canDisplayParkingPrice(option)).toBe(true);
-    expect(parkingPriceLine(option, sevenDayTrip).primary).toContain('$37');
-    expect(parkingPriceLine(option, sevenDayTrip).confidence).toBe('official');
+    const line = parkingPriceLine(option, sevenDayTrip);
+    expect(line.primary).toContain('$259 total');
+    expect(line.secondary).toContain('$37/day for 7 days');
+    expect(line.confidence).toBe('official');
   });
 
   test('real ParkWhiz selected-date total still displays', () => {

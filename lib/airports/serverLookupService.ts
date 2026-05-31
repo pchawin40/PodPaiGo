@@ -58,6 +58,13 @@ export async function refreshFromDatabase(): Promise<boolean> {
 
     if (result.rows.length === 0) return false;
 
+    if (result.rows.length < 500) {
+      console.warn(
+        `Airport DB returned ${result.rows.length} rows; keeping bundled national catalog instead.`,
+      );
+      return false;
+    }
+
     airportLookupService.loadRecords(
       result.rows.map((row) => ({
         airportCode: row.airport_code,

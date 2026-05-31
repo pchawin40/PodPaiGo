@@ -944,7 +944,6 @@ export default function TripFlow() {
                 <div className="md:col-span-2">
                   {isAirportTrip && (
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-zinc-800">Airport</label>
                       <AirportSearchPicker
                         value={state.airportCode}
                         onChange={(airportCode) =>

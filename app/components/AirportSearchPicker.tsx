@@ -32,6 +32,8 @@ export default function AirportSearchPicker({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const trimmedQuery = query.trim();
+  const showingPopular = open && !trimmedQuery;
 
   useEffect(() => {
     let active = true;
@@ -66,7 +68,7 @@ export default function AirportSearchPicker({
       setLoading(true);
       try {
         const res = await fetch(
-          `/api/airports/search?q=${encodeURIComponent(query.trim())}&limit=12`,
+          `/api/airports/search?q=${encodeURIComponent(trimmedQuery)}&limit=15`,
         );
         const data = await res.json();
         if (active && Array.isArray(data.airports)) {
@@ -77,13 +79,13 @@ export default function AirportSearchPicker({
       } finally {
         if (active) setLoading(false);
       }
-    }, query.trim() ? 120 : 0);
+    }, trimmedQuery ? 120 : 0);
 
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [query]);
+  }, [trimmedQuery]);
 
   useEffect(() => {
     function onDocumentClick(event: MouseEvent) {
@@ -103,10 +105,11 @@ export default function AirportSearchPicker({
 
   return (
     <div ref={containerRef} className={className}>
+      <label className="block text-sm font-medium text-zinc-800">Airport</label>
       <input
         type="text"
         value={displayValue}
-        placeholder="Search airport code, city, or name (SEA, Seattle, LAX...)"
+        placeholder="Search by airport code, city, or airport name"
         onFocus={() => {
           setOpen(true);
           setQuery('');
@@ -119,10 +122,19 @@ export default function AirportSearchPicker({
         autoComplete="off"
         spellCheck={false}
       />
+      <p className="mt-1 text-xs text-zinc-500">
+        Search by airport code, city, or airport name. Popular U.S. airports appear when the field is empty.
+      </p>
 
       {open && (
         <div className="relative z-20">
           <ul className="absolute mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-slate-200 bg-white py-2 shadow-lg">
+            {showingPopular && !loading && (
+              <li className="px-4 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Popular U.S. airports
+              </li>
+            )}
+
             {loading && (
               <li className="px-4 py-2 text-sm text-slate-500">Searching airports...</li>
             )}

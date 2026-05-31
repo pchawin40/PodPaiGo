@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 };
 
 const currentFeatures = [
-  "Airport trip planning for supported Washington airports",
-  "Parking, rideshare, taxi, and transit comparison where data is available",
+  "National U.S. airport search in new trip and edit-trip forms",
+  "Airport trip planning with parking, rideshare, taxi, and transit comparison",
   "Leave-by timing using traffic, airport buffer, and trip details",
-  "Parking duration and total-cost estimates",
+  "Parking duration with total and per-day price display",
   "Airport maps and airport-specific guidance",
   "Weather-aware scoring for parking comfort and walking exposure",
   "Confidence labels for live, verified, estimated, and fallback data",
@@ -30,6 +30,38 @@ const futurePlans = [
   {
     title: "Saved preferences",
     body: "Let users save what they care about, such as lower cost, covered parking, fewer transfers, shorter walks, rideshare preference, luggage needs, and typical departure buffers.",
+  },
+  {
+    title: "Favorite trips and saved routes",
+    body: "Save recurring airport trips and preferred routes so frequent travelers can reopen a plan without re-entering the same details.",
+  },
+  {
+    title: "Favorite parking lots",
+    body: "Bookmark trusted lots and reopen them quickly on future trips to the same airport.",
+  },
+  {
+    title: "Saved home, work, and airport locations",
+    body: "Store frequent origins and destination airports so repeat planning starts with one tap.",
+  },
+  {
+    title: "Business traveler mode",
+    body: "A profile tuned for expensed work travel with faster defaults, clearer receipts-oriented summaries, and fewer leisure-oriented distractions.",
+  },
+  {
+    title: "Covered parking filter",
+    body: "Filter parking results to garages and covered options when weather protection matters.",
+  },
+  {
+    title: "Security and well-lit filter",
+    body: "Help travelers prioritize safer-feeling parking and access options with better lighting and lower walking exposure.",
+  },
+  {
+    title: "Rideshare-first mode",
+    body: "Surface Uber and rideshare options first for expensed work travel when driving and parking are not the priority.",
+  },
+  {
+    title: "Hotel and flight integrations (future expansion)",
+    body: "Later connect hotel stays and flight details for richer trip context. This is future expansion, not current core PodPaiGo scope.",
   },
 ];
 

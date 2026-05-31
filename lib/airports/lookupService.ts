@@ -102,6 +102,8 @@ function scoreAirport(record: NationalAirportRecord, query: string): number {
     if (alias.includes(q) || q.includes(alias)) score += 70;
   }
 
+  if (score === 0) return 0;
+
   if (record.airportType === 'large_airport') score += 8;
   if (record.iata) score += 5;
 

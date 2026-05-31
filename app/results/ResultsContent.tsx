@@ -548,66 +548,108 @@ function HiddenAccessOptionsSection({
 }: {
   options: AccessStrategyOption[];
 }) {
-  const hidden = options.filter((option) => option.isHiddenGem);
-  if (hidden.length === 0) return null;
+  if (options.length === 0) return null;
+
+  const hiddenGems = options.filter((option) => option.isHiddenGem);
+  const parkAndRideOptions = options.filter(
+    (option) => option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
+  );
+
+  const renderOption = (option: AccessStrategyOption) => (
+    <div
+      key={option.id}
+      className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-lg font-bold text-zinc-900">{option.displayName}</div>
+          <div className="mt-1 text-base font-semibold text-zinc-800">
+            {option.pricing.displayPrimary}
+          </div>
+          <div className="mt-1 text-sm text-zinc-600">
+            {option.pricing.displaySecondary}
+          </div>
+          <div className="mt-2 text-sm text-zinc-700">{option.explanation}</div>
+          {option.overnightCaveat ? (
+            <div className="mt-2 text-sm text-amber-900">{option.overnightCaveat}</div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col items-end gap-2">
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pricingConfidenceBadgeClass(option.pricing.confidence)}`}
+          >
+            {formatPricingConfidenceLabel(option.pricing.confidence)}
+          </span>
+          <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+            {option.timing.terminalReadyMinutes} min to terminal-ready
+          </span>
+        </div>
+      </div>
+
+      {option.bestFor?.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {option.bestFor.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-medium text-emerald-800"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {option.mapLink ? (
+          <a
+            href={option.mapLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+          >
+            View on map
+          </a>
+        ) : null}
+        {option.sourceLink ? (
+          <a
+            href={option.sourceLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-50"
+          >
+            Transit info
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
 
   return (
     <div id="hidden-access-options" className="mt-6 scroll-mt-6">
-      <div className="mb-4">
-        <h2 className="text-xl font-bold">Hidden access options</h2>
-        <p className="mt-1 text-sm text-zinc-600">
-          Realistic airport access strategies that are easy to miss in standard parking searches.
-        </p>
-      </div>
-
-      <div className="space-y-3">
-        {hidden.map((option) => (
-          <div
-            key={option.id}
-            className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 shadow-sm"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg font-bold text-zinc-900">{option.displayName}</div>
-                <div className="mt-1 text-base font-semibold text-zinc-800">
-                  {option.pricing.displayPrimary}
-                </div>
-                <div className="mt-1 text-sm text-zinc-600">
-                  {option.pricing.displaySecondary}
-                </div>
-                <div className="mt-2 text-sm text-zinc-700">{option.explanation}</div>
-                {option.overnightCaveat ? (
-                  <div className="mt-2 text-sm text-amber-900">{option.overnightCaveat}</div>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col items-end gap-2">
-                <span
-                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pricingConfidenceBadgeClass(option.pricing.confidence)}`}
-                >
-                  {formatPricingConfidenceLabel(option.pricing.confidence)}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
-                  {option.timing.terminalReadyMinutes} min to terminal-ready
-                </span>
-              </div>
-            </div>
-
-            {option.bestFor?.length ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {option.bestFor.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-medium text-emerald-800"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+      {hiddenGems.length > 0 && (
+        <>
+          <div className="mb-4">
+            <h2 className="text-xl font-bold">Hidden access options</h2>
+            <p className="mt-1 text-sm text-zinc-600">
+              Realistic airport access strategies that are easy to miss in standard parking searches.
+            </p>
           </div>
-        ))}
-      </div>
+          <div className="space-y-3">{hiddenGems.map(renderOption)}</div>
+        </>
+      )}
+
+      {parkAndRideOptions.length > 0 && (
+        <div className={hiddenGems.length > 0 ? 'mt-8' : ''}>
+          <div className="mb-4">
+            <h2 className="text-xl font-bold">Park & ride / transit access</h2>
+            <p className="mt-1 text-sm text-zinc-600">
+              Station and transit-center parking with rail or transit to the airport — not standard airport parking lots.
+            </p>
+          </div>
+          <div className="space-y-3">{parkAndRideOptions.map(renderOption)}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1465,7 +1507,7 @@ function OptionCard({
       ? parkingPriceLine(normalizedParkingOption, tripData)
       : null;
 
-  const parkingTotalText =
+  const parkingDailyText =
     item.type === 'parking' && parkingPrice?.secondary
       ? parkingPrice.secondary
       : null;
@@ -1556,9 +1598,9 @@ function OptionCard({
                     : nonParkingPrice}
               </span>
 
-              {parkingTotalText && (
-                <span className="text-sm font-semibold text-zinc-600">
-                  · {parkingTotalText.replace('Est. total: ', '')}
+              {parkingDailyText && (
+                <span className="block text-sm font-medium text-zinc-600">
+                  {parkingDailyText}
                 </span>
               )}
 
@@ -2941,6 +2983,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       window.history.replaceState(null, '', newUrl);
     }
   }, [sort]);
+
+  useEffect(() => {
+    if (!showMapModal) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [showMapModal]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -5128,17 +5188,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </div>
 
               {showMapModal && (
-                <div className="fixed inset-0 z-[100] bg-black/50 p-3 sm:p-6">
-                  <div className="mx-auto flex h-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+                <div
+                  className="fixed inset-0 z-[100] overscroll-none bg-black/50 p-3 sm:p-6"
+                  onWheel={(event) => event.stopPropagation()}
+                  onTouchMove={(event) => event.stopPropagation()}
+                >
+                  <div className="mx-auto flex h-full max-h-[calc(100dvh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
 
                     {/* Header */}
-                    <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+                    <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3">
                       <div>
                         <div className="text-sm font-semibold text-zinc-900">Parking map</div>
-                        <div className="text-xs text-zinc-500">Available lots around airport</div>
+                        <div className="text-xs text-zinc-500">
+                          You are viewing lots around {currentAirport.id}
+                          {tripData?.origin ? ` · from ${tripData.origin}` : ''}
+                        </div>
                       </div>
 
                       <button
+                        type="button"
                         onClick={() => setShowMapModal(false)}
                         className="cursor-pointer rounded-full border px-3 py-1 text-sm"
                       >
@@ -5147,9 +5215,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     </div>
 
                     {/* Map */}
-                    <div className="flex-1">
+                    <div className="min-h-0 flex-1 overflow-hidden">
                       <ParkingLotsMap
                         airportCode={tripData?.airportCode}
+                        originAddress={tripData?.origin}
                         parkingOptions={recommendation.parking}
                         selectedParkingId={selectedParkingId}
                         onSelectParking={setSelectedParkingId}
@@ -5809,7 +5878,6 @@ function EditTripForm({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-zinc-800">Airport</label>
             <AirportSearchPicker
               value={selectedAirportCode}
               onChange={(airportCode) => {

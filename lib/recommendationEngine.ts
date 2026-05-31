@@ -26,6 +26,10 @@ import {
 import { isParkingRouteUnavailable } from './parking/routeStatus';
 import { getAirportById } from './airports/catalog';
 import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
+import {
+  buildParkAndRideAccessOptionsFromParking,
+  partitionParkingByAccessKind,
+} from './access/parkAndRideAccess';
 import { rankAccessOptions } from './access/rankAccessOptions';
 
 type TripDataWithTransport = TripData & {
@@ -422,20 +426,22 @@ export class RecommendationEngine {
       ? ((tripData as TripDataWithTransport).airportCode || 'SEA').toUpperCase()
       : 'GENERAL';
 
-    parking =
-      isAirportTrip && airportCode === 'SEA'
-        ? parking.map((p) =>
-          attachSeaCheckpointRoute(
-            p,
-            resolvedTsaEstimate.bestCheckpoint
-              ? {
-                ...resolvedTsaEstimate.bestCheckpoint,
-                reason: resolvedTsaEstimate.bestCheckpoint.reason || 'Best checkpoint for this trip.',
-              }
-              : undefined
-          )
+    const { standardParking, parkAndRideParking } = partitionParkingByAccessKind(parking);
+    parking = standardParking;
+
+    if (isAirportTrip && airportCode === 'SEA') {
+      parking = parking.map((p) =>
+        attachSeaCheckpointRoute(
+          p,
+          resolvedTsaEstimate.bestCheckpoint
+            ? {
+              ...resolvedTsaEstimate.bestCheckpoint,
+              reason: resolvedTsaEstimate.bestCheckpoint.reason || 'Best checkpoint for this trip.',
+            }
+            : undefined
         )
-        : parking;
+      );
+    }
 
     const weatherResult = isAirportTrip
       ? await getWeatherForAirport({
@@ -703,9 +709,21 @@ export class RecommendationEngine {
         ? buildSeaCuratedAccessOptions(tripData, airportCode, trafficEstimate)
         : [];
 
+    const discoveredParkAndRideAccess =
+      isAirportTrip && parkAndRideParking.length > 0
+        ? buildParkAndRideAccessOptionsFromParking(
+          parkAndRideParking,
+          tripData,
+          airportCode,
+          trafficEstimate,
+        )
+        : [];
+
+    const allAccessOptions = [...curatedAccessOptions, ...discoveredParkAndRideAccess];
+
     const accessStrategies =
-      curatedAccessOptions.length > 0
-        ? rankAccessOptions(curatedAccessOptions, tripData)
+      allAccessOptions.length > 0
+        ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
 
     return {

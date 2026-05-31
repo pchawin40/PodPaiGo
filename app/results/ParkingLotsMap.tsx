@@ -29,24 +29,9 @@ function trustedParkingSourceLink(lot: ParkingOption): string | null {
     return link;
 }
 
-async function geocodeParkingLot(
-    lot: ParkingOption,
-    airportLabel: string
-): Promise<google.maps.LatLngLiteral | null> {
-    if (typeof lot.lat === 'number' && typeof lot.lng === 'number') {
-        return { lat: lot.lat, lng: lot.lng };
-    }
-
+async function geocodeAddress(query: string): Promise<google.maps.LatLngLiteral | null> {
     const geocoder = new google.maps.Geocoder();
-
-    const query =
-        lot.address ||
-        lot.normalizedAddress ||
-        lot.routeDestination ||
-        `${lot.name} near ${airportLabel}`;
-
     const result = await geocoder.geocode({ address: query });
-
     const location = result.results?.[0]?.geometry?.location;
     if (!location) return null;
 
@@ -55,13 +40,33 @@ async function geocodeParkingLot(
         lng: location.lng(),
     };
 }
+
+async function geocodeParkingLot(
+    lot: ParkingOption,
+    airportLabel: string
+): Promise<google.maps.LatLngLiteral | null> {
+    if (typeof lot.lat === 'number' && typeof lot.lng === 'number') {
+        return { lat: lot.lat, lng: lot.lng };
+    }
+
+    const query =
+        lot.address ||
+        lot.normalizedAddress ||
+        lot.routeDestination ||
+        `${lot.name} near ${airportLabel}`;
+
+    return geocodeAddress(query);
+}
+
 export default function ParkingLotsMap({
     airportCode = 'SEA',
+    originAddress,
     parkingOptions,
     selectedParkingId,
     onSelectParking,
 }: {
     airportCode?: string;
+    originAddress?: string | null;
     parkingOptions: ParkingOption[];
     selectedParkingId?: string | null;
     onSelectParking?: (id: string) => void;
@@ -82,16 +87,51 @@ export default function ParkingLotsMap({
             const { AdvancedMarkerElement, PinElement } =
                 (await google.maps.importLibrary('marker')) as google.maps.MarkerLibrary;
 
-
             const map = new Map(mapRef.current, {
                 center: airport.geoLocation,
-                zoom: 12,
+                zoom: 11,
                 mapId: process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID,
                 mapTypeId: 'roadmap',
+                gestureHandling: 'greedy',
             });
 
             const bounds = new google.maps.LatLngBounds();
             bounds.extend(airport.geoLocation);
+
+            const airportPin = new PinElement({
+                glyphText: '✈',
+                background: '#2563eb',
+                borderColor: '#1e3a8a',
+                glyphColor: '#ffffff',
+            });
+
+            new AdvancedMarkerElement({
+                map,
+                position: airport.geoLocation,
+                title: `${airport.id} airport`,
+                content: airportPin,
+            });
+
+            if (originAddress?.trim()) {
+                const originPosition = await geocodeAddress(originAddress.trim());
+                if (originPosition) {
+                    bounds.extend(originPosition);
+
+                    const originPin = new PinElement({
+                        glyphText: '●',
+                        background: '#0f766e',
+                        borderColor: '#134e4a',
+                        glyphColor: '#ffffff',
+                    });
+
+                    new AdvancedMarkerElement({
+                        map,
+                        position: originPosition,
+                        title: `Your origin: ${originAddress}`,
+                        content: originPin,
+                    });
+                }
+            }
 
             const mapLotLimit = Number(process.env.NEXT_PUBLIC_PARKING_MAP_MAX_LOTS || 50);
 
@@ -205,7 +245,7 @@ export default function ParkingLotsMap({
         font-weight: 700;
       "
     >
-      Check / book
+      View listing
     </a>`
                             : ''
                         }
@@ -222,24 +262,37 @@ export default function ParkingLotsMap({
                         block: 'center',
                     });
                 });
+
+                if (selectedParkingId === lot.id) {
+                    info.open({ map, anchor: marker });
+                }
             });
 
             if (validLots.length > 0) {
-                map.fitBounds(bounds);
+                map.fitBounds(bounds, 56);
 
                 google.maps.event.addListenerOnce(map, 'idle', () => {
-                    if ((map.getZoom() ?? 12) > 14) map.setZoom(14);
+                    const zoom = map.getZoom() ?? 11;
+                    if (zoom > 13) map.setZoom(13);
+                    if (zoom < 9) map.setZoom(9);
                 });
             } else {
                 map.setCenter(airport.geoLocation);
-                map.setZoom(12);
+                map.setZoom(11);
             }
         }
 
         initMap().catch((error) => {
-            console.error('Failed to initialize parking map:', error);
+            console.warn('Failed to initialize parking map:', error);
         });
-    }, [airportCode, parkingOptions, onSelectParking]);
+    }, [airportCode, originAddress, parkingOptions, onSelectParking, selectedParkingId]);
 
-    return <div ref={mapRef} className="h-full min-h-[520px] w-full" />;
+    return (
+        <div className="relative h-full min-h-[520px] w-full">
+            <div ref={mapRef} className="h-full min-h-[520px] w-full" />
+            <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-zinc-200 bg-white/95 px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm">
+                ✈ Airport · ● Origin · numbered lots
+            </div>
+        </div>
+    );
 }

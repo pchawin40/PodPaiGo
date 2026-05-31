@@ -229,34 +229,36 @@ export function formatParkingPriceLine(
 ): ParkingPriceDisplayLine {
   const confidence = resolvePricingConfidence(option);
   const days = Math.max(1, estimateParkingDays(tripData));
-  const daily = deriveParkingDailyRange(option);
   const total = deriveParkingTotalRange(option, tripData);
   const label = formatPricingConfidenceLabel(confidence);
 
+  const daily =
+    option.priceUnit === 'total' &&
+    typeof option.price === 'number' &&
+    option.price > 0
+      ? {
+          min: Math.round(option.price / days),
+          max: Math.round(option.price / days),
+          currency: 'USD' as const,
+        }
+      : deriveParkingDailyRange(option);
+
   const dailyText = formatMoneyRange(daily.min, daily.max);
   const totalText = formatMoneyRange(total.min, total.max);
+  const dailyIsExact = daily.min === daily.max;
+  const totalIsExact = total.min === total.max;
+  const showDailyApprox =
+    !dailyIsExact || confidence === 'estimated' || !totalIsExact;
 
-  if (option.priceUnit === 'total' && daily.min === daily.max && daily.min > days) {
-    return {
-      primary: `${label} ${totalText} total`,
-      secondary: option.priceNote || `${days} day(s)`,
-      confidence,
-    };
-  }
-
-  const primary =
-    daily.min === daily.max && total.min === total.max
-      ? `${label} ${dailyText}/day · ${totalText} total`
-      : `${label} ${dailyText}/day`;
-
-  const secondary =
-    total.min === total.max
-      ? `Total ${totalText} for ${days} day(s)`
-      : `Est. total ${totalText} for ${days} day(s)`;
+  const primary = `${label} ${totalText} total`;
+  const dailyPrefix = showDailyApprox && !dailyIsExact ? '~' : '';
+  const secondary = dailyIsExact
+    ? `${dailyPrefix}${formatMoney(daily.min)}/day for ${days} day${days === 1 ? '' : 's'}`
+    : `${dailyPrefix}${dailyText}/day for ${days} day${days === 1 ? '' : 's'}`;
 
   return {
     primary,
-    secondary: option.priceNote || secondary,
+    secondary,
     confidence,
   };
 }
