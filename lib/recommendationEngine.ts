@@ -25,6 +25,8 @@ import {
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
 import { getAirportById } from './airports/catalog';
+import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
+import { rankAccessOptions } from './access/rankAccessOptions';
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -696,10 +698,21 @@ export class RecommendationEngine {
       );
     });
 
+    const curatedAccessOptions =
+      isAirportTrip && airportCode === 'SEA'
+        ? buildSeaCuratedAccessOptions(tripData, airportCode, trafficEstimate)
+        : [];
+
+    const accessStrategies =
+      curatedAccessOptions.length > 0
+        ? rankAccessOptions(curatedAccessOptions, tripData)
+        : undefined;
+
     return {
       parking: finalParking,
       rideshare: finalRideshare,
       transit: finalTransit,
+      accessStrategies,
       tsaEstimate: resolvedTsaEstimate,
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
       airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,

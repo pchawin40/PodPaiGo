@@ -174,6 +174,10 @@ export type ParkingOption = {
    * UI may hide this if `priceDisplay` is not `live`.
    */
   price: number;
+  priceMin?: number;
+  priceMax?: number;
+  priceRangeLabel?: string;
+  pricingConfidence?: 'live' | 'recent' | 'official' | 'estimated' | 'final_on_provider';
   /**
    * How the UI should present this price.
    * Default: derived from trust status (legacy).
@@ -468,10 +472,13 @@ export type TsaWaitTimes = {
   clearPrecheck: number;
 };
 
+import type { AccessRankingResult } from './access/types';
+
 export type Recommendation = {
   parking: ParkingOption[];
   rideshare: RideshareOption[];
   transit: TransitOption[];
+  accessStrategies?: AccessRankingResult;
   tsaEstimate: TsaEstimate;
   airportRouteUnavailable?: boolean;
   airportRouteUnavailableReason?: string;

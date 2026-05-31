@@ -101,7 +101,7 @@ export const mockParkingOptions: ParkingOption[] = [
     assumptions: [
       'Pricing varies by date/time and promos',
       'Shuttle service included',
-      'Check live price before booking'
+      'Confirm final rate on provider before booking'
     ],
     walkingMinutes: 2,
     shuttleMinutes: 12,
@@ -123,7 +123,7 @@ export const mockParkingOptions: ParkingOption[] = [
     price: 34,
     priceDisplay: 'from-per-day' as const,
     priceUnit: 'per-day' as const,
-    priceNote: 'Estimated daily rate — check live price',
+    priceNote: 'Estimated daily rate — confirm final rate on provider',
     priceSource: 'direct-lot-rate',
     priceConfidence: 'medium',
     distance: 15,
@@ -137,7 +137,7 @@ export const mockParkingOptions: ParkingOption[] = [
     assumptions: [
       'Pricing varies by date/time and promos',
       'Shuttle service included',
-      'Check live price before booking'
+      'Confirm final rate on provider before booking'
     ],
     walkingMinutes: 2,
     shuttleMinutes: 12,

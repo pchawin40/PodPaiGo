@@ -1,4 +1,6 @@
 import { ParkingOption, TripData } from '../types';
+import type { PriceableParkingLike } from '../access/types';
+import { canDisplayParkingPrice } from './priceDisplay';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
 import { isParkingRouteUnavailable } from './routeStatus';
 import { getAirportById } from '../airports/catalog';
@@ -541,9 +543,15 @@ export function parkingRouteBreakdown(option: ParkingOption): string {
     .join(' + ');
 }
 
+import { formatOptionPrice } from '../access/pricingLadder';
+
 export function parkingDailyCost(option: ParkingOption, formatMoney: (n: number) => string): string {
-  if (typeof option.price !== 'number' || option.price <= 0) return 'Check live price';
-  return `${formatMoney(option.price)}/day`;
+  const formatted = formatOptionPrice(option);
+  if (formatted.includes('/day')) return formatted.replace(/^[^$]*/, '').trim() || formatted;
+  if (typeof option.price === 'number' && option.price > 0) {
+    return `${formatMoney(option.price)}/day`;
+  }
+  return formatted;
 }
 
 export function routeUrlForOption(
@@ -589,11 +597,16 @@ export function parkingKeySafe(option: { id?: string; name?: string } | null | u
   });
 }
 
-export function hasRealParkingPrice(option: { price?: number; priceDisplay?: string }) {
-  return (
-    typeof option.price === 'number' &&
-    option.price > 0 &&
-    option.price < 500 &&
-    option.priceDisplay !== 'check-live'
-  );
+export function hasRealParkingPrice(option: {
+  price?: number;
+  priceDisplay?: string;
+  priceMin?: number;
+  priceMax?: number;
+}) {
+  return canDisplayParkingPrice({
+    price: option.price ?? 0,
+    priceDisplay: option.priceDisplay as PriceableParkingLike['priceDisplay'],
+    priceMin: option.priceMin,
+    priceMax: option.priceMax,
+  });
 }

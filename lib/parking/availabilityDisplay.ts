@@ -27,7 +27,7 @@ export function getParkingAvailabilityDisplay(option: ParkingOption) {
   }
 
   return {
-    label: 'Check live',
+    label: 'Verify availability',
     tone: 'zinc',
     description: 'Open provider to confirm current price and availability.',
   };

@@ -19,7 +19,7 @@ const SEA_KNOWN_PRICES: Record<string, PricingResolution> = {
     price: 34,
     priceDisplay: 'from-per-day' as const,
     priceUnit: 'per-day' as const,
-    priceNote: 'Known SEA parking lot. Estimated daily rate — check live price before booking.',
+    priceNote: 'Known SEA parking lot. Estimated daily rate — confirm final rate on provider before booking.',
     priceSource: 'direct-lot-rate',
     priceConfidence: 'medium',
     bookingProvider: 'MasterPark',

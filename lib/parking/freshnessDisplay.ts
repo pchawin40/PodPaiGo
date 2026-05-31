@@ -1,5 +1,11 @@
 import type { ParkingOption } from '../types';
 import type { PriceFreshness } from '../providers/parking/types';
+import {
+  formatPricingConfidenceLabel,
+  pricingConfidenceBadgeClass,
+  resolvePricingConfidence,
+} from '../access/pricingLadder';
+import type { PricingConfidenceLabel } from '../access/types';
 
 export function formatPriceFreshnessLabel(
   freshness: PriceFreshness | undefined,
@@ -31,14 +37,30 @@ export function priceFreshnessBadgeClass(
   }
 }
 
-export function resolveParkingFreshness(option: ParkingOption): {
-  label: 'LIVE' | 'RECENT' | 'ESTIMATED' | 'UNKNOWN';
+export function resolveParkingPricingBadge(option: ParkingOption): {
+  label: string;
+  className: string;
+  confidence: PricingConfidenceLabel;
   providerSource?: string;
   fetchedAt?: string;
 } {
+  const confidence = resolvePricingConfidence(option);
+
   return {
-    label: formatPriceFreshnessLabel(option.priceFreshness),
+    label: formatPricingConfidenceLabel(confidence),
+    className: pricingConfidenceBadgeClass(confidence),
+    confidence,
     providerSource: option.providerSource,
     fetchedAt: option.fetchedAt,
   };
+}
+
+export function resolveParkingFreshness(option: ParkingOption): {
+  label: string;
+  className: string;
+  confidence: PricingConfidenceLabel;
+  providerSource?: string;
+  fetchedAt?: string;
+} {
+  return resolveParkingPricingBadge(option);
 }

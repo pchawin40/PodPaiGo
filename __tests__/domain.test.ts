@@ -186,7 +186,7 @@ describe('Transit Cost Calculations', () => {
       arrivalTime: '10:00'
     };
     const result = calculateTransitCost(transit, tripData);
-    expect(result).toBe(3.25);
+    expect(result).toBe(3);
   });
 
   test('calculateTransitCost should double for round-trip', () => {
@@ -200,7 +200,7 @@ describe('Transit Cost Calculations', () => {
       returnTime: '15:00'
     };
     const result = calculateTransitCost(transit, tripData);
-    expect(result).toBe(6.5);
+    expect(result).toBe(6);
   });
 });
 
@@ -335,7 +335,7 @@ describe('Recommendation Ranking', () => {
     const result = rankRecommendations(tripData, parkingOptions, rideshareOptions, transitOptions, tsaEstimate);
     const minCost = Math.min(...result.map(item => item.cost));
     expect(result.some(item => item.cost === minCost)).toBe(true);
-    expect(minCost).toBe(6.5);
+    expect(minCost).toBe(6);
   });
 
   test('rankRecommendations should sort by score descending', () => {

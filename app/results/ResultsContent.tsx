@@ -77,9 +77,14 @@ import {
   shouldAttemptGooglePlaceMatch,
 } from '../../lib/parking/googlePlaceMatchUtils';
 import {
-  priceFreshnessBadgeClass,
   resolveParkingFreshness,
 } from '../../lib/parking/freshnessDisplay';
+import type { AccessStrategyOption } from '../../lib/access/types';
+import {
+  formatParkingPriceLine,
+  formatPricingConfidenceLabel,
+  pricingConfidenceBadgeClass,
+} from '../../lib/access/pricingLadder';
 import type { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 
@@ -479,50 +484,19 @@ function pricingKindLabel(kind?: string): string {
     case 'mock':
       return 'Mock data';
     case 'check-live':
-      return 'Check live price';
     case 'from-per-day':
-      return 'From / day';
+      return 'Final price on provider';
     default:
-      return '—';
+      return 'Estimated';
   }
 }
 
 function formatProviderPrice(it: PriceableOption): { primary: string; secondary?: string } {
-  const kind = it.priceDisplay as string | undefined;
-  const unit = it.priceUnit as string | undefined;
-
-  if (kind === 'check-live') {
-    if (typeof it.price === 'number' && it.price > 0) {
-      return {
-        primary: `From ${formatMoney(it.price)}/day`,
-        secondary: 'Latest cached rate — check live price before booking',
-      };
-    }
-
-    return { primary: 'Check live price', secondary: it.priceNote };
-  }
-
-  if (kind === 'from-per-day' && unit === 'per-day' && typeof it.price === 'number') {
-    return {
-      primary: formatParkingDailyPrice({
-        price: it.price,
-        bestFor: it.bestFor,
-        priceNote: it.priceNote,
-      }),
-      secondary: it.priceNote,
-    };
-  }
-
-  if ((kind === 'estimated' || kind === 'mock') && typeof it.price === 'number') {
-    const prefix = kind === 'mock' ? 'Mock:' : 'Est.';
-    return { primary: `${prefix} ${formatMoney(it.price)}`, secondary: it.priceNote };
-  }
-
-  if (typeof it.price === 'number') {
-    return { primary: formatMoney(it.price), secondary: it.priceNote };
-  }
-
-  return { primary: 'Check price', secondary: it.priceNote };
+  const line = formatParkingPriceLine(it as ParkingOption, null);
+  return {
+    primary: line.primary,
+    secondary: line.secondary || it.priceNote,
+  };
 }
 
 function PriceLegend() {
@@ -532,20 +506,93 @@ function PriceLegend() {
       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <div className="font-medium">Live</div>
-          <div className="text-xs text-zinc-600">Pulled from provider/API</div>
+          <div className="text-xs text-zinc-600">Pulled from provider/API for selected dates</div>
+        </div>
+        <div>
+          <div className="font-medium">Recent</div>
+          <div className="text-xs text-zinc-600">Cached or snapshot within the last week</div>
+        </div>
+        <div>
+          <div className="font-medium">Official</div>
+          <div className="text-xs text-zinc-600">Published airport or agency rate</div>
         </div>
         <div>
           <div className="font-medium">Estimated</div>
-          <div className="text-xs text-zinc-600">Calculated or based on typical rates</div>
+          <div className="text-xs text-zinc-600">Modelled or curated estimate with assumptions</div>
         </div>
-        <div>
-          <div className="font-medium">From / day</div>
-          <div className="text-xs text-zinc-600">Daily rate; trip total may vary by length of stay</div>
+        <div className="sm:col-span-2">
+          <div className="font-medium">Final price on provider</div>
+          <div className="text-xs text-zinc-600">Numeric anchor shown; confirm final rate at checkout</div>
         </div>
-        <div>
-          <div className="font-medium">Check live price</div>
-          <div className="text-xs text-zinc-600">App does not have reliable live pricing yet; open provider to confirm</div>
-        </div>
+      </div>
+    </div>
+  );
+}
+
+function HiddenAccessOptionsSection({
+  options,
+}: {
+  options: AccessStrategyOption[];
+}) {
+  const hidden = options.filter((option) => option.isHiddenGem);
+  if (hidden.length === 0) return null;
+
+  return (
+    <div id="hidden-access-options" className="mt-6 scroll-mt-6">
+      <div className="mb-4">
+        <h2 className="text-xl font-bold">Hidden access options</h2>
+        <p className="mt-1 text-sm text-zinc-600">
+          Realistic airport access strategies that are easy to miss in standard parking searches.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {hidden.map((option) => (
+          <div
+            key={option.id}
+            className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 shadow-sm"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-lg font-bold text-zinc-900">{option.displayName}</div>
+                <div className="mt-1 text-base font-semibold text-zinc-800">
+                  {option.pricing.displayPrimary}
+                </div>
+                <div className="mt-1 text-sm text-zinc-600">
+                  {option.pricing.displaySecondary}
+                </div>
+                <div className="mt-2 text-sm text-zinc-700">{option.explanation}</div>
+                {option.overnightCaveat ? (
+                  <div className="mt-2 text-sm text-amber-900">{option.overnightCaveat}</div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${pricingConfidenceBadgeClass(option.pricing.confidence)}`}
+                >
+                  {formatPricingConfidenceLabel(option.pricing.confidence)}
+                </span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
+                  {option.timing.terminalReadyMinutes} min to terminal-ready
+                </span>
+              </div>
+            </div>
+
+            {option.bestFor?.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {option.bestFor.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-medium text-emerald-800"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -795,9 +842,11 @@ function optionPriceSummary(
   }
 
   if (kind === 'check-live') {
+    const ladderLine = formatParkingPriceLine(option as ParkingOption, tripData);
     return {
-      primary: 'Check live price',
-      secondary: option?.priceNote,
+      primary: ladderLine.primary,
+      secondary: ladderLine.secondary || option?.priceNote,
+      badge: formatPricingConfidenceLabel(ladderLine.confidence),
     };
   }
 
@@ -952,7 +1001,7 @@ function buildBookingSourceRows(parking: PriceableOption & {
           trust: 'high',
           notes: directNotes,
           link: directLink,
-          ctaLabel: isOfficialAirport ? 'Book official' : 'Check live',
+          ctaLabel: isOfficialAirport ? 'Book official' : 'Open provider',
           pricePerDay: directPricePerDay,
           priceDisplay: directPriceDisplay,
         }),
@@ -962,9 +1011,9 @@ function buildBookingSourceRows(parking: PriceableOption & {
       provider: 'SpotHero',
       type: 'marketplace',
       trust: 'high',
-      notes: spotHeroEst != null ? 'Major marketplace (estimated)' : 'Major marketplace (check live)',
+      notes: spotHeroEst != null ? 'Major marketplace (estimated)' : 'Major marketplace (estimated range)',
       link: spotHeroUrl,
-      ctaLabel: 'Check live',
+      ctaLabel: 'Open marketplace',
       pricePerDay: spotHeroEst,
       priceDisplay: spotHeroEst != null ? 'estimated' : 'check-live',
     }),
@@ -1488,8 +1537,8 @@ function OptionCard({
           <div className="mt-2">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-lg font-bold text-zinc-900">
-                {isAprFetching
-                  ? 'Checking live price…'
+                {isAprFetching && item.type === 'parking'
+                  ? parkingPrice?.primary || 'Updating provider price…'
                   : item.type === 'parking'
                     ? parkingPrice?.primary
                     : nonParkingPrice}
@@ -1540,7 +1589,7 @@ function OptionCard({
 
                 return (
                   <div
-                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${priceFreshnessBadgeClass((opt as ParkingOption).priceFreshness)}`}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${freshness.className}`}
                     title={title}
                   >
                     {freshness.label}
@@ -4251,7 +4300,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {aprLiveChecking && parkingPricesChecking && (
                 <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-                  Checking live parking prices and availability…
+                  Updating provider parking prices…
                 </div>
               )}
 
@@ -4615,7 +4664,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const bestMode = scoredModes.sort((a, b) => b.score - a.score)[0];
 
-            const recommendationMode = bestMode?.key || 'check-live';
+            const recommendationMode = bestMode?.key || 'compare';
 
             const shortParkingName = bestParking?.name
               ? bestParking.name
@@ -4632,7 +4681,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? `Take ${bestRideOption?.name || 'rideshare'}`
                   : recommendationMode === 'transit'
                     ? 'Take transit'
-                    : 'Check live options';
+                    : 'Compare options';
 
             const recommendedReason =
               recommendationMode === 'parking'
@@ -4643,7 +4692,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? 'Best fit if you want the lowest effort and do not want to leave a car parked.'
                   : recommendationMode === 'transit'
                     ? 'Best fit if cost matters most and your schedule has enough buffer.'
-                    : 'Live provider checks are needed before making a final decision.';
+                    : 'Open provider pricing before making a final decision.';
 
             const modeRows = [
               {
@@ -4651,7 +4700,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 icon: '🅿️',
                 label: 'Parking',
                 name: bestParking?.name || 'No parking option found',
-                cost: parkingTotal !== null ? `$${Math.round(parkingTotal)}` : 'Check price',
+                cost: parkingTotal !== null ? `$${Math.round(parkingTotal)}` : 'Estimated range',
                 time: parkingBreakdown?.totalMinutes
                   ? formatMinutes(parkingBreakdown.totalMinutes)
                   : 'Check route',
@@ -4672,7 +4721,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? recommendationMode === 'rideshare'
                     ? 'Best pick'
                     : 'Easy backup'
-                  : 'Check live',
+                  : 'Open app',
               },
               {
                 key: 'transit',
@@ -4694,8 +4743,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 name: isOvernightTrip
                   ? 'Not available for overnight airport parking'
                   : 'Only if lot rules allow it',
-                cost: isOvernightTrip ? 'N/A' : 'Varies',
-                time: isOvernightTrip ? 'N/A' : 'Depends',
+                cost: isOvernightTrip ? 'Varies by lot' : 'Varies',
+                time: isOvernightTrip ? 'Varies by mode' : 'Depends',
                 verdict: isOvernightTrip ? 'Unavailable' : 'Verify rules',
                 unavailable: isOvernightTrip,
               },
@@ -4718,7 +4767,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               if (key === 'rideshare') {
                 return {
-                  label: 'Check live ride price',
+                  label: 'View ride estimates',
                   onClick: () => {
                     setOpenProviderSection('ride');
 
@@ -4989,6 +5038,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         <div className="mt-6">
           <SortTabs value={sort} onChange={setSort} />
         </div>
+
+        {recommendation.accessStrategies?.options?.length ? (
+          <HiddenAccessOptionsSection options={recommendation.accessStrategies.options} />
+        ) : null}
 
         {
           showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
