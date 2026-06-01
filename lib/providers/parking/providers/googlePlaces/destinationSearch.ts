@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../../../types';
+import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
 import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
@@ -44,7 +45,7 @@ export async function getDestinationParkingOptions(args: {
   dateTime: string;
   parkingDurationMinutes?: number;
 }): Promise<ParkingOption[]> {
-  const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const key = getGoogleMapsServerApiKey();
 
   if (!key) return [];
 

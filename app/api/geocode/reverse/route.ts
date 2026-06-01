@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   const lat = searchParams.get('lat');
   const lng = searchParams.get('lng');
-  const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const apiKey = getGoogleMapsServerApiKey();
 
   if (!lat || !lng) {
     return NextResponse.json({ error: 'Missing lat/lng' }, { status: 400 });

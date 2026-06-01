@@ -39,43 +39,10 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
+import { resolveParkingDriveMinutes } from './routeMinutes';
+
 function getParkingDriveMinutes(option: ParkingOption): number {
-  const optionWithRoute = option as ParkingOption & {
-    duration?: number | null;
-    routeToParkingMinutes?: number | null;
-    driveMinutes?: number | null;
-    durationMinutes?: number | null;
-    routeDurationMinutes?: number | null;
-    distanceMinutes?: number | null;
-    routeMinutes?: number | null;
-    drivingMinutes?: number | null;
-    driveTimeMinutes?: number | null;
-    routeToLotMinutes?: number | null;
-    originToParkingMinutes?: number | null;
-  };
-
-  const candidates = [
-    optionWithRoute.routeToParkingMinutes,
-    optionWithRoute.originToParkingMinutes,
-    optionWithRoute.routeToLotMinutes,
-    optionWithRoute.driveTimeMinutes,
-    optionWithRoute.drivingMinutes,
-    optionWithRoute.routeMinutes,
-    optionWithRoute.driveMinutes,
-    optionWithRoute.durationMinutes,
-    optionWithRoute.routeDurationMinutes,
-    optionWithRoute.distanceMinutes,
-    optionWithRoute.duration,
-  ];
-
-  const valid = candidates.find(
-    (minutes) =>
-      typeof minutes === 'number' &&
-      Number.isFinite(minutes) &&
-      minutes > 0
-  );
-
-  return valid ?? 0;
+  return resolveParkingDriveMinutes(option);
 }
 
 export function parkingTimeBreakdown(option: ParkingOption): {

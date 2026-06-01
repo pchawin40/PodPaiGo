@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 
 function googleMapsApiKey(): string | null {
-  return process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_SERVER_API_KEY || null;
+  return getGoogleMapsServerApiKey() ?? null;
 }
 
 function unavailableResponse() {

@@ -15,6 +15,11 @@ import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
+import {
+  applyParkingOriginDriveMinutes,
+  estimateParkingDriveMinutesFallback,
+} from './parking/routeMinutes';
+import { getGoogleMapsServerApiKey } from './env/googleMapsServerKey';
 
 
 
@@ -310,7 +315,7 @@ export class MockTrafficProvider implements TrafficProvider {
 const ROUTE_CACHE = new Map<string, { ts: number; estimate: TrafficEstimate }>();
 const ROUTE_INFLIGHT = new Map<string, Promise<TrafficEstimate>>();
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT = 6;
+const DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT = 24;
 
 function normalizeRouteCachePart(value: string): string {
   const raw = String(value || '').trim();
@@ -397,7 +402,7 @@ function logRoutesApiCache(
 }
 
 export class LiveTrafficProvider implements TrafficProvider {
-  private serverKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  private serverKey = getGoogleMapsServerApiKey();
 
   private async geocodeLatLng(address: string): Promise<{ lat: number, lng: number } | null> {
     try {
@@ -784,6 +789,10 @@ export class MockProvider implements DataProvider {
     return hub.driveTimeFactor + 5;
   }
 
+  private async geocodeLatLng(_address: string): Promise<{ lat: number; lng: number } | null> {
+    return null;
+  }
+
   private async getRouteEstimate(
     origin: string,
     destination: string,
@@ -911,6 +920,8 @@ export class MockProvider implements DataProvider {
       true
     );
 
+    const originCoords = await this.geocodeLatLng(origin);
+
     // Do not hide parking lots just because the home → airport route failed.
     // Parking discovery can still be useful; individual lot routes can be checked separately.
     const destinationDriveUnavailable = Boolean(destinationRouteEstimate.routeUnavailable);
@@ -945,10 +956,14 @@ export class MockProvider implements DataProvider {
     const liveRouteLimit = initialLiveParkingRouteLimit();
     const uniqueRouteKeys = new Set(parkingRouteEntries.map((entry) => entry.routeCacheKey));
     const liveRouteKeys = new Set(
-      parkingRouteEntries
-        .slice(0, liveRouteLimit)
-        .map((entry) => entry.routeCacheKey)
+      liveRouteLimit > 0
+        ? parkingRouteEntries.slice(0, liveRouteLimit).map((entry) => entry.routeCacheKey)
+        : parkingRouteEntries.map((entry) => entry.routeCacheKey)
     );
+
+    if (liveRouteLimit <= 0 || liveRouteLimit >= uniqueRouteKeys.size) {
+      uniqueRouteKeys.forEach((routeCacheKey) => liveRouteKeys.add(routeCacheKey));
+    }
 
     let selectedCachedRoutes = 0;
     let selectedInFlightRoutes = 0;
@@ -1020,21 +1035,34 @@ export class MockProvider implements DataProvider {
           lastUpdated: new Date().toISOString(),
         };
 
-        if (!routeEstimate) {
-          const optionWithDuration = option as ParkingOption & { duration?: number };
+        const resolveFallbackDriveMinutes = () =>
+          estimateParkingDriveMinutesFallback({
+            originLat: originCoords?.lat,
+            originLng: originCoords?.lng,
+            option,
+          });
 
-          return {
-            ...option,
-            ...commonRouteFields,
-            duration: optionWithDuration.duration ?? option.distance,
-            routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
-            routeUnavailable: false,
-            routeUnavailableReason: option.routeUnavailableReason,
-            assumptions: [
-              ...option.assumptions,
-              'Live route calculation deferred for parking options outside the initially visible set.',
-            ],
-          };
+        if (!routeEstimate) {
+          const fallbackDriveMinutes = resolveFallbackDriveMinutes();
+
+          const deferredOption = applyParkingOriginDriveMinutes(
+            {
+              ...option,
+              ...commonRouteFields,
+              routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
+              routeUnavailable: false,
+              routeUnavailableReason: option.routeUnavailableReason,
+              assumptions: [
+                ...option.assumptions,
+                fallbackDriveMinutes > 0
+                  ? `Estimated ${fallbackDriveMinutes} min drive from origin based on straight-line distance.`
+                  : 'Live route calculation deferred for parking options outside the initially visible set.',
+              ],
+            },
+            fallbackDriveMinutes,
+          );
+
+          return deferredOption;
         }
 
         const liveDriveMinutes =
@@ -1042,50 +1070,41 @@ export class MockProvider implements DataProvider {
             ? routeEstimate.duration
             : null;
 
-        // if (process.env.NODE_ENV === 'development') {
-        //   console.log('[Parking route debug]', {
-        //     name: option.name,
-        //     address: option.address,
-        //     routeDestination,
-        //     routeDuration: routeEstimate.duration,
-        //     routeTrustStatus: routeEstimate.trustStatus,
-        //     routeUnavailable: routeEstimate.routeUnavailable,
-        //     originalOptionDistance: option.distance,
-        //   });
-        // }
-
         const routeFailed = routeEstimate.routeUnavailable === true || liveDriveMinutes == null;
+        const fallbackDriveMinutes = routeFailed ? resolveFallbackDriveMinutes() : 0;
+        const driveMinutes = routeFailed
+          ? fallbackDriveMinutes
+          : liveDriveMinutes!;
 
-        return {
-          ...option,
-          ...commonRouteFields,
+        const enrichedOption = applyParkingOriginDriveMinutes(
+          {
+            ...option,
+            ...commonRouteFields,
+            routeTrustStatus: routeFailed
+              ? option.routeTrustStatus ?? option.trustStatus
+              : routeEstimate.trustStatus,
+            routeUnavailableReason: routeFailed
+              ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
+              : undefined,
+            availability: option.availability,
+            assumptions: [
+              ...option.assumptions,
+              routeFailed
+                ? fallbackDriveMinutes > 0
+                  ? `Live route check failed; using estimated ${fallbackDriveMinutes} min drive from origin to lot.`
+                  : 'Live route check failed for this parking lot; showing provider option with estimated/deferred route timing.'
+                : `Route from ${origin} to ${routeDestination}`,
+              routeFailed
+                ? routeEstimate.routeUnavailableReason || 'Open map directions to confirm drive time.'
+                : routeEstimate.trustStatus === 'live'
+                  ? `Based on live routing: ${driveMinutes} min drive`
+                  : `Estimated route time: ${driveMinutes} min drive`,
+            ],
+          },
+          driveMinutes,
+        );
 
-          // Use live route when available. If live route fails, keep provider option visible.
-          distance: liveDriveMinutes ?? option.distance ?? 0,
-          duration: liveDriveMinutes ?? option.distance ?? 0,
-
-          routeTrustStatus: routeFailed
-            ? option.routeTrustStatus ?? option.trustStatus
-            : routeEstimate.trustStatus,
-
-          routeUnavailableReason: routeFailed
-            ? routeEstimate.routeUnavailableReason || DEFAULT_ROUTE_UNAVAILABLE_REASON
-            : undefined,
-
-          availability: option.availability,
-
-          assumptions: [
-            ...option.assumptions,
-            routeFailed
-              ? 'Live route check failed for this parking lot; showing provider option with estimated/deferred route timing.'
-              : `Route from ${origin} to ${routeDestination}`,
-            routeFailed
-              ? routeEstimate.routeUnavailableReason || 'Open map directions to confirm drive time.'
-              : routeEstimate.trustStatus === 'live'
-                ? `Based on live routing: ${liveDriveMinutes} min drive`
-                : `Estimated route time: ${liveDriveMinutes} min drive`,
-          ],
-        };
+        return enrichedOption;
       })
     );
 

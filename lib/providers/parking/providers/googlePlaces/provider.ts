@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../../../types';
+import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import type { ParkingProvider, ParkingSearchContext, ProviderHealth } from '../../types';
 import { tagParkingFreshness, inferPriceFreshness } from '../../types';
 import { getGoogleParkingPlaces } from './airportSearch';
@@ -24,7 +25,7 @@ export class GooglePlacesParkingProvider implements ParkingProvider {
         checkedAt,
       };
     }
-    if (!process.env.GOOGLE_MAPS_SERVER_API_KEY) {
+    if (!getGoogleMapsServerApiKey()) {
       return {
         status: 'degraded',
         message: 'GOOGLE_MAPS_SERVER_API_KEY not configured',

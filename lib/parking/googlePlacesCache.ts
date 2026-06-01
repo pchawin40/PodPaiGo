@@ -1,3 +1,4 @@
+import { getGoogleMapsServerApiKey } from '../env/googleMapsServerKey';
 import { db } from '../db/client';
 import { getAirportById } from '../airports/catalog';
 import { ParkingOption, ParkingGooglePlaceSnapshot, ParkingGoogleReview } from '../types';
@@ -185,7 +186,7 @@ function buildParkingSearchQueries(args: {
 }
 
 function getServerApiKey(): string | null {
-  return process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY || null;
+  return getGoogleMapsServerApiKey() ?? null;
 }
 
 async function logGooglePlacesError(scope: string, res: Response | null): Promise<void> {
@@ -819,7 +820,7 @@ export async function fetchGooglePlacePhotoNames(
   limit = 4
 ): Promise<string[]> {
   const normalizedPlaceId = typeof placeId === 'string' ? placeId.trim() : '';
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const apiKey = getGoogleMapsServerApiKey();
 
   if (!normalizedPlaceId || !apiKey) return [];
 

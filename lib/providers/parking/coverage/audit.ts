@@ -1,3 +1,4 @@
+import { getGoogleMapsServerApiKey } from '../../../env/googleMapsServerKey';
 import { getAirportById } from '../../../airports/catalog';
 import type { ParkingOption } from '../../../types';
 import { parkingProviderRegistry } from '../registry';
@@ -45,7 +46,7 @@ function discoveryModeIncludes(provider: 'parkwhiz' | 'google'): boolean {
 
 function readEnvironmentFlags() {
   return {
-    googleApiConfigured: Boolean(process.env.GOOGLE_MAPS_SERVER_API_KEY),
+    googleApiConfigured: Boolean(getGoogleMapsServerApiKey()),
     inventoryEnabled: process.env.DISABLE_PARKING_DB_CACHE !== 'true',
     parkWhizDiscoveryEnabled: discoveryModeIncludes('parkwhiz'),
     aprEnabled: process.env.DISABLE_APR_PARKING !== 'true',

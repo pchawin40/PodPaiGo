@@ -1,3 +1,4 @@
+import { getGoogleMapsServerApiKey } from '../env/googleMapsServerKey';
 import { ParkingOption } from '../types';
 
 type GooglePlaceParkingResult = {
@@ -22,7 +23,7 @@ function googlePlacePhotoImageUrl(photoName?: string | null): string | undefined
 export async function enrichParkingWithGooglePlaces(
   parking: ParkingOption[]
 ): Promise<ParkingOption[]> {
-  const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const apiKey = getGoogleMapsServerApiKey();
 
   if (!apiKey) {
     return parking;

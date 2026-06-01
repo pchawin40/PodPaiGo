@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../../../types';
+import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { getAirportById } from '../../../../airports/catalog';
 import { resolveParkingPricing } from '../../../pricingResolver';
 import { resolveDynamicParkingPrice } from '../../../dynamicParkingPricing';
@@ -193,7 +194,7 @@ export async function getGoogleParkingPlaces(args: {
   airportCoordinates?: { lat: number; lng: number };
   destination: string;
 }): Promise<ParkingOption[]> {
-  const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const key = getGoogleMapsServerApiKey();
   const airportCode = (args.airportCode || 'SEA').toUpperCase();
   const airport = getAirportById(airportCode);
   const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;

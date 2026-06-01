@@ -190,6 +190,13 @@ export type ParkingOption = {
   priceSource?: ParkingPriceSource;
   priceConfidence?: PriceConfidence;
   distance: number; // in minutes
+  /** Origin address to parking lot drive time (minutes). */
+  originToParkingMinutes?: number;
+  /** Same as originToParkingMinutes; used by route enrichment. */
+  routeToParkingMinutes?: number;
+  driveMinutes?: number;
+  /** Live or estimated origin→lot drive duration in minutes. */
+  duration?: number;
   availability: number; // percentage
   trustStatus: TrustStatus;
   routeTrustStatus?: TrustStatus;

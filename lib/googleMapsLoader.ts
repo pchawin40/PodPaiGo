@@ -26,7 +26,7 @@ export async function loadGoogleMaps(apiKey: string): Promise<void> {
 
         const script = document.createElement('script');
         script.id = 'google-maps-script';
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly&libraries=places,marker&loading=async&callback=initGoogleMaps`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly&libraries=marker&loading=async&callback=initGoogleMaps`;
         script.async = true;
         script.defer = true;
         script.onerror = () => reject(new Error('Google Maps failed to load'));

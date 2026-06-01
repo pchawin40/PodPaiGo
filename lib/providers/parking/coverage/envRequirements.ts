@@ -1,3 +1,5 @@
+import { getGoogleMapsServerApiKey } from '../../../env/googleMapsServerKey';
+
 export type EnvVarStatus = 'configured' | 'missing' | 'disabled';
 
 export type ProviderActivationState =
@@ -48,7 +50,7 @@ function inventoryCacheEnabled(): boolean {
 }
 
 export function buildProviderEnvAuditReport(): ProviderEnvAuditReport {
-  const googleKey = envConfigured('GOOGLE_MAPS_SERVER_API_KEY');
+  const googleKey = Boolean(getGoogleMapsServerApiKey());
   const dbReady = databaseConfigured();
   const inventoryEnabled = inventoryCacheEnabled();
   const parkWhizEnabled = discoveryModeIncludes('parkwhiz');

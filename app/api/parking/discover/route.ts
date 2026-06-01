@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 import { getAirportById } from '../../../../lib/airports/catalog';
 import { saveParkingLots, ParkingLotInventoryInput } from '../../../../lib/parking/inventory';
 
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const key = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+        const key = getGoogleMapsServerApiKey();
 
         if (!key) {
             return NextResponse.json(

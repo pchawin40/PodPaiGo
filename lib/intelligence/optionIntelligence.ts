@@ -511,10 +511,15 @@ function calculateDurationPressure(
   kind: OptionKind,
   option: IntelligentOption
 ) {
-  const duration =
+  const rawDuration =
     kind === 'parking' && isParking(option)
       ? getParkingRouteMinutes(option)
       : getDurationSafe(option);
+
+  const duration =
+    typeof rawDuration === 'number' && Number.isFinite(rawDuration)
+      ? rawDuration
+      : 0;
 
   if (duration <= 30) return 0;
   if (duration <= 60) return 8;
@@ -524,9 +529,13 @@ function calculateDurationPressure(
   return 40;
 }
 
-function getDurationSafe(option: IntelligentOption) {
-  if ('duration' in option) return option.duration;
-  if ('distance' in option) return option.distance;
+function getDurationSafe(option: IntelligentOption): number {
+  if ('duration' in option && typeof option.duration === 'number' && Number.isFinite(option.duration)) {
+    return option.duration;
+  }
+  if ('distance' in option && typeof option.distance === 'number' && Number.isFinite(option.distance)) {
+    return option.distance;
+  }
   return 0;
 }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,7 +190,7 @@ function devDetails(result: GooglePredictionResult) {
 
 export async function GET(request: NextRequest) {
   const input = request.nextUrl.searchParams.get('input')?.trim() || '';
-  const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const apiKey = getGoogleMapsServerApiKey();
 
   if (input.length < 3) {
     return jsonResponse({ predictions: [], status: 'INPUT_TOO_SHORT' });

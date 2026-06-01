@@ -19,7 +19,7 @@ export default function AirportMapView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const airport = getAirportById(airportCode) || getAirportById('SEA');
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   const topLots = useMemo(() => parkingOptions.slice(0, 6), [parkingOptions]);
   const selected = topLots.find(p => p.id === selectedId) || topLots[0];
