@@ -37,10 +37,15 @@ describe('rideshare estimate model', () => {
 
     expect(uber).toBeDefined();
     expect(uber!.rideshareTripScope).toBe('one-way');
-    expect(uber!.priceMin).toBeGreaterThanOrEqual(95);
-    expect(uber!.priceMax).toBeLessThanOrEqual(240);
-    expect(uber!.price).toBeGreaterThanOrEqual(100);
-    expect(uber!.price).toBeLessThanOrEqual(180);
+    expect(uber!.priceMin).toBeGreaterThanOrEqual(100);
+    expect(uber!.priceMax).toBeLessThanOrEqual(220);
+    expect(uber!.price).toBeGreaterThanOrEqual(105);
+    expect(uber!.price).toBeLessThanOrEqual(145);
+
+    const observedMarketOneWay = 116;
+    const tolerance = observedMarketOneWay * 0.2;
+    expect(uber!.price).toBeGreaterThanOrEqual(observedMarketOneWay - tolerance);
+    expect(uber!.price).toBeLessThanOrEqual(observedMarketOneWay + tolerance);
 
     const display = formatRidesharePriceDisplay(uber!);
     expect(display.primary).toMatch(/^Estimated \$[\d]+–\$[\d]+ one way$/);
@@ -65,8 +70,8 @@ describe('rideshare estimate model', () => {
 
     expect(uber).toBeDefined();
     expect(uber!.rideshareTripScope).toBe('round-trip');
-    expect(uber!.oneWayPriceMin).toBeGreaterThanOrEqual(95);
-    expect(uber!.oneWayPriceMax).toBeLessThanOrEqual(240);
+    expect(uber!.oneWayPriceMin).toBeGreaterThanOrEqual(100);
+    expect(uber!.oneWayPriceMax).toBeLessThanOrEqual(220);
     expect(uber!.priceMin).toBeGreaterThanOrEqual(uber!.oneWayPriceMin! * 2 - 4);
     expect(uber!.priceMax).toBeGreaterThanOrEqual(uber!.oneWayPriceMax! * 2 - 4);
 

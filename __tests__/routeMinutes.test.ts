@@ -14,14 +14,14 @@ describe('routeMinutes', () => {
     expect(minutes).toBeGreaterThanOrEqual(60);
   });
 
-  it('prefers originToParkingMinutes over placeholder distance', () => {
+  it('ignores placeholder duration when explicit drive minutes exist', () => {
     const minutes = resolveParkingDriveMinutes({
       id: 'test',
       name: 'Test lot',
       type: 'off-airport',
       price: 10,
       availability: 50,
-      distance: 5,
+      duration: 12,
       originToParkingMinutes: 68,
       assumptions: [],
     });
@@ -92,9 +92,9 @@ describe('parkingTimeBreakdown drive display', () => {
     };
   }
 
-  it('includes Drive to parking over 45m for Monroe to SeaTac lot', () => {
+  it('includes Drive to lot over 45m for Monroe to SeaTac lot', () => {
     const breakdown = parkingTimeBreakdown(jiffyLot(), monroeOrigin);
-    const drive = breakdown.parts.find((part) => part.label === 'Drive to parking');
+    const drive = breakdown.parts.find((part) => part.label === 'Drive to lot');
 
     expect(drive).toBeDefined();
     expect(drive!.minutes).toBeGreaterThan(45);
@@ -106,7 +106,7 @@ describe('parkingTimeBreakdown drive display', () => {
 
     expect(breakdown.parts.map((part) => part.label)).toEqual(
       expect.arrayContaining([
-        'Drive to parking',
+        'Drive to lot',
         'Park/check-in',
         'Shuttle wait',
         'Shuttle',

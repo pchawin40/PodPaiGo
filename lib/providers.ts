@@ -1043,6 +1043,9 @@ export class MockProvider implements DataProvider {
           sourceLink,
           mapLink,
           lastUpdated: new Date().toISOString(),
+          ...(originCoords
+            ? { originLat: originCoords.lat, originLng: originCoords.lng }
+            : {}),
         };
 
         const resolveFallbackDriveMinutes = async (): Promise<number> => {

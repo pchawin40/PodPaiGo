@@ -219,8 +219,8 @@ export function formatRidesharePriceDisplay(
 }
 
 function longDistanceAirportMultiplier(distanceMiles: number): number {
-  if (distanceMiles >= 40) return 1.08;
-  if (distanceMiles >= 28) return 1.05;
+  if (distanceMiles >= 40) return 1.05;
+  if (distanceMiles >= 28) return 1.04;
   if (distanceMiles >= 18) return 1.03;
   return 1;
 }
@@ -232,7 +232,7 @@ function longTripFareFloor(distanceMiles: number, profile: FareProfile): number 
 
   return Math.max(
     profile.minimumFare,
-    Math.round(distanceMiles * 2.1 + profile.baseFare + profile.serviceFee * 0.6),
+    Math.round(distanceMiles * 2.2 + profile.baseFare + profile.serviceFee * 0.6),
   );
 }
 
@@ -248,7 +248,7 @@ function longDistanceAirportFare(args: {
     profile.baseFare +
     profile.serviceFee * 0.75 +
     airportFees +
-    distanceMiles * (profile.providerKind === 'taxi' ? 2.95 : 2.05) +
+    distanceMiles * (profile.providerKind === 'taxi' ? 2.95 : 1.3) +
     durationMinutes * profile.perMinute * 0.85
   );
 }
@@ -466,10 +466,7 @@ export function estimateFareRange(args: {
           durationMinutes,
           distanceMiles,
           airportFees,
-        }) *
-        distanceMultiplier *
-        trafficMultiplier *
-        timeMultiplier
+        }) * longDistanceAirportMultiplier(distanceMiles)
       : null;
   const fareBeforeFloor =
     modeledLongDistanceFare ?? adjustedBaseline * trafficMultiplier * timeMultiplier * distanceMultiplier;
@@ -477,12 +474,19 @@ export function estimateFareRange(args: {
     longTripFareFloor(distanceMiles, profile),
     fareBeforeFloor,
   );
-  const confidenceRangeExtra = confidence === 'baseline-estimate' ? 0.12 : 0.06;
+  const confidenceRangeExtra =
+    confidence === 'baseline-estimate'
+      ? distanceMiles >= 35
+        ? 0.06
+        : 0.12
+      : 0.06;
   const baseRangePercent = profile.rangePercent + confidenceRangeExtra;
   const rangePercent =
-    distanceMiles >= 35
-      ? Math.min(0.34, baseRangePercent)
-      : Math.min(0.5, baseRangePercent);
+    distanceMiles >= 40
+      ? Math.min(0.13, baseRangePercent)
+      : distanceMiles >= 35
+        ? Math.min(0.18, baseRangePercent)
+        : Math.min(0.5, baseRangePercent);
   const min = roundFare(fare * (1 - rangePercent));
   const max = Math.max(min + 8, roundFare(fare * (1 + rangePercent)));
 

@@ -39,7 +39,7 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
-import { resolveParkingDriveMinutesWithFallback, type ParkingDriveContext } from './routeMinutes';
+import { resolveParkingDriveMinutesWithFallback, buildParkingDriveContextFromOption, type ParkingDriveContext } from './routeMinutes';
 
 function getParkingDriveMinutes(
   option: ParkingOption,
@@ -64,7 +64,8 @@ export function parkingTimeBreakdown(
     };
   }
 
-  const drive = getParkingDriveMinutes(option, context);
+  const resolvedContext = context ?? buildParkingDriveContextFromOption(option);
+  const drive = getParkingDriveMinutes(option, resolvedContext);
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
   const shuttleWait =
     option.transferType === 'shuttle'
@@ -90,7 +91,7 @@ export function parkingTimeBreakdown(
         : 0;
 
   const parts = [
-    ...(drive > 0 ? [{ label: 'Drive to parking', minutes: drive }] : []),
+    { label: 'Drive to lot', minutes: drive },
     ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
     ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
     ...(transfer > 0

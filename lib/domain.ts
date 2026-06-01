@@ -101,10 +101,13 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
   return parking.type === 'off-airport' ? 12 : 4;
 }
 
-import { getParkingTerminalTimeMinutes } from './parking/routeMinutes';
+import { getParkingTerminalTimeMinutes, buildParkingDriveContextFromOption } from './parking/routeMinutes';
 
 function getParkingTotalMinutes(parking: ParkingOption): number {
-  return getParkingTerminalTimeMinutes(parking);
+  return getParkingTerminalTimeMinutes(
+    parking,
+    buildParkingDriveContextFromOption(parking),
+  );
 }
 
 function getStressScore(

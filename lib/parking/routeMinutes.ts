@@ -53,8 +53,6 @@ export function resolveParkingDriveMinutes(option: ParkingDriveCarrier): number 
     option.driveMinutes,
     option.durationMinutes,
     option.routeDurationMinutes,
-    option.distanceMinutes,
-    option.duration,
   ];
 
   const valid = candidates.find(
@@ -71,6 +69,20 @@ export type ParkingDriveContext = {
   originLat?: number | null;
   originLng?: number | null;
 };
+
+export function buildParkingDriveContextFromOption(
+  option: ParkingOption,
+): ParkingDriveContext {
+  const extended = option as ParkingOption & {
+    originLat?: number;
+    originLng?: number;
+  };
+
+  return {
+    originLat: extended.originLat,
+    originLng: extended.originLng,
+  };
+}
 
 export function resolveParkingDriveMinutesWithFallback(
   option: ParkingDriveCarrier,
@@ -96,7 +108,8 @@ export function getParkingTerminalTimeMinutes(
   option: ParkingOption,
   context?: ParkingDriveContext,
 ): number {
-  const driveMinutes = resolveParkingDriveMinutesWithFallback(option, context);
+  const resolvedContext = context ?? buildParkingDriveContextFromOption(option);
+  const driveMinutes = resolveParkingDriveMinutesWithFallback(option, resolvedContext);
   const parkingBufferMinutes = option.parkingBufferMinutes ?? 0;
   const transferToTerminalMinutes = option.transferToTerminalMinutes ?? 0;
   const shuttleWait =

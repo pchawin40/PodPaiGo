@@ -101,6 +101,7 @@ import {
 } from '../../lib/trip/searchParams';
 import { intentFromSearchParams } from '../../lib/trip/favoriteTrips';
 import SaveFavoriteTripButton from '../components/SaveFavoriteTripButton';
+import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 
 type PriceableOption = {
   id?: string;
@@ -5105,24 +5106,42 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                 <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
                   {isOvernightTrip ? (
-                    <>
-                      <span className="font-semibold text-zinc-950">Overnight trip detected:</span>{' '}
+                    <div className="space-y-2">
+                      <div>
+                        <span className="font-semibold text-zinc-950">
+                          Overnight trip detected
+                        </span>
+                        <span className="text-zinc-800">
+                          {' '}
+                          ({Math.max(1, Math.round(calculateParkingDuration(tripData) / (24 * 60)))}{' '}
+                          {Math.round(calculateParkingDuration(tripData) / (24 * 60)) === 1
+                            ? 'day'
+                            : 'days'}
+                          )
+                        </span>
+                      </div>
+                      <p>
+                        Park &amp; Ride options are not recommended because overnight parking rules
+                        are often unverified. Airport and off-airport hotel lots were prioritized
+                        for this trip length.
+                      </p>
                       {showParkRideReason && (
-                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
                           <div className="font-semibold">
                             Why Park & Ride is unavailable for this trip
                           </div>
                           <div className="mt-1">
-                            This trip appears to require overnight parking. Most Park & Ride lots are meant for
-                            same-day commuter use, and PodPaiGo should not recommend leaving your car overnight
-                            unless the lot has verified overnight parking rules.
+                            This trip appears to require overnight parking. Most Park & Ride lots are
+                            meant for same-day commuter use, and PodPaiGo should not recommend leaving
+                            your car overnight unless the lot has verified overnight parking rules.
                           </div>
                           <div className="mt-2 text-xs text-amber-800">
-                            Safer choices: use airport/off-airport parking, rideshare, taxi, or a verified overnight parking provider.
+                            Safer choices: use airport/off-airport parking, rideshare, taxi, or a
+                            verified overnight parking provider.
                           </div>
                         </div>
                       )}
-                    </>
+                    </div>
                   ) : cheapestMode && fastestMode ? (
                     <>
                       <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
@@ -5221,7 +5240,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           />
         ) : null}
 
-        {process.env.NODE_ENV === 'development' &&
+        {isPodPaiGoDebugUIEnabled() &&
         getTripAirportCode(tripData) === 'SEA' &&
         !recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">

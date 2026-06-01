@@ -13,7 +13,10 @@ import {
   calculateTransitCost,
 } from '../domain';
 import { isParkingRouteUnavailable } from '../parking/routeStatus';
-import { resolveParkingDriveMinutes } from '../parking/routeMinutes';
+import {
+  buildParkingDriveContextFromOption,
+  getParkingTerminalTimeMinutes,
+} from '../parking/routeMinutes';
 
 type OptionKind = 'parking' | 'rideshare' | 'transit';
 
@@ -104,8 +107,7 @@ function getParkingTransferMinutes(option: ParkingOption) {
 function getParkingRouteMinutes(option: ParkingOption) {
   if (isParkingRouteUnavailable(option)) return 999;
 
-  const driveMinutes = resolveParkingDriveMinutes(option);
-  return driveMinutes + (option.parkingBufferMinutes ?? 0) + getParkingTransferMinutes(option);
+  return getParkingTerminalTimeMinutes(option, buildParkingDriveContextFromOption(option));
 }
 
 function getOptionRouteTrust(option: IntelligentOption) {

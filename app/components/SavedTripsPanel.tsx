@@ -67,7 +67,21 @@ export default function SavedTripsPanel({
   }
 
   if (trips.length === 0) {
-    return null;
+    return (
+      <section
+        className={
+          'rounded-2xl border border-dashed border-sky-200 bg-white/80 p-4 text-sm text-slate-600 sm:p-5 ' +
+          className
+        }
+      >
+        <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+        <p className="mt-2 leading-6">
+          No saved trips yet. Use <span className="font-medium text-slate-900">Save trip</span> on
+          the results page or <span className="font-medium text-slate-900">Save as favorite</span>{' '}
+          while planning to store a route on this device.
+        </p>
+      </section>
+    );
   }
 
   return (
