@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Hotel parking">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="100%" stop-color="#fff7ed"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#bg)"/>
+  <rect x="120" y="90" width="400" height="210" rx="12" fill="#fde68a"/>
+  <rect x="160" y="130" width="120" height="90" fill="#fff"/>
+  <rect x="360" y="130" width="120" height="90" fill="#fff"/>
+  <rect x="280" y="240" width="80" height="60" fill="#f59e0b"/>
+  <text x="320" y="205" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#92400e">HOTEL</text>
+  <text x="320" y="320" text-anchor="middle" font-family="Arial,sans-serif" font-size="22" font-weight="700" fill="#78350f">P</text>
+</svg>

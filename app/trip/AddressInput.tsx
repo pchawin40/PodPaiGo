@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { loadGoogleMaps } from '@/lib/googleMapsLoader';
 
 type Prediction = {
   description: string;
@@ -12,40 +11,6 @@ type AutocompleteApiResponse = {
   predictions?: unknown;
   error?: string;
   message?: string;
-};
-
-type GeocoderResult = {
-  formatted_address: string;
-};
-
-type AutocompleteSuggestion = {
-  placePrediction?: {
-    placeId?: string;
-    text?: { text?: string };
-    structuredFormat?: {
-      mainText?: { text?: string };
-      secondaryText?: { text?: string };
-    };
-  };
-};
-
-type AutocompleteSuggestionApi = {
-  fetchAutocompleteSuggestions: (request: {
-    input: string;
-  }) => Promise<{ suggestions?: AutocompleteSuggestion[] }>;
-};
-
-type PlacesLibrary = {
-  AutocompleteSuggestion?: AutocompleteSuggestionApi;
-  AutocompleteService?: new () => {
-    getPlacePredictions: (
-      request: {
-        input: string;
-        componentRestrictions?: { country: string };
-      },
-      callback: (predictions: Prediction[] | null, status: string) => void
-    ) => void;
-  };
 };
 
 const LOCAL_STORAGE_KEY = 'podpaigo-recent-origins';
@@ -134,24 +99,6 @@ interface Props {
   placeholder?: string;
 }
 
-interface GoogleMapsWindow {
-  google?: {
-    maps?: {
-      places?: {
-        AutocompleteSuggestion?: AutocompleteSuggestionApi;
-      };
-      Geocoder: new () => {
-        geocode: (
-          request: { location: { lat: number; lng: number } },
-          callback: (results: GeocoderResult[], status: string) => void
-        ) => void;
-      };
-    };
-  };
-}
-
-declare const window: Window & GoogleMapsWindow;
-
 export function AddressInput({ label, value, onChange, placeholder }: Props) {
   const [inputValue, setInputValue] = useState(value || '');
   const [predictions, setPredictions] = useState<Prediction[]>([]);
@@ -171,47 +118,12 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
   }, []);
 
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const autocompleteSuggestion = useRef<AutocompleteSuggestionApi | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
-  const browserApiKey =
-    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  // Load Google Maps JS Places Library as an optional browser fallback.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!browserApiKey) return;
-
-    let cancelled = false;
-
-    async function initPlaces() {
-      await loadGoogleMaps(browserApiKey!);
-
-      if (cancelled) return;
-
-      const places = window.google?.maps?.places as PlacesLibrary | undefined;
-
-      if (
-        places?.AutocompleteSuggestion?.fetchAutocompleteSuggestions &&
-        !autocompleteSuggestion.current
-      ) {
-        autocompleteSuggestion.current = places.AutocompleteSuggestion;
-      }
-    }
-
-    initPlaces().catch(() => {
-      console.warn('Failed to load Google Maps Places browser fallback');
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [browserApiKey]);
-
-  // Fetch predictions based on input value, debounce to avoid noisy Google requests.
   useEffect(() => {
     if (!hasTouchedInput) return;
 
@@ -229,133 +141,26 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      const applyPredictions = (nextPredictions: Prediction[]) => {
-        setPredictions(nextPredictions);
-        setIsOpen(true);
-        setHighlightedIndex(-1);
-        setLoadingPredictions(false);
-        setPredictionError(null);
-      };
-
-      const runLegacyAutocomplete = (): Promise<Prediction[]> =>
-        new Promise((resolve) => {
-          const places = window.google?.maps?.places as PlacesLibrary | undefined;
-
-          if (!places?.AutocompleteService) {
-            resolve([]);
-            return;
-          }
-
-          const service = new places.AutocompleteService();
-
-          service.getPlacePredictions(
-            {
-              input: query,
-              componentRestrictions: { country: 'us' },
-            },
-            (results) => {
-              resolve(
-                (results || []).map((p) => ({
-                  description: p.description,
-                  place_id: p.place_id,
-                }))
-              );
-            }
-          );
-        });
-
-      const fetchBrowserAutocomplete = async (): Promise<Prediction[]> => {
-        const suggestionApi = autocompleteSuggestion.current;
-
-        if (suggestionApi) {
-          try {
-            const { suggestions = [] } = await suggestionApi.fetchAutocompleteSuggestions({
-              input: query,
-            });
-            const nextPredictions = suggestions
-              .map((suggestion) => {
-                const prediction = suggestion.placePrediction;
-                const primary = prediction?.structuredFormat?.mainText?.text;
-                const secondary = prediction?.structuredFormat?.secondaryText?.text;
-                const description =
-                  prediction?.text?.text ||
-                  [primary, secondary].filter(Boolean).join(', ');
-
-                if (!description) return null;
-
-                return {
-                  description,
-                  place_id: prediction?.placeId || description,
-                };
-              })
-              .filter((prediction): prediction is Prediction => Boolean(prediction));
-
-            if (nextPredictions.length > 0) return nextPredictions;
-          } catch {
-            // Fall through to the legacy browser autocomplete service.
-          }
-        }
-
-        return runLegacyAutocomplete();
-      };
-
-      const runAutocomplete = async () => {
-        let serverError: unknown = null;
-
-        try {
-          const serverPredictions = await fetchServerAutocomplete(query, controller.signal);
-
+      fetchServerAutocomplete(query, controller.signal)
+        .then((serverPredictions) => {
           if (controller.signal.aborted) return;
 
-          if (serverPredictions.length > 0) {
-            applyPredictions(serverPredictions);
-            return;
-          }
-        } catch (error) {
-          if (isAbortError(error)) return;
-
-          serverError = error;
-          console.warn('Address autocomplete API failed', error);
-        }
-
-        try {
-          const browserPredictions = await fetchBrowserAutocomplete();
-
-          if (controller.signal.aborted) return;
-
-          if (browserPredictions.length > 0) {
-            applyPredictions(browserPredictions);
-            return;
-          }
-        } catch (error) {
-          if (isAbortError(error)) return;
-
-          console.warn('Google Maps browser autocomplete failed', error);
-        }
-
-        if (controller.signal.aborted) return;
-
-        setPredictions([]);
-        setIsOpen(true);
-        setHighlightedIndex(-1);
-        setLoadingPredictions(false);
-
-        if (serverError) {
-          setPredictionError('Unable to load suggestions. Try again in a moment.');
-        } else {
+          setPredictions(serverPredictions);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+          setLoadingPredictions(false);
           setPredictionError(null);
-        }
-      };
+        })
+        .catch((error) => {
+          if (isAbortError(error) || controller.signal.aborted) return;
 
-      runAutocomplete().catch((error) => {
-        if (isAbortError(error) || controller.signal.aborted) return;
-
-        console.warn('Address autocomplete failed unexpectedly', error);
-        setPredictions([]);
-        setIsOpen(false);
-        setLoadingPredictions(false);
-        setPredictionError('Unable to load suggestions. You can keep typing your address.');
-      });
+          console.warn('Address autocomplete API failed', error);
+          setPredictions([]);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+          setLoadingPredictions(false);
+          setPredictionError('Unable to load suggestions. Try again in a moment.');
+        });
     }, 250);
 
     return () => {
@@ -454,7 +259,6 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
     }
   };
 
-  // Click recent origin entry
   const onRecentClick = (value: string) => {
     onChange(value);
     setInputValue(value);
@@ -524,7 +328,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
                 id={`prediction-${prediction.place_id}`}
                 key={prediction.place_id}
                 role="option"
-                onMouseDown={(e) => e.preventDefault()} // prevent blur before click
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onSelectPrediction(prediction)}
                 tabIndex={-1}
                 className={`cursor-pointer px-4 py-3 text-sm ${selected ? 'bg-blue-600 text-white' : 'text-zinc-900 hover:bg-zinc-100'

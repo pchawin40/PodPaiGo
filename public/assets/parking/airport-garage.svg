@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Airport parking garage">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#eff6ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#sky)"/>
+  <rect x="80" y="120" width="480" height="180" rx="8" fill="#475569"/>
+  <rect x="110" y="150" width="90" height="70" fill="#f8fafc"/>
+  <rect x="220" y="150" width="90" height="70" fill="#e2e8f0"/>
+  <rect x="330" y="150" width="90" height="70" fill="#f8fafc"/>
+  <rect x="440" y="150" width="90" height="70" fill="#e2e8f0"/>
+  <rect x="300" y="70" width="40" height="50" fill="#64748b"/>
+  <text x="320" y="310" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="700" fill="#0f172a">P</text>
+</svg>

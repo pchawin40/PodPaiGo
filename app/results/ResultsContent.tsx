@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -89,6 +89,11 @@ import {
 } from '../../lib/access/pricingLadder';
 import type { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
+import {
+  buildResultsPathFromSearchParams,
+  parseTripDataFromSearchParams,
+  tripDataToSearchParams,
+} from '../../lib/trip/searchParams';
 
 type PriceableOption = {
   id?: string;
@@ -548,12 +553,9 @@ function HiddenAccessOptionsSection({
 }: {
   options: AccessStrategyOption[];
 }) {
-  if (options.length === 0) return null;
-
   const hiddenGems = options.filter((option) => option.isHiddenGem);
-  const parkAndRideOptions = options.filter(
-    (option) => option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
-  );
+
+  if (hiddenGems.length === 0) return null;
 
   const renderOption = (option: AccessStrategyOption) => (
     <div
@@ -627,29 +629,62 @@ function HiddenAccessOptionsSection({
 
   return (
     <div id="hidden-access-options" className="mt-6 scroll-mt-6">
-      {hiddenGems.length > 0 && (
-        <>
-          <div className="mb-4">
-            <h2 className="text-xl font-bold">Hidden access options</h2>
-            <p className="mt-1 text-sm text-zinc-600">
-              Realistic airport access strategies that are easy to miss in standard parking searches.
-            </p>
-          </div>
-          <div className="space-y-3">{hiddenGems.map(renderOption)}</div>
-        </>
-      )}
+      <div className="mb-4">
+        <h2 className="text-xl font-bold">Hidden access options</h2>
+        <p className="mt-1 text-sm text-zinc-600">
+          Realistic airport access strategies that are easy to miss in standard parking searches.
+        </p>
+      </div>
+      <div className="space-y-3">{hiddenGems.map(renderOption)}</div>
+    </div>
+  );
+}
 
-      {parkAndRideOptions.length > 0 && (
-        <div className={hiddenGems.length > 0 ? 'mt-8' : ''}>
-          <div className="mb-4">
-            <h2 className="text-xl font-bold">Park & ride / transit access</h2>
-            <p className="mt-1 text-sm text-zinc-600">
-              Station and transit-center parking with rail or transit to the airport — not standard airport parking lots.
-            </p>
+function TransitParkAndRideCards({
+  options,
+}: {
+  options: AccessStrategyOption[];
+}) {
+  if (options.length === 0) return null;
+
+  return (
+    <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
+      <div>
+        <div className="text-sm font-semibold text-zinc-900">Park & ride options</div>
+        <p className="mt-1 text-xs leading-5 text-zinc-600">
+          Park & ride options combine parking at a station with transit to the airport. Verify parking rules before leaving your car.
+        </p>
+      </div>
+
+      {options.map((option) => (
+        <div
+          key={option.id}
+          className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-zinc-900">{option.displayName}</div>
+              <div className="mt-1 text-sm font-medium text-zinc-800">
+                {option.pricing.displayPrimary}
+              </div>
+              <div className="mt-1 text-xs text-zinc-600">{option.pricing.displaySecondary}</div>
+            </div>
+            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+              {option.timing.terminalReadyMinutes} min
+            </span>
           </div>
-          <div className="space-y-3">{parkAndRideOptions.map(renderOption)}</div>
+          {option.mapLink ? (
+            <a
+              href={option.mapLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800"
+            >
+              View on map →
+            </a>
+          ) : null}
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -2281,12 +2316,14 @@ function ProviderDropdownSection({
   items,
   defaultOpen = false,
   transitPayment,
+  footerContent,
 }: {
   title: string;
   subtitle: string;
   items: ProviderLinkItem[];
   defaultOpen?: boolean;
   transitPayment?: TransitPaymentOption;
+  footerContent?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -2294,7 +2331,7 @@ function ProviderDropdownSection({
     setOpen(defaultOpen);
   }, [defaultOpen]);
 
-  if (!items || items.length === 0) return null;
+  if ((!items || items.length === 0) && !footerContent) return null;
 
   return (
     <details
@@ -2333,6 +2370,7 @@ function ProviderDropdownSection({
         items={items}
         transitPayment={transitPayment}
       />
+      {footerContent}
     </details>
   );
 }
@@ -2654,6 +2692,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [rankedOptions, setRankedOptions] = useState<RankedRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
   const [invalidTripMessage, setInvalidTripMessage] = useState<string | null>(null);
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
@@ -3004,189 +3044,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    const type = searchParams.get('type') as TripData['type'] | null;
-    const origin = searchParams.get('origin') || '';
-    const destination = searchParams.get('destination') || '';
-    const airportCode = searchParams.get('airport') || 'SEA'; // default to SEA if not provided
-    const parkingDurationStr = searchParams.get('parkingDuration');
-    const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
-    const parkingCheckInDate = searchParams.get('parkingCheckInDate') || '';
-    const parkingCheckOutDate = searchParams.get('parkingCheckOutDate') || '';
-
-    const transportRaw = searchParams.get('transport') || 'all';
-    const transportAvailability = isOneOf(transportRaw, ['car', 'rideshare', 'transit', 'all'] as const)
-      ? transportRaw
-      : 'all';
-
-    const transitPaymentRaw = searchParams.get('transitPayment') || 'normal';
-    const transitPayment: TransitPaymentOption =
-      transitPaymentRaw === 'orca-pass' ? 'orca-pass' : 'normal';
-
-    const intentParam = searchParams.get('intent') || '';
-
-    const timeAnchorRaw = searchParams.get('timeAnchor');
-    const timeAnchor: 'flight-departure' | 'airport-arrival' =
-      timeAnchorRaw === 'airport-arrival' ? 'airport-arrival' : 'flight-departure';
-
-    const checkingBags = (searchParams.get('bags') || 'no').toLowerCase() === 'yes';
-    const checkedInRaw = (searchParams.get('checkedInAtAirport') || 'yes').toLowerCase();
-    const checkedInAtAirport = checkedInRaw !== 'no';
-
-    const securityRaw =
-      searchParams.get('securityOption') ||
-      searchParams.get('security') ||
-      'standard';
-
-    const securityOption: SecurityOption = isOneOf(
-      securityRaw,
-      ['standard', 'precheck', 'clear', 'clear-precheck'] as const
-    )
-      ? securityRaw
-      : 'standard';
-
-    const flightTypeRaw = searchParams.get('flightType') || 'domestic';
-    const flightType: FlightType = isOneOf(
-      flightTypeRaw,
-      ['domestic', 'international'] as const
-    )
-      ? flightTypeRaw
-      : 'domestic';
-
-    const cabinRaw = searchParams.get('cabin') || 'economy';
-    const cabin: CabinClass = isOneOf(
-      cabinRaw,
-      ['economy', 'premium'] as const
-    )
-      ? cabinRaw
-      : 'economy';
-
-    let data: TripData | null = null;
-
-    if (type === 'one-way-departure') {
-      const departureDate = searchParams.get('departureDate') || '';
-      const departureTime = searchParams.get('departureTime') || '';
-
-      let computedParkingDuration = parkingDuration;
-      if (!computedParkingDuration && parkingCheckInDate && parkingCheckOutDate) {
-        const checkIn = parseLocalDate(parkingCheckInDate);
-        const checkOut = parseLocalDate(parkingCheckOutDate);
-        if (checkIn && checkOut) {
-          const diffMs = checkOut.getTime() - checkIn.getTime();
-          const diffMinutes = Math.round(diffMs / 60000);
-
-          if (diffMinutes > 0) {
-            computedParkingDuration = Math.max(24 * 60, diffMinutes);
-          }
-        }
-      }
-
-      if (departureDate && departureTime && origin && destination) {
-        data = intentParam === 'flying-out'
-          ? {
-            type,
-            origin,
-            destination,
-            departureDate,
-            departureTime,
-            timeAnchor,
-            parkingDuration: computedParkingDuration,
-            parkingCheckInDate,
-            parkingCheckOutDate,
-            transportAvailability,
-            transitPayment,
-            checkingBags,
-            securityOption,
-            flightType,
-            cabin,
-            checkedInAtAirport,
-            airportCode,
-          }
-          : {
-            type,
-            origin,
-            destination,
-            airportCode,
-            departureDate,
-            departureTime,
-            timeAnchor,
-            parkingDuration: computedParkingDuration,
-            parkingCheckInDate,
-            parkingCheckOutDate,
-            transportAvailability,
-            transitPayment,
-            checkedInAtAirport,
-          };
-      }
-    } else if (type === 'one-way-arrival') {
-      const arrivalDate = searchParams.get('arrivalDate') || '';
-      const arrivalTime = searchParams.get('arrivalTime') || '';
-      if (arrivalDate && arrivalTime && origin && destination) {
-        data = { type, origin, destination, arrivalDate, arrivalTime, transportAvailability, transitPayment };
-      }
-    } else if (type === 'round-trip') {
-      const departureDate = searchParams.get('departureDate') || '';
-      const departureTime = searchParams.get('departureTime') || '';
-      const returnDate = searchParams.get('returnDate') || '';
-      const returnTime = searchParams.get('returnTime') || '';
-      if (departureDate && departureTime && returnDate && returnTime && origin && destination) {
-        data = { type, origin, destination, departureDate, departureTime, returnDate, returnTime, parkingDuration, transportAvailability, transitPayment };
-      }
-    } else if (type === 'dropoff-pickup') {
-      const airportTripDate = searchParams.get('airportTripDate') || '';
-      const airportTripTime = searchParams.get('airportTripTime') || '';
-      if (airportTripDate && airportTripTime && origin && destination) {
-        data = { type, origin, destination, airportTripDate, airportTripTime, transportAvailability, transitPayment };
-      }
-    } else if (type === 'general-trip') {
-      const arrivalDate = searchParams.get('arrivalDate') || '';
-      const arrivalTime = searchParams.get('arrivalTime') || '';
-
-      const destinationKindRaw = searchParams.get('destinationKind') || 'general';
-      const destinationKind = [
-        'airport',
-        'office',
-        'downtown',
-        'stadium',
-        'event',
-        'hospital',
-        'restaurant',
-        'hotel',
-        'general',
-      ].includes(destinationKindRaw)
-        ? destinationKindRaw
-        : 'general';
-
-      const destinationName =
-        searchParams.get('destinationName') ||
-        searchParams.get('destination') ||
-        destination;
-
-      const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
-      const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
-
-      if (arrivalDate && arrivalTime && origin && destination) {
-        data = {
-          type,
-          origin,
-          destination,
-          destinationKind,
-          destinationName,
-          arrivalDate,
-          arrivalTime,
-          parkingDuration,
-          parkingCheckInDate,
-          parkingCheckInTime,
-          parkingCheckOutDate,
-          parkingCheckOutTime,
-          transportAvailability,
-          transitPayment,
-        } as TripData;
-      }
-    }
-
-    if (data) { // Ensure airport code is included in trip data for consistent processing, even if not explicitly in URL params for some trip types
-      data = { ...data, airportCode, transitPayment } as TripData;
-    }
+    const data = parseTripDataFromSearchParams(searchParams);
 
     if (data) {
       const requestKey = JSON.stringify(data);
@@ -3248,7 +3106,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
       // Always show loading state for URL-driven recomputes (date/time/origin changes, etc.)
       setInvalidTripMessage(null);
+      setFetchError(null);
       setLoading(true);
+      if (isNewTripRequest) {
+        setIsRecalculating(true);
+      }
       setShowTooLate(false);
       setRecommendation(null);
       setRankedOptions([]);
@@ -3329,6 +3191,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             message: error instanceof Error ? error.message : String(error),
           });
           console.error('Error fetching recommendations:', error);
+          setFetchError(
+            error instanceof Error
+              ? error.message
+              : 'Could not recalculate recommendations. Please try again.',
+          );
+          setRecommendation(null);
+          setRankedOptions([]);
         })
         .finally(() => {
           const current = recommendationsRequestRef.current;
@@ -3352,6 +3221,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
           if (isCurrentRequest || !hasNewerRequest) {
             setLoading(false);
+            setIsRecalculating(false);
           }
         });
 
@@ -3844,7 +3714,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   if (loading) {
     return (
       <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
-        <div className="text-lg text-zinc-700">Loading options…</div>
+        <div className="text-lg text-zinc-700">
+          {isRecalculating ? 'Recalculating…' : 'Loading options…'}
+        </div>
       </div>
     );
   }
@@ -3853,10 +3725,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return (
       <div className="airport-page-bg flex flex-1 flex-col items-center justify-center px-4">
         <div className="text-lg font-medium text-zinc-900">
-          {invalidTripMessage ? 'Trip details are incomplete' : 'We couldn’t read your trip.'}
+          {fetchError
+            ? 'Recalculation failed'
+            : invalidTripMessage
+              ? 'Trip details are incomplete'
+              : 'We couldn’t read your trip.'}
         </div>
         <div className="mt-1 max-w-md text-center text-sm text-zinc-600">
-          {invalidTripMessage || 'Go back and try again.'}
+          {fetchError || invalidTripMessage || 'Go back and try again.'}
         </div>
         <div className="mt-2 max-w-md text-center text-xs text-zinc-500">
           Phase 1 clean result URLs are device/browser-local.
@@ -5066,45 +4942,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                   <EditTripForm
                     initialData={editingData}
+                    isSubmitting={isRecalculating || loading}
                     onSubmit={(data) => {
-                      const params = new URLSearchParams(searchParams.toString());
+                      recommendationsLoadedKeyRef.current = '';
+                      setFetchError(null);
+                      setIsRecalculating(true);
+                      setLoading(true);
 
-                      Object.entries(data).forEach(([key, value]) => {
-                        if (value !== undefined && value !== null && value !== '') {
-                          params.set(key, String(value));
-                        }
+                      const params = tripDataToSearchParams(data, {
+                        intent: intent || searchParams.get('intent') || 'flying-out',
+                        preserve: new URLSearchParams(searchParams.toString()),
                       });
-
-                      if (data.type === 'one-way-departure') {
-                        const updatedSecurityOption =
-                          (data as TripDataWithExtras).securityOption || 'standard';
-
-                        params.set('securityOption', updatedSecurityOption);
-                        params.set('security', updatedSecurityOption);
-                      }
-
-                      const selectedAirport =
-                        getAirportById(((data as TripDataWithExtras).airportCode || 'SEA').toUpperCase()) ||
-                        getAirportById('SEA')!;
-
-                      params.set('airportCode', selectedAirport.id);
-                      params.set('airport', selectedAirport.id);
-                      params.set('airportName', selectedAirport.label);
-                      params.set('destination', selectedAirport.routingAddress);
-                      params.set('rideshareDestinationName', selectedAirport.rideshareDestinationName);
-                      params.set('airportCheckinNote', selectedAirport.checkinNote || '');
-
-                      params.set('airportLat', String(selectedAirport.geoLocation.lat));
-                      params.set('airportLng', String(selectedAirport.geoLocation.lng));
-
-                      params.set('intent', intent || params.get('intent') || 'flying-out');
-
-                      const nextUrl = `/results?${params.toString()}`;
 
                       setIsEditing(false);
                       setEditingData(null);
 
-                      router.push(nextUrl);
+                      router.replace(buildResultsPathFromSearchParams(params));
                     }}
                     onCancel={() => {
                       setIsEditing(false);
@@ -5124,8 +4977,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           <SortTabs value={sort} onChange={setSort} />
         </div>
 
-        {recommendation.accessStrategies?.options?.length ? (
-          <HiddenAccessOptionsSection options={recommendation.accessStrategies.options} />
+        {recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
+          <HiddenAccessOptionsSection
+            options={recommendation.accessStrategies.options.filter((option) => option.isHiddenGem)}
+          />
+        ) : null}
+
+        {process.env.NODE_ENV === 'development' &&
+        getTripAirportCode(tripData) === 'SEA' &&
+        !recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <div className="font-semibold">SEA curated access diagnostic</div>
+            <div className="mt-1">
+              API returned no curated hidden access options for SEA. Confirm{' '}
+              <code className="rounded bg-white px-1">SEA_CURATED_ACCESS=1</code> in{' '}
+              <code className="rounded bg-white px-1">.env.local</code> and restart the dev server.
+            </div>
+          </div>
         ) : null}
 
         {
@@ -5551,6 +5419,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               items={[...(transitOptions), ...extraTransitProviders]}
               defaultOpen={openProviderSection === 'transit'}
               transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
+              footerContent={
+                <TransitParkAndRideCards
+                  options={
+                    recommendation.accessStrategies?.options?.filter(
+                      (option) =>
+                        option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
+                    ) ?? []
+                  }
+                />
+              }
             />
 
             <ParkingReviewsModal
@@ -5586,12 +5464,14 @@ function EditTripForm({
   onCancel,
   intent,
   airportCode,
+  isSubmitting = false,
 }: {
   initialData: TripData;
   onSubmit: (data: TripData) => void;
   onCancel: () => void;
   intent: string;
   airportCode: string;
+  isSubmitting?: boolean;
 }) {
   const [origin, setOrigin] = useState(initialData.origin);
   const [selectedAirportCode, setSelectedAirportCode] = useState(
@@ -6194,9 +6074,10 @@ function EditTripForm({
         </button>
         <button
           type="submit"
-          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+          disabled={isSubmitting}
+          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          Recalculate
+          {isSubmitting ? 'Recalculating…' : 'Recalculate'}
         </button>
       </div>
     </form>

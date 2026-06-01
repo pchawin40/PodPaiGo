@@ -101,11 +101,32 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
   return parking.type === 'off-airport' ? 12 : 4;
 }
 
+import { resolveParkingDriveMinutes } from './parking/routeMinutes';
+
 function getParkingTotalMinutes(parking: ParkingOption): number {
-  const driveMinutes = parking.distance || 0;
+  const driveMinutes = resolveParkingDriveMinutes(parking);
   const parkingBufferMinutes = parking.parkingBufferMinutes ?? 0;
   const transferToTerminalMinutes = parking.transferToTerminalMinutes ?? 0;
-  return driveMinutes + parkingBufferMinutes + transferToTerminalMinutes;
+  const shuttleWait =
+    parking.transferType === 'shuttle'
+      ? typeof parking.shuttleWaitMinutes === 'number'
+        ? parking.shuttleWaitMinutes
+        : 8
+      : 0;
+  const walkInside =
+    typeof parking.walkingMinutes === 'number'
+      ? parking.walkingMinutes
+      : parking.transferType === 'airport-garage'
+        ? 5
+        : 3;
+
+  return (
+    driveMinutes +
+    parkingBufferMinutes +
+    shuttleWait +
+    transferToTerminalMinutes +
+    walkInside
+  );
 }
 
 function getStressScore(
