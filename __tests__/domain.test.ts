@@ -160,6 +160,24 @@ describe('Rideshare Cost Calculations', () => {
     const result = calculateRideshareCost(rideshare, tripData);
     expect(result).toBe(90);
   });
+
+  test('calculateRideshareCost should not double scoped round-trip estimates', () => {
+    const scopedRideshare: RideshareOption = {
+      ...rideshare,
+      price: 260,
+      rideshareTripScope: 'round-trip',
+    };
+    const tripData: TripData = {
+      type: 'one-way-departure',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      departureDate: '2024-01-01',
+      departureTime: '10:00',
+      parkingCheckOutDate: '2024-01-05',
+    };
+
+    expect(calculateRideshareCost(scopedRideshare, tripData)).toBe(260);
+  });
 });
 
 describe('Transit Cost Calculations', () => {

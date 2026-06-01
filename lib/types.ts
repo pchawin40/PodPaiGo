@@ -287,6 +287,9 @@ export type ParkingOption = {
   shuttleReliabilityLabel?: string;
 
   trueTotalCost?: number;
+
+  /** Overnight/time-limit rules for park-and-ride lots discovered from listings. */
+  parkAndRideRules?: ParkAndRideParkingRules;
 };
 
 export type ParkingGoogleReview = {
@@ -326,6 +329,9 @@ export type RideshareOption = {
   price: number;
   priceMin?: number;
   priceMax?: number;
+  oneWayPriceMin?: number;
+  oneWayPriceMax?: number;
+  rideshareTripScope?: 'one-way' | 'round-trip';
   priceRangeLabel?: string;
   priceDisplay?: PriceDisplay;
   priceUnit?: PriceUnit;

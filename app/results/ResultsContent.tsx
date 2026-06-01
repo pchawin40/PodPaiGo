@@ -41,7 +41,7 @@ import {
   parkingRouteUnavailableReason,
   withStableParkingRouteStatus,
 } from '../../lib/parking/routeStatus';
-import { RIDESHARE_ESTIMATE_DISCLAIMER } from '../../lib/rideshare/estimate';
+import { RIDESHARE_ESTIMATE_DISCLAIMER, formatRidesharePriceDisplay } from '../../lib/rideshare/estimate';
 
 import {
   parseHHMMToMinutes,
@@ -109,6 +109,9 @@ type PriceableOption = {
   priceNote?: string;
   priceMin?: number;
   priceMax?: number;
+  oneWayPriceMin?: number;
+  oneWayPriceMax?: number;
+  rideshareTripScope?: 'one-way' | 'round-trip';
   priceRangeLabel?: string;
   rideshareEstimateConfidence?: RideshareEstimateConfidence;
   distanceMiles?: number;
@@ -345,20 +348,16 @@ function rideshareConfidenceMeta(
   }
 }
 
+function ridesharePriceDisplay(option: AppOption): { primary: string; secondary: string | null } {
+  return formatRidesharePriceDisplay(option);
+}
+
 function ridesharePricePrimary(option: AppOption): string | null {
-  if (typeof option.priceMin === 'number' && typeof option.priceMax === 'number') {
-    return `Estimated $${option.priceMin}–$${option.priceMax} rideshare range`;
-  }
+  return ridesharePriceDisplay(option).primary;
+}
 
-  if (option.priceRangeLabel) {
-    return `Estimated ${option.priceRangeLabel} rideshare range`;
-  }
-
-  if (typeof option.price === 'number' && option.price > 0) {
-    return `Estimated ${formatMoney(option.price)} rideshare range`;
-  }
-
-  return null;
+function ridesharePriceSecondary(option: AppOption): string | null {
+  return ridesharePriceDisplay(option).secondary;
 }
 
 function getTripAirportCode(tripData: TripData | null): string {
@@ -792,6 +791,9 @@ function PricingLinksSection({
       {items.map((it: ProviderLinkItem) => {
         const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
         const rideshareConfidence = rideshareConfidenceMeta(it.rideshareEstimateConfidence);
+        const ridesharePricing = isRideSection
+          ? ridesharePriceDisplay(it as AppOption)
+          : null;
         const price = formatProviderPrice(it);
         const link = bestLink(it);
         const kind = it.priceDisplay as string | undefined;
@@ -809,14 +811,14 @@ function PricingLinksSection({
           isTransitSection && transitPayment === 'orca-pass'
             ? '$0'
             : isRideSection
-              ? ridesharePricePrimary(it as AppOption) || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
+              ? ridesharePricing?.primary || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
               : price.primary;
 
         const secondaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
             ? 'Covered by ORCA pass'
             : isRideSection
-              ? it.priceNote || RIDESHARE_ESTIMATE_DISCLAIMER
+              ? ridesharePricing?.secondary || RIDESHARE_ESTIMATE_DISCLAIMER
               : it.priceNote || price.secondary;
 
         const primaryCta =
@@ -831,6 +833,77 @@ function PricingLinksSection({
                 : 'View deal';
 
         const sourceAndMapSame = Boolean(link && it.mapLink && link === it.mapLink);
+
+        if (isRideSection) {
+          return (
+            <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-sky-200 hover:shadow-md sm:p-4">
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-slate-900 ring-1 ring-sky-100 sm:h-12 sm:w-12">
+                    {providerIcon(it.name)}
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="text-base font-semibold leading-snug text-zinc-900">
+                      {it.name}
+                    </div>
+
+                    {primaryPrice ? (
+                      <div className="text-lg font-bold leading-snug text-zinc-900">
+                        {primaryPrice}
+                      </div>
+                    ) : null}
+
+                    {secondaryPrice && ridesharePricing?.secondary ? (
+                      <div className="text-sm font-medium leading-snug text-zinc-600">
+                        {secondaryPrice}
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {rideshareConfidence && (
+                        <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + rideshareConfidence.className}>
+                          {rideshareConfidence.label}
+                        </span>
+                      )}
+                      <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                        {trust.label}
+                      </span>
+                    </div>
+
+                    <p className="text-xs leading-relaxed text-zinc-500">
+                      {RIDESHARE_ESTIMATE_DISCLAIMER}
+                    </p>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {it.mapLink && !sourceAndMapSame && (
+                        <a
+                          href={it.mapLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                        >
+                          View route
+                        </a>
+                      )}
+
+                      {link && (
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                        >
+                          {primaryCta}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
@@ -1534,10 +1607,6 @@ function OptionCard({
   const safeParkingSearchQuery = `${airport.label} ${airport.id} airport parking`;
 
   const trust = confidenceFromTrust((opt.trustStatus || 'estimated') as TrustStatus);
-  const rideshareConfidence =
-    item.type === 'rideshare'
-      ? rideshareConfidenceMeta(opt.rideshareEstimateConfidence)
-      : null;
 
   const sourceLink =
     item.type === 'parking'
@@ -1654,9 +1723,12 @@ function OptionCard({
     ? timing.shortByMinutes
     : null;
 
+  const isRideshareCard = item.type === 'rideshare';
+  const ridesharePricing = isRideshareCard ? ridesharePriceDisplay(opt) : null;
+
   const nonParkingPrice =
     item.type === 'rideshare'
-      ? ridesharePricePrimary(opt) || visiblePrice.primary
+      ? ridesharePricing?.primary || visiblePrice.primary
       : typeof opt.price === 'number' && opt.price > 0
         ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
         : visiblePrice.primary;
@@ -1676,7 +1748,57 @@ function OptionCard({
       )}
 
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
+          {isRideshareCard ? (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-base font-semibold leading-tight text-slate-950 sm:text-lg">
+                  {opt.name}
+                </div>
+                {!compact && (
+                  <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700">
+                    {typeLabel(item.type)}
+                  </div>
+                )}
+                {rank === 1 &&
+                  sort === 'easiest' &&
+                  timing.status !== 'too-late' && (
+                    <div className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                      Recommended
+                    </div>
+                  )}
+              </div>
+
+              <div className="text-lg font-bold text-zinc-900">
+                {ridesharePricing?.primary || nonParkingPrice}
+              </div>
+
+              {ridesharePricing?.secondary ? (
+                <div className="text-sm font-medium text-zinc-600">
+                  {ridesharePricing.secondary}
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + (rideshareConfidenceMeta(opt.rideshareEstimateConfidence)?.className || trust.className)}>
+                  Estimated
+                </span>
+                <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                  {trust.label}
+                </span>
+                {timingMeta && (
+                  <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + timingMeta.className}>
+                    {timingMeta.label}
+                  </div>
+                )}
+              </div>
+
+              <p className="text-xs text-zinc-600">
+                {RIDESHARE_ESTIMATE_DISCLAIMER}
+              </p>
+            </div>
+          ) : (
+            <>
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-base font-semibold leading-tight text-slate-950 sm:text-lg">{opt.name}</div>
 
@@ -1718,22 +1840,10 @@ function OptionCard({
               )}
             </div>
 
-            {item.type === 'rideshare' && (
-              <p className="mt-1 text-xs text-zinc-600">
-                {opt.priceNote || RIDESHARE_ESTIMATE_DISCLAIMER}
-              </p>
-            )}
-
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {item.type !== 'rideshare' && (
                 <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
                   {trust.label}
-                </div>
-              )}
-
-              {rideshareConfidence && (
-                <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + rideshareConfidence.className}>
-                  {rideshareConfidence.label}
                 </div>
               )}
 
@@ -1817,6 +1927,8 @@ function OptionCard({
               })() : null}
             </div>
           </div>
+            </>
+          )}
 
           {item.type === 'parking' && routeUnavailable && (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">

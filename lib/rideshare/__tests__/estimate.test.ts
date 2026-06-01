@@ -132,9 +132,8 @@ describe('rideshare estimate v1', () => {
     expect(options.every((option) => option.priceDisplay === 'estimated')).toBe(true);
     expect(options.every((option) => typeof option.priceMin === 'number')).toBe(true);
     expect(options.every((option) => typeof option.priceMax === 'number')).toBe(true);
-    expect(options.every((option) => option.priceNote?.includes('Estimated rideshare range'))).toBe(
-      true,
-    );
+    expect(options.every((option) => option.priceNote?.includes('Estimated'))).toBe(true);
+    expect(options.every((option) => option.priceNote?.includes('rideshare range'))).toBe(true);
   });
 
   test('changes estimates when distance and duration increase', () => {

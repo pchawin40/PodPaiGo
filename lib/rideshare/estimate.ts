@@ -1,4 +1,4 @@
-import type { RideshareEstimateConfidence, RideshareOption, TrafficEstimate } from '../types';
+import type { RideshareEstimateConfidence, RideshareOption, TrafficEstimate, TripData } from '../types';
 
 type RideProviderKind = 'uber' | 'lyft' | 'taxi';
 type RideTier = 'standard' | 'comfort' | 'xl';
@@ -31,7 +31,10 @@ type BuildRideshareEstimateOptionsArgs = {
   taxiSearchUrl: string;
   departureDateTime?: string;
   airportCode?: string;
+  tripData?: TripData;
 };
+
+export type RideshareTripScope = 'one-way' | 'round-trip';
 
 type DistanceBand = {
   id: string;
@@ -48,7 +51,7 @@ const DISTANCE_BANDS: Record<'near' | 'metro' | 'regional' | 'distant', Distance
   near: { id: 'near', typicalMiles: 8, typicalMinutes: 22, congestion: 'medium' },
   metro: { id: 'metro', typicalMiles: 18, typicalMinutes: 38, congestion: 'medium' },
   regional: { id: 'regional', typicalMiles: 32, typicalMinutes: 55, congestion: 'low' },
-  distant: { id: 'distant', typicalMiles: 50, typicalMinutes: 75, congestion: 'low' },
+  distant: { id: 'distant', typicalMiles: 48, typicalMinutes: 72, congestion: 'low' },
 };
 
 const FARE_PROFILES: FareProfile[] = [
@@ -138,6 +141,118 @@ function formatFareRange(min: number, max: number): string {
   return `$${min}–$${max}`;
 }
 
+export function isRideshareRoundTripEstimate(tripData?: TripData | null): boolean {
+  if (!tripData) return false;
+
+  if (tripData.type === 'round-trip') {
+    return true;
+  }
+
+  if (tripData.type === 'one-way-departure') {
+    if (tripData.parkingCheckInDate && tripData.parkingCheckOutDate) {
+      return tripData.parkingCheckOutDate !== tripData.parkingCheckInDate;
+    }
+
+    if (tripData.parkingCheckOutDate) {
+      return true;
+    }
+
+    if (typeof tripData.parkingDuration === 'number' && tripData.parkingDuration >= 18 * 60) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function formatRidesharePriceDisplay(
+  option: Pick<
+    RideshareOption,
+    | 'priceMin'
+    | 'priceMax'
+    | 'oneWayPriceMin'
+    | 'oneWayPriceMax'
+    | 'rideshareTripScope'
+    | 'priceRangeLabel'
+  > & {
+    price?: number;
+  },
+): { primary: string; secondary: string | null } {
+  const min = option.priceMin;
+  const max = option.priceMax;
+
+  if (typeof min === 'number' && typeof max === 'number') {
+    if (option.rideshareTripScope === 'round-trip') {
+      const eachWayMin = option.oneWayPriceMin ?? Math.round(min / 2);
+      const eachWayMax = option.oneWayPriceMax ?? Math.round(max / 2);
+
+      return {
+        primary: `Estimated $${min}–$${max} round trip`,
+        secondary: `~$${eachWayMin}–$${eachWayMax} each way`,
+      };
+    }
+
+    return {
+      primary: `Estimated $${min}–$${max} one way`,
+      secondary: null,
+    };
+  }
+
+  if (option.priceRangeLabel) {
+    return {
+      primary: `Estimated ${option.priceRangeLabel}`,
+      secondary: null,
+    };
+  }
+
+  if (typeof option.price === 'number' && option.price > 0) {
+    return {
+      primary: `Estimated $${option.price}`,
+      secondary: null,
+    };
+  }
+
+  return {
+    primary: 'Estimated fare unavailable',
+    secondary: null,
+  };
+}
+
+function longDistanceAirportMultiplier(distanceMiles: number): number {
+  if (distanceMiles >= 40) return 1.08;
+  if (distanceMiles >= 28) return 1.05;
+  if (distanceMiles >= 18) return 1.03;
+  return 1;
+}
+
+function longTripFareFloor(distanceMiles: number, profile: FareProfile): number {
+  if (profile.providerKind === 'taxi' || distanceMiles < 30) {
+    return profile.minimumFare;
+  }
+
+  return Math.max(
+    profile.minimumFare,
+    Math.round(distanceMiles * 2.1 + profile.baseFare + profile.serviceFee * 0.6),
+  );
+}
+
+function longDistanceAirportFare(args: {
+  profile: FareProfile;
+  durationMinutes: number;
+  distanceMiles: number;
+  airportFees: number;
+}): number {
+  const { profile, durationMinutes, distanceMiles, airportFees } = args;
+
+  return (
+    profile.baseFare +
+    profile.serviceFee * 0.75 +
+    airportFees +
+    distanceMiles * (profile.providerKind === 'taxi' ? 2.95 : 2.05) +
+    durationMinutes * profile.perMinute * 0.85
+  );
+}
+
 export function congestionMultiplier(congestion: TrafficEstimate['congestion']): number {
   switch (congestion) {
     case 'high':
@@ -213,6 +328,17 @@ export function resolveOriginDistanceBand(origin: string, airportCode?: string):
       normalized.includes('everett')
     ) {
       return DISTANCE_BANDS.regional;
+    }
+
+    if (
+      normalized.includes('monroe') ||
+      normalized.includes('snohomish') ||
+      normalized.includes('marysville') ||
+      normalized.includes('enumclaw') ||
+      normalized.includes('snoqualmie') ||
+      normalized.includes('cle elum')
+    ) {
+      return DISTANCE_BANDS.distant;
     }
   }
 
@@ -332,14 +458,33 @@ export function estimateFareRange(args: {
     durationMinutes * profile.perMinute;
 
   const adjustedBaseline = baseline * tierMultiplier;
+  const distanceMultiplier = longDistanceAirportMultiplier(distanceMiles);
+  const modeledLongDistanceFare =
+    distanceMiles >= 35
+      ? longDistanceAirportFare({
+          profile,
+          durationMinutes,
+          distanceMiles,
+          airportFees,
+        }) *
+        distanceMultiplier *
+        trafficMultiplier *
+        timeMultiplier
+      : null;
+  const fareBeforeFloor =
+    modeledLongDistanceFare ?? adjustedBaseline * trafficMultiplier * timeMultiplier * distanceMultiplier;
   const fare = Math.max(
-    profile.minimumFare,
-    adjustedBaseline * trafficMultiplier * timeMultiplier,
+    longTripFareFloor(distanceMiles, profile),
+    fareBeforeFloor,
   );
   const confidenceRangeExtra = confidence === 'baseline-estimate' ? 0.12 : 0.06;
-  const rangePercent = profile.rangePercent + confidenceRangeExtra;
+  const baseRangePercent = profile.rangePercent + confidenceRangeExtra;
+  const rangePercent =
+    distanceMiles >= 35
+      ? Math.min(0.34, baseRangePercent)
+      : Math.min(0.5, baseRangePercent);
   const min = roundFare(fare * (1 - rangePercent));
-  const max = Math.max(min + 4, roundFare(fare * (1 + rangePercent)));
+  const max = Math.max(min + 8, roundFare(fare * (1 + rangePercent)));
 
   return {
     min,
@@ -370,9 +515,12 @@ export function buildRideshareEstimateOptions(
   const now = new Date().toISOString();
   const timeOfDay = timeOfDayMultiplier(args.departureDateTime);
   const estimateLabel = confidenceLabel(confidence);
+  const tripScope: RideshareTripScope = isRideshareRoundTripEstimate(args.tripData)
+    ? 'round-trip'
+    : 'one-way';
 
   return FARE_PROFILES.map((profile) => {
-    const fare = estimateFareRange({
+    const oneWayFare = estimateFareRange({
       profile,
       durationMinutes: resolvedRoute.duration,
       distanceMiles,
@@ -380,13 +528,30 @@ export function buildRideshareEstimateOptions(
       confidence,
       departureDateTime: args.departureDateTime,
     });
+    const fare =
+      tripScope === 'round-trip'
+        ? {
+            min: oneWayFare.min * 2,
+            max: oneWayFare.max * 2,
+            midpoint: oneWayFare.midpoint * 2,
+          }
+        : oneWayFare;
     const isTaxi = profile.providerKind === 'taxi';
     const providerName = sourceName(profile);
+    const scopeLabel = tripScope === 'round-trip' ? 'round trip' : 'one way';
     const routeBasis = effective.usedFallback
-      ? `Estimated rideshare range from ${resolveOriginDistanceBand(args.origin, args.airportCode).id} airport distance band`
+      ? `Estimated ${scopeLabel} rideshare range from ${resolveOriginDistanceBand(args.origin, args.airportCode).id} airport distance band`
       : hasRouteDistance
-        ? 'Estimated rideshare range from route distance and drive time'
-        : 'Estimated rideshare range from route drive time';
+        ? `Estimated ${scopeLabel} rideshare range from route distance and drive time`
+        : `Estimated ${scopeLabel} rideshare range from route drive time`;
+    const display = formatRidesharePriceDisplay({
+      priceMin: fare.min,
+      priceMax: fare.max,
+      oneWayPriceMin: oneWayFare.min,
+      oneWayPriceMax: oneWayFare.max,
+      rideshareTripScope: tripScope,
+      price: fare.midpoint,
+    });
 
     return {
       id: profile.id,
@@ -394,15 +559,20 @@ export function buildRideshareEstimateOptions(
       price: fare.midpoint,
       priceMin: fare.min,
       priceMax: fare.max,
+      oneWayPriceMin: oneWayFare.min,
+      oneWayPriceMax: oneWayFare.max,
+      rideshareTripScope: tripScope,
       priceRangeLabel: formatFareRange(fare.min, fare.max),
       priceDisplay: 'estimated',
       priceUnit: 'total',
-      priceNote: `${routeBasis}. ${RIDESHARE_ESTIMATE_DISCLAIMER}`,
+      priceNote: `${routeBasis}. ${display.secondary ? `${display.secondary}. ` : ''}${RIDESHARE_ESTIMATE_DISCLAIMER}`,
       rideshareEstimateConfidence: confidence,
       distanceMiles: Math.round(distanceMiles * 10) / 10,
       routeDistanceMeters,
       pickupWaitMinutes: profile.pickupWaitMinutes,
-      duration: resolvedRoute.duration + profile.pickupWaitMinutes,
+      duration:
+        (resolvedRoute.duration + profile.pickupWaitMinutes) *
+        (tripScope === 'round-trip' ? 2 : 1),
       availability: profile.availability,
       trustStatus: 'estimated',
       routeTrustStatus: resolvedRoute.trustStatus,
@@ -413,7 +583,10 @@ export function buildRideshareEstimateOptions(
       mapLink: args.directionsUrl,
       lastUpdated: now,
       assumptions: [
-        `${estimateLabel} ${profile.name} rideshare range (${formatFareRange(fare.min, fare.max)}).`,
+        `${estimateLabel} ${profile.name} ${scopeLabel} estimate (${formatFareRange(fare.min, fare.max)}).`,
+        tripScope === 'round-trip'
+          ? `Includes estimated outbound and return rides (${formatFareRange(oneWayFare.min, oneWayFare.max)} each way).`
+          : 'Includes a single origin-to-airport ride estimate.',
         effective.usedFallback
           ? 'Route data was unavailable; estimate uses a typical airport distance band.'
           : hasRouteDistance
@@ -423,7 +596,7 @@ export function buildRideshareEstimateOptions(
         `Time-of-day factor: ${timeOfDay.label} (${timeOfDay.multiplier.toFixed(2)}x).`,
         `Traffic/congestion factor: ${resolvedRoute.congestion}.`,
         `${profile.name} fare range estimated from ${distanceMiles.toFixed(1)} mi and ${resolvedRoute.duration} min drive time.`,
-        `Includes an estimated ${profile.pickupWaitMinutes} min pickup wait.`,
+        `Includes an estimated ${profile.pickupWaitMinutes} min pickup wait per ride.`,
         RIDESHARE_ESTIMATE_DISCLAIMER,
       ],
     } satisfies RideshareOption;

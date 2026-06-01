@@ -369,7 +369,8 @@ export class RecommendationEngine {
         ? this.provider.getRideshareOptions(
           tripData.origin,
           tripData.destination,
-          tripDateTime
+          tripDateTime,
+          tripData,
         )
         : Promise.resolve([]),
 

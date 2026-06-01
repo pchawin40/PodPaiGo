@@ -182,13 +182,13 @@ export function calculateParkingDuration(tripData: TripData): number {
 
   // Airport round trip: usually parking spans departure → return.
   if (tripData.type === 'round-trip') {
-    return tripData.parkingDuration ?? calculateTripDuration(tripData);
+    return tripData.parkingDuration ?? fromCheckInOut ?? calculateTripDuration(tripData);
   }
 
   // Airport departure / airport parking flow:
   // default to 24 hours only for airport-style trips.
   if (tripData.type === 'one-way-departure') {
-    return tripData.parkingDuration ?? (24 * 60);
+    return tripData.parkingDuration ?? fromCheckInOut ?? (24 * 60);
   }
 
   return 0;
@@ -222,9 +222,14 @@ export function calculateOffAirportParkingCost(
 }
 
 export function calculateRideshareCost(rideshare: RideshareOption, tripData: TripData): number {
+  if (rideshare.rideshareTripScope === 'round-trip' || rideshare.rideshareTripScope === 'one-way') {
+    return rideshare.price;
+  }
+
   if (tripData.type === 'round-trip') {
     return rideshare.price * 2;
   }
+
   return rideshare.price;
 }
 

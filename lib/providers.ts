@@ -8,6 +8,7 @@ import {
   LocationInfo,
   TsaEstimate,
   SecurityOption,
+  TripData,
 } from './types';
 import { mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
@@ -276,7 +277,12 @@ export interface AirportInfoProvider {
 }
 
 export interface DataProvider extends TrafficProvider, ParkingProvider, FlightProvider, TsaProvider, AirportInfoProvider {
-  getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]>;
+  getRideshareOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    tripData?: TripData,
+  ): Promise<RideshareOption[]>;
   getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]>;
   getParkingOptions(
     origin: string,
@@ -1168,6 +1174,7 @@ export class MockProvider implements DataProvider {
       taxiSearchUrl: this.buildGoogleMapsSearchLink(taxiQuery),
       departureDateTime: dateTime,
       airportCode: airport?.id,
+      tripData,
     });
   }
 
