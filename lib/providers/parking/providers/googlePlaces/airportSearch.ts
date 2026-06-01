@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../../../types';
+import { DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES } from '../../../../access/parkAndRideAccess';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { getAirportById } from '../../../../airports/catalog';
 import { resolveParkingPricing } from '../../../pricingResolver';
@@ -350,7 +351,7 @@ export async function getGoogleParkingPlaces(args: {
           id: `${airportCode.toLowerCase()}-google-${place.id}`,
           name,
           serviceAirportCode: airportCode,
-          type: isOfficial ? 'official' : 'off-airport',
+          type: isOfficial ? 'official' : isParkAndRide ? 'park-and-ride' : 'off-airport',
           price: price ?? staticPricing.price ?? 20,
           priceMin,
           priceMax,
@@ -406,6 +407,7 @@ export async function getGoogleParkingPlaces(args: {
             isOfficial ? 'Closest Walk' : 'Compare Listed Deal',
             isParkAndRide ? 'Park & Ride' : '',
           ].filter(Boolean),
+          parkAndRideRules: isParkAndRide ? DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES : undefined,
         };
 
         return withAvailabilityScore(option);

@@ -61,14 +61,14 @@ describe('RecommendationEngine accessStrategies', () => {
     RecommendationEngine.setDataProvider(originalProvider);
   });
 
-  const seaTrip: TripData = {
+  const sameDaySeaTrip: TripData = {
     type: 'one-way-departure',
     origin: 'Capitol Hill, Seattle, WA',
     destination: 'Seattle-Tacoma International Airport (SEA)',
     airportCode: 'SEA',
     departureDate: '2026-06-01',
     departureTime: '08:00',
-    parkingDuration: 24 * 60,
+    parkingDuration: 8 * 60,
     transportAvailability: 'all',
   };
 
@@ -76,18 +76,38 @@ describe('RecommendationEngine accessStrategies', () => {
     process.env.SEA_CURATED_ACCESS = '1';
     RecommendationEngine.setDataProvider(createMockProvider());
 
-    const rec = await RecommendationEngine.generateRecommendations(seaTrip);
+    const rec = await RecommendationEngine.generateRecommendations(sameDaySeaTrip);
 
     expect(rec.accessStrategies?.options?.length).toBeGreaterThan(0);
     expect(rec.accessStrategies?.options?.[0]?.displayName).toBe('Northgate Park + Link');
     expect(rec.accessStrategies?.topPickId).toBe('sea-northgate-park-link');
   });
 
+  test('still includes Northgate hidden access for overnight trips without promoting it as top pick', async () => {
+    process.env.SEA_CURATED_ACCESS = '1';
+    RecommendationEngine.setDataProvider(createMockProvider());
+
+    const overnightTrip: TripData = {
+      ...sameDaySeaTrip,
+      parkingDuration: 7 * 24 * 60,
+    };
+
+    const rec = await RecommendationEngine.generateRecommendations(overnightTrip);
+    const northgate = rec.accessStrategies?.options?.find(
+      (option) => option.id === 'sea-northgate-park-link',
+    );
+
+    expect(northgate).toBeDefined();
+    expect(northgate?.isHiddenGem).toBe(true);
+    expect(northgate?.recommendedForTrip).toBe(false);
+    expect(rec.accessStrategies?.topPickId).toBeUndefined();
+  });
+
   test('omits accessStrategies for SEA when flag disabled', async () => {
     delete process.env.SEA_CURATED_ACCESS;
     RecommendationEngine.setDataProvider(createMockProvider());
 
-    const rec = await RecommendationEngine.generateRecommendations(seaTrip);
+    const rec = await RecommendationEngine.generateRecommendations(sameDaySeaTrip);
 
     expect(rec.accessStrategies).toBeUndefined();
   });
@@ -97,7 +117,7 @@ describe('RecommendationEngine accessStrategies', () => {
     RecommendationEngine.setDataProvider(createMockProvider());
 
     const rec = await RecommendationEngine.generateRecommendations({
-      ...seaTrip,
+      ...sameDaySeaTrip,
       airportCode: 'LAX',
       destination: 'Los Angeles International Airport (LAX)',
     });

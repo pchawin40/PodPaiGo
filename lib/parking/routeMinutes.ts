@@ -67,6 +67,67 @@ export function resolveParkingDriveMinutes(option: ParkingDriveCarrier): number 
   return valid ?? 0;
 }
 
+export type ParkingDriveContext = {
+  originLat?: number | null;
+  originLng?: number | null;
+};
+
+export function resolveParkingDriveMinutesWithFallback(
+  option: ParkingDriveCarrier,
+  context?: ParkingDriveContext,
+): number {
+  const direct = resolveParkingDriveMinutes(option);
+  if (direct > 0) {
+    return direct;
+  }
+
+  if (option.routeUnavailable) {
+    return 0;
+  }
+
+  return estimateParkingDriveMinutesFallback({
+    originLat: context?.originLat,
+    originLng: context?.originLng,
+    option,
+  });
+}
+
+export function getParkingTerminalTimeMinutes(
+  option: ParkingOption,
+  context?: ParkingDriveContext,
+): number {
+  const driveMinutes = resolveParkingDriveMinutesWithFallback(option, context);
+  const parkingBufferMinutes = option.parkingBufferMinutes ?? 0;
+  const transferToTerminalMinutes = option.transferToTerminalMinutes ?? 0;
+  const shuttleWait =
+    option.transferType === 'shuttle'
+      ? typeof option.shuttleWaitMinutes === 'number'
+        ? option.shuttleWaitMinutes
+        : 8
+      : 0;
+  const walkInside =
+    typeof option.walkingMinutes === 'number'
+      ? option.walkingMinutes
+      : option.transferType === 'airport-garage'
+        ? 5
+        : 3;
+  const bufferRisk =
+    typeof option.bufferRiskMinutes === 'number'
+      ? option.bufferRiskMinutes
+      : option.transferType === 'shuttle'
+        ? 5
+        : 0;
+
+  return (
+    driveMinutes +
+    parkingBufferMinutes +
+    shuttleWait +
+    transferToTerminalMinutes +
+    walkInside +
+    bufferRisk
+  );
+}
+
 export function estimateParkingDriveMinutesFallback(args: {
   originLat?: number | null;
   originLng?: number | null;

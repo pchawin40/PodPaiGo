@@ -83,6 +83,11 @@ import {
 } from '../../lib/parking/freshnessDisplay';
 import type { AccessStrategyOption } from '../../lib/access/types';
 import {
+  PARK_AND_RIDE_UI_COPY,
+  isOvernightAirportParkingTrip,
+  partitionParkAndRideAccessOptions,
+} from '../../lib/access/parkAndRideAccess';
+import {
   formatParkingPriceLine,
   formatPricingConfidenceLabel,
   pricingConfidenceBadgeClass,
@@ -575,6 +580,14 @@ function HiddenAccessOptionsSection({
           {option.overnightCaveat ? (
             <div className="mt-2 text-sm text-amber-900">{option.overnightCaveat}</div>
           ) : null}
+          {option.parkAndRideRules?.ruleNote ? (
+            <div className="mt-2 text-sm text-amber-900">{option.parkAndRideRules.ruleNote}</div>
+          ) : null}
+          {option.recommendedForTrip === false ? (
+            <div className="mt-2 text-sm font-medium text-amber-950">
+              {option.notRecommendedReason || PARK_AND_RIDE_UI_COPY.notRecommendedOvernight}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-col items-end gap-2">
@@ -642,49 +655,108 @@ function HiddenAccessOptionsSection({
 
 function TransitParkAndRideCards({
   options,
+  isOvernightTrip = false,
 }: {
   options: AccessStrategyOption[];
+  isOvernightTrip?: boolean;
 }) {
+  const [showNotRecommended, setShowNotRecommended] = useState(false);
+
   if (options.length === 0) return null;
 
-  return (
-    <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
-      <div>
-        <div className="text-sm font-semibold text-zinc-900">Park & ride options</div>
-        <p className="mt-1 text-xs leading-5 text-zinc-600">
-          Park & ride options combine parking at a station with transit to the airport. Verify parking rules before leaving your car.
-        </p>
-      </div>
+  const { recommended, notRecommendedForOvernight } =
+    partitionParkAndRideAccessOptions(options, isOvernightTrip);
 
-      {options.map((option) => (
-        <div
-          key={option.id}
-          className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-zinc-900">{option.displayName}</div>
+  const renderCard = (option: AccessStrategyOption, forOvernightWarning = false) => (
+    <div
+      key={option.id}
+      className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-zinc-900">{option.displayName}</div>
+          {forOvernightWarning || option.recommendedForTrip === false ? (
+            <>
+              <div className="mt-2 text-sm font-medium text-amber-950">
+                {PARK_AND_RIDE_UI_COPY.notRecommendedOvernight}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-amber-900">
+                {option.parkAndRideRules?.ruleNote || PARK_AND_RIDE_UI_COPY.unknownRulesNote}
+              </div>
+              <div className="mt-1 text-xs text-zinc-600">
+                {PARK_AND_RIDE_UI_COPY.verifyRules}
+              </div>
+            </>
+          ) : (
+            <>
               <div className="mt-1 text-sm font-medium text-zinc-800">
                 {option.pricing.displayPrimary}
               </div>
               <div className="mt-1 text-xs text-zinc-600">{option.pricing.displaySecondary}</div>
-            </div>
-            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-              {option.timing.terminalReadyMinutes} min
-            </span>
+              <div className="mt-2 text-xs text-amber-900">
+                {PARK_AND_RIDE_UI_COPY.sameDayCaveat}. {PARK_AND_RIDE_UI_COPY.verifyRules}
+              </div>
+              {option.parkAndRideRules?.ruleNote ? (
+                <div className="mt-1 text-xs text-zinc-600">{option.parkAndRideRules.ruleNote}</div>
+              ) : null}
+            </>
+          )}
+        </div>
+        <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
+          {option.timing.terminalReadyMinutes} min
+        </span>
+      </div>
+      {option.mapLink ? (
+        <a
+          href={option.mapLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800"
+        >
+          View on map →
+        </a>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
+      {recommended.length > 0 ? (
+        <>
+          <div>
+            <div className="text-sm font-semibold text-zinc-900">Park & ride options</div>
+            <p className="mt-1 text-xs leading-5 text-zinc-600">
+              {PARK_AND_RIDE_UI_COPY.sameDayCaveat}. {PARK_AND_RIDE_UI_COPY.verifyRules}
+            </p>
           </div>
-          {option.mapLink ? (
-            <a
-              href={option.mapLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800"
-            >
-              View on map →
-            </a>
+          {recommended.map((option) => renderCard(option))}
+        </>
+      ) : null}
+
+      {notRecommendedForOvernight.length > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+          <button
+            type="button"
+            onClick={() => setShowNotRecommended((open) => !open)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span className="text-sm font-semibold text-amber-950">
+              Not recommended for overnight parking ({notRecommendedForOvernight.length})
+            </span>
+            <span className="text-xs font-semibold text-amber-900">
+              {showNotRecommended ? 'Hide' : 'Show'}
+            </span>
+          </button>
+          <p className="mt-2 text-xs leading-5 text-amber-900">
+            {PARK_AND_RIDE_UI_COPY.unknownRulesNote}
+          </p>
+          {showNotRecommended ? (
+            <div className="mt-3 space-y-3">
+              {notRecommendedForOvernight.map((option) => renderCard(option, true))}
+            </div>
           ) : null}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
@@ -2757,8 +2829,32 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       ? [enriched.imageUrl]
       : enriched.images ?? base.images;
 
+    const driveContext = {
+      originToParkingMinutes:
+        merged.originToParkingMinutes ?? base.originToParkingMinutes,
+      routeToParkingMinutes:
+        merged.routeToParkingMinutes ?? base.routeToParkingMinutes,
+      driveMinutes: merged.driveMinutes ?? base.driveMinutes,
+      duration: merged.duration ?? base.duration,
+    };
+
+    const recomputedDrive =
+      !driveContext.originToParkingMinutes &&
+      typeof enriched.lat === 'number' &&
+      typeof enriched.lng === 'number' &&
+      typeof base.originToParkingMinutes === 'number'
+        ? base.originToParkingMinutes
+        : undefined;
+
     return {
       ...merged,
+      ...driveContext,
+      originToParkingMinutes:
+        driveContext.originToParkingMinutes ?? recomputedDrive,
+      routeToParkingMinutes:
+        driveContext.routeToParkingMinutes ?? recomputedDrive,
+      lat: enriched.lat ?? merged.lat ?? base.lat,
+      lng: enriched.lng ?? merged.lng ?? base.lng,
       imageUrl: imageUrl || undefined,
       images: images?.length ? images : undefined,
     };
@@ -5421,6 +5517,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
               footerContent={
                 <TransitParkAndRideCards
+                  isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
                   options={
                     recommendation.accessStrategies?.options?.filter(
                       (option) =>

@@ -39,13 +39,19 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
-import { resolveParkingDriveMinutes } from './routeMinutes';
+import { resolveParkingDriveMinutesWithFallback, type ParkingDriveContext } from './routeMinutes';
 
-function getParkingDriveMinutes(option: ParkingOption): number {
-  return resolveParkingDriveMinutes(option);
+function getParkingDriveMinutes(
+  option: ParkingOption,
+  context?: ParkingDriveContext,
+): number {
+  return resolveParkingDriveMinutesWithFallback(option, context);
 }
 
-export function parkingTimeBreakdown(option: ParkingOption): {
+export function parkingTimeBreakdown(
+  option: ParkingOption,
+  context?: ParkingDriveContext,
+): {
   label: string;
   totalMinutes: number;
   parts: Array<{ label: string; minutes: number }>;
@@ -58,7 +64,7 @@ export function parkingTimeBreakdown(option: ParkingOption): {
     };
   }
 
-  const drive = getParkingDriveMinutes(option);
+  const drive = getParkingDriveMinutes(option, context);
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
   const shuttleWait =
     option.transferType === 'shuttle'
@@ -84,7 +90,7 @@ export function parkingTimeBreakdown(option: ParkingOption): {
         : 0;
 
   const parts = [
-    ...(drive > 0 ? [{ label: 'Drive', minutes: drive }] : []),
+    ...(drive > 0 ? [{ label: 'Drive to parking', minutes: drive }] : []),
     ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
     ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
     ...(transfer > 0
@@ -492,7 +498,7 @@ export function formatMinutes(min: number): string {
 export function parkingRouteBreakdown(option: ParkingOption): string {
   const breakdown = parkingTimeBreakdown(option);
 
-  const drive = breakdown.parts.find((p) => p.label === 'Drive');
+  const drive = breakdown.parts.find((p) => p.label === 'Drive to parking');
   const wait = breakdown.parts.find((p) => p.label === 'Shuttle wait');
   const transfer = breakdown.parts.find((p) =>
     ['Shuttle', 'Garage to terminal', 'Walk to terminal'].includes(p.label)

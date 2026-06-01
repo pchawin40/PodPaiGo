@@ -404,7 +404,7 @@ function logRoutesApiCache(
 export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = getGoogleMapsServerApiKey();
 
-  private async geocodeLatLng(address: string): Promise<{ lat: number, lng: number } | null> {
+  async geocodeAddress(address: string): Promise<{ lat: number, lng: number } | null> {
     try {
       if (!this.serverKey) return null;
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.serverKey}`;
@@ -460,8 +460,8 @@ export class LiveTrafficProvider implements TrafficProvider {
       const inflightPromise = (async () => {
         // Geocode origin and destination where possible
         const [originLatLng, destLatLng] = await Promise.all([
-          this.geocodeLatLng(origin),
-          this.geocodeLatLng(destination),
+          this.geocodeAddress(origin),
+          this.geocodeAddress(destination),
         ]);
 
         // Prepare computeRouteMatrix request body
@@ -789,7 +789,11 @@ export class MockProvider implements DataProvider {
     return hub.driveTimeFactor + 5;
   }
 
-  private async geocodeLatLng(_address: string): Promise<{ lat: number; lng: number } | null> {
+  private async geocodeLatLng(address: string): Promise<{ lat: number; lng: number } | null> {
+    if (this.trafficProvider instanceof LiveTrafficProvider) {
+      return this.trafficProvider.geocodeAddress(address);
+    }
+
     return null;
   }
 
@@ -1035,15 +1039,40 @@ export class MockProvider implements DataProvider {
           lastUpdated: new Date().toISOString(),
         };
 
-        const resolveFallbackDriveMinutes = () =>
-          estimateParkingDriveMinutesFallback({
+        const resolveFallbackDriveMinutes = async (): Promise<number> => {
+          let minutes = estimateParkingDriveMinutesFallback({
             originLat: originCoords?.lat,
             originLng: originCoords?.lng,
             option,
           });
 
+          if (minutes > 0 || !originCoords) {
+            return minutes;
+          }
+
+          const lotCoords =
+            typeof option.lat === 'number' &&
+            Number.isFinite(option.lat) &&
+            typeof option.lng === 'number' &&
+            Number.isFinite(option.lng)
+              ? { lat: option.lat, lng: option.lng }
+              : await this.geocodeLatLng(routeDestination);
+
+          if (!lotCoords) {
+            return 0;
+          }
+
+          minutes = estimateParkingDriveMinutesFallback({
+            originLat: originCoords.lat,
+            originLng: originCoords.lng,
+            option: { ...option, lat: lotCoords.lat, lng: lotCoords.lng },
+          });
+
+          return minutes;
+        };
+
         if (!routeEstimate) {
-          const fallbackDriveMinutes = resolveFallbackDriveMinutes();
+          const fallbackDriveMinutes = await resolveFallbackDriveMinutes();
 
           const deferredOption = applyParkingOriginDriveMinutes(
             {
@@ -1071,7 +1100,7 @@ export class MockProvider implements DataProvider {
             : null;
 
         const routeFailed = routeEstimate.routeUnavailable === true || liveDriveMinutes == null;
-        const fallbackDriveMinutes = routeFailed ? resolveFallbackDriveMinutes() : 0;
+        const fallbackDriveMinutes = routeFailed ? await resolveFallbackDriveMinutes() : 0;
         const driveMinutes = routeFailed
           ? fallbackDriveMinutes
           : liveDriveMinutes!;
@@ -1111,7 +1140,12 @@ export class MockProvider implements DataProvider {
     return enriched;
   }
 
-  async getRideshareOptions(origin: string, destination: string, dateTime: string): Promise<RideshareOption[]> {
+  async getRideshareOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    tripData?: TripData,
+  ): Promise<RideshareOption[]> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
     const routeEstimate = await this.getRouteEstimate(origin, routeDestination, dateTime, true);
     const airport = resolveAirportFromDestination(destination);

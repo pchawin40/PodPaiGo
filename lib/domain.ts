@@ -101,32 +101,10 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
   return parking.type === 'off-airport' ? 12 : 4;
 }
 
-import { resolveParkingDriveMinutes } from './parking/routeMinutes';
+import { getParkingTerminalTimeMinutes } from './parking/routeMinutes';
 
 function getParkingTotalMinutes(parking: ParkingOption): number {
-  const driveMinutes = resolveParkingDriveMinutes(parking);
-  const parkingBufferMinutes = parking.parkingBufferMinutes ?? 0;
-  const transferToTerminalMinutes = parking.transferToTerminalMinutes ?? 0;
-  const shuttleWait =
-    parking.transferType === 'shuttle'
-      ? typeof parking.shuttleWaitMinutes === 'number'
-        ? parking.shuttleWaitMinutes
-        : 8
-      : 0;
-  const walkInside =
-    typeof parking.walkingMinutes === 'number'
-      ? parking.walkingMinutes
-      : parking.transferType === 'airport-garage'
-        ? 5
-        : 3;
-
-  return (
-    driveMinutes +
-    parkingBufferMinutes +
-    shuttleWait +
-    transferToTerminalMinutes +
-    walkInside
-  );
+  return getParkingTerminalTimeMinutes(parking);
 }
 
 function getStressScore(
@@ -187,6 +165,15 @@ export function calculateTripDuration(tripData: TripData): number {
 }
 
 export function calculateParkingDuration(tripData: TripData): number {
+  const fromCheckInOut = (() => {
+    if (!tripData.parkingCheckInDate || !tripData.parkingCheckOutDate) return null;
+    const checkIn = new Date(`${tripData.parkingCheckInDate}T00:00:00`);
+    const checkOut = new Date(`${tripData.parkingCheckOutDate}T00:00:00`);
+    if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) return null;
+    const diffMinutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
+    return diffMinutes > 0 ? Math.max(24 * 60, diffMinutes) : null;
+  })();
+
   // General point A → B trips should be hourly by default.
   // Example: office, downtown, stadium, restaurant, hospital.
   if (tripData.type === 'general-trip') {

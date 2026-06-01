@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../../../types';
+import { DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES } from '../../../../access/parkAndRideAccess';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
@@ -204,6 +205,7 @@ export async function getDestinationParkingOptions(args: {
         providerSource: 'google',
         fetchedAt: new Date().toISOString(),
         priceFreshness: 'estimated',
+        parkAndRideRules: isParkAndRide ? DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES : undefined,
       };
 
       return withAvailabilityScore(option);

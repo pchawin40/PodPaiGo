@@ -1,5 +1,6 @@
 import type {
   ParkingOption,
+  ParkAndRideParkingRules,
   RideshareOption,
   TransitOption,
   PriceDisplay,
@@ -70,6 +71,10 @@ export type AccessStrategyOption = {
   stressScore: number;
   confidenceScore: number;
   overnightCaveat?: string;
+  parkAndRideRules?: ParkAndRideParkingRules;
+  /** False when overnight/multi-day rules are unknown or disallow leaving a car. */
+  recommendedForTrip?: boolean;
+  notRecommendedReason?: string;
   explanation: string;
   bestFor?: string[];
   isHiddenGem?: boolean;

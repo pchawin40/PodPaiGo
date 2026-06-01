@@ -1,5 +1,10 @@
 import { calculateParkingDuration } from '../domain';
-import type { TrafficEstimate, TripData } from '../types';
+import type { TrafficEstimate, TripData, ParkAndRideParkingRules } from '../types';
+import {
+  canConfirmOvernightParkAndRide,
+  isOvernightAirportParkingTrip,
+  PARK_AND_RIDE_UI_COPY,
+} from './parkAndRideAccess';
 import type { AccessStrategyOption } from './types';
 import { SEA_CURATED_HUBS } from './seaCuratedOptions';
 
@@ -28,14 +33,6 @@ export function logSeaCuratedAccessDisabledDiagnostic(): void {
   );
 }
 
-function isOvernightTrip(tripData: TripData): boolean {
-  const parkingDurationMinutes = calculateParkingDuration(tripData);
-  return (
-    (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
-    parkingDurationMinutes >= 18 * 60
-  );
-}
-
 function estimateDriveMinutes(
   tripData: TripData,
   trafficEstimate: TrafficEstimate | undefined,
@@ -47,12 +44,17 @@ function estimateDriveMinutes(
   return fallbackMinutes;
 }
 
-function scaleParkingRange(
+function scaleParkingRangeForConfirmedOvernight(
   min: number,
   max: number,
   tripData: TripData,
+  rules: ParkAndRideParkingRules,
 ): { min: number; max: number } {
-  if (!isOvernightTrip(tripData)) {
+  if (!isOvernightAirportParkingTrip(tripData)) {
+    return { min, max };
+  }
+
+  if (!canConfirmOvernightParkAndRide(rules)) {
     return { min, max };
   }
 
@@ -84,6 +86,16 @@ function formatMoneyRange(min: number, max: number): string {
   return `$${Math.round(min)}–$${Math.round(max)}`;
 }
 
+function buildCuratedParkAndRideRules(
+  overnightRules: string,
+): ParkAndRideParkingRules {
+  return {
+    overnightAllowed: false,
+    ruleConfidence: 'estimated',
+    ruleNote: overnightRules,
+  };
+}
+
 export function buildSeaCuratedAccessOptions(
   tripData: TripData,
   airportCode: string,
@@ -95,7 +107,7 @@ export function buildSeaCuratedAccessOptions(
     return [];
   }
 
-  const overnight = isOvernightTrip(tripData);
+  const overnight = isOvernightAirportParkingTrip(tripData);
 
   return SEA_CURATED_HUBS.filter((hub) => hub.enabled).map((hub) => {
     const driveMinutes = estimateDriveMinutes(
@@ -108,10 +120,16 @@ export function buildSeaCuratedAccessOptions(
       hub.timing.walkToPlatformMinutes +
       hub.timing.linkRideMinutes;
 
-    const parkingRange = scaleParkingRange(
+    const parkAndRideRules = buildCuratedParkAndRideRules(
+      hub.parking.overnightRules,
+    );
+    const canEstimateOvernightParking = canConfirmOvernightParkAndRide(parkAndRideRules);
+
+    const parkingRange = scaleParkingRangeForConfirmedOvernight(
       hub.parking.min,
       hub.parking.max,
       tripData,
+      parkAndRideRules,
     );
     const transitRange = applyTransitFare(hub.transit.min, hub.transit.max, tripData);
     const totalMin = parkingRange.min + transitRange.min;
@@ -120,32 +138,57 @@ export function buildSeaCuratedAccessOptions(
     const confidenceScore = hub.confidence === 'high' ? 70 : hub.confidence === 'medium' ? 55 : 40;
     const stressScore = overnight ? 62 : 48;
 
+    const pricing = canEstimateOvernightParking || !overnight
+      ? {
+          total: { min: totalMin, max: totalMax, currency: 'USD' as const },
+          unit: 'trip_total' as const,
+          confidence: 'estimated' as const,
+          breakdown: {
+            parking: {
+              min: parkingRange.min,
+              max: parkingRange.max,
+              currency: 'USD' as const,
+            },
+            transit: {
+              min: transitRange.min,
+              max: transitRange.max,
+              currency: 'USD' as const,
+            },
+          },
+          displayPrimary: `Estimated ${formatMoneyRange(totalMin, totalMax)} total`,
+          displaySecondary: `Parking ${formatMoneyRange(parkingRange.min, parkingRange.max)} + Link ${formatMoneyRange(transitRange.min, transitRange.max)}`,
+          sourceNotes: `${hub.parking.sourceNotes} | ${hub.transit.sourceNotes}`,
+        }
+      : {
+          total: { min: transitRange.min, max: transitRange.max, currency: 'USD' as const },
+          unit: 'trip_total' as const,
+          confidence: 'estimated' as const,
+          breakdown: {
+            transit: {
+              min: transitRange.min,
+              max: transitRange.max,
+              currency: 'USD' as const,
+            },
+          },
+          displayPrimary: PARK_AND_RIDE_UI_COPY.notRecommendedOvernight,
+          displaySecondary: `${hub.parking.overnightRules} Transit ${formatMoneyRange(transitRange.min, transitRange.max)} only — parking cost not estimated for multi-day trips.`,
+          sourceNotes: `${hub.parking.sourceNotes} | ${hub.transit.sourceNotes}`,
+        };
+
+    const recommendedForTrip = !overnight || canEstimateOvernightParking;
+
     return {
       id: hub.id,
       airportCode: 'SEA',
       displayName: hub.displayName,
       strategyType: hub.strategyType,
       sourceKind: 'curated',
-      pricing: {
-        total: { min: totalMin, max: totalMax, currency: 'USD' },
-        unit: 'trip_total',
-        confidence: 'estimated',
-        breakdown: {
-          parking: {
-            min: parkingRange.min,
-            max: parkingRange.max,
-            currency: 'USD',
-          },
-          transit: {
-            min: transitRange.min,
-            max: transitRange.max,
-            currency: 'USD',
-          },
-        },
-        displayPrimary: `Estimated ${formatMoneyRange(totalMin, totalMax)} total`,
-        displaySecondary: `Parking ${formatMoneyRange(parkingRange.min, parkingRange.max)} + Link ${formatMoneyRange(transitRange.min, transitRange.max)}`,
-        sourceNotes: `${hub.parking.sourceNotes} | ${hub.transit.sourceNotes}`,
-      },
+      parkAndRideRules,
+      recommendedForTrip,
+      notRecommendedReason: recommendedForTrip
+        ? undefined
+        : PARK_AND_RIDE_UI_COPY.notRecommendedOvernight,
+      pricing,
       timing: {
         terminalReadyMinutes,
         driveMinutes,
@@ -155,6 +198,9 @@ export function buildSeaCuratedAccessOptions(
           `Drive to ${hub.hubPlaceName}`,
           'Walk to Link platform',
           'Link light rail to SEA',
+          overnight && !canEstimateOvernightParking
+            ? PARK_AND_RIDE_UI_COPY.overnightCostUnavailable
+            : 'Curated hub estimate; verify Sound Transit rules before leaving your car.',
           trafficEstimate?.trustStatus === 'live'
             ? 'Drive time partially informed by live traffic'
             : 'Drive time uses typical hub estimate',
@@ -163,7 +209,9 @@ export function buildSeaCuratedAccessOptions(
       easeScore: 100 - stressScore,
       stressScore,
       confidenceScore,
-      overnightCaveat: overnight ? hub.parking.overnightRules : undefined,
+      overnightCaveat: overnight
+        ? `${hub.parking.overnightRules} ${PARK_AND_RIDE_UI_COPY.verifyRules}`
+        : `${PARK_AND_RIDE_UI_COPY.sameDayCaveat}. ${PARK_AND_RIDE_UI_COPY.verifyRules}`,
       explanation: hub.explanation,
       bestFor: hub.bestFor,
       isHiddenGem: true,

@@ -1,15 +1,7 @@
-import { calculateParkingDuration } from '../domain';
 import type { TripData } from '../types';
 import { confidenceToScore } from './pricingLadder';
 import type { AccessRankingResult, AccessStrategyOption } from './types';
-
-function isOvernightTrip(tripData: TripData): boolean {
-  const parkingDurationMinutes = calculateParkingDuration(tripData);
-  return (
-    (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
-    parkingDurationMinutes >= 18 * 60
-  );
-}
+import { isOvernightAirportParkingTrip } from './parkAndRideAccess';
 
 function normalizeInverse(value: number, cap: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -20,7 +12,7 @@ export function rankAccessOptions(
   options: AccessStrategyOption[],
   tripData: TripData,
 ): AccessRankingResult {
-  const overnight = isOvernightTrip(tripData);
+  const overnight = isOvernightAirportParkingTrip(tripData);
 
   const scored = options.map((option) => {
     const costMidpoint = (option.pricing.total.min + option.pricing.total.max) / 2;
@@ -30,6 +22,7 @@ export function rankAccessOptions(
     const confScore = confidenceToScore(option.pricing.confidence);
 
     let penalty = 0;
+    if (option.recommendedForTrip === false) penalty += 100;
     if (overnight && option.overnightCaveat) penalty += 25;
     if (option.pricing.confidence === 'estimated') penalty += 5;
     if (option.pricing.confidence === 'final_on_provider') penalty += 8;
@@ -51,9 +44,13 @@ export function rankAccessOptions(
     (a, b) => (b.rankScore ?? 0) - (a.rankScore ?? 0),
   );
 
+  const recommended = sorted.filter((option) => option.recommendedForTrip !== false);
+  const notRecommended = sorted.filter((option) => option.recommendedForTrip === false);
+  const ordered = [...recommended, ...notRecommended];
+
   return {
-    options: sorted,
-    topPickId: sorted[0]?.id,
+    options: ordered,
+    topPickId: recommended[0]?.id,
     rankedBy: ['cost', 'time', 'ease', 'confidence'],
   };
 }

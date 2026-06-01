@@ -156,6 +156,16 @@ export type TransferLeg = {
   note?: string;
 };
 
+export type ParkAndRideRuleConfidence = 'confirmed' | 'unknown' | 'estimated';
+
+export type ParkAndRideParkingRules = {
+  overnightAllowed?: boolean;
+  maxParkingHours?: number;
+  permitRequired?: boolean;
+  ruleConfidence: ParkAndRideRuleConfidence;
+  ruleNote?: string;
+};
+
 export type ParkingOption = {
   id: string;
   name: string;
