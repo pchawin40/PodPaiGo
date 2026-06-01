@@ -99,6 +99,8 @@ import {
   parseTripDataFromSearchParams,
   tripDataToSearchParams,
 } from '../../lib/trip/searchParams';
+import { intentFromSearchParams } from '../../lib/trip/favoriteTrips';
+import SaveFavoriteTripButton from '../components/SaveFavoriteTripButton';
 
 type PriceableOption = {
   id?: string;
@@ -3221,6 +3223,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const [sort, setSort] = useState<SortTab>(initialSort);
 
+  const favoriteTripInput = useMemo(() => {
+    if (!tripData) return null;
+
+    const extras = tripData as TripData & {
+      checkingBags?: boolean;
+      cabin?: CabinClass;
+    };
+
+    return {
+      origin: tripData.origin,
+      airportCode: getTripAirportCode(tripData),
+      intent: intentFromSearchParams(intent),
+      checkingBags: extras.checkingBags === true,
+      cabin: extras.cabin || 'economy',
+      transportAvailability: tripData.transportAvailability || 'all',
+      preferredSort: sort,
+      destination: tripData.type === 'general-trip' ? tripData.destination : undefined,
+      destinationKind: tripData.destinationKind,
+    };
+  }, [tripData, intent, sort]);
+
   useEffect(() => {
     // Sync URL param with current sort state
     if (typeof window === 'undefined') return;
@@ -4597,6 +4620,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
+                {favoriteTripInput ? (
+                  <SaveFavoriteTripButton
+                    trip={favoriteTripInput}
+                    label="Save trip"
+                    savedLabel="Saved"
+                  />
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {

@@ -22,6 +22,10 @@ import { formatMoney } from '../utils/formatter';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
+import SavedTripsPanel from '../components/SavedTripsPanel';
+import SaveFavoriteTripButton from '../components/SaveFavoriteTripButton';
+import type { RecommendationSortMode } from '../../lib/domain';
+import type { FavoriteTripIntent } from '../../lib/trip/favoriteTrips';
 
 type Intent =
   | 'general-trip'
@@ -323,6 +327,7 @@ function Card({
     </button>
   );
 }
+
 
 export default function TripFlow() {
   const router = useRouter();
@@ -798,6 +803,30 @@ export default function TripFlow() {
     };
   }, [state.airportCode]);
 
+  const favoriteTripInput = useMemo(
+    () => ({
+      origin: state.origin,
+      airportCode: state.airportCode,
+      intent: (state.intent || 'flying-out') as FavoriteTripIntent,
+      checkingBags: state.checkingBags,
+      cabin: state.cabin,
+      transportAvailability: state.transportAvailability,
+      preferredSort: 'easiest' as RecommendationSortMode,
+      destination: state.destination || undefined,
+      destinationKind: state.destinationKind,
+    }),
+    [
+      state.origin,
+      state.airportCode,
+      state.intent,
+      state.checkingBags,
+      state.cabin,
+      state.transportAvailability,
+      state.destination,
+      state.destinationKind,
+    ],
+  );
+
   return (
     <div className="airport-page-bg flex flex-1 flex-col font-sans">
       <main className="mx-auto w-full max-w-3xl flex-1 px-3 py-8 sm:px-4 sm:py-10">
@@ -812,6 +841,11 @@ export default function TripFlow() {
             Enter where you’re starting and where you’re going. PodPaiGo compares driving, parking, rideshare, transit, and park & ride when available.
           </p>
         </div>
+
+        <SavedTripsPanel
+          className="mb-6"
+          description="Tap a saved route to compare options with today’s dates."
+        />
 
         {errors.length > 0 && (
           <div
@@ -1468,7 +1502,14 @@ export default function TripFlow() {
                 return null;
               })()}
 
-              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <SaveFavoriteTripButton
+                  trip={favoriteTripInput}
+                  label="Save as favorite"
+                  savedLabel="Saved to this device"
+                />
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center">
                 <button
                   type="button"
                   onClick={onBack}
@@ -1483,6 +1524,7 @@ export default function TripFlow() {
                 >
                   See options
                 </button>
+                </div>
               </div>
             </div>
           </form>

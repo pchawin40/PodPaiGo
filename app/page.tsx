@@ -1,6 +1,7 @@
 import Link from "next/link";
 import HeroBadge from "./components/HeroBadge";
 import SiteHeader from "./components/SiteHeader";
+import SavedTripsHomeSection from "./components/SavedTripsHomeSection";
 
 const features = [
   {
@@ -106,6 +107,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <SavedTripsHomeSection />
 
       <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
         <div className="grid gap-4 md:grid-cols-4">
