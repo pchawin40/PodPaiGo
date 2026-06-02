@@ -8,6 +8,8 @@ import {
   sortRankedRecommendations,
   RecommendationSortMode,
   calculateParkingDuration,
+  formatTransitCostDisplay,
+  getTransitTripTotalCost,
 } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
@@ -853,10 +855,12 @@ function PricingLinksSection({
   title,
   items,
   transitPayment,
+  tripData,
 }: {
   title: string;
   items: ProviderLinkItem[];
   transitPayment?: TransitPaymentOption;
+  tripData?: TripData | null;
 }) {
   if (!items || items.length === 0) return null;
 
@@ -879,6 +883,11 @@ function PricingLinksSection({
           isTransitSection &&
           (it.id === 'soundtransit-planner' || it.id === 'google-maps-transit');
 
+        const transitPriceDisplay =
+          isTransitSection && tripData && typeof it.price === 'number' && !isTransitUtility
+            ? formatTransitCostDisplay(it as TransitOption, tripData)
+            : null;
+
         const shouldShowPrice = !isTransitUtility;
 
         const shouldShowPriceKindBadge =
@@ -887,16 +896,20 @@ function PricingLinksSection({
         const primaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
             ? '$0'
-            : isRideSection
-              ? ridesharePricing?.primary || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
-              : price.primary;
+            : transitPriceDisplay
+              ? transitPriceDisplay.primary
+              : isRideSection
+                ? ridesharePricing?.primary || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
+                : price.primary;
 
         const secondaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
             ? 'Covered by ORCA pass'
-            : isRideSection
-              ? ridesharePricing?.secondary || RIDESHARE_ESTIMATE_DISCLAIMER
-              : it.priceNote || price.secondary;
+            : transitPriceDisplay?.secondary
+              ? transitPriceDisplay.secondary
+              : isRideSection
+                ? ridesharePricing?.secondary || RIDESHARE_ESTIMATE_DISCLAIMER
+                : it.priceNote || price.secondary;
 
         const primaryCta =
           it.id === 'soundtransit-planner'
@@ -1022,11 +1035,21 @@ function PricingLinksSection({
                           {primaryPrice}
                         </div>
 
-                        {isTransitSection && typeof it.price === 'number' && (
+                        {isTransitSection && transitPriceDisplay ? (
+                          <div className="text-xs font-medium text-zinc-500">
+                            {transitPayment === 'orca-pass'
+                              ? 'pass applied'
+                              : transitPriceDisplay.includesReturnLeg
+                                ? 'round-trip fare estimate'
+                                : 'one-way fare estimate'}
+                          </div>
+                        ) : null}
+
+                        {isTransitSection && !transitPriceDisplay && typeof it.price === 'number' ? (
                           <div className="text-xs font-medium text-zinc-500">
                             {transitPayment === 'orca-pass' ? 'pass applied' : 'fare estimate'}
                           </div>
-                        )}
+                        ) : null}
 
                         {isRideSection && typeof it.price === 'number' && (
                           <div className="text-xs font-medium text-zinc-500">
@@ -2628,6 +2651,7 @@ function ProviderDropdownSection({
   items,
   defaultOpen = false,
   transitPayment,
+  tripData,
   footerContent,
 }: {
   title: string;
@@ -2635,6 +2659,7 @@ function ProviderDropdownSection({
   items: ProviderLinkItem[];
   defaultOpen?: boolean;
   transitPayment?: TransitPaymentOption;
+  tripData?: TripData | null;
   footerContent?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -2681,6 +2706,7 @@ function ProviderDropdownSection({
         title={title}
         items={items}
         transitPayment={transitPayment}
+        tripData={tripData}
       />
       {footerContent}
     </details>
@@ -4889,11 +4915,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             const bestTransit = sortedOptions.find((o) => o.type === 'transit') || null;
             const bestTransitOption = bestTransit?.option as TransitOption | undefined;
 
-            const transitCost =
-              typeof bestTransit?.cost === 'number' && bestTransit.cost < 999999
-                ? bestTransit.cost
-                : bestTransitOption?.price ?? null;
-
             const transitDuration =
               typeof bestTransit?.duration === 'number' && bestTransit.duration < 999999
                 ? bestTransit.duration
@@ -4903,6 +4924,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               Boolean(bestTransit) &&
               bestTransitOption?.trustStatus !== 'fallback' &&
               transitDuration !== null;
+
+            const transitCost =
+              bestTransitOption && tripData && hasReliableTransit
+                ? getTransitTripTotalCost(bestTransitOption, tripData)
+                : typeof bestTransit?.cost === 'number' && bestTransit.cost < 999999
+                  ? bestTransit.cost
+                  : null;
+
+            const transitCostDisplay =
+              bestTransitOption && tripData
+                ? formatTransitCostDisplay(bestTransitOption, tripData)
+                : null;
 
             const cheapestMode = (() => {
               const candidates = [
@@ -5073,7 +5106,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 icon: '🚆',
                 label: 'Transit',
                 name: bestTransitOption?.name || 'Google Maps / Sound Transit',
-                cost: transitCost !== null && hasReliableTransit ? `$${Math.round(transitCost)}` : 'Check route',
+                cost: transitCostDisplay && hasReliableTransit
+                  ? transitCostDisplay.primary
+                  : 'Check route',
                 time: transitDuration !== null && hasReliableTransit ? formatMinutes(transitDuration) : 'Not ready',
                 verdict: hasReliableTransit
                   ? recommendationMode === 'transit'
@@ -5290,7 +5325,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ) : cheapestMode && fastestMode ? (
                     <>
                       <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
-                      Cheapest is {cheapestMode.label} around ${Math.round(cheapestMode.cost)}.
+                      Cheapest is {cheapestMode.label}{' '}
+                      {cheapestMode.key === 'transit' && transitCostDisplay
+                        ? `at ${transitCostDisplay.primary}`
+                        : `around $${Math.round(cheapestMode.cost)}`}
+                      {cheapestMode.key === 'transit' && transitCostDisplay?.secondary
+                        ? ` (${transitCostDisplay.secondary})`
+                        : ''}
+                      .
                       Fastest is {fastestMode.label} around {formatMinutes(fastestMode.minutes)}.
                     </>
                   ) : (
@@ -5835,6 +5877,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               items={[...(transitOptions), ...extraTransitProviders]}
               defaultOpen={openProviderSection === 'transit'}
               transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
+              tripData={tripData}
               footerContent={
                 <TransitParkAndRideCards
                   isOvernightTrip={isOvernightAirportParkingTrip(tripData)}

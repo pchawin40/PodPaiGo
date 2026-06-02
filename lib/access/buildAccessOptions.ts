@@ -1,4 +1,5 @@
 import { calculateParkingDuration } from '../domain';
+import { shouldIncludeReturnTransitLeg } from '../transit/transitPricing';
 import type { TrafficEstimate, TripData, ParkAndRideParkingRules } from '../types';
 import {
   canConfirmOvernightParkAndRide,
@@ -74,7 +75,7 @@ function applyTransitFare(
     return { min: 0, max: 0 };
   }
 
-  const multiplier = tripData.type === 'round-trip' ? 2 : 1;
+  const multiplier = shouldIncludeReturnTransitLeg(tripData) ? 2 : 1;
   return {
     min: min * multiplier,
     max: max * multiplier,

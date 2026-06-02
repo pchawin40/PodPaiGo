@@ -219,6 +219,7 @@ describe('Transit Cost Calculations', () => {
     };
     const result = calculateTransitCost(transit, tripData);
     expect(result).toBe(6);
+    expect(transit.price).toBe(3);
   });
 });
 

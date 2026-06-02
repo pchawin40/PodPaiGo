@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { getOAuthProviderConfig, type SupportedOAuthProviderId } from '../../lib/auth/oauthProviders';
+import { signInWithOAuthProvider } from '../../lib/auth/oauthSignIn';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase/client';
 
 type AuthContextValue = {
@@ -19,6 +21,10 @@ type AuthContextValue = {
   configured: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
+  signInWithOAuth: (
+    providerId: SupportedOAuthProviderId,
+    redirectPath: string,
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -86,6 +92,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null };
   }, []);
 
+  const signInWithOAuth = useCallback(
+    async (providerId: SupportedOAuthProviderId, redirectPath: string) => {
+      const provider = getOAuthProviderConfig(providerId);
+      if (!provider?.enabled) {
+        return { error: 'This sign-in provider is not available yet.' };
+      }
+
+      return signInWithOAuthProvider(provider.supabaseProvider, redirectPath);
+    },
+    [],
+  );
+
   const signOut = useCallback(async () => {
     const client = getSupabaseClient();
     if (!client) return;
@@ -100,9 +118,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured,
       signIn,
       signUp,
+      signInWithOAuth,
       signOut,
     }),
-    [user, session, loading, configured, signIn, signUp, signOut],
+    [user, session, loading, configured, signIn, signUp, signInWithOAuth, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

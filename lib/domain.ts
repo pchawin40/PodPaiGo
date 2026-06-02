@@ -3,6 +3,7 @@ import {
   isParkingRouteUnavailable,
   parkingRouteUnavailableReason,
 } from './parking/routeStatus';
+import { calculateTransitCost } from './transit/transitPricing';
 
 
 /**
@@ -253,23 +254,14 @@ export function calculateRideshareCost(rideshare: RideshareOption, tripData: Tri
   return rideshare.price;
 }
 
-export function calculateTransitCost(
-  transit: TransitOption | TransitJourney,
-  tripData: TripData
-): number {
-  if (tripData.transitPayment === 'orca-pass') {
-    return 0;
-  }
-
-  const oneWayCost =
-    'totalCost' in transit
-      ? transit.totalCost
-      : transit.price;
-
-  return tripData.type === 'round-trip'
-    ? oneWayCost * 2
-    : oneWayCost;
-}
+export {
+  calculateTransitCost,
+  formatTransitCostDisplay,
+  getTransitOneWayCost,
+  getTransitTripTotalCost,
+  shouldIncludeReturnTransitLeg,
+} from './transit/transitPricing';
+export type { TransitCostDisplay } from './transit/transitPricing';
 
 export function calculateLeaveByTime(
   tripData: TripData,

@@ -5,20 +5,34 @@ import SiteHeader from "../components/SiteHeader";
 export const metadata: Metadata = {
   title: "Current Features and Roadmap",
   description:
-    "What PodPaiGo currently supports and the planned roadmap for Washington airports, national airport coverage, point-to-point planning, and saved preferences.",
+    "What PodPaiGo currently supports and the planned roadmap for airport planning, accounts, AI assistance, and broader travel coverage.",
 };
 
 const currentFeatures = [
-  "National U.S. airport search in new trip and edit-trip forms",
+  "National U.S. airport search in trip and edit-trip forms",
   "Airport trip planning with parking, rideshare, taxi, and transit comparison",
   "Leave-by timing using traffic, airport buffer, and trip details",
+  "Trip-level transit pricing when a return leg is implied",
   "Parking duration with total and per-day price display",
-  "Airport maps and airport-specific guidance",
+  "Safe-mode Google API quota protection for local development",
+  "Google Places and live parking discovery disabled by default in local dev",
+  "Supabase account foundation with email/password and Google sign-in",
+  "Saved trips on your account page",
+  "AI trip assistant in mock mode (confirm before running recommendations)",
+  "Airport trip card with airline lookup and airport guidance",
   "Weather-aware scoring for parking comfort and walking exposure",
   "Confidence labels for live, verified, estimated, and fallback data",
 ];
 
 const futurePlans = [
+  {
+    title: "Live AI trip assistant providers",
+    body: "Move beyond mock parsing to optional live LLM providers with the same confirm-before-search safety flow.",
+  },
+  {
+    title: "More OAuth providers",
+    body: "Add Apple and Microsoft sign-in through Supabase Auth once provider setup is complete.",
+  },
   {
     title: "National airport coverage",
     body: "Move from Washington airports to major U.S. airports, then broaden coverage as the data model and provider links become more reliable.",
@@ -33,31 +47,15 @@ const futurePlans = [
   },
   {
     title: "Favorite trips and saved routes",
-    body: "Save recurring airport trips and preferred routes so frequent travelers can reopen a plan without re-entering the same details.",
+    body: "Expand saved-trip workflows with tags, recurring airport routes, and faster reopen flows.",
   },
   {
     title: "Favorite parking lots",
     body: "Bookmark trusted lots and reopen them quickly on future trips to the same airport.",
   },
   {
-    title: "Saved home, work, and airport locations",
-    body: "Store frequent origins and destination airports so repeat planning starts with one tap.",
-  },
-  {
     title: "Business traveler mode",
     body: "A profile tuned for expensed work travel with faster defaults, clearer receipts-oriented summaries, and fewer leisure-oriented distractions.",
-  },
-  {
-    title: "Covered parking filter",
-    body: "Filter parking results to garages and covered options when weather protection matters.",
-  },
-  {
-    title: "Security and well-lit filter",
-    body: "Help travelers prioritize safer-feeling parking and access options with better lighting and lower walking exposure.",
-  },
-  {
-    title: "Rideshare-first mode",
-    body: "Surface Uber and rideshare options first for expensed work travel when driving and parking are not the priority.",
   },
   {
     title: "Hotel and flight integrations (future expansion)",
@@ -83,10 +81,10 @@ export default function RoadmapPage() {
             What PodPaiGo has now and what comes next
           </h1>
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-600">
-            PodPaiGo is currently focused on airport transportation planning:
-            comparing parking, rideshare, transit, timing, cost, weather, and
-            trip effort. The roadmap expands from Washington airports to broader
-            U.S. airport coverage, then to general point-to-point planning.
+            PodPaiGo helps travelers compare airport parking, rideshare, transit,
+            timing, cost, weather, and trip effort. Recent work added account
+            sign-in, saved trips, safe-mode API protection, and an AI trip assistant
+            foundation while keeping Google Places disabled by default in local dev.
           </p>
         </section>
 

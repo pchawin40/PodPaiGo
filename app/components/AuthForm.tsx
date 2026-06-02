@@ -1,9 +1,11 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { getFriendlyOAuthErrorMessage } from '../../lib/auth/oauthErrors';
 import { useAuth } from './AuthProvider';
+import OAuthProviderButtons from './OAuthProviderButtons';
 
 type AuthMode = 'sign-in' | 'sign-up';
 
@@ -24,6 +26,14 @@ export default function AuthForm() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const authError = searchParams.get('auth_error');
+    const friendlyError = getFriendlyOAuthErrorMessage(authError);
+    if (friendlyError) {
+      setError(friendlyError);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -61,8 +71,9 @@ export default function AuthForm() {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
         Supabase auth is not configured. Add{' '}
-        <code className="rounded bg-white px-1">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
-        <code className="rounded bg-white px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to your env.
+        <code className="rounded bg-white px-1">NEXT_PUBLIC_SUPABASE_URL</code>,{' '}
+        <code className="rounded bg-white px-1">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, and{' '}
+        <code className="rounded bg-white px-1">NEXT_PUBLIC_SITE_URL</code> to your env.
       </div>
     );
   }
@@ -90,6 +101,16 @@ export default function AuthForm() {
         >
           Sign up
         </button>
+      </div>
+
+      <OAuthProviderButtons redirectTo={redirectTo} />
+
+      <div className="my-5 flex items-center gap-3">
+        <div className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          or use email
+        </span>
+        <div className="h-px flex-1 bg-slate-200" />
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
