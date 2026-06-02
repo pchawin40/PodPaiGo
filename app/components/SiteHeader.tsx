@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AuthNav from "./AuthNav";
 
 type SiteHeaderProps = {
   ctaHref?: string;
@@ -16,6 +17,7 @@ export default function SiteHeader({
     { href: "/roadmap", label: "Roadmap" },
     { href: "/about", label: "About" },
     { href: "/privacy", label: "Privacy" },
+    { href: "/account", label: "Account" },
   ];
 
   return (
@@ -88,12 +90,15 @@ export default function SiteHeader({
           ))}
         </nav>
 
-        <Link
-          href={ctaHref}
-          className="hidden rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700 md:inline-flex"
-        >
-          {ctaLabel}
-        </Link>
+        <div className="hidden items-center gap-2 md:flex">
+          <AuthNav />
+          <Link
+            href={ctaHref}
+            className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
+          >
+            {ctaLabel}
+          </Link>
+        </div>
       </div>
     </header>
   );

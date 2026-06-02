@@ -735,7 +735,10 @@ export class RecommendationEngine {
       rideshare: finalRideshare,
       transit: finalTransit,
       accessStrategies,
-      parkingDiscoveryNotice: isAirportTrip ? getParkingDiscoveryNotice() : undefined,
+      parkingDiscoveryNotice:
+        isAirportTrip && shouldLoadParking
+          ? getParkingDiscoveryNotice(finalParking.length)
+          : undefined,
       tsaEstimate: resolvedTsaEstimate,
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
       airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,

@@ -2,6 +2,7 @@ import Link from "next/link";
 import HeroBadge from "./components/HeroBadge";
 import SiteHeader from "./components/SiteHeader";
 import SavedTripsHomeSection from "./components/SavedTripsHomeSection";
+import TripAssistantPanel from "./components/TripAssistantPanel";
 
 const features = [
   {
@@ -106,6 +107,10 @@ export default function Home() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
+        <TripAssistantPanel />
       </section>
 
       <SavedTripsHomeSection />

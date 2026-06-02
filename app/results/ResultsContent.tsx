@@ -10,7 +10,8 @@ import {
   calculateParkingDuration,
 } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
-import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
+import AirlineLookupPanel from '../components/AirlineLookupPanel';
+import AirportTripCard from '../components/AirportTripCard';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -103,8 +104,7 @@ import {
   parseTripDataFromSearchParams,
   tripDataToSearchParams,
 } from '../../lib/trip/searchParams';
-import { intentFromSearchParams } from '../../lib/trip/favoriteTrips';
-import SaveFavoriteTripButton from '../components/SaveFavoriteTripButton';
+import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 
 type PriceableOption = {
@@ -3366,11 +3366,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
 
 
-  const seatacZone = useMemo(() => {
-    if (!airlineOrFlight) return null;
-    return resolveSeatacCheckinZone(airlineOrFlight);
-  }, [airlineOrFlight]);
-
   const initialSort = (() => {
     const sortParam = searchParams.get('sort');
     return sortParam === 'cheapest' || sortParam === 'fastest' || sortParam === 'easiest'
@@ -3379,27 +3374,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   })();
 
   const [sort, setSort] = useState<SortTab>(initialSort);
-
-  const favoriteTripInput = useMemo(() => {
-    if (!tripData) return null;
-
-    const extras = tripData as TripData & {
-      checkingBags?: boolean;
-      cabin?: CabinClass;
-    };
-
-    return {
-      origin: tripData.origin,
-      airportCode: getTripAirportCode(tripData),
-      intent: intentFromSearchParams(intent),
-      checkingBags: extras.checkingBags === true,
-      cabin: extras.cabin || 'economy',
-      transportAvailability: tripData.transportAvailability || 'all',
-      preferredSort: sort,
-      destination: tripData.type === 'general-trip' ? tripData.destination : undefined,
-      destinationKind: tripData.destinationKind,
-    };
-  }, [tripData, intent, sort]);
 
   useEffect(() => {
     // Sync URL param with current sort state
@@ -4661,17 +4635,34 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               )}
 
-              {seatacZone && (
-                <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                  Suggested SEA check-in area:{' '}
-                  <span className="font-medium">{seatacZone.destination}</span>
-                  {seatacZone.note ? <span> · {seatacZone.note}</span> : null}
-                </div>
-              )}
+              {airlineOrFlight ? (
+                <AirlineLookupPanel
+                  airportCode={currentAirportCode}
+                  airlineOrFlight={airlineOrFlight}
+                  className="mt-3"
+                />
+              ) : null}
             </div>
 
             {/* Right: supporting context */}
             <div className="space-y-3 lg:border-l lg:border-sky-100 lg:pl-5">
+              <AirportTripCard
+                airportCode={currentAirportCode}
+                airlineOrFlight={airlineOrFlight || null}
+                leaveByTime={
+                  airportRouteUnavailable
+                    ? null
+                    : bestViableLeaveByTime || recommendation.leaveByTime || null
+                }
+                parkingPickName={
+                  smartPickOption
+                    ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
+                    : null
+                }
+                checkingBags={
+                  'checkingBags' in tripData ? !!tripData.checkingBags : false
+                }
+              />
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
@@ -4779,12 +4770,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
-                {favoriteTripInput ? (
-                  <SaveFavoriteTripButton
-                    trip={favoriteTripInput}
-                    label="Save trip"
-                    savedLabel="Saved"
-                  />
+                {tripData ? (
+                  <SaveAccountTripButton tripData={tripData} intent={intent} />
                 ) : null}
                 <button
                   type="button"

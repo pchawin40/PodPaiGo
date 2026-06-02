@@ -8,13 +8,29 @@ import {
 } from '../lib/providers/parking/registerDefaults';
 import { googlePlacesParkingProvider } from '../lib/providers/parking/providers/googlePlaces/provider';
 import { getGoogleParkingPlaces } from '../lib/providers/parking/providers/googlePlaces/airportSearch';
+import { attachGooglePlaceToParking } from '../lib/parking/googlePlaceMatch';
 import {
+  CACHED_PARKING_UNAVAILABLE_MESSAGE,
   LIVE_PARKING_DISCOVERY_DISABLED_MESSAGE,
+  getParkingDiscoveryNotice,
 } from '../lib/parking/parkingDiscoveryMode';
+import {
+  formatGooglePlacesRequestSummaryLine,
+  logGooglePlacesRequestSummary,
+} from '../lib/parking/googlePlacesConfig';
+import {
+  canMakeLiveGetPlaceCall,
+  canMakeLivePhotoMediaCall,
+  canMakeLiveSearchTextCall,
+} from '../lib/parking/googlePlacesGuard';
+import {
+  getActivePlacesRequestBudget,
+  resetPlacesRequestBudgetForTests,
+  runWithPlacesRequestBudget,
+} from '../lib/apiUsage/placesRequestBudget';
 import { RecommendationEngine } from '../lib/recommendationEngine';
 import { shouldDiscoverParkingForTrip } from '../lib/trip/tripContext';
 import type { TripData } from '../lib/types';
-import { resetPlacesRequestBudgetForTests } from '../lib/apiUsage/placesRequestBudget';
 
 jest.mock('../lib/providers/parking/shared/snapshots', () => ({
   getParkingPriceSnapshotsCached: jest.fn(async () => []),
@@ -24,6 +40,17 @@ jest.mock('../lib/db/parkingCache', () => ({
   getLatestParkingPriceSnapshots: jest.fn(async () => []),
   saveParkingPriceSnapshotsFromOptions: jest.fn(async () => undefined),
 }));
+
+function applySafeModeEnv(): void {
+  process.env.DISABLE_GOOGLE_PLACES = 'true';
+  process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'true';
+  process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+  process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '0';
+  process.env.MAX_GOOGLE_SEARCHTEXT_PER_REQUEST = '0';
+  process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST = '0';
+  process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST = '0';
+  process.env.DISABLE_PARKING_DB_CACHE = 'false';
+}
 
 function baseOption(overrides: Partial<ParkingOption> = {}): ParkingOption {
   return {
@@ -75,19 +102,21 @@ describe('parking safe mode', () => {
     delete process.env.DISABLE_GOOGLE_PLACE_PHOTOS;
     delete process.env.DISABLE_GOOGLE_PARKING_DISCOVERY;
     delete process.env.DISABLE_PARKING_DB_CACHE;
-    process.env.NODE_ENV = 'development';
+    delete process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST;
+    delete process.env.MAX_GOOGLE_SEARCHTEXT_PER_REQUEST;
+    delete process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST;
+    delete process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST;
   });
 
   test('google provider is disabled when live discovery kill switch is on', () => {
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+    applySafeModeEnv();
     registerDefaultParkingProviders();
 
     expect(googlePlacesParkingProvider.enabled()).toBe(false);
   });
 
-  test('airport aggregation still returns cached/provider parking when Google discovery is disabled', async () => {
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
-    process.env.DISABLE_GOOGLE_PLACES = 'true';
+  test('airport aggregation returns cached/provider parking only when Google is disabled', async () => {
+    applySafeModeEnv();
 
     jest.spyOn(parkingProviderRegistry, 'executeSearch').mockResolvedValueOnce([
       {
@@ -106,23 +135,21 @@ describe('parking safe mode', () => {
       },
     ]);
 
+    const fetchMock = jest.spyOn(global, 'fetch');
+
     const options = await aggregateAirportParkingOptions({
       airportCode: 'SEA',
       destination: 'Seattle-Tacoma International Airport (SEA)',
     });
 
     expect(options.map((option) => option.id)).toEqual(['inv-1']);
-    expect(options[0]?.assumptions).toEqual(
-      expect.arrayContaining([
-        'Cached/provider parking data (live Google Places discovery disabled).',
-      ]),
-    );
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
+    ).toHaveLength(0);
   });
 
   test('Google Places disabled causes zero SearchText, GetPlace, and PhotoMedia calls', async () => {
-    process.env.DISABLE_GOOGLE_PLACES = 'true';
-    process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'true';
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+    applySafeModeEnv();
 
     const fetchMock = jest.spyOn(global, 'fetch');
 
@@ -131,15 +158,148 @@ describe('parking safe mode', () => {
       destination: 'Seattle-Tacoma International Airport',
     });
 
-    const placesApiCalls = fetchMock.mock.calls.filter(([url]) =>
-      String(url).includes('places.googleapis.com'),
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
+    ).toHaveLength(0);
+  });
+
+  test('non-airport trip uses zero Google Places calls', async () => {
+    applySafeModeEnv();
+
+    const fetchMock = jest.spyOn(global, 'fetch');
+    const getParkingOptionsSpy = jest
+      .spyOn(RecommendationEngine.provider, 'getParkingOptions')
+      .mockResolvedValue([]);
+
+    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(false);
+
+    await RecommendationEngine.generateRecommendations(CITY_TRIP);
+    await attachGooglePlaceToParking(baseOption(), CITY_TRIP, 'SEA');
+
+    expect(getParkingOptionsSpy).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
+    ).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('google-place-match')),
+    ).toHaveLength(0);
+
+    getParkingOptionsSpy.mockRestore();
+  });
+
+  test('airport trip with Google disabled still returns parking when cached provider data exists', async () => {
+    applySafeModeEnv();
+
+    const originalProvider = RecommendationEngine.provider;
+    RecommendationEngine.setDataProvider({
+      ...originalProvider,
+      getParkingOptions: jest.fn(async () => [baseOption({ id: 'inv-1' })]),
+      getRideshareOptions: jest.fn(async () => []),
+      getTransitOptions: jest.fn(async () => []),
+      getTsaEstimate: jest.fn(async () => ({
+        destination: 'SEA',
+        waitTime: 15,
+        status: 'fallback' as const,
+        sourceName: 'Test',
+        trustStatus: 'estimated' as const,
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getTrafficEstimate: jest.fn(async () => ({
+        route: 'test',
+        duration: 30,
+        congestion: 'low' as const,
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getFlightInfo: jest.fn(async () => ({
+        destination: 'SEA',
+        status: 'on-time' as const,
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getAirportInfo: jest.fn(async () => ({
+        destination: 'SEA',
+        name: 'SEA',
+        services: [],
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+    });
+
+    const recommendation = await RecommendationEngine.generateRecommendations(AIRPORT_TRIP);
+
+    expect(recommendation.parking.length).toBeGreaterThan(0);
+    expect(recommendation.parkingDiscoveryNotice).toBe(
+      LIVE_PARKING_DISCOVERY_DISABLED_MESSAGE,
     );
 
-    expect(placesApiCalls).toHaveLength(0);
+    RecommendationEngine.setDataProvider(originalProvider);
+  });
+
+  test('airport trip with Google disabled shows unavailable notice when no cached parking exists', async () => {
+    applySafeModeEnv();
+
+    const originalProvider = RecommendationEngine.provider;
+    RecommendationEngine.setDataProvider({
+      ...originalProvider,
+      getParkingOptions: jest.fn(async () => []),
+      getRideshareOptions: jest.fn(async () => []),
+      getTransitOptions: jest.fn(async () => []),
+      getTsaEstimate: jest.fn(async () => ({
+        destination: 'SEA',
+        waitTime: 15,
+        status: 'fallback' as const,
+        sourceName: 'Test',
+        trustStatus: 'estimated' as const,
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getTrafficEstimate: jest.fn(async () => ({
+        route: 'test',
+        duration: 30,
+        congestion: 'low' as const,
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getFlightInfo: jest.fn(async () => ({
+        destination: 'SEA',
+        status: 'on-time' as const,
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+      getAirportInfo: jest.fn(async () => ({
+        destination: 'SEA',
+        name: 'SEA',
+        services: [],
+        trustStatus: 'estimated' as const,
+        sourceName: 'Test',
+        lastUpdated: new Date().toISOString(),
+        assumptions: [],
+      })),
+    });
+
+    const recommendation = await RecommendationEngine.generateRecommendations(AIRPORT_TRIP);
+
+    expect(recommendation.parking).toHaveLength(0);
+    expect(recommendation.parkingDiscoveryNotice).toBe(CACHED_PARKING_UNAVAILABLE_MESSAGE);
+    expect(getParkingDiscoveryNotice(0)).toBe(CACHED_PARKING_UNAVAILABLE_MESSAGE);
+
+    RecommendationEngine.setDataProvider(originalProvider);
   });
 
   test('merge applies safe-mode labels when discovery is disabled', async () => {
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+    applySafeModeEnv();
 
     const merged = await mergeLiveParkingSourceResults(
       { airportCode: 'SEA' },
@@ -161,61 +321,74 @@ describe('parking safe mode', () => {
     );
   });
 
-  test('recommendation includes parking discovery notice when live discovery is disabled', async () => {
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+  test('request summary logs used=0/0/0/0 when live Places calls are blocked', async () => {
+    applySafeModeEnv();
 
-    const originalProvider = RecommendationEngine.provider;
-    RecommendationEngine.setDataProvider({
-      ...originalProvider,
-      getParkingOptions: jest.fn(async () => [baseOption({ id: 'inv-1' })]),
-      getRideshareOptions: jest.fn(async () => []),
-      getTransitOptions: jest.fn(async () => []),
-      getTsaEstimate: jest.fn(async () => ({
-        destination: 'SEA',
-        waitTime: 15,
-        status: 'fallback',
-        sourceName: 'Test',
-        trustStatus: 'estimated',
-        lastUpdated: new Date().toISOString(),
-        assumptions: [],
-      })),
-      getTrafficEstimate: jest.fn(async () => ({
-        route: 'test',
-        duration: 30,
-        congestion: 'low',
-        trustStatus: 'estimated',
-        sourceName: 'Test',
-        lastUpdated: new Date().toISOString(),
-        assumptions: [],
-      })),
-      getFlightInfo: jest.fn(async () => null),
-      getAirportInfo: jest.fn(async () => ({})),
+    await runWithPlacesRequestBudget('safe-mode-airport-search', async () => {
+      expect(
+        canMakeLiveSearchTextCall({
+          reason: 'airport_parking_discovery',
+          route: 'searchAirportGoogleParking',
+          airportCode: 'SEA',
+        }),
+      ).toBe(false);
+
+      expect(
+        canMakeLiveGetPlaceCall({
+          reason: 'place_details',
+          route: 'fetchGooglePlaceDetailsLive',
+          lotName: 'Jiffy Airport Parking',
+          airportCode: 'SEA',
+          cacheKey: 'place-live',
+        }),
+      ).toBe(false);
+
+      expect(
+        canMakeLivePhotoMediaCall({
+          reason: 'place_photo_media',
+          route: '/api/google-place-photo',
+          cacheKey: 'places/abc/photos/def',
+        }),
+      ).toBe(false);
+
+      const budget = getActivePlacesRequestBudget();
+      expect(budget?.searchText).toBe(0);
+      expect(budget?.getPlace).toBe(0);
+      expect(budget?.photoMedia).toBe(0);
+      expect(budget?.total).toBe(0);
     });
 
-    const recommendation = await RecommendationEngine.generateRecommendations(AIRPORT_TRIP);
+    expect(
+      formatGooglePlacesRequestSummaryLine({
+        route: '/api/recommendations',
+        requestKey: 'safe-mode-airport-search',
+        searchTextUsed: 0,
+        getPlaceUsed: 0,
+        photoMediaUsed: 0,
+        totalUsed: 0,
+        blocked: 3,
+      }),
+    ).toBe('[google-places-config] request /api/recommendations used=0/0/0/0 blocked=3');
 
-    expect(recommendation.parkingDiscoveryNotice).toBe(
-      LIVE_PARKING_DISCOVERY_DISABLED_MESSAGE,
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    const info = jest.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    logGooglePlacesRequestSummary({
+      route: '/api/recommendations',
+      requestKey: 'safe-mode-airport-search',
+      searchTextUsed: 0,
+      getPlaceUsed: 0,
+      photoMediaUsed: 0,
+      totalUsed: 0,
+      blocked: 3,
+    });
+
+    expect(info).toHaveBeenCalledWith(
+      '[google-places-config] request /api/recommendations used=0/0/0/0 blocked=3',
     );
-    expect(recommendation.parking.length).toBeGreaterThan(0);
 
-    RecommendationEngine.setDataProvider(originalProvider);
-  });
-
-  test('non-airport trip does not call parking discovery', async () => {
-    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
-
-    const getParkingOptionsSpy = jest
-      .spyOn(RecommendationEngine.provider, 'getParkingOptions')
-      .mockResolvedValue([]);
-
-    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(false);
-
-    const recommendation = await RecommendationEngine.generateRecommendations(CITY_TRIP);
-
-    expect(getParkingOptionsSpy).not.toHaveBeenCalled();
-    expect(recommendation.parkingDiscoveryNotice).toBeUndefined();
-
-    getParkingOptionsSpy.mockRestore();
+    info.mockRestore();
+    process.env.NODE_ENV = previousNodeEnv;
   });
 });

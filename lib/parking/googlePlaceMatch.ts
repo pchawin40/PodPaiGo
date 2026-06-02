@@ -4,6 +4,7 @@ import {
 } from './googlePlaceMatchUtils';
 import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
 import { shouldDiscoverParkingForTrip } from '../trip/tripContext';
+import { isGooglePlacesLiveBlocked } from './googlePlacesGuard';
 
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
@@ -68,6 +69,14 @@ export async function attachGooglePlaceToParking(
   options: AttachGooglePlaceOptions = {}
 ): Promise<ParkingOption> {
   if (tripData && !shouldDiscoverParkingForTrip(tripData)) {
+    return withStableParkingRouteStatus(parking);
+  }
+
+  if (
+    isGooglePlacesLiveBlocked() &&
+    typeof parking.lat === 'number' &&
+    typeof parking.lng === 'number'
+  ) {
     return withStableParkingRouteStatus(parking);
   }
 

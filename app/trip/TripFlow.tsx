@@ -16,6 +16,7 @@ import {
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { getAirportById } from '../../lib/airports/catalog';
 import AirportSearchPicker from '../components/AirportSearchPicker';
+import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import { parseLocalDate } from '../../lib/tripTime';
 import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney } from '../utils/formatter';
@@ -959,6 +960,30 @@ export default function TripFlow() {
                         </div>
                         <div className="mt-1">{airportGuide.note}</div>
                       </div>
+                      {intent && intentCopy(intent).wantsAirline ? (
+                        <div className="mt-4">
+                          <label className="block text-sm font-medium text-zinc-800">
+                            Airline or flight number (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={state.airlineOrFlight}
+                            onChange={(event) =>
+                              setState((s) => ({ ...s, airlineOrFlight: event.target.value }))
+                            }
+                            placeholder="Alaska, Delta, AS 123"
+                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                          />
+                          <p className="mt-2 text-xs text-zinc-500">
+                            Helps suggest terminal and check-in area. Confirm with your airline before travel.
+                          </p>
+                          <AirlineLookupPanel
+                            airportCode={state.airportCode}
+                            airlineOrFlight={state.airlineOrFlight}
+                            className="mt-3"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   )}
                   {isGeneralTrip && (
