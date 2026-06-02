@@ -17,6 +17,11 @@ import {
   normalizeParkingLotName,
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
+import {
+  getFreshPhotoNamesFromRecord,
+  parsePhotoNamesJson,
+  PLACE_PHOTO_SOURCE_GOOGLE,
+} from './placePhotoNameCache';
 
 const GOOGLE_PLACE_DB_READ_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_READ_TIMEOUT_MS || 2500);
 const GOOGLE_PLACE_PHOTO_NAME_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -136,6 +141,8 @@ const SNAPSHOT_SELECT_COLUMNS = `
   lng,
   photo_name,
   photo_names_json,
+  photo_refreshed_at,
+  photo_source,
   last_fetched_at,
   updated_at,
   expires_at
@@ -162,15 +169,6 @@ function hasUsablePlaceCoords(
     typeof record.lat === 'number' &&
     typeof record.lng === 'number'
   );
-}
-
-function parsePhotoNamesJson(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function cleanText(value: string | null | undefined): string {
@@ -332,6 +330,8 @@ export function googlePlacePhotoImageUrl(
   photoName: string | null | undefined,
   maxWidthPx = 900
 ): string | null {
+  if (isGooglePlacePhotosLiveBlocked()) return null;
+
   const name = typeof photoName === 'string' ? photoName.trim() : '';
   if (!name) return null;
 
@@ -393,6 +393,8 @@ function mapRowToRecord(row: Record<string, unknown>): ParkingGooglePlaceCacheRe
     lng: row.lng != null ? Number(row.lng) : undefined,
     photoName: (row.photo_name as string | null) || undefined,
     photoNames: parsePhotoNamesJson(row.photo_names_json),
+    photoRefreshedAt: (row.photo_refreshed_at as string | null) || undefined,
+    photoSource: (row.photo_source as string | null) || undefined,
     rating: row.rating != null ? Number(row.rating) : undefined,
     reviewCount: row.review_count != null ? Number(row.review_count) : undefined,
     reviews,
@@ -504,6 +506,8 @@ function photoNamesFromDetails(details: GoogleLegacyPlaceDetailsResult | null): 
 
 async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Promise<void> {
   let client: PoolClient | null = null;
+  const photoNames = record.photoNames ?? (record.photoName ? [record.photoName] : []);
+  const hasPhotoNames = photoNames.length > 0;
 
   try {
     client = await db.connect();
@@ -530,6 +534,8 @@ async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Prom
           lng,
           photo_name,
           photo_names_json,
+          photo_refreshed_at,
+          photo_source,
           last_fetched_at,
           updated_at,
           expires_at
@@ -539,6 +545,8 @@ async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Prom
           $6, $7, $8, $9, $10,
           $11, $12, $13::jsonb, $14,
           $15, $16, $17, $18::jsonb,
+          case when $19::boolean then now() else null end,
+          case when $19::boolean then $20 else null end,
           now(), now(), now() + interval '7 days'
         )
         on conflict (cache_key)
@@ -560,6 +568,14 @@ async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Prom
           lng = excluded.lng,
           photo_name = excluded.photo_name,
           photo_names_json = excluded.photo_names_json,
+          photo_refreshed_at = case
+            when excluded.photo_refreshed_at is not null then excluded.photo_refreshed_at
+            else parking_lot_google_place_snapshots.photo_refreshed_at
+          end,
+          photo_source = case
+            when excluded.photo_source is not null then excluded.photo_source
+            else parking_lot_google_place_snapshots.photo_source
+          end,
           last_fetched_at = excluded.last_fetched_at,
           updated_at = excluded.updated_at,
           expires_at = excluded.expires_at
@@ -582,7 +598,9 @@ async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Prom
         record.lat ?? null,
         record.lng ?? null,
         record.photoName ?? null,
-        JSON.stringify(record.photoNames ?? (record.photoName ? [record.photoName] : [])),
+        JSON.stringify(photoNames),
+        hasPhotoNames,
+        PLACE_PHOTO_SOURCE_GOOGLE,
       ],
     );
 
@@ -966,6 +984,7 @@ async function fetchGooglePlaceDetails(
 
   const cachedByPlaceId = await getCachedRecordByPlaceId(normalizedPlaceId);
   if (cachedByPlaceId && hasUsablePlaceCoords(cachedByPlaceId)) {
+    const freshPhotoNames = getFreshPhotoNamesFromRecord(cachedByPlaceId);
     return {
       place_id: cachedByPlaceId.googlePlaceId,
       name: cachedByPlaceId.googlePlaceName,
@@ -975,8 +994,8 @@ async function fetchGooglePlaceDetails(
       url: cachedByPlaceId.googleMapsUri,
       lat: cachedByPlaceId.lat,
       lng: cachedByPlaceId.lng,
-      photoName: cachedByPlaceId.photoName,
-      photoNames: cachedByPlaceId.photoNames,
+      photoName: freshPhotoNames[0],
+      photoNames: freshPhotoNames,
     };
   }
 
@@ -1050,11 +1069,9 @@ export async function fetchGooglePlacePhotoNames(
   if (!normalizedPlaceId) return [];
 
   const cachedByPlaceId = await getCachedRecordByPlaceId(normalizedPlaceId);
-  if (cachedByPlaceId?.photoNames?.length) {
-    return cachedByPlaceId.photoNames.slice(0, limit);
-  }
-  if (cachedByPlaceId?.photoName) {
-    return [cachedByPlaceId.photoName];
+  const freshCachedNames = getFreshPhotoNamesFromRecord(cachedByPlaceId);
+  if (freshCachedNames.length) {
+    return freshCachedNames.slice(0, limit);
   }
 
   const cachedPhotoName = photoNameCache.get(normalizedPlaceId);
@@ -1066,7 +1083,19 @@ export async function fetchGooglePlacePhotoNames(
     return [];
   }
 
-  const details = await fetchGooglePlaceDetails(normalizedPlaceId).catch(() => null);
+  if (
+    !canMakeLiveGetPlaceCall({
+      reason: 'place_photo_names',
+      route: 'fetchGooglePlacePhotoNames',
+      cacheKey: normalizedPlaceId,
+    })
+  ) {
+    return [];
+  }
+
+  const details = await fetchGooglePlaceDetailsLive(normalizedPlaceId, {
+    cacheKey: normalizedPlaceId,
+  }).catch(() => null);
   const photoNames = details?.photoNames?.length
     ? details.photoNames
     : details?.photoName
@@ -1198,6 +1227,8 @@ export async function resolveParkingGooglePlace(args: {
     return cachedMetadata ? { ...cachedMetadata, source: 'stale-fallback' } : null;
   }
 
+  const cachedFreshPhotoNames = getFreshPhotoNamesFromRecord(cachedMetadata);
+
   const photoNames =
     details?.photoNames?.length
       ? details.photoNames
@@ -1205,7 +1236,7 @@ export async function resolveParkingGooglePlace(args: {
         ? [details.photoName]
         : matchedPhotoName
           ? [matchedPhotoName]
-          : cachedMetadata?.photoNames || (cachedMetadata?.photoName ? [cachedMetadata.photoName] : []);
+          : cachedFreshPhotoNames;
 
   const reviews = (details?.reviews || []).slice(0, 5).map((review, index) =>
     toReview(review, index, details?.place_id || placeId || cacheKey),
@@ -1229,10 +1260,12 @@ export async function resolveParkingGooglePlace(args: {
     photoName:
       details?.photoName ||
       matchedPhotoName ||
-      cachedMetadata?.photoName ||
+      cachedFreshPhotoNames[0] ||
       photoNames[0] ||
       undefined,
-    photoNames: photoNames.length ? photoNames : cachedMetadata?.photoNames,
+    photoNames: photoNames.length ? photoNames : undefined,
+    photoRefreshedAt: photoNames.length ? new Date().toISOString() : cachedMetadata?.photoRefreshedAt,
+    photoSource: photoNames.length ? PLACE_PHOTO_SOURCE_GOOGLE : cachedMetadata?.photoSource,
     rating:
       typeof details?.rating === 'number'
         ? details.rating

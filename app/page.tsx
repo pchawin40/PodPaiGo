@@ -3,6 +3,7 @@ import HeroBadge from "./components/HeroBadge";
 import SiteHeader from "./components/SiteHeader";
 import SavedTripsHomeSection from "./components/SavedTripsHomeSection";
 import TripAssistantPanel from "./components/TripAssistantPanel";
+import PodPaiGoAssistant from "./components/PodPaiGoAssistant";
 
 const features = [
   {
@@ -175,6 +176,8 @@ export default function Home() {
           </Link>
         </div>
       </footer>
+
+      <PodPaiGoAssistant page="home" />
     </main>
   );
 }

@@ -14,6 +14,8 @@ import {
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
+import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
+import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
 import ParkingProviderActions from './ParkingProviderActions';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
@@ -4889,6 +4891,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 intent={intent}
                 tripData={tripData}
               />
+              <RouteLookaheadPanel
+                origin={tripData.origin}
+                destination={
+                  currentAirport.routingAddress ||
+                  currentAirport.destinationName ||
+                  currentAirport.label
+                }
+                destinationLatLng={currentAirport.geoLocation}
+                airportCode={currentAirportCode}
+                departureDate={
+                  tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                    ? tripData.departureDate
+                    : null
+                }
+                departureTime={
+                  tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                    ? tripData.departureTime
+                    : null
+                }
+                airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                disabled={airportRouteUnavailable || !tripData.origin?.trim()}
+              />
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
@@ -6117,8 +6141,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             Plan another trip
           </Link>
         </div>
-      </main >
-    </div >
+      </main>
+      {tripData && recommendation ? (
+        <PodPaiGoAssistant
+          page="results"
+          resultsContext={{
+            tripData,
+            recommendation,
+            leaveByTime: bestViableLeaveByTime || recommendation.leaveByTime || null,
+          }}
+        />
+      ) : null}
+    </div>
   );
 }
 

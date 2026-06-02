@@ -343,6 +343,8 @@ export type ParkingGooglePlaceSnapshot = {
   googleMapsUri?: string;
   lat?: number;
   lng?: number;
+  photoRefreshedAt?: string;
+  photoSource?: string;
   rating?: number;
   reviewCount?: number;
   reviews: ParkingGoogleReview[];

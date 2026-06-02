@@ -177,6 +177,9 @@ export default function AirportTripCard({
           bagPlan={resolvedBagPlan}
           hasParkingOrRidesharePlan={Boolean(model.parkingPickName || transportMode === 'rideshare')}
           returnDate={returnDate}
+          storageKey={[airportCode, departureTime, returnDate, airlineOrFlight]
+            .filter(Boolean)
+            .join(':')}
         />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

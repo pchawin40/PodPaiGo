@@ -72,21 +72,7 @@ export default function TripAssistantVoiceButton({
   };
 
   if (!supported) {
-    return (
-      <button
-        type="button"
-        disabled
-        title="Voice input coming soon"
-        aria-label="Voice input coming soon"
-        className={
-          'inline-flex items-center gap-2 self-start rounded-full border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500 ' +
-          className
-        }
-      >
-        <span aria-hidden="true">🎤</span>
-        Voice input coming soon
-      </button>
-    );
+    return null;
   }
 
   return (
