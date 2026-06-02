@@ -98,6 +98,25 @@ export default function PrivacyPage() {
           </section>
 
           <section>
+            <h2 className="text-xl font-semibold">Outbound clicks and partner links</h2>
+            <p className="mt-2 leading-7 text-slate-600">
+              When you click provider booking or directions links, PodPaiGo may record a lightweight
+              outbound click event (provider, airport, lot, destination URL, and optional trip id).
+              Some links may become partner links in the future. We do not sell your personal data.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold">AI trip assistant usage</h2>
+            <p className="mt-2 leading-7 text-slate-600">
+              If you use the AI trip assistant, the text you submit may be parsed by a mock parser
+              or an optional live OpenAI provider depending on environment settings. Parsed fields are
+              shown for review before recommendations run. AI usage may be logged server-side with
+              input size and token counts for budget control.
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-xl font-semibold">What we do not do</h2>
             <p className="mt-2 leading-7 text-slate-600">
               PodPaiGo does not sell your personal data. We do not use your account

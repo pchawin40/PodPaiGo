@@ -42,6 +42,7 @@ describe('airport guide static intelligence', () => {
       leaveByTime: '08:30',
       parkingPickName: 'WallyPark',
       checkingBags: false,
+      bagPlan: 'none',
     });
 
     expect(model).not.toBeNull();
@@ -50,20 +51,39 @@ describe('airport guide static intelligence', () => {
     expect(model?.terminalLabel).toMatch(/North Satellite/);
   });
 
-  test('airport trip card renders TSA and CLEAR badge labels', () => {
+  test('airport trip card renders companion hero labels', () => {
     const html = renderToStaticMarkup(
       React.createElement(AirportTripCard, {
         airportCode: 'SEA',
         airlineOrFlight: 'Alaska',
         leaveByTime: '08:30',
         parkingPickName: 'WallyPark',
-        checkingBags: false,
+        bagPlan: 'none',
+        departureTime: '12:00',
+        airportBufferMinutes: 75,
+        travelMinutes: 40,
+        transportMode: 'parking',
       }),
     );
 
     expect(html).toContain('TSA PreCheck');
     expect(html).toContain('CLEAR');
-    expect(html).toContain('Airport Trip Card');
+    expect(html).toContain('Airport day companion');
+    expect(html).toContain('Leave home');
+    expect(html).toContain('Travel checklist');
+  });
+
+  test('DL flight input resolves to Delta on card model', () => {
+    const model = buildAirportTripCardModel({
+      airportCode: 'SEA',
+      airlineOrFlight: 'DL 1234',
+      leaveByTime: '08:30',
+    });
+
+    expect(model?.airlineLabel).toBe('Delta Air Lines');
+    expect(model?.normalizedFlightLabel).toContain('Delta Air Lines');
+    expect(model?.airlineCode).toBe('DL');
+    expect(model?.flightNumber).toBe('1234');
   });
 
   test('airport guide module makes zero paid API calls', async () => {

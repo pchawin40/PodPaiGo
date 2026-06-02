@@ -29,6 +29,7 @@ export type TransportAvailability = 'car' | 'rideshare' | 'transit' | 'all';
 export type SecurityOption = 'standard' | 'precheck' | 'clear' | 'clear-precheck';
 export type FlightType = 'domestic' | 'international';
 export type CabinClass = 'economy' | 'premium';
+export type BagPlan = 'none' | 'checked' | 'oversized';
 
 export type TransitPaymentOption = 'normal' | 'orca-pass';
 
@@ -86,6 +87,7 @@ export type TripData =
     departureTime: string;
     timeAnchor?: 'flight-departure' | 'airport-arrival'; // add this
     parkingDuration?: number;
+    bagPlan?: BagPlan;
     checkingBags?: boolean;
     securityOption?: SecurityOption;
     flightType?: FlightType;

@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { href: '/how-it-works', label: 'How it works' },
   { href: '/airports', label: 'Airports' },
   { href: '/roadmap', label: 'Roadmap' },
+  { href: '/pricing', label: 'Pricing' },
   { href: '/about', label: 'About' },
   { href: '/privacy', label: 'Privacy' },
 ];

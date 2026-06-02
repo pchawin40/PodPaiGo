@@ -1,4 +1,6 @@
-import { parseAirlineOrFlight } from './seatacCheckin';
+import { parseFlightInput } from '../airlines/parseFlightInput';
+import { bagPlanExplanation, resolveBagPlan } from './bagPlan';
+import type { BagPlan } from '../types';
 
 export type AirlineTerminalMapping = {
   matchNames: string[];
@@ -386,10 +388,10 @@ export function lookupAirlineGuide(
   const trimmed = airlineInput.trim();
   if (!guide || !trimmed) return null;
 
-  const parsed = parseAirlineOrFlight(trimmed);
+  const parsed = parseFlightInput(trimmed);
   const normalized = normalizeAirlineInput(trimmed);
   const hit = guide.airlineTerminalMap.find((mapping) =>
-    mappingMatches(mapping, normalized, parsed.carrierCode),
+    mappingMatches(mapping, normalized, parsed.airlineCode ?? undefined),
   );
 
   if (hit) {
@@ -423,23 +425,21 @@ export function lookupAirlineGuide(
   };
 }
 
-export type AirportTripChecklistItem = {
-  id: string;
-  label: string;
-  done: boolean;
-};
-
 export type AirportTripCardModel = {
   airportCode: string;
   airportName: string;
   city: string;
   airlineLabel: string | null;
+  normalizedFlightLabel: string | null;
+  airlineCode: string | null;
+  flightNumber: string | null;
   terminalLabel: string | null;
   leaveByTime: string | null;
   parkingPickName: string | null;
+  bagPlan: BagPlan;
+  bagPlanExplanation: string | null;
   tsaPreCheckAvailable: boolean;
   clearAvailable: boolean;
-  checklist: AirportTripChecklistItem[];
   disclaimer: string;
 };
 
@@ -449,9 +449,19 @@ export function buildAirportTripCardModel(args: {
   leaveByTime?: string | null;
   parkingPickName?: string | null;
   checkingBags?: boolean;
+  bagPlan?: BagPlan;
 }): AirportTripCardModel | null {
   const guide = getAirportGuide(args.airportCode);
   if (!guide) return null;
+
+  const bagPlan = resolveBagPlan({
+    bagPlan: args.bagPlan,
+    checkingBags: args.checkingBags,
+  });
+
+  const flightParsed = args.airlineOrFlight?.trim()
+    ? parseFlightInput(args.airlineOrFlight)
+    : null;
 
   const lookup = args.airlineOrFlight?.trim()
     ? lookupAirlineGuide(guide.airportCode, args.airlineOrFlight)
@@ -467,23 +477,17 @@ export function buildAirportTripCardModel(args: {
     airportCode: guide.airportCode,
     airportName: guide.airportName,
     city: guide.city,
-    airlineLabel: lookup?.airlineName || args.airlineOrFlight?.trim() || null,
+    airlineLabel: flightParsed?.airlineName || lookup?.airlineName || args.airlineOrFlight?.trim() || null,
+    normalizedFlightLabel: flightParsed?.normalizedLabel || null,
+    airlineCode: flightParsed?.airlineCode || null,
+    flightNumber: flightParsed?.flightNumber || null,
     terminalLabel,
     leaveByTime: args.leaveByTime ?? null,
     parkingPickName: args.parkingPickName ?? null,
+    bagPlan,
+    bagPlanExplanation: bagPlanExplanation(bagPlan),
     tsaPreCheckAvailable: guide.tsaPreCheckAvailable,
     clearAvailable: guide.clearAvailable,
-    checklist: [
-      { id: 'id', label: 'Government ID / passport', done: false },
-      { id: 'boarding-pass', label: 'Boarding pass ready', done: false },
-      { id: 'parking', label: 'Parking reservation confirmed', done: Boolean(args.parkingPickName) },
-      { id: 'buffer', label: 'Arrive with airport buffer time', done: Boolean(args.leaveByTime) },
-      {
-        id: 'bags',
-        label: args.checkingBags ? 'Checked bags ready for drop-off' : 'Carry-on bags only',
-        done: !args.checkingBags,
-      },
-    ],
     disclaimer: AIRPORT_TRIP_DISCLAIMER,
   };
 }

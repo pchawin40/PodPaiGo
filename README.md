@@ -10,7 +10,9 @@ A smart airport companion for comparing parking, rideshare, transit, timing, and
 - **Safe-mode API protection**: Quota caps and disabled Google Places by default in local dev
 - **Accounts**: Supabase email/password plus Google sign-in
 - **Saved trips**: Save and reopen plans from your account page
-- **AI trip assistant**: Mock parser by default with confirm-before-search flow
+- **Monetization-ready CTAs**: Reserve parking, view provider, and directions buttons with outbound click tracking
+- **Pricing placeholder**: `/pricing` page for future Pro features (no Stripe yet)
+- **AI trip assistant**: Mock parser by default; optional live OpenAI with daily/input caps
 - **Airport command center**: Airport trip card, airline lookup, and airport guidance
 - **TSA and weather context**: Security and weather-aware scoring where available
 
@@ -74,9 +76,22 @@ Google OAuth setup: see [docs/supabase-oauth-setup.md](docs/supabase-oauth-setup
 ```env
 AI_ASSISTANT_PROVIDER=mock
 DISABLE_AI_ASSISTANT=false
+MAX_AI_PARSE_CALLS_PER_REQUEST=1
+MAX_AI_PARSE_CALLS_PER_USER_DAY=20
+MAX_AI_PARSE_CALLS_PER_ANON_DAY=5
+MAX_AI_PARSE_INPUT_CHARS=1000
+# OPENAI_API_KEY=
+# OPENAI_TRIP_PARSE_MODEL=gpt-4o-mini
 ```
 
-Live providers can be added later; mock mode is the safe default.
+Local dev defaults to mock. Production uses OpenAI only when `AI_ASSISTANT_PROVIDER=openai` and `OPENAI_API_KEY` is set.
+
+### Monetization telemetry
+
+Apply migration `20260603120000_monetization_and_ai_usage.sql` to enable:
+
+- `outbound_click_events` (RLS-protected inserts from `/api/monetization/outbound-click`)
+- `ai_usage_events` (server-side AI budget logging)
 
 ## Database migrations
 
@@ -89,6 +104,7 @@ Apply them to your Supabase/Postgres project in timestamp order, for example:
 3. `20260601120000_api_usage_and_route_snapshots.sql`
 4. `20260601130000_places_cache_enhancements.sql`
 5. `20260602120000_user_auth_foundation.sql`
+6. `20260603120000_monetization_and_ai_usage.sql`
 
 Using Supabase CLI (if installed):
 

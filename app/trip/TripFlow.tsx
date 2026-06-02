@@ -12,11 +12,14 @@ import {
   TripData,
   TripType,
   DestinationKind,
+  BagPlan,
 } from '../../lib/types';
 import { resolveSeatacCheckinZone } from '../../lib/airports/seatacCheckin';
 import { getAirportById } from '../../lib/airports/catalog';
 import AirportSearchPicker from '../components/AirportSearchPicker';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
+import AirlineCombobox from '../components/AirlineCombobox';
+import { normalizeAirlineTextForTrip } from '../../lib/airlines/parseFlightInput';
 import { parseLocalDate } from '../../lib/tripTime';
 import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney } from '../utils/formatter';
@@ -64,7 +67,7 @@ type FormState = {
   parkingCheckOutDate: string;
   parkingCheckOutTime: string;
   parkingDurationHours: string;
-  checkingBags: boolean;
+  bagPlan: BagPlan;
   securityOption: SecurityOption;
   flightType: FlightType;
   cabin: CabinClass;
@@ -357,7 +360,7 @@ export default function TripFlow() {
     parkingCheckOutDate: '',
     parkingCheckOutTime: '',
     parkingDurationHours: '8',
-    checkingBags: false,
+    bagPlan: 'none',
     securityOption: 'standard',
     flightType: 'domestic',
     cabin: 'economy',
@@ -696,7 +699,7 @@ export default function TripFlow() {
     }
 
     if (state.airlineOrFlight.trim()) {
-      params.set('airlineOrFlight', state.airlineOrFlight.trim());
+      params.set('airlineOrFlight', normalizeAirlineTextForTrip(state.airlineOrFlight) || state.airlineOrFlight.trim());
     }
 
     if (tripType === 'general-trip') {
@@ -742,7 +745,8 @@ export default function TripFlow() {
 
       // Flying-out only: airport readiness assumptions
       if (state.intent === 'flying-out') {
-        params.set('bags', state.checkingBags ? 'yes' : 'no');
+        params.set('bagPlan', state.bagPlan);
+        params.set('bags', state.bagPlan === 'none' ? 'no' : 'yes');
         params.set('security', state.securityOption);
         params.set('flightType', state.flightType);
         params.set('cabin', state.cabin);
@@ -809,7 +813,7 @@ export default function TripFlow() {
       origin: state.origin,
       airportCode: state.airportCode,
       intent: (state.intent || 'flying-out') as FavoriteTripIntent,
-      checkingBags: state.checkingBags,
+      checkingBags: state.bagPlan !== 'none',
       cabin: state.cabin,
       transportAvailability: state.transportAvailability,
       preferredSort: 'easiest' as RecommendationSortMode,
@@ -820,7 +824,7 @@ export default function TripFlow() {
       state.origin,
       state.airportCode,
       state.intent,
-      state.checkingBags,
+      state.bagPlan,
       state.cabin,
       state.transportAvailability,
       state.destination,
@@ -962,21 +966,12 @@ export default function TripFlow() {
                       </div>
                       {intent && intentCopy(intent).wantsAirline ? (
                         <div className="mt-4">
-                          <label className="block text-sm font-medium text-zinc-800">
-                            Airline or flight number (optional)
-                          </label>
-                          <input
-                            type="text"
+                          <AirlineCombobox
                             value={state.airlineOrFlight}
-                            onChange={(event) =>
-                              setState((s) => ({ ...s, airlineOrFlight: event.target.value }))
+                            onChange={(value) =>
+                              setState((s) => ({ ...s, airlineOrFlight: value }))
                             }
-                            placeholder="Alaska, Delta, AS 123"
-                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                           />
-                          <p className="mt-2 text-xs text-zinc-500">
-                            Helps suggest terminal and check-in area. Confirm with your airline before travel.
-                          </p>
                           <AirlineLookupPanel
                             airportCode={state.airportCode}
                             airlineOrFlight={state.airlineOrFlight}
@@ -1062,7 +1057,7 @@ export default function TripFlow() {
                         <div className="text-xs font-medium text-blue-700">Recommended</div>
                         <div className="text-lg font-bold text-blue-950">
                           {calculateAirportReadinessBuffer({
-                            checkingBags: state.checkingBags,
+                            bagPlan: state.bagPlan,
                             securityOption: state.securityOption,
                             flightType: state.flightType,
                             cabin: state.cabin,
@@ -1075,21 +1070,24 @@ export default function TripFlow() {
                     <div className="mt-4 space-y-4">
                       <div>
                         <div className="text-xs font-semibold uppercase text-zinc-500">
-                          Bags
+                          Bag plan
                         </div>
-                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          {[
-                            { value: false, label: 'No checked bags' },
-                            { value: true, label: 'Checking bags' },
-                          ].map((opt) => {
-                            const selected = state.checkingBags === opt.value;
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          {(
+                            [
+                              { value: 'none' as BagPlan, label: 'No checked bag' },
+                              { value: 'checked' as BagPlan, label: 'Checked bag' },
+                              { value: 'oversized' as BagPlan, label: 'Oversized / special item' },
+                            ] as Array<{ value: BagPlan; label: string }>
+                          ).map((opt) => {
+                            const selected = state.bagPlan === opt.value;
 
                             return (
                               <button
-                                key={String(opt.value)}
+                                key={opt.value}
                                 type="button"
                                 onClick={() =>
-                                  setState((s) => ({ ...s, checkingBags: opt.value }))
+                                  setState((s) => ({ ...s, bagPlan: opt.value }))
                                 }
                                 className={
                                   'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
@@ -1209,7 +1207,7 @@ export default function TripFlow() {
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       {calculateAirportReadinessBuffer({
-                        checkingBags: state.checkingBags,
+                        bagPlan: state.bagPlan,
                         securityOption: state.securityOption,
                         flightType: state.flightType,
                         cabin: state.cabin,

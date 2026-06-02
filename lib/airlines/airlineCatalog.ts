@@ -64,7 +64,7 @@ export function resolveAirlineInput(inputRaw: string): ResolvedAirlineInput {
   }
 
   const compact = rawInput.replace(/\s+/g, ' ');
-  const flightMatch = compact.match(/^([A-Za-z]{2})(?:\s+)?(\d{1,4})$/);
+  const flightMatch = compact.match(/^([A-Za-z0-9]{2})(?:\s+)?(\d{1,4})$/i);
   if (flightMatch) {
     const carrierCode = flightMatch[1].toUpperCase();
     const flightNumber = flightMatch[2];

@@ -14,6 +14,8 @@ import {
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
+import { useAuth } from '../components/AuthProvider';
+import ParkingProviderActions from './ParkingProviderActions';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -32,6 +34,9 @@ import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
 import ParkingLotVisual from './ParkingLotVisual';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
+import { resolveBagPlan } from '../../lib/airports/bagPlan';
+import type { AirportDayTransportMode } from '../../lib/airports/airportDayTimeline';
+import { parseFlightInput } from '../../lib/airlines/parseFlightInput';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
@@ -64,6 +69,7 @@ import {
   CabinClass,
   FlightType,
   SecurityOption,
+  BagPlan,
   TransportAvailability,
   Recommendation,
   TripData,
@@ -159,6 +165,7 @@ type TripDataWithExtras = TripData & {
   timeAnchor?: 'flight-departure' | 'airport-arrival';
   transitPayment?: TransitPaymentOption;
   checkingBags?: boolean;
+  bagPlan?: BagPlan;
   securityOption?: SecurityOption;
   flightType?: FlightType;
   cabin?: CabinClass;
@@ -1401,73 +1408,21 @@ function computeAirportReadyBufferMinutes(
 ): { bufferMinutes: number; assumptions: string[] } | null {
   if (!tripData || tripData.type !== 'one-way-departure') return null;
 
-  const flightType = 'flightType' in tripData && tripData.flightType
-    ? tripData.flightType
-    : 'domestic';
-
-  const checkingBags = 'checkingBags' in tripData
-    ? !!tripData.checkingBags
-    : false;
-
-  const securityOption = 'securityOption' in tripData && tripData.securityOption
-    ? tripData.securityOption
-    : 'standard';
-
-  const cabin = 'cabin' in tripData && tripData.cabin
-    ? tripData.cabin
-    : 'economy';
-
-  let bufferMinutes =
-    flightType === 'international'
-      ? checkingBags
-        ? 180
-        : 150
-      : checkingBags
-        ? 105
-        : 75;
-
-  const assumptions: string[] = [];
-
-  assumptions.push(
-    flightType === 'international'
-      ? 'International flight'
-      : 'Domestic flight'
-  );
-
-  assumptions.push(
-    checkingBags
-      ? 'Checking bags: added airline counter/bag-drop time'
-      : 'No checked bags'
-  );
-
-  if (securityOption === 'precheck') {
-    bufferMinutes -= 15;
-    assumptions.push('TSA PreCheck: reduced security buffer');
-  } else if (securityOption === 'clear') {
-    bufferMinutes -= 10;
-    assumptions.push('CLEAR: reduced ID/security entry buffer');
-  } else if (securityOption === 'clear-precheck') {
-    bufferMinutes -= 25;
-    assumptions.push('CLEAR + PreCheck: reduced security buffer');
-  } else {
-    assumptions.push('Standard TSA');
-  }
-
-  if (cabin === 'premium') {
-    bufferMinutes -= checkingBags ? 10 : 5;
-    assumptions.push('Premium/Business/First cabin: slightly faster check-in estimate');
-  } else {
-    assumptions.push('Economy cabin');
-  }
-
-  const minimum = flightType === 'international' ? 120 : 60;
-  bufferMinutes = Math.max(minimum, bufferMinutes);
-
-  assumptions.push(`Recommended airport-ready buffer: ${formatMinutes(bufferMinutes)}`);
+  const readiness = calculateAirportReadinessBuffer({
+    bagPlan: 'bagPlan' in tripData ? tripData.bagPlan : undefined,
+    checkingBags: 'checkingBags' in tripData ? !!tripData.checkingBags : false,
+    securityOption:
+      'securityOption' in tripData && tripData.securityOption
+        ? tripData.securityOption
+        : 'standard',
+    flightType:
+      'flightType' in tripData && tripData.flightType ? tripData.flightType : 'domestic',
+    cabin: 'cabin' in tripData && tripData.cabin ? tripData.cabin : 'economy',
+  });
 
   return {
-    bufferMinutes,
-    assumptions,
+    bufferMinutes: readiness.bufferMinutes,
+    assumptions: readiness.assumptions,
   };
 }
 
@@ -1680,6 +1635,8 @@ function OptionCard({
   aprLiveChecking,
   onShowReviews,
   googleEnrichedParking,
+  accessToken,
+  tripId,
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -1691,6 +1648,8 @@ function OptionCard({
   aprLiveChecking: boolean;
   onShowReviews?: (parking: ParkingOption) => void;
   googleEnrichedParking?: Record<string, ParkingOption>;
+  accessToken?: string | null;
+  tripId?: string | null;
 }) {
   const opt =
     item.type === 'parking'
@@ -2208,64 +2167,42 @@ function OptionCard({
         </div>
 
         <div className="flex w-full shrink-0 flex-col gap-2 md:w-auto md:min-w-40 md:items-stretch">
-          {compact ? (
+          {item.type === 'parking' ? (
+            <ParkingProviderActions
+              compact={compact}
+              bookingUrl={routeUnavailable ? null : sourceLink}
+              providerUrl={routeUnavailable ? null : sourceLink}
+              directionsUrl={
+                routeUnavailable
+                  ? null
+                  : parkingLotRouteLink || opt.mapLink || null
+              }
+              searchQuery={opt.searchQuery || safeParkingSearchQuery}
+              provider={opt.bookingProvider || opt.sourceName || opt.name}
+              airportCode={airportCode}
+              parkingLotId={opt.id || null}
+              tripId={tripId || null}
+              accessToken={accessToken}
+            />
+          ) : compact ? (
             <div className="flex flex-col gap-2">
               {!routeUnavailable && sourceLink && (
                 <button
                   type="button"
                   onClick={() =>
-                    item.type === 'parking'
-                      ? copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
+                    item.type === 'rideshare'
+                      ? window.open(sourceLink, '_blank', 'noopener,noreferrer')
                       : window.open(sourceLink, '_blank', 'noopener,noreferrer')
                   }
                   className="inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
                 >
-                  {item.type === 'parking'
-                    ? opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
-                      ? 'View deal'
-                      : opt.type === 'official'
-                        ? 'Book official'
-                        : 'Check price'
-                    : item.type === 'rideshare' &&
-                      (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
-                      ? 'Find taxi'
-                      : item.type === 'rideshare'
-                        ? 'Open app'
-                        : 'View'}
+                  {item.type === 'rideshare' &&
+                    (opt.id === 'taxi' || String(opt.name || '').toLowerCase().includes('taxi'))
+                    ? 'Find taxi'
+                    : item.type === 'rideshare'
+                      ? 'Open app'
+                      : 'View'}
                 </button>
-              )}
-
-              {item.type === 'parking' && !routeUnavailable && parkingLotRouteLink && (
-                <a
-                  href={parkingLotRouteLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-                >
-                  Route to parking
-                </a>
-              )}
-
-              {item.type === 'parking' && parkingToDestinationRouteLink && (
-                <a
-                  href={parkingToDestinationRouteLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-                >
-                  {parkingTransferLinkLabel}
-                </a>
-              )}
-
-              {item.type === 'parking' && parkingToTerminalRouteLink && (
-                <a
-                  href={parkingToTerminalRouteLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-                >
-                  Parking to terminal
-                </a>
               )}
 
               {routeUnavailable && (
@@ -2276,21 +2213,7 @@ function OptionCard({
             </div>
           ) : (
             <>
-              {!routeUnavailable && sourceLink && item.type === 'parking' ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    copyTextThenOpen(opt.searchQuery || safeParkingSearchQuery, sourceLink)
-                  }
-                  className="inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
-                >
-                  {opt.bookingProvider === 'AirportParkingReservations' || opt.sourceName === 'AirportParkingReservations'
-                    ? 'View deal'
-                    : opt.type === 'official'
-                      ? 'Book official'
-                      : 'Check price'}
-                </button>
-              ) : sourceLink && !routeUnavailable ? (
+              {sourceLink && !routeUnavailable ? (
                 <a
                   href={sourceLink}
                   target="_blank"
@@ -2306,46 +2229,13 @@ function OptionCard({
                 </a>
               ) : null}
 
-              {item.type === 'parking' && parkingLotRouteLink && (
-                <a
-                  href={parkingLotRouteLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-900 hover:bg-slate-50"
-                >
-                  Route to parking
-                </a>
-              )}
-
-              {item.type === 'parking' && parkingToDestinationRouteLink && (
-                <a
-                  href={parkingToDestinationRouteLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-                >
-                  {parkingTransferLinkLabel}
-                </a>
-              )}
-
-              {item.type === 'parking' && parkingToTerminalRouteLink && (
-                <a
-                  href={parkingToTerminalRouteLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-                >
-                  Parking to terminal
-                </a>
-              )}
-
               {routeUnavailable && (
                 <div className="max-w-56 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
                   Route unavailable for this origin/date. Try a different origin or transportation option.
                 </div>
               )}
 
-              {item.type !== 'parking' && routeLink && (
+              {routeLink && (
                 <a
                   href={routeLink}
                   target="_blank"
@@ -2357,6 +2247,28 @@ function OptionCard({
               )}
             </>
           )}
+
+          {item.type === 'parking' && !routeUnavailable && parkingToDestinationRouteLink ? (
+            <a
+              href={parkingToDestinationRouteLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            >
+              {parkingTransferLinkLabel}
+            </a>
+          ) : null}
+
+          {item.type === 'parking' && parkingToTerminalRouteLink ? (
+            <a
+              href={parkingToTerminalRouteLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            >
+              Parking to terminal
+            </a>
+          ) : null}
         </div>
       </div>
 
@@ -3010,6 +2922,8 @@ function logRecommendationsFetch(
 
 export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
+  const { session } = useAuth();
+  const accessToken = session?.access_token ?? null;
   const routeSearchParams = useSearchParams();
   const routeSearchParamsString = routeSearchParams.toString();
   const searchParams = useMemo(() => {
@@ -3371,6 +3285,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     if (!tripData || tripData.type !== 'one-way-departure') return null;
 
     return calculateAirportReadinessBuffer({
+      bagPlan: tripData.bagPlan,
       checkingBags: !!tripData.checkingBags,
       securityOption: tripData.securityOption || 'standard',
       flightType: tripData.flightType || 'domestic',
@@ -3388,6 +3303,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
 
   const airlineOrFlight = searchParams.get('airlineOrFlight') || '';
+  const airlineDisplay = useMemo(() => {
+    if (!airlineOrFlight.trim()) return '';
+    return parseFlightInput(airlineOrFlight).normalizedLabel || airlineOrFlight;
+  }, [airlineOrFlight]);
   const intent = searchParams.get('intent') || '';
 
 
@@ -4198,6 +4117,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     ) as SecurityOption;
 
     const readiness = calculateAirportReadinessBuffer({
+      bagPlan: tripExtras.bagPlan,
       checkingBags: !!tripExtras.checkingBags,
       securityOption: selectedSecurityOption,
       flightType: (tripExtras.flightType || 'domestic') as FlightType,
@@ -4215,7 +4135,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         : depMin - airportReadyBufferMinutes
     );
 
-    const checkingBags = !!(tripData as TripDataWithExtras).checkingBags;
+    const resolvedBagPlan = resolveBagPlan({
+      bagPlan: (tripData as TripDataWithExtras).bagPlan,
+      checkingBags: !!(tripData as TripDataWithExtras).checkingBags,
+    });
     const flightType = String((tripData as TripDataWithExtras).flightType || 'domestic');
     const cabin = String((tripData as TripDataWithExtras).cabin || 'economy');
     const securityOption = String((tripData as TripDataWithExtras).securityOption || 'standard');
@@ -4230,7 +4153,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return {
       recommendedBy,
       lines: [
-        `Bags: ${checkingBags ? 'Yes' : 'No'}`,
+        `Bag plan: ${resolvedBagPlan === 'none' ? 'No checked bag' : resolvedBagPlan === 'checked' ? 'Checked bag' : 'Oversized / special item'}`,
         `Security: ${secLabel}`,
         `Flight: ${flightType === 'international' ? 'International' : 'Domestic'}`,
         `Cabin: ${cabin === 'premium' ? 'Premium' : 'Economy'}`,
@@ -4392,6 +4315,82 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       : smartPickParkingOptions;
 
   const smartPickOption = cheapestSmartPickOptions[0] || null;
+
+  const airportCompanionCard = useMemo(() => {
+    const topOption = viableOptions[0] ?? null;
+    const enrichedSmartPick = smartPickOption
+      ? googleEnrichedParking[smartPickOption.id] || smartPickOption
+      : null;
+
+    let transportMode: AirportDayTransportMode = null;
+    let transportModeLabel: string | null = null;
+    let travelMinutes: number | null = null;
+    let shuttleWalkMinutes: number | null = null;
+    let bookingUrl: string | null = null;
+    let directionsUrl: string | null = null;
+
+    if (smartPickOption && enrichedSmartPick && !isParkingRouteUnavailable(enrichedSmartPick)) {
+      transportMode = 'parking';
+      transportModeLabel = 'Parking';
+      const breakdown = parkingTimeBreakdown(enrichedSmartPick);
+      const drivePart = breakdown.parts.find((part) => part.label === 'Drive to lot');
+      travelMinutes = drivePart?.minutes ?? topOption?.duration ?? breakdown.totalMinutes;
+      shuttleWalkMinutes = Math.max(0, breakdown.totalMinutes - (drivePart?.minutes ?? 0));
+      bookingUrl = enrichedSmartPick.sourceLink ?? null;
+      if (tripData) {
+        const routeLinks = parkingRouteLinks(enrichedSmartPick, tripData);
+        directionsUrl = routeLinks.routeToParkingUrl || enrichedSmartPick.mapLink || null;
+      } else {
+        directionsUrl = enrichedSmartPick.mapLink || null;
+      }
+    } else if (topOption?.type === 'rideshare') {
+      transportMode = 'rideshare';
+      transportModeLabel = 'Rideshare / taxi';
+      travelMinutes = topOption.duration;
+    } else if (topOption?.type === 'transit') {
+      transportMode = 'transit';
+      transportModeLabel = 'Transit';
+      travelMinutes = topOption.duration;
+    } else if (topOption?.type === 'parking') {
+      transportMode = 'parking';
+      transportModeLabel = 'Parking';
+      travelMinutes = topOption.duration;
+    } else if (recommendation?.trafficEstimate?.duration) {
+      travelMinutes = recommendation.trafficEstimate.duration;
+    }
+
+    const bagPlan =
+      tripData?.type === 'one-way-departure'
+        ? resolveBagPlan({
+            bagPlan: tripData.bagPlan,
+            checkingBags: tripData.checkingBags,
+          })
+        : ('none' as BagPlan);
+
+    const returnDate =
+      tripData?.type === 'round-trip'
+        ? tripData.returnDate
+        : tripData?.type === 'one-way-departure'
+          ? (tripData as TripDataWithExtras).parkingCheckOutDate || null
+          : null;
+
+    return {
+      transportMode,
+      transportModeLabel,
+      travelMinutes,
+      shuttleWalkMinutes,
+      bookingUrl,
+      directionsUrl,
+      bagPlan,
+      returnDate,
+    };
+  }, [
+    viableOptions,
+    smartPickOption,
+    googleEnrichedParking,
+    recommendation?.trafficEstimate?.duration,
+    tripData,
+  ]);
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
@@ -4628,7 +4627,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 {displayDestination}
                 {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
-                {airlineOrFlight ? ` • ${airlineOrFlight}` : ''}
+                {airlineDisplay ? ` • ${airlineDisplay}` : ''}
               </p>
 
               {(tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
@@ -4685,9 +4684,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
                     : null
                 }
+                bagPlan={airportCompanionCard.bagPlan}
                 checkingBags={
                   'checkingBags' in tripData ? !!tripData.checkingBags : false
                 }
+                transportMode={airportCompanionCard.transportMode}
+                transportModeLabel={airportCompanionCard.transportModeLabel}
+                travelMinutes={airportCompanionCard.travelMinutes}
+                shuttleWalkMinutes={airportCompanionCard.shuttleWalkMinutes}
+                departureTime={
+                  tripData.type === 'one-way-departure' ? tripData.departureTime : null
+                }
+                airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                bookingUrl={airportCompanionCard.bookingUrl}
+                directionsUrl={airportCompanionCard.directionsUrl}
+                returnDate={airportCompanionCard.returnDate}
+                intent={intent}
+                tripData={tripData}
               />
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
@@ -5767,6 +5780,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           sort={sort}
                           onShowReviews={handleShowReviews}
                           googleEnrichedParking={googleEnrichedParking}
+                          accessToken={accessToken}
+                          tripId={searchParams.get('tripId')}
                         />
                       ))}
                     </div>
@@ -5822,6 +5837,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         sort={sort}
                         onShowReviews={handleShowReviews}
                         googleEnrichedParking={googleEnrichedParking}
+                        accessToken={accessToken}
+                        tripId={searchParams.get('tripId')}
                       />
                     ))}
                   </div>
@@ -5954,7 +5971,12 @@ function EditTripForm({
 
   const showAirportTimingControls = intent === 'flying-out' && initialData.type === 'one-way-departure';
 
-  const [checkingBags, setCheckingBags] = useState<boolean>(!!(initialData as TripDataWithExtras).checkingBags);
+  const [bagPlan, setBagPlan] = useState<BagPlan>(() =>
+    resolveBagPlan({
+      bagPlan: (initialData as TripDataWithExtras).bagPlan,
+      checkingBags: !!(initialData as TripDataWithExtras).checkingBags,
+    }),
+  );
   const [securityOption, setSecurityOption] = useState<SecurityOption>(((initialData as TripDataWithExtras).securityOption || 'standard') as SecurityOption);
   const [flightType, setFlightType] = useState<FlightType>(((initialData as TripDataWithExtras).flightType || 'domestic') as FlightType);
   const [cabin, setCabin] = useState<CabinClass>(((initialData as TripDataWithExtras).cabin || 'economy') as CabinClass);
@@ -6151,7 +6173,8 @@ function EditTripForm({
         parkingCheckInDate: departureDate,
         parkingCheckOutDate: parkingCheckOutDate || undefined,
         transportAvailability,
-        checkingBags: showAirportTimingControls ? checkingBags : (initialData as TripDataWithExtras).checkingBags,
+        bagPlan: showAirportTimingControls ? bagPlan : (initialData as TripDataWithExtras).bagPlan,
+        checkingBags: showAirportTimingControls ? bagPlan !== 'none' : (initialData as TripDataWithExtras).checkingBags,
         securityOption: showAirportTimingControls ? securityOption : (initialData as TripDataWithExtras).securityOption,
         flightType: showAirportTimingControls ? flightType : (initialData as TripDataWithExtras).flightType,
         cabin: showAirportTimingControls ? cabin : (initialData as TripDataWithExtras).cabin,
@@ -6267,33 +6290,33 @@ function EditTripForm({
           <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
             <div className="text-sm font-medium text-zinc-900">Airport timing</div>
             <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <div className="text-sm font-medium text-zinc-800">Checking bags?</div>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCheckingBags(false)}
-                    className={
-                      'rounded-xl border px-3 py-2 text-sm font-medium ' +
-                      (!checkingBags
-                        ? 'border-blue-500 bg-blue-50 text-zinc-900'
-                        : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
-                    }
-                  >
-                    No
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCheckingBags(true)}
-                    className={
-                      'rounded-xl border px-3 py-2 text-sm font-medium ' +
-                      (checkingBags
-                        ? 'border-blue-500 bg-blue-50 text-zinc-900'
-                        : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
-                    }
-                  >
-                    Yes
-                  </button>
+              <div className="sm:col-span-2">
+                <div className="text-sm font-medium text-zinc-800">Bag plan</div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {(
+                    [
+                      { key: 'none' as const, label: 'No checked bag' },
+                      { key: 'checked' as const, label: 'Checked bag' },
+                      { key: 'oversized' as const, label: 'Oversized / special item' },
+                    ] as Array<{ key: BagPlan; label: string }>
+                  ).map((opt) => {
+                    const selected = bagPlan === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setBagPlan(opt.key)}
+                        className={
+                          'rounded-xl border px-3 py-2 text-left text-sm font-medium ' +
+                          (selected
+                            ? 'border-blue-500 bg-blue-50 text-zinc-900'
+                            : 'border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50')
+                        }
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

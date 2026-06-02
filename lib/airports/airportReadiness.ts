@@ -1,7 +1,9 @@
-import { CabinClass, FlightType, SecurityOption } from '../types';
+import { bagPlanAddsMinutes, bagPlanExplanation, resolveBagPlan } from './bagPlan';
+import { CabinClass, FlightType, SecurityOption, type BagPlan } from '../types';
 
 export type AirportReadinessInput = {
-  checkingBags: boolean;
+  checkingBags?: boolean;
+  bagPlan?: BagPlan;
   securityOption: SecurityOption;
   flightType: FlightType;
   cabin: CabinClass;
@@ -10,33 +12,29 @@ export type AirportReadinessInput = {
 export type AirportReadinessResult = {
   bufferMinutes: number;
   assumptions: string[];
+  bagPlan: BagPlan;
 };
 
 export function calculateAirportReadinessBuffer(
-  input: AirportReadinessInput
+  input: AirportReadinessInput,
 ): AirportReadinessResult {
   const assumptions: string[] = [];
+  const bagPlan = resolveBagPlan(input);
 
-  let buffer =
-    input.flightType === 'international'
-      ? input.checkingBags
-        ? 180
-        : 150
-      : input.checkingBags
-        ? 105
-        : 75;
+  let buffer = input.flightType === 'international' ? 150 : 75;
 
   assumptions.push(
-    input.flightType === 'international'
-      ? 'International flight'
-      : 'Domestic flight'
+    input.flightType === 'international' ? 'International flight' : 'Domestic flight',
   );
 
-  assumptions.push(
-    input.checkingBags
-      ? 'Checked bags: add check-in/drop-off time'
-      : 'No checked bags'
-  );
+  const bagMinutes = bagPlanAddsMinutes(bagPlan);
+  if (bagMinutes > 0) {
+    buffer += bagMinutes;
+    const explanation = bagPlanExplanation(bagPlan);
+    if (explanation) assumptions.push(explanation);
+  } else {
+    assumptions.push('No checked bags');
+  }
 
   if (input.securityOption === 'precheck') {
     buffer -= 15;
@@ -54,8 +52,7 @@ export function calculateAirportReadinessBuffer(
   }
 
   if (input.cabin === 'premium') {
-    const reduction = input.checkingBags ? 10 : 5;
-    buffer -= reduction;
+    buffer -= bagPlan === 'none' ? 5 : 10;
     assumptions.push('Premium cabin: slightly faster check-in estimate');
   } else {
     assumptions.push('Economy cabin');
@@ -69,5 +66,6 @@ export function calculateAirportReadinessBuffer(
   return {
     bufferMinutes: buffer,
     assumptions,
+    bagPlan,
   };
 }

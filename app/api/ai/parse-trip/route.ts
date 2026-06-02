@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOutboundClick';
 import { beginAiParseRequest, resetAiParseBudgetForTests } from '../../../../lib/ai/tripParseBudget';
 import { parseTripText } from '../../../../lib/ai/parseTripText';
-import { isAiAssistantDisabled } from '../../../../lib/ai/tripParseConfig';
+import {
+  getAiAssistantProvider,
+  isAiAssistantDisabled,
+  isLiveAiAssistantActive,
+} from '../../../../lib/ai/tripParseConfig';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +18,7 @@ function jsonError(status: number, error: string, message: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    let body: { userText?: unknown };
+    let body: { userText?: unknown; sessionId?: unknown };
 
     try {
       body = await request.json();
@@ -26,13 +31,30 @@ export async function POST(request: NextRequest) {
       return jsonError(400, 'missing_user_text', 'userText is required.');
     }
 
+    const sessionId =
+      typeof body.sessionId === 'string' && body.sessionId.trim()
+        ? body.sessionId.trim().slice(0, 120)
+        : null;
+
+    const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || null;
+    const authClient = createSupabaseAuthClient(accessToken);
+    let userId: string | null = null;
+
+    if (authClient && accessToken) {
+      const { data } = await authClient.auth.getUser();
+      userId = data.user?.id ?? null;
+    }
+
     beginAiParseRequest();
 
-    const parsed = await parseTripText(userText);
+    const parsed = await parseTripText(userText, { userId, sessionId });
 
     return NextResponse.json({
       ...parsed,
       assistantDisabled: isAiAssistantDisabled(),
+      liveProviderActive: isLiveAiAssistantActive(),
+      configuredProvider: getAiAssistantProvider(),
+      requiresConfirmation: true,
     });
   } catch (error) {
     return jsonError(

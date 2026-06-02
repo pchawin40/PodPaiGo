@@ -3,10 +3,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   AIRLINE_CATALOG,
-  resolveAirlineInput,
   searchAirlines,
   type AirlineCatalogEntry,
 } from '../../lib/airlines/airlineCatalog';
+import { parseFlightInput } from '../../lib/airlines/parseFlightInput';
 
 type AirlineComboboxProps = {
   value: string;
@@ -31,7 +31,7 @@ export default function AirlineCombobox({
   const [activeIndex, setActiveIndex] = useState(0);
 
   const suggestions = useMemo(() => searchAirlines(value), [value]);
-  const resolved = useMemo(() => resolveAirlineInput(value), [value]);
+  const parsed = useMemo(() => parseFlightInput(value), [value]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -127,14 +127,13 @@ export default function AirlineCombobox({
 
       {helperText ? <p className="mt-2 text-xs text-zinc-500">{helperText}</p> : null}
 
-      {resolved.carrierCode && resolved.airlineName ? (
+      {parsed.airlineCode && parsed.airlineName ? (
         <p className="mt-2 text-xs text-slate-600">
-          Detected: {resolved.airlineName}
-          {resolved.flightNumber ? ` · flight ${resolved.carrierCode} ${resolved.flightNumber}` : ''}
+          Detected: {parsed.normalizedLabel || parsed.airlineName}
         </p>
       ) : null}
 
-      {value.trim() && !resolved.matchedCatalogEntry ? (
+      {value.trim() && !parsed.matchedCatalogEntry ? (
         <p className="mt-2 text-xs text-amber-800">
           Custom airline entry — confirm gate and check-in details with your airline before travel.
         </p>

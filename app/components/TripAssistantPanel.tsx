@@ -1,10 +1,11 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
+import { useAuth } from './AuthProvider';
 import TripAssistantConfirm from './TripAssistantConfirm';
 
 const EXAMPLE_PROMPTS = [
@@ -17,13 +18,33 @@ type TripAssistantPanelProps = {
   className?: string;
 };
 
+type ParseTripApiResponse = ParsedTripAssistantResult & {
+  liveProviderActive?: boolean;
+  configuredProvider?: 'mock' | 'openai';
+  requiresConfirmation?: boolean;
+};
+
 export default function TripAssistantPanel({ className = '' }: TripAssistantPanelProps) {
   const router = useRouter();
+  const { session } = useAuth();
   const [userText, setUserText] = useState('');
   const [parsed, setParsed] = useState<ParsedTripAssistantResult | null>(null);
+  const [liveProviderActive, setLiveProviderActive] = useState(false);
+  const [configuredProvider, setConfiguredProvider] = useState<'mock' | 'openai'>('mock');
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId] = useState(
+    () => `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+
+  const accessToken = session?.access_token ?? null;
+
+  const assistantStatusLabel = useMemo(() => {
+    if (loading) return 'AI parse in progress…';
+    if (parsed) return 'Review before running';
+    return liveProviderActive ? 'Using AI assistant' : 'Mock parser';
+  }, [loading, parsed, liveProviderActive]);
 
   const handleParse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -32,18 +53,27 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     setLoading(true);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+
       const response = await fetch('/api/ai/parse-trip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userText }),
+        headers,
+        body: JSON.stringify({ userText, sessionId }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as ParseTripApiResponse & { message?: string };
       if (!response.ok) {
         throw new Error(data.message || 'Could not parse trip.');
       }
 
-      setParsed(data as ParsedTripAssistantResult);
+      setParsed(data);
+      setLiveProviderActive(Boolean(data.liveProviderActive));
+      setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
     } catch (parseError) {
       setParsed(null);
       setError(parseError instanceof Error ? parseError.message : 'Could not parse trip.');
@@ -87,16 +117,14 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           </p>
         </div>
 
-        <button
-          type="button"
-          disabled
-          title="Voice input coming soon"
-          aria-label="Voice input coming soon"
-          className="inline-flex items-center gap-2 self-start rounded-full border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500"
-        >
-          <span aria-hidden="true">🎤</span>
-          Voice soon
-        </button>
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
+            {assistantStatusLabel}
+          </span>
+          <span className="text-xs text-slate-500">
+            {liveProviderActive ? 'Using AI assistant' : 'Mock parser in development'}
+          </span>
+        </div>
       </div>
 
       <form onSubmit={handleParse} className="mt-4 space-y-3">
@@ -135,7 +163,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           disabled={!userText.trim() || loading}
           className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? 'Parsing…' : 'Parse trip'}
+          {loading ? 'AI parse…' : 'Generate trip plan'}
         </button>
       </form>
 
@@ -147,6 +175,10 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             onConfirm={handleConfirm}
             onCancel={handleCancel}
           />
+          <p className="mt-3 text-xs text-slate-500">
+            Review before running. Provider: {parsed.parser}
+            {configuredProvider === 'openai' ? ' (live configured)' : ' (mock/dev fallback)'}.
+          </p>
         </div>
       ) : null}
     </section>

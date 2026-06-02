@@ -1,87 +1,104 @@
-import { getAiAssistantProvider, getOpenAiApiKey, isAiAssistantDisabled } from './tripParseConfig';
-import { logAiParseEvent } from './tripParseLogger';
+import { checkAiDailyBudget, recordAiDailyBudgetUse } from './aiDailyBudget';
+import { logAiUsageEvent } from './aiUsageLogger';
 import { parseTripTextMock } from './mockTripParser';
+import { parseTripTextOpenAi } from './openaiTripParser';
+import { logAiParseEvent } from './tripParseLogger';
+import {
+  getAiAssistantProvider,
+  getMaxAiParseInputChars,
+  isAiAssistantDisabled,
+} from './tripParseConfig';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 import { tryConsumeAiParseCall } from './tripParseBudget';
 
-async function parseTripTextOpenAi(userText: string): Promise<ParsedTripAssistantResult | null> {
-  const apiKey = getOpenAiApiKey();
-  if (!apiKey) return null;
+export type ParseTripTextOptions = {
+  userId?: string | null;
+  sessionId?: string | null;
+};
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
-      temperature: 0,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Extract airport trip planning fields from user text. Return JSON with keys: originText, airportCode, destinationCity, airlineText, departureDate, departureTime, returnDate, returnTime, tripType, needsParking, needsLeaveTime, confidence, missingFields.',
-        },
-        { role: 'user', content: userText },
-      ],
-    }),
-  });
-
-  if (!response.ok) return null;
-
-  const json = await response.json();
-  const content = json?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') return null;
-
-  const parsed = JSON.parse(content) as Partial<ParsedTripAssistantResult>;
+function emptyParsedResult(parser: ParsedTripAssistantResult['parser']): ParsedTripAssistantResult {
   return {
-    originText: parsed.originText ?? null,
-    airportCode: parsed.airportCode?.toUpperCase?.() ?? null,
-    destinationCity: parsed.destinationCity ?? null,
-    airlineText: parsed.airlineText ?? null,
-    departureDate: parsed.departureDate ?? null,
-    departureTime: parsed.departureTime ?? null,
-    returnDate: parsed.returnDate ?? null,
-    returnTime: parsed.returnTime ?? null,
-    tripType: parsed.tripType ?? null,
-    needsParking: parsed.needsParking === true,
-    needsLeaveTime: parsed.needsLeaveTime !== false,
-    confidence: parsed.confidence ?? 'medium',
-    missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields.map(String) : [],
-    parser: 'openai',
+    originText: null,
+    airportCode: null,
+    destinationCity: null,
+    airlineText: null,
+    departureDate: null,
+    departureTime: null,
+    returnDate: null,
+    returnTime: null,
+    tripType: null,
+    needsParking: false,
+    needsLeaveTime: true,
+    confidence: 'low',
+    missingFields: ['userText'],
+    parser,
   };
 }
 
-export async function parseTripText(userText: string): Promise<ParsedTripAssistantResult> {
+function budgetBlockedResult(reason: string): ParsedTripAssistantResult {
+  return {
+    ...parseTripTextMock(''),
+    parser: 'mock',
+    confidence: 'low',
+    missingFields: [reason],
+  };
+}
+
+export async function parseTripText(
+  userText: string,
+  options: ParseTripTextOptions = {},
+): Promise<ParsedTripAssistantResult> {
   const trimmed = userText.trim();
+  const parserLabel = isAiAssistantDisabled() ? 'disabled' : getAiAssistantProvider();
+
   if (!trimmed) {
     logAiParseEvent('ai_parse_failed', { reason: 'empty_input' });
+    return emptyParsedResult(isAiAssistantDisabled() ? 'disabled' : 'mock');
+  }
+
+  if (trimmed.length > getMaxAiParseInputChars()) {
+    logAiParseEvent('ai_parse_failed', { reason: 'input_too_long' });
+    await logAiUsageEvent({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      provider: parserLabel,
+      model: null,
+      inputChars: trimmed.length,
+      success: false,
+      errorCode: 'input_too_long',
+    });
     return {
-      originText: null,
-      airportCode: null,
-      destinationCity: null,
-      airlineText: null,
-      departureDate: null,
-      departureTime: null,
-      returnDate: null,
-      returnTime: null,
-      tripType: null,
-      needsParking: false,
-      needsLeaveTime: true,
-      confidence: 'low',
-      missingFields: ['userText'],
-      parser: isAiAssistantDisabled() ? 'disabled' : 'mock',
+      ...budgetBlockedResult('inputTooLong'),
+      missingFields: ['inputTooLong'],
+    };
+  }
+
+  const dailyBudget = await checkAiDailyBudget({
+    userId: options.userId,
+    sessionId: options.sessionId,
+  });
+
+  if (!dailyBudget.allowed) {
+    logAiParseEvent('ai_parse_failed', { reason: dailyBudget.reason || 'daily_limit_exceeded' });
+    await logAiUsageEvent({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      provider: parserLabel,
+      model: null,
+      inputChars: trimmed.length,
+      success: false,
+      errorCode: dailyBudget.reason || 'daily_limit_exceeded',
+    });
+    return {
+      ...budgetBlockedResult('dailyLimit'),
+      missingFields: ['dailyLimit'],
     };
   }
 
   if (!tryConsumeAiParseCall()) {
     logAiParseEvent('ai_parse_failed', { reason: 'request_budget_exceeded' });
     return {
-      ...parseTripTextMock(trimmed),
-      parser: 'mock',
-      confidence: 'low',
+      ...budgetBlockedResult('requestBudget'),
       missingFields: ['requestBudget'],
     };
   }
@@ -94,13 +111,52 @@ export async function parseTripText(userText: string): Promise<ParsedTripAssista
   try {
     if (!isAiAssistantDisabled() && getAiAssistantProvider() === 'openai') {
       const openAiResult = await parseTripTextOpenAi(trimmed);
-      if (openAiResult) {
+      recordAiDailyBudgetUse({
+        userId: options.userId,
+        sessionId: options.sessionId,
+      });
+
+      if (openAiResult.parsed) {
+        await logAiUsageEvent({
+          userId: options.userId,
+          sessionId: options.sessionId,
+          provider: 'openai',
+          model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+          inputChars: trimmed.length,
+          promptTokens: openAiResult.promptTokens,
+          completionTokens: openAiResult.completionTokens,
+          totalTokens: openAiResult.totalTokens,
+          estimatedCost: openAiResult.estimatedCost,
+          success: true,
+        });
         logAiParseEvent('ai_parse_success', { parser: 'openai' });
-        return openAiResult;
+        return openAiResult.parsed;
       }
+
+      await logAiUsageEvent({
+        userId: options.userId,
+        sessionId: options.sessionId,
+        provider: 'openai',
+        model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+        inputChars: trimmed.length,
+        success: false,
+        errorCode: openAiResult.errorCode || 'openai_failed',
+      });
     }
 
     const mockResult = parseTripTextMock(trimmed);
+    recordAiDailyBudgetUse({
+      userId: options.userId,
+      sessionId: options.sessionId,
+    });
+    await logAiUsageEvent({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      provider: 'mock',
+      model: null,
+      inputChars: trimmed.length,
+      success: true,
+    });
     logAiParseEvent('ai_parse_mock_used', {
       confidence: mockResult.confidence,
       missingFields: mockResult.missingFields,
@@ -108,8 +164,16 @@ export async function parseTripText(userText: string): Promise<ParsedTripAssista
     logAiParseEvent('ai_parse_success', { parser: 'mock' });
     return mockResult;
   } catch (error) {
-    logAiParseEvent('ai_parse_failed', {
-      reason: error instanceof Error ? error.message : 'unknown_error',
+    const message = error instanceof Error ? error.message : 'unknown_error';
+    logAiParseEvent('ai_parse_failed', { reason: message });
+    await logAiUsageEvent({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      provider: getAiAssistantProvider(),
+      model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+      inputChars: trimmed.length,
+      success: false,
+      errorCode: message,
     });
 
     return {

@@ -214,6 +214,7 @@ function plannedAirportArrivalDateTime(tripData: TripData): string | undefined {
   }
 
   const readiness = calculateAirportReadinessBuffer({
+    bagPlan: tripData.bagPlan,
     checkingBags: !!tripData.checkingBags,
     securityOption: tripData.securityOption || 'standard',
     flightType: tripData.flightType || 'domestic',
@@ -660,6 +661,7 @@ export class RecommendationEngine {
     const airportReadiness =
       tripData.type === 'one-way-departure'
         ? calculateAirportReadinessBuffer({
+          bagPlan: tripData.bagPlan,
           checkingBags: !!tripData.checkingBags,
           securityOption: tripData.securityOption || 'standard',
           flightType: tripData.flightType || 'domestic',

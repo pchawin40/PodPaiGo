@@ -1,5 +1,7 @@
 import { getAirportById } from '../airports/catalog';
+import { parseBagPlanParam, resolveBagPlan } from '../airports/bagPlan';
 import type {
+  BagPlan,
   CabinClass,
   FlightType,
   SecurityOption,
@@ -76,7 +78,13 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const timeAnchor: 'flight-departure' | 'airport-arrival' =
     timeAnchorRaw === 'airport-arrival' ? 'airport-arrival' : 'flight-departure';
 
-  const checkingBags = (searchParams.get('bags') || 'no').toLowerCase() === 'yes';
+  const bagPlanRaw = searchParams.get('bagPlan');
+  const checkingBagsLegacy = (searchParams.get('bags') || 'no').toLowerCase() === 'yes';
+  const bagPlan = resolveBagPlan({
+    bagPlan: bagPlanRaw ? parseBagPlanParam(bagPlanRaw) : undefined,
+    checkingBags: checkingBagsLegacy,
+  });
+  const checkingBags = bagPlan !== 'none';
   const checkedInRaw = (searchParams.get('checkedInAtAirport') || 'yes').toLowerCase();
   const checkedInAtAirport = checkedInRaw !== 'no';
 
@@ -136,6 +144,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               transportAvailability,
               transitPayment,
               checkingBags,
+              bagPlan,
               securityOption,
               flightType,
               cabin,
@@ -270,6 +279,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
 type TripDataWithExtras = TripData & {
   airportCode?: string;
   checkingBags?: boolean;
+  bagPlan?: BagPlan;
   securityOption?: SecurityOption;
   flightType?: FlightType;
   cabin?: CabinClass;
@@ -347,7 +357,12 @@ export function tripDataToSearchParams(
     if (extras.timeAnchor) params.set('timeAnchor', extras.timeAnchor);
 
     if (options?.intent === 'flying-out' || params.get('intent') === 'flying-out') {
-      params.set('bags', extras.checkingBags ? 'yes' : 'no');
+      const resolvedBagPlan = resolveBagPlan({
+        bagPlan: extras.bagPlan,
+        checkingBags: extras.checkingBags,
+      });
+      params.set('bagPlan', resolvedBagPlan);
+      params.set('bags', resolvedBagPlan === 'none' ? 'no' : 'yes');
       const securityOption = extras.securityOption || 'standard';
       params.set('securityOption', securityOption);
       params.set('security', securityOption);
