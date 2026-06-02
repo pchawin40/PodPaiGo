@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Recommendation, TripData } from '../../../lib/types';
 import { RecommendationEngine } from '../../../lib/recommendationEngine';
+import { runWithSearchBudget } from '../../../lib/apiUsage/searchBudget';
+import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
 export const runtime = 'nodejs';
 
 const recommendationInFlight = new Map<string, Promise<Recommendation>>();
@@ -57,7 +59,11 @@ export async function POST(request: NextRequest) {
     const existing = recommendationInFlight.get(requestKey);
     const promise =
       existing ||
-      RecommendationEngine.generateRecommendations(tripData).finally(() => {
+      runWithPlacesRequestBudget(requestKey, () =>
+        runWithSearchBudget(requestKey, () =>
+          RecommendationEngine.generateRecommendations(tripData),
+        ),
+      ).finally(() => {
         recommendationInFlight.delete(requestKey);
       });
 

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isGooglePlacePhotosLiveBlocked, isGooglePlacesLiveBlocked } from '../../../lib/parking/googlePlacesGuard';
+import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
 import {
   fetchGooglePlacePhotoName,
   fetchGooglePlacePhotoNames,
@@ -12,6 +14,7 @@ import {
   shouldAttemptGooglePlaceMatch,
 } from '../../../lib/parking/googlePlaceMatchUtils';
 import {
+  readPlacePhotoCache,
   savePlacePhotoCache,
 } from '../../../lib/parking/placePhotoCache';
 import { TimeoutError, withTimeout } from '../../../lib/utils/asyncTimeout';
@@ -69,9 +72,81 @@ async function withPhotoName(
   place: ParkingGooglePlaceCacheRecord
 ): Promise<ParkingGooglePlaceCacheRecord> {
   if (place.photoName || !place.googlePlaceId) return place;
+  if (place.photoNames?.length) {
+    return { ...place, photoName: place.photoNames[0] };
+  }
+
+  if (isGooglePlacePhotosLiveBlocked()) {
+    return place;
+  }
 
   const photoName = await fetchGooglePlacePhotoName(place.googlePlaceId).catch(() => null);
   return photoName ? { ...place, photoName } : place;
+}
+
+async function resolvePlacePhotos(args: {
+  place: ParkingGooglePlaceCacheRecord;
+  name: string;
+  airport: string | null;
+}): Promise<{ photos: string[]; attributions: string[] }> {
+  const placeId = args.place.googlePlaceId;
+  if (!placeId) {
+    const fallback = googlePlacePhotoImageUrl(args.place.photoName);
+    return {
+      photos: fallback ? [fallback] : [],
+      attributions: [],
+    };
+  }
+
+  const cachedPhotos = await readPlacePhotoCache(placeId);
+  if (cachedPhotos?.photos.length) {
+    return {
+      photos: cachedPhotos.photos,
+      attributions: cachedPhotos.attributions,
+    };
+  }
+
+  if (args.place.photoNames?.length) {
+    const imageUrls = args.place.photoNames
+      .map((photoName) => googlePlacePhotoImageUrl(photoName))
+      .filter((url): url is string => Boolean(url));
+
+    if (imageUrls.length) {
+      return { photos: imageUrls, attributions: [] };
+    }
+  }
+
+  const placeWithPhoto = await withPhotoName(args.place);
+  if (isGooglePlacePhotosLiveBlocked()) {
+    const fallbackImageUrl = googlePlacePhotoImageUrl(placeWithPhoto.photoName);
+    return {
+      photos: fallbackImageUrl ? [fallbackImageUrl] : [],
+      attributions: [],
+    };
+  }
+
+  const photoNames = placeWithPhoto.googlePlaceId
+    ? await fetchGooglePlacePhotoNames(placeWithPhoto.googlePlaceId, 4)
+    : [];
+
+  const imageUrls = photoNames
+    .map((photoName) => googlePlacePhotoImageUrl(photoName))
+    .filter((url): url is string => Boolean(url));
+
+  const fallbackImageUrl = googlePlacePhotoImageUrl(placeWithPhoto.photoName);
+  const photos = imageUrls.length ? imageUrls : fallbackImageUrl ? [fallbackImageUrl] : [];
+
+  if (placeWithPhoto.googlePlaceId && photos.length) {
+    await savePlacePhotoCache({
+      placeId: placeWithPhoto.googlePlaceId,
+      parkingName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName || args.name,
+      airportCode: args.airport || undefined,
+      photos,
+      attributions: [],
+    });
+  }
+
+  return { photos, attributions: [] };
 }
 
 export async function GET(req: NextRequest) {
@@ -137,148 +212,153 @@ async function handleRequest(input: Record<string, unknown>) {
     });
   }
 
-  let matchResult: PlaceMatchResult | null = null;
-
-  try {
-    matchResult = await withTimeout(
-      (async () => {
-        const place = await resolveParkingGooglePlace({
-          airportCode: airport || null,
-          parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
-          lotName: name,
-          lotAddress: address,
-          googlePlaceId,
-          airportContext: resolvedAirportContext,
-          provider,
-          source,
-        });
-
-        if (!place) return null;
-
-        const placeWithPhoto = await withPhotoName(place);
-
-        const photoNames = placeWithPhoto.googlePlaceId
-          ? await fetchGooglePlacePhotoNames(placeWithPhoto.googlePlaceId, 4)
-          : [];
-
-        const imageUrls = photoNames
-          .map((photoName) => googlePlacePhotoImageUrl(photoName))
-          .filter((url): url is string => Boolean(url));
-
-        const fallbackImageUrl = googlePlacePhotoImageUrl(placeWithPhoto.photoName);
-        const photos = imageUrls.length ? imageUrls : fallbackImageUrl ? [fallbackImageUrl] : [];
-
-        if (placeWithPhoto.googlePlaceId && photos.length) {
-          await savePlacePhotoCache({
-            placeId: placeWithPhoto.googlePlaceId,
-            parkingName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName || name,
-            airportCode: airport || undefined,
-            photos,
-            attributions: [],
-          });
-        }
-
-        return {
-          place: placeWithPhoto,
-          cachedPhotos: photos,
-          cachedAttributions: [],
-        };
-      })(),
-      GOOGLE_PLACE_MATCH_TIMEOUT_MS,
-      'Google place match'
-    );
-  } catch (error) {
-    if (error instanceof TimeoutError) {
-      return NextResponse.json({
-        ...unavailableFields(),
-        status: 'timeout',
-        place: null,
-        cacheKey,
-        source: 'timeout',
-      });
-    }
-
-    console.error('google-place-match failed', error);
-
-    return NextResponse.json(
-      {
-        ...unavailableFields(),
-        status: 'error',
-        place: null,
-        cacheKey,
-        source: 'error',
-        message:
-          process.env.NODE_ENV === 'development' && error instanceof Error
-            ? error.message
-            : 'Google place match failed',
-        stack:
-          process.env.NODE_ENV === 'development' && error instanceof Error
-            ? error.stack
-            : undefined,
-      },
-      { status: 500 }
-    );
+  const destinationKind = toString(input.destinationKind);
+  if (destinationKind && destinationKind !== 'airport') {
+    return NextResponse.json({
+      ...unavailableFields(),
+      place: null,
+      cacheKey,
+      source: 'skipped-non-airport-trip',
+    });
   }
 
-  const placeWithPhoto = matchResult?.place ?? null;
-  const cachedPhotos = matchResult?.cachedPhotos ?? [];
-  const cachedAttributions = matchResult?.cachedAttributions ?? [];
+  return runWithPlacesRequestBudget(`google-place-match:${cacheKey}`, async () => {
+    let matchResult: PlaceMatchResult | null = null;
 
-  const imageUrl = cachedPhotos[0] || googlePlacePhotoImageUrl(placeWithPhoto?.photoName);
-  const photoUrl = imageUrl;
-  const placeId = placeWithPhoto?.googlePlaceId || null;
-  const displayName = placeWithPhoto?.googlePlaceName || placeWithPhoto?.lotName || null;
-  const formattedAddress =
-    placeWithPhoto?.googleFormattedAddress || placeWithPhoto?.lotAddress || null;
-  const rating = typeof placeWithPhoto?.rating === 'number' ? placeWithPhoto.rating : null;
-  const userRatingCount =
-    typeof placeWithPhoto?.reviewCount === 'number' ? placeWithPhoto.reviewCount : null;
-  const googleMapsUri = placeWithPhoto?.googleMapsUri || null;
+    try {
+      matchResult = await withTimeout(
+        (async () => {
+          const place = await resolveParkingGooglePlace({
+            airportCode: airport || null,
+            parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+            lotName: name,
+            lotAddress: address,
+            googlePlaceId,
+            airportContext: resolvedAirportContext,
+            provider,
+            source,
+          });
 
-  const result = placeWithPhoto
-    ? {
-      placeId,
-      displayName,
-      formattedAddress,
-      rating,
-      userRatingCount,
-      photoUrl,
-      imageUrl,
-      images: cachedPhotos.length ? cachedPhotos : imageUrl ? [imageUrl] : [],
-      photoAttributions: cachedAttributions,
-      status: 'matched',
-      place: {
+          if (!place) return null;
+
+          const { photos, attributions } = await resolvePlacePhotos({
+            place,
+            name,
+            airport: airport || null,
+          });
+
+          return {
+            place,
+            cachedPhotos: photos,
+            cachedAttributions: attributions,
+          };
+        })(),
+        GOOGLE_PLACE_MATCH_TIMEOUT_MS,
+        'Google place match',
+      );
+    } catch (error) {
+      if (error instanceof TimeoutError) {
+        return NextResponse.json({
+          ...unavailableFields(),
+          status: 'timeout',
+          place: null,
+          cacheKey,
+          source: 'timeout',
+        });
+      }
+
+      console.error('google-place-match failed', error);
+
+      return NextResponse.json(
+        {
+          ...unavailableFields(),
+          status: 'error',
+          place: null,
+          cacheKey,
+          source: 'error',
+          message:
+            process.env.NODE_ENV === 'development' && error instanceof Error
+              ? error.message
+              : 'Google place match failed',
+          stack:
+            process.env.NODE_ENV === 'development' && error instanceof Error
+              ? error.stack
+              : undefined,
+        },
+        { status: 500 },
+      );
+    }
+
+    const placeWithPhoto = matchResult?.place ?? null;
+    const cachedPhotos = matchResult?.cachedPhotos ?? [];
+    const cachedAttributions = matchResult?.cachedAttributions ?? [];
+
+    const imageUrl = cachedPhotos[0] || googlePlacePhotoImageUrl(placeWithPhoto?.photoName);
+    const photoUrl = imageUrl;
+    const placeId = placeWithPhoto?.googlePlaceId || null;
+    const displayName = placeWithPhoto?.googlePlaceName || placeWithPhoto?.lotName || null;
+    const formattedAddress =
+      placeWithPhoto?.googleFormattedAddress || placeWithPhoto?.lotAddress || null;
+    const rating = typeof placeWithPhoto?.rating === 'number' ? placeWithPhoto.rating : null;
+    const userRatingCount =
+      typeof placeWithPhoto?.reviewCount === 'number' ? placeWithPhoto.reviewCount : null;
+    const googleMapsUri = placeWithPhoto?.googleMapsUri || null;
+    const lat = typeof placeWithPhoto?.lat === 'number' ? placeWithPhoto.lat : null;
+    const lng = typeof placeWithPhoto?.lng === 'number' ? placeWithPhoto.lng : null;
+
+    const result = placeWithPhoto
+      ? {
         placeId,
-        googlePlaceId: placeId,
-        name: displayName,
         displayName,
-        googleMapsUri,
-        rating,
-        reviewCount: userRatingCount,
-        userRatingCount,
-        address: formattedAddress,
         formattedAddress,
-        reviews: placeWithPhoto.reviews,
-        fetchedAt: placeWithPhoto.fetchedAt,
-        expiresAt: placeWithPhoto.expiresAt,
-        source: placeWithPhoto.source,
-        matchConfidence: placeWithPhoto.matchConfidence,
-        ...parkingGooglePlaceToOptionUpdate(placeWithPhoto),
+        lat,
+        lng,
+        coordinateSource: lat != null && lng != null ? 'google_place' : null,
+        rating,
+        userRatingCount,
         photoUrl,
         imageUrl,
         images: cachedPhotos.length ? cachedPhotos : imageUrl ? [imageUrl] : [],
         photoAttributions: cachedAttributions,
         status: 'matched',
-      },
-      cacheKey: placeWithPhoto.cacheKey,
-      source: 'google-places',
-    }
-    : {
-      ...unavailableFields(),
-      place: null,
-      cacheKey,
-      source: 'unavailable',
-    };
+        place: {
+          placeId,
+          googlePlaceId: placeId,
+          lat,
+          lng,
+          coordinateSource: lat != null && lng != null ? 'google_place' : undefined,
+          name: displayName,
+          displayName,
+          googleMapsUri,
+          rating,
+          reviewCount: userRatingCount,
+          userRatingCount,
+          address: formattedAddress,
+          formattedAddress,
+          reviews: placeWithPhoto.reviews,
+          fetchedAt: placeWithPhoto.fetchedAt,
+          expiresAt: placeWithPhoto.expiresAt,
+          source: placeWithPhoto.source,
+          matchConfidence: placeWithPhoto.matchConfidence,
+          ...parkingGooglePlaceToOptionUpdate(placeWithPhoto),
+          photoUrl,
+          imageUrl,
+          images: cachedPhotos.length ? cachedPhotos : imageUrl ? [imageUrl] : [],
+          photoAttributions: cachedAttributions,
+          status: 'matched',
+        },
+        cacheKey: placeWithPhoto.cacheKey,
+        source: isGooglePlacesLiveBlocked() && placeWithPhoto.source !== 'google-places'
+          ? placeWithPhoto.source
+          : 'google-places',
+      }
+      : {
+        ...unavailableFields(),
+        place: null,
+        cacheKey,
+        source: 'unavailable',
+      };
 
-  return NextResponse.json(result);
+    return NextResponse.json(result);
+  });
 }

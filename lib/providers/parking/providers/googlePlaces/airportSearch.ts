@@ -1,5 +1,6 @@
 import type { ParkingOption } from '../../../../types';
 import { DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES } from '../../../../access/parkAndRideAccess';
+import { canMakeLiveSearchTextCall, isGoogleParkingDiscoveryLiveBlocked } from '../../../../parking/googlePlacesGuard';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { getAirportById } from '../../../../airports/catalog';
 import { resolveParkingPricing } from '../../../pricingResolver';
@@ -146,22 +147,7 @@ function resolveLotKeyFromName(name: string): string | null {
   return null;
 }
 
-function isParkAndRideName(name: string): boolean {
-  const lower = name.toLowerCase();
-
-  return (
-    lower.includes('park & ride') ||
-    lower.includes('park and ride') ||
-    lower.includes('park-and-ride') ||
-    lower.includes('park n ride') ||
-    lower.includes('transit center') ||
-    lower.includes('transit centre') ||
-    lower.includes('link station') ||
-    lower.includes('light rail') ||
-    lower.includes('station parking') ||
-    lower.includes('northgate')
-  );
-}
+import { looksLikeParkAndRideTransitName } from '../../../../parking/parkAndRideClassification';
 
 function dedupeGooglePlaces(places: GooglePlace[]): GooglePlace[] {
   const seen = new Set<string>();
@@ -227,8 +213,39 @@ export async function getGoogleParkingPlaces(args: {
     process.env.GOOGLE_PARKING_MAX_RESULTS || 50,
   );
 
+  const airportSearchQueryCache = new Map<string, { ts: number; places: GooglePlace[] }>();
+  const airportSearchInFlight = new Map<string, Promise<GooglePlace[]>>();
+  const AIRPORT_SEARCH_QUERY_TTL_MS =
+    Number(process.env.PLACES_SEARCH_QUERY_CACHE_TTL_HOURS || 24) * 60 * 60 * 1000;
+
   async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    if (isGoogleParkingDiscoveryLiveBlocked()) return [];
+
+    const cacheKey = `${airportCode}|${textQuery}`.toLowerCase();
+    const cached = airportSearchQueryCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < AIRPORT_SEARCH_QUERY_TTL_MS) {
+      return cached.places;
+    }
+
+    const inFlight = airportSearchInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const promise = (async () => {
+      if (
+        !canMakeLiveSearchTextCall(
+          {
+            reason: 'airport_parking_discovery',
+            route: 'searchAirportGoogleParking',
+            airportCode,
+            cacheKey,
+          },
+          { discovery: true },
+        )
+      ) {
+        return [];
+      }
+
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -262,7 +279,18 @@ export async function getGoogleParkingPlaces(args: {
     if (!res.ok) return [];
 
     const data = await res.json();
-    return Array.isArray(data.places) ? data.places : [];
+    const places = Array.isArray(data.places) ? data.places : [];
+    airportSearchQueryCache.set(cacheKey, { ts: Date.now(), places });
+    return places;
+    })();
+
+    airportSearchInFlight.set(cacheKey, promise);
+
+    try {
+      return await promise;
+    } finally {
+      airportSearchInFlight.delete(cacheKey);
+    }
   }
 
   if (!key || !airportCoordinates) return [];
@@ -310,7 +338,7 @@ export async function getGoogleParkingPlaces(args: {
 
         const name = place.displayName?.text || `${airportCode} Parking`;
         const lowerName = name.toLowerCase();
-        const isParkAndRide = isParkAndRideName(name);
+        const isParkAndRide = looksLikeParkAndRideTransitName(name);
         const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
 
         const lotKey = resolveLotKeyFromName(name);

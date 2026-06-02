@@ -1,0 +1,94 @@
+
+> podpaigo@0.1.0 build
+> next build
+
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /home/pathocha000/personal/PodPaiGo/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /home/pathocha000/personal/PodPaiGo/PodPaiGo/package-lock.json
+
+▲ Next.js 16.2.4 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.6s
+  Running TypeScript ...
+  Finished TypeScript in 8.5s ...
+  Collecting page data using 19 workers ...
+  Generating static pages using 19 workers (0/36) ...
+  Generating static pages using 19 workers (9/36) 
+  Generating static pages using 19 workers (18/36) 
+  Generating static pages using 19 workers (27/36) 
+AirportLookupService database refresh failed error: column "airport_code" does not exist
+    at async c (.next/server/chunks/ssr/[root-of-the-server]__12.z7tj._.js:1:253)
+    at async f (.next/server/chunks/ssr/[root-of-the-server]__12.z7tj._.js:19:769)
+    at async g (.next/server/chunks/ssr/[root-of-the-server]__065m_g~._.js:1:5746)
+    at async i (.next/server/chunks/ssr/[root-of-the-server]__065m_g~._.js:1:6265) {
+  length: 112,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '27',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '3716',
+  routine: 'errorMissingColumn'
+}
+✓ Generating static pages using 19 workers (36/36) in 1135ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /about
+├ ○ /admin/parking-diagnostics
+├ ○ /airports
+├ ● /airports/[code]
+│ ├ /airports/sea
+│ ├ /airports/pae
+│ ├ /airports/bli
+│ └ [+3 more paths]
+├ ○ /airports/sea
+├ ƒ /api/admin/refresh-apr
+├ ƒ /api/airport-security
+├ ƒ /api/airports
+├ ƒ /api/airports/search
+├ ƒ /api/apr-availability
+├ ƒ /api/cron/discover-parking
+├ ƒ /api/cron/refresh-parking
+├ ƒ /api/geocode/autocomplete
+├ ƒ /api/geocode/reverse
+├ ƒ /api/google-place-match
+├ ƒ /api/google-place-photo
+├ ƒ /api/parking-reviews
+├ ƒ /api/parking/apr-live-prices
+├ ƒ /api/parking/diagnostics
+├ ƒ /api/parking/discover
+├ ƒ /api/parking/inventory
+├ ƒ /api/parking/live-refresh
+├ ƒ /api/parking/prices
+├ ƒ /api/recommendations
+├ ƒ /api/tsa/sea
+├ ƒ /api/weather
+├ ○ /how-it-works
+├ ○ /privacy
+├ ○ /results
+├ ƒ /results/[tripId]
+├ ○ /roadmap
+└ ○ /trip
+
+
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML (uses generateStaticParams)
+ƒ  (Dynamic)  server-rendered on demand
+

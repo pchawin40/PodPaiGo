@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
+import {
+  cachePhotoMedia,
+  dedupePhotoMediaFetch,
+  getCachedPhotoMedia,
+} from '@/lib/parking/placeMediaCache';
+import { canMakeLivePhotoMediaCall } from '@/lib/parking/googlePlacesGuard';
+import { runWithPlacesRequestBudget } from '@/lib/apiUsage/placesRequestBudget';
 
 function googleMapsApiKey(): string | null {
   return getGoogleMapsServerApiKey() ?? null;
@@ -36,44 +43,76 @@ function encodePhotoName(name: string): string {
 export async function GET(req: NextRequest) {
   const name = req.nextUrl.searchParams.get('name')?.trim() || '';
   const apiKey = googleMapsApiKey();
+  const maxWidthPx = normalizedMaxWidth(req.nextUrl.searchParams.get('maxWidthPx'));
 
   if (!apiKey || !isSafePhotoName(name)) {
     return unavailableResponse();
   }
 
-  const params = new URLSearchParams({
-    maxWidthPx: String(normalizedMaxWidth(req.nextUrl.searchParams.get('maxWidthPx'))),
-    key: apiKey,
-  });
+  const cached = getCachedPhotoMedia(name, maxWidthPx);
+  if (cached) {
+    const headers = new Headers();
+    headers.set('Content-Type', cached.contentType);
+    headers.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    headers.set('X-Place-Photo-Cache', 'hit');
+    return new Response(cached.body, { status: 200, headers });
+  }
 
-  const url = `https://places.googleapis.com/v1/${encodePhotoName(name)}/media?${params.toString()}`;
-
-  try {
-    const upstream = await fetch(url, {
-      cache: 'no-store',
-      redirect: 'follow',
-    });
-
-    const contentType = upstream.headers.get('content-type') || '';
-    if (!upstream.ok || !upstream.body || !contentType.toLowerCase().startsWith('image/')) {
+  return runWithPlacesRequestBudget(`google-place-photo:${name}`, async () => {
+    if (
+      !canMakeLivePhotoMediaCall({
+        reason: 'place_photo_media',
+        route: '/api/google-place-photo',
+        cacheKey: name,
+      })
+    ) {
       return unavailableResponse();
     }
 
-    const headers = new Headers();
-    headers.set('Content-Type', contentType);
-    headers.set(
-      'Cache-Control',
-      upstream.headers.get('cache-control') || 'public, max-age=86400, stale-while-revalidate=604800'
-    );
-
-    const contentLength = upstream.headers.get('content-length');
-    if (contentLength) headers.set('Content-Length', contentLength);
-
-    return new Response(upstream.body, {
-      status: 200,
-      headers,
+    const params = new URLSearchParams({
+      maxWidthPx: String(maxWidthPx),
+      key: apiKey,
     });
-  } catch {
-    return unavailableResponse();
-  }
+
+    const url = `https://places.googleapis.com/v1/${encodePhotoName(name)}/media?${params.toString()}`;
+
+    try {
+      const media = await dedupePhotoMediaFetch(name, maxWidthPx, async () => {
+        const upstream = await fetch(url, {
+          cache: 'no-store',
+          redirect: 'follow',
+        });
+
+        const contentType = upstream.headers.get('content-type') || '';
+        if (!upstream.ok || !upstream.body || !contentType.toLowerCase().startsWith('image/')) {
+          return null;
+        }
+
+        const body = await upstream.arrayBuffer();
+        return { body, contentType, ts: Date.now() };
+      });
+
+      if (!media) {
+        return unavailableResponse();
+      }
+
+      cachePhotoMedia(name, maxWidthPx, media.body, media.contentType);
+
+      const headers = new Headers();
+      headers.set('Content-Type', media.contentType);
+      headers.set(
+        'Cache-Control',
+        'public, max-age=86400, stale-while-revalidate=604800',
+      );
+      headers.set('X-Place-Photo-Cache', 'miss');
+      headers.set('Content-Length', String(media.body.byteLength));
+
+      return new Response(media.body, {
+        status: 200,
+        headers,
+      });
+    } catch {
+      return unavailableResponse();
+    }
+  });
 }

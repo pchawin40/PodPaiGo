@@ -56,12 +56,21 @@ function getTrustPenalty(trustStatus: TrustStatus): number {
   }
 }
 
-function getDirectnessBoost(option: ParkingOption | RideshareOption | TransitOption | TransitJourney, type: 'parking' | 'rideshare' | 'transit'): number {
+function getDirectnessBoost(
+  option: ParkingOption | RideshareOption | TransitOption | TransitJourney,
+  type: 'parking' | 'rideshare' | 'transit',
+  tripData?: TripData,
+): number {
   if (type === 'parking') {
     const parkingOption = option as ParkingOption;
     if (isParkingRouteUnavailable(parkingOption)) return -100;
 
-    const totalMinutes = getParkingTotalMinutes(parkingOption);
+    const totalMinutes = tripData
+      ? getParkingTotalMinutes(parkingOption, tripData)
+      : getParkingTerminalTimeMinutes(
+          parkingOption,
+          buildParkingDriveContextFromOption(parkingOption),
+        );
     return totalMinutes <= 10 ? 18 : totalMinutes <= 20 ? 10 : 4;
   }
 
@@ -102,26 +111,34 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
 }
 
 import { getParkingTerminalTimeMinutes, buildParkingDriveContextFromOption } from './parking/routeMinutes';
+import { resolveTripParkingContext } from './trip/tripContext';
 
-function getParkingTotalMinutes(parking: ParkingOption): number {
+function getParkingTotalMinutes(parking: ParkingOption, tripData: TripData): number {
   return getParkingTerminalTimeMinutes(
     parking,
     buildParkingDriveContextFromOption(parking),
+    resolveTripParkingContext(tripData),
   );
 }
 
 function getStressScore(
   type: 'parking' | 'rideshare' | 'transit',
   option: ParkingOption | RideshareOption | TransitOption | TransitJourney,
-  cost: number
+  cost: number,
+  tripData?: TripData,
 ): number {
   const trustPenalty = getTrustPenalty(option.trustStatus);
-  const directnessBoost = getDirectnessBoost(option, type);
+  const directnessBoost = getDirectnessBoost(option, type, tripData);
   const availability = option.availability || 0;
   const duration = type === 'parking'
     ? isParkingRouteUnavailable(option as ParkingOption)
       ? 999
-      : getParkingTotalMinutes(option as ParkingOption)
+      : tripData
+        ? getParkingTotalMinutes(option as ParkingOption, tripData)
+        : getParkingTerminalTimeMinutes(
+            option as ParkingOption,
+            buildParkingDriveContextFromOption(option as ParkingOption),
+          )
     : type === 'rideshare'
       ? (option as RideshareOption).duration
       : (option as TransitJourney).totalDuration;
@@ -356,7 +373,7 @@ export function rankRecommendations(
         ? calculateOfficialParkingCost(parking, parkingDuration)
         : calculateOffAirportParkingCost(parking, parkingDuration);
 
-      const totalDuration = getParkingTotalMinutes(parking);
+      const totalDuration = getParkingTotalMinutes(parking, tripData);
 
       let score = 100 - (cost * 0.45);
       score -= totalDuration * 2;
@@ -414,10 +431,21 @@ export function rankRecommendations(
       }
 
       const reasons = [];
-      if ((parking.transferType ?? (parking.type === 'off-airport' ? 'shuttle' : 'walk')) !== 'shuttle') {
-        reasons.push('Direct terminal access');
+      const isCityTrip = resolveTripParkingContext(tripData) === 'city_destination_trip';
+
+      if (isCityTrip) {
+        if ((parking.transferToTerminalMinutes ?? 99) <= 10) reasons.push('Short walk');
+        if (parking.covered) reasons.push('Covered garage');
+        if (parking.priceDisplay === 'live' || parking.pricingConfidence === 'live') {
+          reasons.push('Live provider price');
+        }
+        if ((parking.transferToTerminalMinutes ?? 99) <= 15) reasons.push('Close to destination');
+      } else {
+        if ((parking.transferType ?? (parking.type === 'off-airport' ? 'shuttle' : 'walk')) !== 'shuttle') {
+          reasons.push('Direct terminal access');
+        }
+        if (parking.type === 'off-airport') reasons.push('Shuttle transfer included');
       }
-      if (parking.type === 'off-airport') reasons.push('Shuttle transfer included');
       if (tripData.type === 'one-way-departure') {
         const parkingHours = parkingDuration / 60;
         reasons.push(`Parking duration: ${parkingHours} hour${parkingHours !== 1 ? 's' : ''}`);
@@ -442,7 +470,7 @@ export function rankRecommendations(
 
       if (reasons.length === 0) reasons.push('Available option');
 
-      const stressScore = getStressScore('parking', parking, cost);
+      const stressScore = getStressScore('parking', parking, cost, tripData);
       recommendations.push({
         type: 'parking',
         option: parking,
@@ -476,7 +504,7 @@ export function rankRecommendations(
     if (cost < 100) reasons.push('Reasonable price');
     if (reasons.length === 0) reasons.push('Available option');
 
-    const stressScore = getStressScore('rideshare', rideshare, cost);
+    const stressScore = getStressScore('rideshare', rideshare, cost, tripData);
     recommendations.push({
       type: 'rideshare',
       option: rideshare,
@@ -544,7 +572,7 @@ export function rankRecommendations(
 
     if (reasons.length === 0) reasons.push('Transit option available');
 
-    const stressScore = getStressScore('transit', transit, cost);
+    const stressScore = getStressScore('transit', transit, cost, tripData);
     const transitDuration = 'totalDuration' in transit ? transit.totalDuration : transit.duration;
     recommendations.push({
       type: 'transit',

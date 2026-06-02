@@ -120,6 +120,68 @@ function unknownGooglePricing(lotKind: ParkingLotKind): PricingResolution {
   };
 }
 
+const PAE_OFFICIAL_PRICES: Record<string, PricingResolution> = {
+  economy: {
+    price: 24,
+    priceMin: 24,
+    priceMax: 24,
+    priceDisplay: 'estimated',
+    priceUnit: 'per-day',
+    priceNote:
+      'Official Paine Field economy daily maximum from the airport rate card. First hour free; cell-phone waiting area is short-term only.',
+    priceSource: 'official-rate',
+    priceConfidence: 'high',
+    bookingProvider: 'Paine Field',
+  },
+  premium: {
+    price: 34,
+    priceMin: 34,
+    priceMax: 34,
+    priceDisplay: 'estimated',
+    priceUnit: 'per-day',
+    priceNote:
+      'Official Paine Field premium daily maximum from the airport rate card. First hour free; cell-phone waiting area is short-term only.',
+    priceSource: 'official-rate',
+    priceConfidence: 'high',
+    bookingProvider: 'Paine Field',
+  },
+  weekly: {
+    price: 204,
+    priceMin: 204,
+    priceMax: 204,
+    priceDisplay: 'estimated',
+    priceUnit: 'total',
+    priceNote:
+      'Official Paine Field discounted weekly rate where applicable. Confirm current rate card before booking.',
+    priceSource: 'official-rate',
+    priceConfidence: 'high',
+    bookingProvider: 'Paine Field',
+  },
+};
+
+function resolvePaeOfficialPricing(lotName: string): PricingResolution | null {
+  const lower = lotName.toLowerCase();
+
+  if (lower.includes('weekly')) {
+    return PAE_OFFICIAL_PRICES.weekly;
+  }
+
+  if (lower.includes('premium') || lower.includes('garage')) {
+    return PAE_OFFICIAL_PRICES.premium;
+  }
+
+  if (
+    lower.includes('economy') ||
+    lower.includes('paine field') ||
+    lower.includes('terminal parking') ||
+    lower.includes('paine field airport')
+  ) {
+    return PAE_OFFICIAL_PRICES.economy;
+  }
+
+  return null;
+}
+
 export function resolveParkingPricing(args: {
   airportCode: string;
   lotName: string;
@@ -136,6 +198,13 @@ export function resolveParkingPricing(args: {
 
     if (matchedKey) {
       return SEA_KNOWN_PRICES[matchedKey];
+    }
+  }
+
+  if (airportCode === 'PAE') {
+    const official = resolvePaeOfficialPricing(lotName);
+    if (official) {
+      return official;
     }
   }
 

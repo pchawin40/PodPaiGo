@@ -1,6 +1,14 @@
 import type { ParkingOption } from '../../../../types';
 import { DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES } from '../../../../access/parkAndRideAccess';
+import { looksLikeParkAndRideTransitName } from '../../../../parking/parkAndRideClassification';
+import {
+  mergeLiveCityParkWhizPricing,
+  resolveCityParkingPricing,
+} from '../../../../parking/cityParkingPricing';
+import { findMatchingParkWhizOption } from '../../../../parking/parkWhizMatch';
+import { canMakeLiveSearchTextCall, isGoogleParkingDiscoveryLiveBlocked } from '../../../../parking/googlePlacesGuard';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
+import { getParkWhizDestinationParkingOptions } from '../../../parkWhiz';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
 import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
@@ -45,6 +53,12 @@ export async function getDestinationParkingOptions(args: {
   destination: string;
   dateTime: string;
   parkingDurationMinutes?: number;
+  destinationLat?: number;
+  destinationLng?: number;
+  checkInDate?: string;
+  checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
 }): Promise<ParkingOption[]> {
   const key = getGoogleMapsServerApiKey();
 
@@ -65,6 +79,24 @@ export async function getDestinationParkingOptions(args: {
   ];
 
   async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
+    if (isGoogleParkingDiscoveryLiveBlocked()) {
+      return [];
+    }
+
+    if (
+      !canMakeLiveSearchTextCall(
+        {
+          reason: 'destination_parking_discovery',
+          route: 'getDestinationParkingOptions',
+          airportCode: null,
+          cacheKey: textQuery,
+        },
+        { discovery: true },
+      )
+    ) {
+      return [];
+    }
+
     const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
@@ -108,6 +140,25 @@ export async function getDestinationParkingOptions(args: {
 
   const places = placesByQuery.flat();
 
+  const durationMinutes = Math.max(60, args.parkingDurationMinutes ?? 4 * 60);
+
+  const liveParkWhizOptions =
+    typeof args.destinationLat === 'number' &&
+    typeof args.destinationLng === 'number' &&
+    args.checkInDate &&
+    args.checkOutDate
+      ? await getParkWhizDestinationParkingOptions({
+          destination: args.destination,
+          coordinates: { lat: args.destinationLat, lng: args.destinationLng },
+          checkInDate: args.checkInDate,
+          checkOutDate: args.checkOutDate,
+          checkInAt: args.checkInAt,
+          checkOutAt: args.checkOutAt,
+        }).catch(() => [])
+      : [];
+
+  const matchedLiveParkWhizIds = new Set<string>();
+
   const mapped = places
     .filter((place: GooglePlace) => {
       const name = String(place.displayName?.text || '').toLowerCase();
@@ -133,10 +184,14 @@ export async function getDestinationParkingOptions(args: {
         lowerName.includes('garage') ||
         lowerName.includes('covered');
 
-      const isParkAndRide =
-        lowerName.includes('park & ride') ||
-        lowerName.includes('park and ride') ||
-        lowerName.includes('station parking');
+      const isParkAndRide = looksLikeParkAndRideTransitName(name);
+      const walkToDestination = isParkAndRide ? 10 : 8;
+      const pricing = resolveCityParkingPricing({
+        name,
+        address: place.formattedAddress,
+        durationMinutes,
+        covered: isGarage,
+      });
 
       const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
       const routeDestination = place.formattedAddress || name;
@@ -149,23 +204,25 @@ export async function getDestinationParkingOptions(args: {
           ? place.userRatingCount
           : undefined;
 
-      const option: ParkingOption = {
+      let option: ParkingOption = {
         id: `destination-google-${place.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         name,
-        type: isParkAndRide ? 'park-and-ride' : 'off-airport',
-        price: isGarage ? 4 : 3,
-        priceDisplay: 'estimated',
-        priceUnit: 'per-hour',
-        priceNote:
-          'Estimated hourly parking. Open Google Maps or provider page to confirm live rate, hours, and availability.',
-        priceSource: 'estimated',
-        priceConfidence: 'low',
+        type: isParkAndRide ? 'park-and-ride' : isGarage ? 'official' : 'off-airport',
+        price: pricing.price,
+        priceMin: pricing.priceMin,
+        priceMax: pricing.priceMax,
+        priceDisplay: pricing.priceDisplay,
+        priceUnit: pricing.priceUnit,
+        pricingConfidence: pricing.pricingConfidence,
+        priceNote: pricing.priceNote,
+        priceSource: pricing.priceSource,
+        priceConfidence: pricing.priceConfidence,
         availabilityStatus: 'unknown',
         isAvailable: true,
         availability: 50,
         availabilityScore: 50,
-        trustStatus: 'estimated',
-        sourceName: 'Google Places',
+        trustStatus: pricing.trustStatus ?? 'estimated',
+        sourceName: pricing.priceSource === 'official-rate' ? 'Official rate card' : 'Estimated city parking',
         sourceLink: place.googleMapsUri || googleMapsSearchUrl(routeDestination),
         mapLink: googleMapsSearchUrl(routeDestination),
         googlePlaceId: place.id,
@@ -180,38 +237,58 @@ export async function getDestinationParkingOptions(args: {
         routeUnavailable: false,
         distance: 10,
         parkingBufferMinutes: 8,
-        transferToTerminalMinutes: isParkAndRide ? 25 : 8,
+        transferToTerminalMinutes: isParkAndRide ? 25 : walkToDestination,
         transferType: isParkAndRide ? 'transit' : 'walk',
-        walkingMinutes: isParkAndRide ? 10 : 8,
+        walkingMinutes: undefined,
         shuttleMinutes: undefined,
+        shuttleWaitMinutes: undefined,
+        bufferRiskMinutes: undefined,
         covered: isGarage,
         reviewScore: rating,
         reviewCount,
         searchQuery: searchQueries.join(' | '),
         lastUpdated: new Date().toISOString(),
         assumptions: [
-          'Discovered from Google Places near the destination.',
-          'Hourly price is estimated because live destination parking pricing is not connected yet.',
-          'Open Google Maps/provider page to confirm live rate, garage hours, entrance, and availability.',
+          'Discovered from Google Places near your destination.',
+          ...(pricing.assumptions || []),
           isParkAndRide
             ? 'Park & Ride rules vary. Do not assume overnight parking unless verified.'
-            : 'Walking time to final destination is estimated.',
+            : 'Walk time to your destination is estimated from the lot location.',
         ].filter(Boolean),
         bestFor: [
           rating && rating >= 4.4 ? 'Best Reviews' : '',
           isGarage ? 'Covered' : '',
-          isParkAndRide ? 'Park & Ride' : 'Destination Parking',
+          isParkAndRide ? 'Park & Ride' : 'City parking',
         ].filter(Boolean),
         providerSource: 'google',
         fetchedAt: new Date().toISOString(),
-        priceFreshness: 'estimated',
+        priceFreshness: pricing.priceDisplay === 'live' ? 'live' : 'estimated',
         parkAndRideRules: isParkAndRide ? DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES : undefined,
       };
+
+      const liveMatch = findMatchingParkWhizOption(option, liveParkWhizOptions);
+      if (liveMatch) {
+        matchedLiveParkWhizIds.add(liveMatch.id);
+        option = mergeLiveCityParkWhizPricing(option, liveMatch);
+      }
 
       return withAvailabilityScore(option);
     });
 
-  return dedupeParkingOptions(mapped)
+  const unmatchedLiveParkWhiz = liveParkWhizOptions
+    .filter((live) => !matchedLiveParkWhizIds.has(live.id))
+    .map((live) =>
+      withAvailabilityScore({
+        ...live,
+        id: `destination-parkwhiz-${live.id}`,
+        assumptions: [
+          ...(live.assumptions || []),
+          'Live ParkWhiz city quote discovered near your destination.',
+        ],
+      }),
+    );
+
+  return dedupeParkingOptions([...mapped, ...unmatchedLiveParkWhiz])
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
     .slice(0, maxResults);
 }

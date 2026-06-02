@@ -4,6 +4,7 @@ import { canDisplayParkingPrice } from './priceDisplay';
 import { googleMapsDirectionsLink, googleMapsSearchLink } from '../maps';
 import { isParkingRouteUnavailable } from './routeStatus';
 import { getAirportById } from '../airports/catalog';
+import { getParkingTransferLinkLabel, resolveTripParkingContextFromTrip } from './parkingLabels';
 import { cleanParkingProviderInventoryName } from './googlePlaceMatchUtils';
 
 type ParkingRouteOption = Pick<
@@ -13,6 +14,10 @@ type ParkingRouteOption = Pick<
   | 'name'
   | 'lat'
   | 'lng'
+  | 'canonicalLat'
+  | 'canonicalLng'
+  | 'canonicalAddress'
+  | 'coordinateSource'
   | 'normalizedAddress'
   | 'address'
   | 'googlePlaceId'
@@ -21,7 +26,7 @@ type ParkingRouteOption = Pick<
   | 'googleMapsUri'
 >;
 
-type ParkingRouteTripData = Pick<TripData, 'origin' | 'destination' | 'airportCode'> | null;
+type ParkingRouteTripData = Pick<TripData, 'origin' | 'destination' | 'airportCode' | 'type' | 'destinationKind'> | null;
 
 type ParkingDestinationSource =
   | 'google-place'
@@ -39,22 +44,18 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
-import { resolveParkingDriveMinutesWithFallback, buildParkingDriveContextFromOption, type ParkingDriveContext } from './routeMinutes';
-
-function getParkingDriveMinutes(
-  option: ParkingOption,
-  context?: ParkingDriveContext,
-): number {
-  return resolveParkingDriveMinutesWithFallback(option, context);
-}
+import { resolveParkingDriveMinutesDetailed, buildParkingDriveContextFromOption, formatDriveToLotMinutes, type ParkingDriveContext } from './routeMinutes';
+import { getParkingRouteCoordinates } from './parkingCoordinates';
+import type { TripParkingContext } from '../trip/tripContext';
 
 export function parkingTimeBreakdown(
   option: ParkingOption,
   context?: ParkingDriveContext,
+  tripContext: TripParkingContext = 'airport_trip',
 ): {
   label: string;
   totalMinutes: number;
-  parts: Array<{ label: string; minutes: number }>;
+  parts: Array<{ label: string; minutes: number; display?: string }>;
 } {
   if (isParkingRouteUnavailable(option)) {
     return {
@@ -65,8 +66,40 @@ export function parkingTimeBreakdown(
   }
 
   const resolvedContext = context ?? buildParkingDriveContextFromOption(option);
-  const drive = getParkingDriveMinutes(option, resolvedContext);
+  const driveResolution = resolveParkingDriveMinutesDetailed(option, resolvedContext);
+  const drive = driveResolution.minutes;
+  const driveDisplay = formatDriveToLotMinutes(drive, driveResolution.source);
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
+
+  if (tripContext === 'city_destination_trip') {
+    const walkToDestination =
+      typeof option.transferToTerminalMinutes === 'number' && option.transferToTerminalMinutes > 0
+        ? option.transferToTerminalMinutes
+        : typeof option.walkingMinutes === 'number' && option.walkingMinutes > 0
+          ? option.walkingMinutes
+          : 8;
+
+    const parts = [
+      {
+        label: 'Drive to lot',
+        minutes: drive,
+        display: driveDisplay,
+      },
+      ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
+      { label: 'Walk to destination', minutes: walkToDestination },
+    ];
+
+    const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
+
+    return {
+      label: parts
+        .map((p) => `${p.label} ${p.display ?? formatMinutes(p.minutes)}`)
+        .join(' + '),
+      totalMinutes,
+      parts,
+    };
+  }
+
   const shuttleWait =
     option.transferType === 'shuttle'
       ? typeof option.shuttleWaitMinutes === 'number'
@@ -91,7 +124,11 @@ export function parkingTimeBreakdown(
         : 0;
 
   const parts = [
-    { label: 'Drive to lot', minutes: drive },
+    {
+      label: 'Drive to lot',
+      minutes: drive,
+      display: driveDisplay,
+    },
     ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
     ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
     ...(transfer > 0
@@ -116,7 +153,9 @@ export function parkingTimeBreakdown(
   const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
 
   return {
-    label: parts.map((p) => `${p.label} ${formatMinutes(p.minutes)}`).join(' + '),
+    label: parts
+      .map((p) => `${p.label} ${p.display ?? formatMinutes(p.minutes)}`)
+      .join(' + '),
     totalMinutes,
     parts,
   };
@@ -257,6 +296,10 @@ export function resolveParkingLotDestination(
   const googlePlaceAddress = String(option.googlePlaceAddress || '').trim();
   const googlePlaceId = String(option.googlePlaceId || '').trim() || undefined;
   const googleMapsUri = String(option.googleMapsUri || '').trim() || undefined;
+  const canonicalAddress = String(option.canonicalAddress || '').trim();
+  const routeCoords = getParkingRouteCoordinates(option);
+  const hasCanonicalCoords =
+    typeof routeCoords.lat === 'number' && typeof routeCoords.lng === 'number';
   const hasUsableAddress = isUsableLotDestination(address, airportDestination);
   const hasUsableNormalizedAddress = isUsableLotDestination(
     normalizedAddress,
@@ -271,6 +314,23 @@ export function resolveParkingLotDestination(
     googlePlaceName,
     hasUsableGooglePlaceAddress ? googlePlaceAddress : ''
   );
+
+  if (option.coordinateSource === 'google_place' && hasCanonicalCoords) {
+    const destination =
+      canonicalAddress ||
+      googlePlaceAddress ||
+      (isUsableLotDestination(googlePlaceDestination, airportDestination)
+        ? googlePlaceDestination
+        : `${routeCoords.lat},${routeCoords.lng}`);
+
+    return {
+      destination,
+      googlePlaceId,
+      googleMapsUri,
+      usedGooglePlaceData: true,
+      source: 'google-place',
+    };
+  }
 
   if (
     (googlePlaceId || googleMapsUri) &&
@@ -377,6 +437,18 @@ export function resolveParkingLotDestination(
   }
 
   if (
+    hasCanonicalCoords
+  ) {
+    return {
+      destination: canonicalAddress || `${routeCoords.lat},${routeCoords.lng}`,
+      googlePlaceId,
+      googleMapsUri,
+      usedGooglePlaceData: option.coordinateSource === 'google_place',
+      source: option.coordinateSource === 'google_place' ? 'google-place' : 'coordinates',
+    };
+  }
+
+  if (
     typeof option.lat === 'number' &&
     Number.isFinite(option.lat) &&
     typeof option.lng === 'number' &&
@@ -417,14 +489,18 @@ export function parkingRouteLinks(
 ): {
   routeToParkingUrl: string | null;
   parkingToAirportUrl: string | null;
+  parkingToDestinationUrl: string | null;
+  transferLinkLabel: string;
   parkingLotDestination: string;
   airportDestination: string;
   usedGooglePlaceData: boolean;
   parkingLotDestinationSource: ParkingDestinationSource;
 } {
+  const tripContext = resolveTripParkingContextFromTrip(tripData);
   const airportDestination = resolveAirportDestination(tripData);
   const lotDestination = resolveParkingLotDestination(option, airportDestination);
   const origin = String(tripData?.origin || '').trim();
+  const finalDestination = String(tripData?.destination || '').trim();
 
   const routeToParkingUrl =
     origin && lotDestination.destination
@@ -434,28 +510,28 @@ export function parkingRouteLinks(
       : null;
 
   const parkingToAirportUrl =
-    lotDestination.destination && airportDestination
+    tripContext === 'airport_trip' &&
+    lotDestination.destination &&
+    airportDestination
       ? googleMapsDirectionsLink(lotDestination.destination, airportDestination, 'driving', {
         originPlaceId: lotDestination.googlePlaceId,
       })
       : null;
 
-  // if (process.env.NODE_ENV === 'development') {
-  //   console.log('[Parking Maps route links]', {
-  //     parkingOptionName: option.name,
-  //     parkingLotDestination: lotDestination.destination || null,
-  //     airportDestination,
-  //     routeToParkingUrl,
-  //     parkingToAirportUrl,
-  //     usedGooglePlaceData: lotDestination.usedGooglePlaceData,
-  //     parkingLotDestinationSource: lotDestination.source,
-  //     googleMapsUri: lotDestination.googleMapsUri,
-  //   });
-  // }
+  const parkingToDestinationUrl =
+    tripContext === 'city_destination_trip' &&
+    lotDestination.destination &&
+    finalDestination
+      ? googleMapsDirectionsLink(lotDestination.destination, finalDestination, 'walking', {
+        originPlaceId: lotDestination.googlePlaceId,
+      })
+      : null;
 
   return {
     routeToParkingUrl,
     parkingToAirportUrl,
+    parkingToDestinationUrl,
+    transferLinkLabel: getParkingTransferLinkLabel(tripContext),
     parkingLotDestination: lotDestination.destination,
     airportDestination,
     usedGooglePlaceData: lotDestination.usedGooglePlaceData,

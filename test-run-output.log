@@ -1,0 +1,943 @@
+=== export PATH ===
+PATH=/home/pathocha000/.volta/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Users/Chawin/AppData/Local/Programs/cursor/resources/app/resources/helpers:/mnt/c/Python312/Scripts/:/mnt/c/Python312/:/mnt/c/Windows/system32:/mnt/c/Windows:/mnt/c/Windows/System32/Wbem:/mnt/c/Windows/System32/WindowsPowerShell/v1.0/:/mnt/c/Windows/System32/OpenSSH/:/mnt/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/mnt/c/Program Files/NVIDIA Corporation/NVIDIA NvDLISR:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files/nodejs/:/mnt/c/ProgramData/chocolatey/bin:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/Users/Chawin/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/Chawin/AppData/Roaming/npm:/mnt/c/Users/Chawin/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Users/Chawin/AppData/Local/GitHubDesktop/bin:/mnt/c/Users/Chawin/.dotnet/tools:/mnt/c/Users/Chawin/AppData/Local/Programs/cursor/resources/app/bin
+=== Setup ===
+Node: /home/pathocha000/.volta/bin/node
+v20.13.1
+Npm: /home/pathocha000/.volta/bin/npm
+10.5.2
+
+=== npm test -- __tests__/rideshareEstimate.test.ts ===
+
+> podpaigo@0.1.0 test
+> jest __tests__/rideshareEstimate.test.ts
+
+FAIL __tests__/rideshareEstimate.test.ts
+  rideshare estimate model
+    ✕ Monroe → SEA one-way UberX is in a realistic market range (4 ms)
+    ✕ airport parking checkout trips estimate outbound and return rides (1 ms)
+
+  ● rideshare estimate model › Monroe → SEA one-way UberX is in a realistic market range
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      38 |     expect(uber).toBeDefined();
+      39 |     expect(uber!.rideshareTripScope).toBe('one-way');
+    > 40 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(100);
+         |                            ^
+      41 |     expect(uber!.priceMax).toBeLessThanOrEqual(220);
+      42 |     expect(uber!.price).toBeGreaterThanOrEqual(105);
+      43 |     expect(uber!.price).toBeLessThanOrEqual(145);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:40:28)
+
+  ● rideshare estimate model › airport parking checkout trips estimate outbound and return rides
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      71 |     expect(uber).toBeDefined();
+      72 |     expect(uber!.rideshareTripScope).toBe('round-trip');
+    > 73 |     expect(uber!.oneWayPriceMin).toBeGreaterThanOrEqual(100);
+         |                                  ^
+      74 |     expect(uber!.oneWayPriceMax).toBeLessThanOrEqual(220);
+      75 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(uber!.oneWayPriceMin! * 2 - 4);
+      76 |     expect(uber!.priceMax).toBeGreaterThanOrEqual(uber!.oneWayPriceMax! * 2 - 4);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:73:34)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 2 total
+Snapshots:   0 total
+Time:        0.375 s, estimated 3 s
+Ran all test suites matching __tests__/rideshareEstimate.test.ts.
+EXIT_CODE: 1
+
+=== npm test ===
+
+> podpaigo@0.1.0 test
+> jest
+
+PASS lib/access/__tests__/rankAccessOptions.test.ts
+PASS lib/access/__tests__/parkAndRideAccess.test.ts
+PASS lib/access/__tests__/seaCurated.test.ts
+  ● Console
+
+    console.warn
+      [access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.
+
+      29 |
+      30 |   seaCuratedDisabledDiagnosticLogged = true;
+    > 31 |   console.warn(
+         |           ^
+      32 |     '[access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.',
+      33 |   );
+      34 | }
+
+      at logSeaCuratedAccessDisabledDiagnostic (lib/access/buildAccessOptions.ts:31:11)
+      at buildSeaCuratedAccessOptions (lib/access/buildAccessOptions.ts:106:5)
+      at Object.<anonymous> (lib/access/__tests__/seaCurated.test.ts:53:40)
+
+PASS __tests__/parkAndRideAccess.test.ts
+PASS lib/airports/__tests__/lookupService.test.ts
+PASS lib/utils/__tests__/debug.test.ts
+FAIL __tests__/rideshareEstimate.test.ts
+  ● rideshare estimate model › Monroe → SEA one-way UberX is in a realistic market range
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      38 |     expect(uber).toBeDefined();
+      39 |     expect(uber!.rideshareTripScope).toBe('one-way');
+    > 40 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(100);
+         |                            ^
+      41 |     expect(uber!.priceMax).toBeLessThanOrEqual(220);
+      42 |     expect(uber!.price).toBeGreaterThanOrEqual(105);
+      43 |     expect(uber!.price).toBeLessThanOrEqual(145);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:40:28)
+
+  ● rideshare estimate model › airport parking checkout trips estimate outbound and return rides
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      71 |     expect(uber).toBeDefined();
+      72 |     expect(uber!.rideshareTripScope).toBe('round-trip');
+    > 73 |     expect(uber!.oneWayPriceMin).toBeGreaterThanOrEqual(100);
+         |                                  ^
+      74 |     expect(uber!.oneWayPriceMax).toBeLessThanOrEqual(220);
+      75 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(uber!.oneWayPriceMin! * 2 - 4);
+      76 |     expect(uber!.priceMax).toBeGreaterThanOrEqual(uber!.oneWayPriceMax! * 2 - 4);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:73:34)
+
+PASS lib/rideshare/__tests__/estimate.test.ts
+PASS __tests__/routeMinutes.test.ts
+PASS lib/providers/parking/providers/googlePlaces/__tests__/airportSearch.test.ts
+PASS lib/__tests__/parkingRouteUnavailableFlow.test.ts
+PASS __tests__/domain.test.ts
+PASS lib/airports/__tests__/nationalAirportSearch.test.ts
+PASS lib/access/__tests__/pricingLadder.test.ts
+PASS lib/trip/__tests__/favoriteTrips.test.ts
+PASS lib/providers/parking/__tests__/aggregator.test.ts
+PASS lib/providers/parking/__tests__/registry.test.ts
+  ● Console
+
+    console.warn
+      [parking-registry] Provider failing-provider search failed: Network timeout
+
+      46 |         } catch (error) {
+      47 |           const message = error instanceof Error ? error.message : String(error);
+    > 48 |           console.warn(`[parking-registry] Provider ${provider.id} search failed:`, message);
+         |                   ^
+      49 |
+      50 |           return {
+      51 |             providerId: provider.id,
+
+      at lib/providers/parking/registry.ts:48:19
+          at async Promise.all (index 0)
+      at Object.<anonymous> (lib/providers/parking/__tests__/registry.test.ts:110:21)
+
+PASS lib/parking/__tests__/airportValidation.test.ts
+PASS __tests__/parkingPriceDisplay.test.ts
+PASS lib/__tests__/providersParkingAirport.test.ts
+PASS __tests__/dynamicParkingPricing.test.ts
+  ● Console
+
+    console.log
+      Dynamic WallyPark price: {
+        lotKey: 'wallypark',
+        price: 32,
+        priceUnit: 'per-day',
+        priceDisplay: 'from-per-day',
+        priceNote: 'Known WallyPark SEA baseline rate. Automated live price checks are disabled for this source; verify before booking.',
+        priceConfidence: 'medium',
+        sourceUrl: 'https://www.wallypark.com/seattle-airport-parking',
+        lastChecked: '2026-06-01T03:13:16.134Z',
+        status: 'fallback'
+      }
+
+      at Object.<anonymous> (__tests__/dynamicParkingPricing.test.ts:7:13)
+
+    console.log
+      Dynamic MasterPark price: {
+        lotKey: 'masterpark',
+        price: 34,
+        priceUnit: 'per-day',
+        priceDisplay: 'from-per-day',
+        priceNote: 'Known MasterPark SEA baseline rate. Automated live price checks are disabled for this source; verify before booking.',
+        priceConfidence: 'medium',
+        sourceUrl: 'https://masterparking.com/locations/seattle-airport-parking',
+        lastChecked: '2026-06-01T03:13:16.145Z',
+        status: 'fallback'
+      }
+
+      at Object.<anonymous> (__tests__/dynamicParkingPricing.test.ts:18:13)
+
+PASS lib/access/__tests__/recommendationAccessStrategies.test.ts
+  ● Console
+
+    console.warn
+      [access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.
+
+      29 |
+      30 |   seaCuratedDisabledDiagnosticLogged = true;
+    > 31 |   console.warn(
+         |           ^
+      32 |     '[access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.',
+      33 |   );
+      34 | }
+
+      at logSeaCuratedAccessDisabledDiagnostic (lib/access/buildAccessOptions.ts:31:11)
+      at buildSeaCuratedAccessOptions (lib/access/buildAccessOptions.ts:106:5)
+      at Function.generateRecommendations (lib/recommendationEngine.ts:710:39)
+      at Object.<anonymous> (lib/access/__tests__/recommendationAccessStrategies.test.ts:110:17)
+
+PASS lib/__tests__/recommendationEngineAirportFiltering.test.ts
+  ● Console
+
+    console.warn
+      [access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.
+
+      29 |
+      30 |   seaCuratedDisabledDiagnosticLogged = true;
+    > 31 |   console.warn(
+         |           ^
+      32 |     '[access] SEA_CURATED_ACCESS disabled; Northgate hidden option will not render.',
+      33 |   );
+      34 | }
+
+      at logSeaCuratedAccessDisabledDiagnostic (lib/access/buildAccessOptions.ts:31:11)
+      at buildSeaCuratedAccessOptions (lib/access/buildAccessOptions.ts:106:5)
+      at Function.generateRecommendations (lib/recommendationEngine.ts:710:39)
+      at Object.<anonymous> (lib/__tests__/recommendationEngineAirportFiltering.test.ts:159:17)
+
+PASS __tests__/parkingPriceCrawler.test.ts
+  ● Console
+
+    console.log
+      WallyPark crawler result: {
+        status: 'blocked',
+        lotKey: 'wallypark',
+        price: null,
+        priceUnit: null,
+        sourceUrl: 'https://www.wallypark.com/seattle-airport-parking',
+        lastChecked: '2026-06-01T03:13:16.044Z',
+        confidence: 'low',
+        rawSnippet: '<html style="height:100%"><head><META NAME="ROBOTS" CONTENT="NOINDEX, NOFOLLOW"><meta name="format-detection" content="telephone=no"><meta name="viewport" content="initial-scale=1.0"><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"></head><body style="margin:0px;height:100%"><iframe id="main-iframe" src="/_Incapsula_Resource?SWUDNSAI=31&xinfo=3-80644902-0%200NNN%20RT%281780283597302%2060%29%20q%280%20-1%20-1%20-1%29%20r%280%20-1%29%20B12%284%2c315%2c0%29%20U18&incident_id=7260006908'
+      }
+
+      at Object.<anonymous> (__tests__/parkingPriceCrawler.test.ts:11:13)
+
+    console.log
+      MasterPark crawler result: {
+        status: 'blocked',
+        lotKey: 'masterpark',
+        price: null,
+        priceUnit: null,
+        sourceUrl: 'https://masterparking.com/locations/seattle-airport-parking',
+        lastChecked: '2026-06-01T03:13:18.229Z',
+        confidence: 'low',
+        rawSnippet: '<!DOCTYPE html>\n' +
+          '<html lang="en-US">\n' +
+          '<head>\n' +
+          '\t<meta charset="UTF-8">\n' +
+          `\t<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />\t\t<meta name='robots' content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' />\n` +
+          '\n' +
+          '\t<!-- This site is optimized with the Yoast SEO plugin v27.3 - https://yoast.com/product/yoast-seo-wordpress/ -->\n' +
+          '\t<title>Home - MasterPark OFFICIAL SITE</title>\n' +
+          '\t<link rel="canonical" href="https://www.masterparking.com/" />\n' +
+          '\t'
+      }
+
+      at Object.<anonymous> (__tests__/parkingPriceCrawler.test.ts:23:13)
+
+    console.log
+      AirportParkingReservations crawler result: {
+        status: 'error',
+        lotKey: 'airportparkingreservations',
+        price: null,
+        priceUnit: null,
+        sourceUrl: 'https://www.airportparkingreservations.com/airportparking/seattle_tacoma_international_airport_parking.html',
+        lastChecked: '2026-06-01T03:13:19.587Z',
+        confidence: 'low'
+      }
+
+      at Object.<anonymous> (__tests__/parkingPriceCrawler.test.ts:35:13)
+
+PASS __tests__/airportParkingReservationsCrawler.test.ts (21.384 s)
+  ● Console
+
+    console.log
+      APR lots: [
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Skyway Inn Airport Parking',
+          price: 10.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
+          rawSnippet: 'Skyway Inn Airport Parking · Valet Uncovered · 2.5 miles · $10.99/day',
+          lastChecked: '2026-06-01T03:13:17.616Z'
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'DoubleTree Seattle Airport',
+          price: 13.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-doubletree-hotel-sea',
+          rawSnippet: 'DoubleTree Seattle Airport · Self Uncovered · 2.0 miles · $13.99/day',
+          lastChecked: '2026-06-01T03:13:17.617Z'
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Extra Car Airport Parking',
+          price: 14.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-extra-car-sea',
+          rawSnippet: 'Extra Car Airport Parking · Valet Uncovered · 1.2 miles · $14.99/day',
+          lastChecked: '2026-06-01T03:13:17.617Z'
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Jiffy Airport Parking Seattle',
+          price: 16.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-jiffy-airport-parking-sea',
+          rawSnippet: 'Jiffy Airport Parking Seattle · Self Uncovered · 0.9 miles · $16.99/day',
+          lastChecked: '2026-06-01T03:13:17.617Z'
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Hilton Seattle Airport & Conference Center',
+          price: 24.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-hilton-seattle-airport-sea',
+          rawSnippet: 'Hilton Seattle Airport & Conference Center · Self Covered · 0.5 miles · $24.99/day',
+          lastChecked: '2026-06-01T03:13:17.617Z'
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'MasterPark Lot B',
+          price: 25.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-seattle-masterpark-lot-b-sea',
+          rawSnippet: 'MasterPark Lot B · Valet Uncovered · 1.0 miles · $25.99/day',
+          lastChecked: '2026-06-01T03:13:17.617Z'
+        }
+      ]
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:7:17)
+
+    console.log
+      APR status: 200
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:27:17)
+
+    console.log
+      APR html length: 1092900
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:28:17)
+
+    console.log
+      APR html snippet: <!DOCTYPE html><html  lang="en-US"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SeaTac Parking: Top Seattle Airport Parking Rates</title><link rel="preconnect" href="https://www.googletagmanager.com"><link rel="preconnect" href="https://a.storyblok.com"><link rel="preconnect" href="https://googleads.g.doubleclick.net"><script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+                          new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+                          j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+                          'https://xyz.airportparkingreservations.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+                      })(window,document,'script','dataLayer','GTM-T732FZ');</script><script src="https://use.typekit.net/jva3fmf.css" type="text/css"></script><link rel="stylesheet" href="/tailwind.css"><style>html{font-family:expressway,sans-serif,Open Sans,-app
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:29:17)
+
+    console.log
+      APR has dollar: true
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:30:17)
+
+    console.log
+      APR has parking: true
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:31:17)
+
+    console.log
+      APR price snippets: [
+        'airport parking, seattle airport parking",\n' +
+          '      "name": "SeaTac Parking",\n' +
+          '      "description": "Book short and long-term SEATAC Airport parking from $8.99 per day. Free Cancellation and Shuttles available. Reserve your Seattle Airport spot today.",\n' +
+          '      "isPartOf": {\n' +
+          '        "@type": "WebSite",\n' +
+          '  ',
+        'rt Parking, are half a mile from the terminal, making them a quick and convenient choice. If you’re looking for the cheapest lot, parking starts from $13.99 per day at DoubleTree Seattle Airport when booked through Airport Parking Reservations. Many lots listed are rated 4.5/5 stars or higher by our',
+        ' much does it cost to park at SeaTac Airport?",\n' +
+          '      "acceptedAnswer": {\n' +
+          '        "@type": "Answer",\n' +
+          '        "text": "Parking near SeaTac starts from $13.99 per day when booked through Airport Parking Reservations. That’s up to 70% cheaper than the airport’s own parking rates. All off-airport lots a',
+        '   "@type": "Answer",\n' +
+          '        "text": "The cheapest parking at SeaTac is available off-airport through Airport Parking Reservations, starting at just $13.99 per day at DoubleTree Seattle Airport. That’s up to 70% less than parking on site. For more savings, check out seasonal offers and limited-time',
+        'make your journey that much smoother. Each parking option has its perks, but for cheap Seattle Airport parking and the best daily rates starting from $10.99, you’ll want to go straight to off-airport parking.</p>\n' +
+          '\n' +
+          '<p style="margin-bottom:20px">Reserve parking at SEATAC by using the search tool above',
+        'com/lot-skyway-inn-airport-parking-sea" style="color:#34B4F5">Skyway Inn Airport Parking</a></td>\n' +
+          '<td>Valet Uncovered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 2.5 miles</td>\n' +
+          '<td>$10.99</td>\n' +
+          '</tr>\n' +
+          '<tr> \n' +
+          '<td style="text-align:left"><a href="https://airportparkingreservations.com/lot-doubletree-hotel-sea" style="color:#34B4F5">Do',
+        'servations.com/lot-doubletree-hotel-sea" style="color:#34B4F5">DoubleTree Seattle Airport</a></td>\n' +
+          '<td>Self Uncovered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 2.0 miles</td>\n' +
+          '<td>$13.99</td>\n' +
+          '</tr>\n' +
+          '<tr> \n' +
+          '<td style="text-align:left"><a href="https://airportparkingreservations.com/lot-extra-car-sea" style="color:#34B4F5">Extra Car',
+        'rkingreservations.com/lot-extra-car-sea" style="color:#34B4F5">Extra Car Airport Parking</a></td>\n' +
+          '<td>Valet Uncovered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 1.2 miles</td>\n' +
+          '<td>$14.99</td>\n' +
+          '</tr>\n' +
+          '<tr> \n' +
+          '<td style="text-align:left"><a href="https://airportparkingreservations.com/lot-jiffy-airport-parking-sea" style="color:#34B4F',
+        'ns.com/lot-jiffy-airport-parking-sea" style="color:#34B4F5">Jiffy Airport Parking Seattle</a></td>\n' +
+          '<td>Self Uncovered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 0.9 miles</td>\n' +
+          '<td>$16.99</td>\n' +
+          '</tr>\n' +
+          '<tr> \n' +
+          '<td style="text-align:left"><a href="https://airportparkingreservations.com/lot-hilton-seattle-airport-sea" style="color:#34B4',
+        'ilton-seattle-airport-sea" style="color:#34B4F5">Hilton Seattle Airport & Conference Center</a></td>\n' +
+          '<td>Self Covered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 0.5 miles</td>\n' +
+          '<td>$24.99</td>\n' +
+          '</tr>\n' +
+          '<tr> \n' +
+          '<td style="text-align:left"><a href="https://airportparkingreservations.com/lot-seattle-masterpark-lot-b-sea" style="color:#34',
+        'eservations.com/lot-seattle-masterpark-lot-b-sea" style="color:#34B4F5">MasterPark Lot B</a></td>\n' +
+          '<td>Valet Uncovered</td>\n' +
+          '<td>\n' +
+          ' \n' +
+          ' 1.0 miles</td>\n' +
+          '<td>$25.99</td>\n' +
+          '</tr>\n' +
+          '</tbody>\n' +
+          '</table>\n' +
+          '<p style="text-align:left; margin-top:10px; font-size:0.6em">*Prices last updated: May 1, 2026</p></div></div></di',
+        'heapest parking at SeaTac is available off-airport through Airport Parking Reservations, starting at just </span><strong><span style="color: #000000">$10.99 per day </span></strong><span style="color: #000000">at </span><u><span style="color: #1155CC"><a target="_self" href="https://airportparkingre',
+        'make your journey that much smoother. Each parking option has its perks, but for cheap Seattle Airport parking and the best daily rates starting from $10.99, you’ll want to go straight to off-airport parking.\\u003C\\u002Fp>\\n\\n\\u003Cp style=\\"margin-bottom:20px\\">Reserve parking at SEATAC by using th',
+        '">Skyway Inn Airport Parking\\u003C\\u002Fa>\\u003C\\u002Ftd>\\n\\u003Ctd>Valet Uncovered\\u003C\\u002Ftd>\\n\\u003Ctd>\\n \\n 2.5 miles\\u003C\\u002Ftd>\\n\\u003Ctd>$10.99\\u003C\\u002Ftd>\\n\\u003C\\u002Ftr>\\n\\u003Ctr> \\n\\u003Ctd style=\\"text-align:left\\">\\u003Ca href=\\"https:\\u002F\\u002Fairportparkingreservations.com',
+        '\\">DoubleTree Seattle Airport\\u003C\\u002Fa>\\u003C\\u002Ftd>\\n\\u003Ctd>Self Uncovered\\u003C\\u002Ftd>\\n\\u003Ctd>\\n \\n 2.0 miles\\u003C\\u002Ftd>\\n\\u003Ctd>$13.99\\u003C\\u002Ftd>\\n\\u003C\\u002Ftr>\\n\\u003Ctr> \\n\\u003Ctd style=\\"text-align:left\\">\\u003Ca href=\\"https:\\u002F\\u002Fairportparkingreservations.com'
+      ]
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:45:17)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 117,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 5)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-seattle-masterpark-lot-b-sea',
+        lotId: 117,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 5)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 262,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 3)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-jiffy-airport-parking-sea',
+        lotId: 262,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 3)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 1067,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 4)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-hilton-seattle-airport-sea',
+        lotId: 1067,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 4)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 97,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 2)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-extra-car-sea',
+        lotId: 97,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 2)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 231,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 1)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-doubletree-hotel-sea',
+        lotId: 231,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 1)
+
+    console.log
+      [APR selected-date API] {
+        lotId: 226,
+        status: 422,
+        ok: false,
+        rate: null,
+        isSoldOut: false,
+        preview: '{"message":"The given data was invalid.","errors":{"checkindate":["The checkindate must be a date after yesterday."],"checkoutdate":["The checkoutdate must be a date after yesterday."]}}'
+      }
+
+      at fetchAprSelectedDatePriceFromPage (lib/providers/aprPlaywrightCrawler.ts:219:11)
+          at async Promise.all (index 0)
+
+    console.log
+      [APR resolved] {
+        url: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
+        lotId: 226,
+        livePrice: null,
+        isSoldOut: false
+      }
+
+      at resolveOne (lib/providers/aprPlaywrightCrawler.ts:318:17)
+          at async Promise.all (index 0)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'Skyway Inn Airport Parking',
+        baselinePrice: 10.99,
+        browserPrice: null,
+        lotId: 226,
+        bookingUrl: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'DoubleTree Seattle Airport',
+        baselinePrice: 13.99,
+        browserPrice: null,
+        lotId: 231,
+        bookingUrl: 'https://airportparkingreservations.com/lot-doubletree-hotel-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'Extra Car Airport Parking',
+        baselinePrice: 14.99,
+        browserPrice: null,
+        lotId: 97,
+        bookingUrl: 'https://airportparkingreservations.com/lot-extra-car-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'Jiffy Airport Parking Seattle',
+        baselinePrice: 16.99,
+        browserPrice: null,
+        lotId: 262,
+        bookingUrl: 'https://airportparkingreservations.com/lot-jiffy-airport-parking-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'Hilton Seattle Airport & Conference Center',
+        baselinePrice: 24.99,
+        browserPrice: null,
+        lotId: 1067,
+        bookingUrl: 'https://airportparkingreservations.com/lot-hilton-seattle-airport-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR merge browser price] {
+        lotName: 'MasterPark Lot B',
+        baselinePrice: 25.99,
+        browserPrice: null,
+        lotId: 117,
+        bookingUrl: 'https://airportparkingreservations.com/lot-seattle-masterpark-lot-b-sea',
+        isSoldOut: false
+      }
+
+      at lib/providers/airportParkingReservationsCrawler.ts:155:13
+          at Array.flatMap (<anonymous>)
+
+    console.log
+      [APR FINAL ENRICHED LOTS] [
+        {
+          lotName: 'Skyway Inn Airport Parking',
+          price: 10.99,
+          rawSnippet: 'Skyway Inn Airport Parking · Valet Uncovered · 2.5 miles · $10.99/day'
+        },
+        {
+          lotName: 'DoubleTree Seattle Airport',
+          price: 13.99,
+          rawSnippet: 'DoubleTree Seattle Airport · Self Uncovered · 2.0 miles · $13.99/day'
+        },
+        {
+          lotName: 'Extra Car Airport Parking',
+          price: 14.99,
+          rawSnippet: 'Extra Car Airport Parking · Valet Uncovered · 1.2 miles · $14.99/day'
+        },
+        {
+          lotName: 'Jiffy Airport Parking Seattle',
+          price: 16.99,
+          rawSnippet: 'Jiffy Airport Parking Seattle · Self Uncovered · 0.9 miles · $16.99/day'
+        },
+        {
+          lotName: 'Hilton Seattle Airport & Conference Center',
+          price: 24.99,
+          rawSnippet: 'Hilton Seattle Airport & Conference Center · Self Covered · 0.5 miles · $24.99/day'
+        },
+        {
+          lotName: 'MasterPark Lot B',
+          price: 25.99,
+          rawSnippet: 'MasterPark Lot B · Valet Uncovered · 1.0 miles · $25.99/day'
+        }
+      ]
+
+      at enrichLotsWithTrackingPrices (lib/providers/airportParkingReservationsCrawler.ts:175:11)
+
+    console.log
+      Date-aware APR lots: [
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Skyway Inn Airport Parking',
+          price: 10.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-skyway-inn-airport-parking-sea',
+          rawSnippet: 'Skyway Inn Airport Parking · Valet Uncovered · 2.5 miles · $10.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 226
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'DoubleTree Seattle Airport',
+          price: 13.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-doubletree-hotel-sea',
+          rawSnippet: 'DoubleTree Seattle Airport · Self Uncovered · 2.0 miles · $13.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 231
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Extra Car Airport Parking',
+          price: 14.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-extra-car-sea',
+          rawSnippet: 'Extra Car Airport Parking · Valet Uncovered · 1.2 miles · $14.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 97
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Jiffy Airport Parking Seattle',
+          price: 16.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-jiffy-airport-parking-sea',
+          rawSnippet: 'Jiffy Airport Parking Seattle · Self Uncovered · 0.9 miles · $16.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 262
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'Hilton Seattle Airport & Conference Center',
+          price: 24.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-hilton-seattle-airport-sea',
+          rawSnippet: 'Hilton Seattle Airport & Conference Center · Self Covered · 0.5 miles · $24.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 1067
+        },
+        {
+          source: 'airportparkingreservations',
+          lotName: 'MasterPark Lot B',
+          price: 25.99,
+          priceUnit: 'per-day',
+          bookingUrl: 'https://airportparkingreservations.com/lot-seattle-masterpark-lot-b-sea',
+          rawSnippet: 'MasterPark Lot B · Valet Uncovered · 1.0 miles · $25.99/day',
+          lastChecked: '2026-06-01T03:13:34.218Z',
+          lotId: 117
+        }
+      ]
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:54:17)
+
+    console.log
+      Date APR status: 200
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:76:17)
+
+    console.log
+      Date APR html length: 1092970
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:77:17)
+
+    console.log
+      Date APR sold out? false
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:78:17)
+
+    console.log
+      Date APR DoubleTree? true
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:79:17)
+
+    console.log
+      Date APR snippet: <!DOCTYPE html><html  lang="en-US"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SeaTac Parking: Top Seattle Airport Parking Rates</title><link rel="preconnect" href="https://www.googletagmanager.com"><link rel="preconnect" href="https://a.storyblok.com"><link rel="preconnect" href="https://googleads.g.doubleclick.net"><script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+                          new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+                          j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+                          'https://xyz.airportparkingreservations.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+                      })(window,document,'script','dataLayer','GTM-T732FZ');</script><script src="https://use.typekit.net/jva3fmf.css" type="text/css"></script><link rel="stylesheet" href="/tailwind.css"><style>html{font-family:expressway,sans-serif,Open Sans,-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol}@media(max-width:640px){@media(hover:none)and (pointer:coarse){html input,html select,html textarea{font-size:1rem!important}}}body{font-family:Arial,Helvetica,sans-serif;min-width:370px;--tw-text-opacity:1;color:rgb(14 36 43/var(--tw-text-opacity,1))}@media(min-width:1024px){body{font-family:Expressway,sans-serif,Open Sans,-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica Neue,Arial,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol}}.container{margin-left:auto;margin-right:auto;max-width:1224px!important}.iconify{height:1.5rem;width:1.5rem}.session-notify{border-bottom-left-radius:.5rem;border-top-left-radius:.5rem;bottom:2.5rem;position:fixed;right:0;z-index:999;--tw-bg-opacity:1;background-color:rgb(107 114 128/var(--tw-bg-opacity,1));padding:1rem 2rem;--tw-text-opacity:1;color:rgb(255 255 255/var(--tw-text-opacity,1));--tw-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4p
+
+      at Object.<anonymous> (__tests__/airportParkingReservationsCrawler.test.ts:80:17)
+
+
+Summary of all failing tests
+FAIL __tests__/rideshareEstimate.test.ts
+  ● rideshare estimate model › Monroe → SEA one-way UberX is in a realistic market range
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      38 |     expect(uber).toBeDefined();
+      39 |     expect(uber!.rideshareTripScope).toBe('one-way');
+    > 40 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(100);
+         |                            ^
+      41 |     expect(uber!.priceMax).toBeLessThanOrEqual(220);
+      42 |     expect(uber!.price).toBeGreaterThanOrEqual(105);
+      43 |     expect(uber!.price).toBeLessThanOrEqual(145);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:40:28)
+
+  ● rideshare estimate model › airport parking checkout trips estimate outbound and return rides
+
+    expect(received).toBeGreaterThanOrEqual(expected)
+
+    Expected: >= 100
+    Received:    99
+
+      71 |     expect(uber).toBeDefined();
+      72 |     expect(uber!.rideshareTripScope).toBe('round-trip');
+    > 73 |     expect(uber!.oneWayPriceMin).toBeGreaterThanOrEqual(100);
+         |                                  ^
+      74 |     expect(uber!.oneWayPriceMax).toBeLessThanOrEqual(220);
+      75 |     expect(uber!.priceMin).toBeGreaterThanOrEqual(uber!.oneWayPriceMin! * 2 - 4);
+      76 |     expect(uber!.priceMax).toBeGreaterThanOrEqual(uber!.oneWayPriceMax! * 2 - 4);
+
+      at Object.<anonymous> (__tests__/rideshareEstimate.test.ts:73:34)
+
+
+Test Suites: 1 failed, 24 passed, 25 total
+Tests:       2 failed, 141 passed, 143 total
+Snapshots:   0 total
+Time:        22.306 s, estimated 23 s
+Ran all test suites.
+EXIT_CODE: 1
+
+=== npm run build ===
+
+> podpaigo@0.1.0 build
+> next build
+
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of /home/pathocha000/personal/PodPaiGo/package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * /home/pathocha000/personal/PodPaiGo/PodPaiGo/package-lock.json
+
+▲ Next.js 16.2.4 (Turbopack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 2.7s
+  Running TypeScript ...
+  Finished TypeScript in 5.9s ...
+  Collecting page data using 19 workers ...
+  Generating static pages using 19 workers (0/36) ...
+  Generating static pages using 19 workers (9/36) 
+  Generating static pages using 19 workers (18/36) 
+  Generating static pages using 19 workers (27/36) 
+AirportLookupService database refresh failed error: column "airport_code" does not exist
+    at async c (.next/server/chunks/ssr/[root-of-the-server]__12.z7tj._.js:1:253)
+    at async f (.next/server/chunks/ssr/[root-of-the-server]__12.z7tj._.js:19:769)
+    at async g (.next/server/chunks/ssr/[root-of-the-server]__065m_g~._.js:1:5746)
+    at async i (.next/server/chunks/ssr/[root-of-the-server]__065m_g~._.js:1:6265) {
+  length: 112,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '27',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '3716',
+  routine: 'errorMissingColumn'
+}
+✓ Generating static pages using 19 workers (36/36) in 989ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /about
+├ ○ /admin/parking-diagnostics
+├ ○ /airports
+├ ● /airports/[code]
+│ ├ /airports/sea
+│ ├ /airports/pae
+│ ├ /airports/bli
+│ └ [+3 more paths]
+├ ○ /airports/sea
+├ ƒ /api/admin/refresh-apr
+├ ƒ /api/airport-security
+├ ƒ /api/airports
+├ ƒ /api/airports/search
+├ ƒ /api/apr-availability
+├ ƒ /api/cron/discover-parking
+├ ƒ /api/cron/refresh-parking
+├ ƒ /api/geocode/autocomplete
+├ ƒ /api/geocode/reverse
+├ ƒ /api/google-place-match
+├ ƒ /api/google-place-photo
+├ ƒ /api/parking-reviews
+├ ƒ /api/parking/apr-live-prices
+├ ƒ /api/parking/diagnostics
+├ ƒ /api/parking/discover
+├ ƒ /api/parking/inventory
+├ ƒ /api/parking/live-refresh
+├ ƒ /api/parking/prices
+├ ƒ /api/recommendations
+├ ƒ /api/tsa/sea
+├ ƒ /api/weather
+├ ○ /how-it-works
+├ ○ /privacy
+├ ○ /results
+├ ƒ /results/[tripId]
+├ ○ /roadmap
+└ ○ /trip
+
+
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML (uses generateStaticParams)
+ƒ  (Dynamic)  server-rendered on demand
+
+EXIT_CODE: 0

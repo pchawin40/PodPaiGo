@@ -11,6 +11,11 @@ import {
     parkingRouteUnavailableReason,
 } from '../parking/routeStatus';
 import { getAirportById } from '../airports/catalog';
+import { isCityDestinationTrip } from '../trip/tripContext';
+import {
+    buildParkingDriveContextFromOption,
+    resolveParkingDriveMinutesWithFallback,
+} from '../parking/routeMinutes';
 
 function resolveDestinationTerminalLabel(trip: TripData): string {
     const code = trip.airportCode?.toUpperCase();
@@ -51,7 +56,10 @@ export function buildParkingTransferLegs(
     option: ParkingOption,
     trip: TripData
 ): TransferLeg[] {
-    const terminalLabel = resolveDestinationTerminalLabel(trip);
+    const isCityTrip = isCityDestinationTrip(trip);
+    const destinationLabel = isCityTrip
+        ? trip.destination || 'destination'
+        : resolveDestinationTerminalLabel(trip);
 
     if (isParkingRouteUnavailable(option)) {
         return [
@@ -66,15 +74,22 @@ export function buildParkingTransferLegs(
         ];
     }
 
+    const driveContext = buildParkingDriveContextFromOption(option);
+    const driveMinutes = resolveParkingDriveMinutesWithFallback(option, driveContext);
+
     const legs: TransferLeg[] = [
         {
             type: 'drive',
             from: trip.origin,
             to: option.name,
-            durationMinutes: option.distance,
-            confidence: option.routeTrustStatus ?? option.trustStatus,
+            durationMinutes: driveMinutes > 0 ? driveMinutes : undefined,
+            confidence: option.originDriveSource === 'haversine-estimated'
+                ? 'estimated'
+                : option.routeTrustStatus ?? option.trustStatus,
             note:
-                option.routeTrustStatus === 'live'
+                option.originDriveSource === 'haversine-estimated'
+                    ? 'Estimated drive time from straight-line distance.'
+                    : option.routeTrustStatus === 'live'
                     ? 'Live route duration when available.'
                     : 'Estimated drive time.',
         },
@@ -85,6 +100,21 @@ export function buildParkingTransferLegs(
         option.shuttleMinutes ??
         option.walkingMinutes ??
         option.checkpointWalkMinutes;
+
+    if (isCityTrip) {
+        legs.push({
+            type: 'walk',
+            from: option.name,
+            to: destinationLabel,
+            durationMinutes: transferMinutes ?? 8,
+            confidence: 'estimated',
+            note: 'Estimated walk from parking to your destination.',
+        });
+
+        return legs;
+    }
+
+    const terminalLabel = destinationLabel;
 
     if (option.transferType === 'transit') {
         legs.push({

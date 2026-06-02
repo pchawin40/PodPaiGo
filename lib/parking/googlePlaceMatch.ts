@@ -3,6 +3,7 @@ import {
   shouldAttemptGooglePlaceMatch,
 } from './googlePlaceMatchUtils';
 import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
+import { shouldDiscoverParkingForTrip } from '../trip/tripContext';
 
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
@@ -34,11 +35,12 @@ function buildMatchKey(parking: ParkingOption, airportCode: string | null): stri
   ].join('|');
 }
 
-function buildRequestBody(parking: ParkingOption, airportCode: string | null) {
+function buildRequestBody(parking: ParkingOption, tripData: TripData | null, airportCode: string | null) {
   return {
     name: parking.name,
     address: parking.address || parking.normalizedAddress || parking.routeDestination || null,
     airport: airportCode,
+    destinationKind: tripData?.destinationKind ?? 'airport',
     parkingLotId: parking.providerLotId || parking.id || null,
     provider: parking.bookingProvider || null,
     source: parking.sourceName || null,
@@ -65,6 +67,10 @@ export async function attachGooglePlaceToParking(
   airportCodeOverride?: string | null,
   options: AttachGooglePlaceOptions = {}
 ): Promise<ParkingOption> {
+  if (tripData && !shouldDiscoverParkingForTrip(tripData)) {
+    return withStableParkingRouteStatus(parking);
+  }
+
   const airportCode = getAirportCode(tripData, airportCodeOverride);
   const cacheKey = buildMatchKey(parking, airportCode);
 
@@ -79,13 +85,25 @@ export async function attachGooglePlaceToParking(
     return withStableParkingRouteStatus(parking);
   }
 
+  if (
+    !options.force &&
+    parking.googlePlaceId &&
+    parking.coordinateSource === 'google_place' &&
+    typeof parking.canonicalLat === 'number' &&
+    typeof parking.canonicalLng === 'number'
+  ) {
+    const enriched = withStableParkingRouteStatus(parking);
+    matchResultCache.set(cacheKey, enriched);
+    return enriched;
+  }
+
   const inflight = matchInFlightCache.get(cacheKey);
   if (inflight) return inflight;
 
   const cached = matchResultCache.get(cacheKey);
   if (cached && !options.force) return withStableParkingRouteStatus(cached);
 
-  const body = buildRequestBody(parking, airportCode);
+  const body = buildRequestBody(parking, tripData, airportCode);
 
   const promise = (async () => {
     const controller = new AbortController();
@@ -109,6 +127,8 @@ export async function attachGooglePlaceToParking(
       const data = await res.json();
 
       const place = data.place || data || {};
+      const placeLat = typeof place.lat === 'number' ? place.lat : undefined;
+      const placeLng = typeof place.lng === 'number' ? place.lng : undefined;
 
       const placeId =
         place?.googlePlaceId ||
@@ -150,6 +170,16 @@ export async function attachGooglePlaceToParking(
 
       const enriched: ParkingOption = mergeParkingRouteStatus(parking, {
         ...parking,
+        ...((typeof placeLat === 'number' && typeof placeLng === 'number')
+          ? {
+              canonicalLat: placeLat,
+              canonicalLng: placeLng,
+              canonicalAddress: place.formattedAddress ?? place.address ?? parking.canonicalAddress,
+              coordinateSource: 'google_place' as const,
+              lat: placeLat,
+              lng: placeLng,
+            }
+          : {}),
         googlePlaceId: placeId,
         googleReviews: place.reviews ?? parking.googleReviews,
         googleReviewsFetchedAt: place.fetchedAt ?? parking.googleReviewsFetchedAt,

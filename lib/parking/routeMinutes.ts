@@ -1,7 +1,12 @@
 import type { ParkingOption } from '../types';
+import type { TripParkingContext } from '../trip/tripContext';
+import { getParkingRouteCoordinates } from './parkingCoordinates';
 
 const ROAD_DISTANCE_FACTOR = 1.25;
 const AVERAGE_ROAD_SPEED_MPH = 35;
+const SAME_PLACE_MILES = 0.15;
+
+export type ParkingDriveSource = 'google-routes' | 'haversine-estimated' | 'same-place';
 
 export function haversineMiles(
   lat1: number,
@@ -40,20 +45,78 @@ type ParkingDriveCarrier = ParkingOption & {
   driveTimeMinutes?: number | null;
   routeToLotMinutes?: number | null;
   originToParkingMinutes?: number | null;
+  originDriveSource?: ParkingDriveSource;
+  originLat?: number | null;
+  originLng?: number | null;
+  routesUsedCanonicalCoords?: boolean;
+  routeTargetLat?: number | null;
+  routeTargetLng?: number | null;
+  coordinateSource?: ParkingOption['coordinateSource'];
 };
 
+const ROUTE_TARGET_COORD_TOLERANCE = 0.001;
+
+export function parkingRouteMinutesAreTrusted(option: ParkingDriveCarrier): boolean {
+  const minutes = resolveParkingDriveMinutes(option);
+  if (minutes <= 0) return false;
+
+  const routeCoords = getParkingRouteCoordinates(option);
+
+  if (option.coordinateSource === 'google_place') {
+    if (option.routesUsedCanonicalCoords !== true) {
+      return false;
+    }
+
+    if (
+      typeof option.routeTargetLat === 'number' &&
+      typeof option.routeTargetLng === 'number' &&
+      typeof routeCoords.lat === 'number' &&
+      typeof routeCoords.lng === 'number'
+    ) {
+      return (
+        Math.abs(option.routeTargetLat - routeCoords.lat) <= ROUTE_TARGET_COORD_TOLERANCE &&
+        Math.abs(option.routeTargetLng - routeCoords.lng) <= ROUTE_TARGET_COORD_TOLERANCE
+      );
+    }
+  }
+
+  if (
+    typeof option.routeTargetLat === 'number' &&
+    typeof option.routeTargetLng === 'number' &&
+    typeof routeCoords.lat === 'number' &&
+    typeof routeCoords.lng === 'number'
+  ) {
+    return (
+      Math.abs(option.routeTargetLat - routeCoords.lat) <= ROUTE_TARGET_COORD_TOLERANCE &&
+      Math.abs(option.routeTargetLng - routeCoords.lng) <= ROUTE_TARGET_COORD_TOLERANCE
+    );
+  }
+
+  return true;
+}
+
+export function areSameParkingOriginAndLot(args: {
+  originLat?: number | null;
+  originLng?: number | null;
+  lotLat?: number | null;
+  lotLng?: number | null;
+}): boolean {
+  const { originLat, originLng, lotLat, lotLng } = args;
+
+  if (
+    typeof originLat !== 'number' ||
+    typeof originLng !== 'number' ||
+    typeof lotLat !== 'number' ||
+    typeof lotLng !== 'number'
+  ) {
+    return false;
+  }
+
+  return haversineMiles(originLat, originLng, lotLat, lotLng) <= SAME_PLACE_MILES;
+}
+
 export function resolveParkingDriveMinutes(option: ParkingDriveCarrier): number {
-  const candidates = [
-    option.originToParkingMinutes,
-    option.routeToParkingMinutes,
-    option.routeToLotMinutes,
-    option.driveTimeMinutes,
-    option.drivingMinutes,
-    option.routeMinutes,
-    option.driveMinutes,
-    option.durationMinutes,
-    option.routeDurationMinutes,
-  ];
+  const candidates = [option.originToParkingMinutes, option.routeToParkingMinutes];
 
   const valid = candidates.find(
     (minutes) =>
@@ -73,10 +136,7 @@ export type ParkingDriveContext = {
 export function buildParkingDriveContextFromOption(
   option: ParkingOption,
 ): ParkingDriveContext {
-  const extended = option as ParkingOption & {
-    originLat?: number;
-    originLng?: number;
-  };
+  const extended = option as ParkingDriveCarrier;
 
   return {
     originLat: extended.originLat,
@@ -84,33 +144,109 @@ export function buildParkingDriveContextFromOption(
   };
 }
 
+export function estimateParkingDriveMinutesFallback(args: {
+  originLat?: number | null;
+  originLng?: number | null;
+  option: Pick<ParkingOption, 'lat' | 'lng' | 'canonicalLat' | 'canonicalLng' | 'distance'>;
+}): number {
+  const { originLat, originLng, option } = args;
+  const routeCoords = getParkingRouteCoordinates(option);
+
+  if (
+    typeof originLat === 'number' &&
+    typeof originLng === 'number' &&
+    typeof routeCoords.lat === 'number' &&
+    typeof routeCoords.lng === 'number'
+  ) {
+    if (areSameParkingOriginAndLot({
+      originLat,
+      originLng,
+      lotLat: routeCoords.lat,
+      lotLng: routeCoords.lng,
+    })) {
+      return 0;
+    }
+
+    const miles = haversineMiles(originLat, originLng, routeCoords.lat, routeCoords.lng);
+    const estimate = estimateDriveMinutesFromStraightLineMiles(miles);
+    if (estimate > 0) return estimate;
+  }
+
+  return 0;
+}
+
+export function resolveParkingDriveMinutesDetailed(
+  option: ParkingDriveCarrier,
+  context?: ParkingDriveContext,
+): { minutes: number; source: ParkingDriveSource | null } {
+  const originLat = context?.originLat ?? option.originLat;
+  const originLng = context?.originLng ?? option.originLng;
+
+  const routeCoords = getParkingRouteCoordinates(option);
+
+  if (
+    areSameParkingOriginAndLot({
+      originLat,
+      originLng,
+      lotLat: routeCoords.lat,
+      lotLng: routeCoords.lng,
+    })
+  ) {
+    return { minutes: 0, source: 'same-place' };
+  }
+
+  const direct = resolveParkingDriveMinutes(option);
+  if (direct > 0 && parkingRouteMinutesAreTrusted(option)) {
+    return {
+      minutes: direct,
+      source: option.originDriveSource ?? 'google-routes',
+    };
+  }
+
+  const estimated = estimateParkingDriveMinutesFallback({
+    originLat,
+    originLng,
+    option,
+  });
+
+  if (estimated > 0) {
+    return { minutes: estimated, source: 'haversine-estimated' };
+  }
+
+  if (option.routeUnavailable) {
+    return { minutes: 0, source: null };
+  }
+
+  return { minutes: 0, source: null };
+}
+
 export function resolveParkingDriveMinutesWithFallback(
   option: ParkingDriveCarrier,
   context?: ParkingDriveContext,
 ): number {
-  const direct = resolveParkingDriveMinutes(option);
-  if (direct > 0) {
-    return direct;
-  }
-
-  if (option.routeUnavailable) {
-    return 0;
-  }
-
-  return estimateParkingDriveMinutesFallback({
-    originLat: context?.originLat,
-    originLng: context?.originLng,
-    option,
-  });
+  return resolveParkingDriveMinutesDetailed(option, context).minutes;
 }
 
 export function getParkingTerminalTimeMinutes(
   option: ParkingOption,
   context?: ParkingDriveContext,
+  tripContext: TripParkingContext = 'airport_trip',
 ): number {
   const resolvedContext = context ?? buildParkingDriveContextFromOption(option);
   const driveMinutes = resolveParkingDriveMinutesWithFallback(option, resolvedContext);
   const parkingBufferMinutes = option.parkingBufferMinutes ?? 0;
+
+  if (tripContext === 'city_destination_trip') {
+    const walkToDestination =
+      typeof option.transferToTerminalMinutes === 'number' && option.transferToTerminalMinutes > 0
+        ? option.transferToTerminalMinutes
+        : typeof option.walkingMinutes === 'number' && option.walkingMinutes > 0
+          ? option.walkingMinutes
+          : 8;
+
+    return driveMinutes + parkingBufferMinutes + walkToDestination;
+  }
+
   const transferToTerminalMinutes = option.transferToTerminalMinutes ?? 0;
   const shuttleWait =
     option.transferType === 'shuttle'
@@ -141,42 +277,82 @@ export function getParkingTerminalTimeMinutes(
   );
 }
 
-export function estimateParkingDriveMinutesFallback(args: {
-  originLat?: number | null;
-  originLng?: number | null;
-  option: Pick<ParkingOption, 'lat' | 'lng' | 'distance'>;
-}): number {
-  const { originLat, originLng, option } = args;
-
-  if (
-    typeof originLat === 'number' &&
-    typeof originLng === 'number' &&
-    typeof option.lat === 'number' &&
-    typeof option.lng === 'number'
-  ) {
-    const miles = haversineMiles(originLat, originLng, option.lat, option.lng);
-    const estimate = estimateDriveMinutesFromStraightLineMiles(miles);
-    if (estimate > 0) return estimate;
-  }
-
-  // Provider `distance` is often a placeholder (e.g. miles from airport), not drive minutes.
-  return 0;
-}
-
 export function applyParkingOriginDriveMinutes(
   option: ParkingOption,
   driveMinutes: number,
+  source: ParkingDriveSource = 'google-routes',
+  routeTarget?: { lat: number; lng: number; usedCanonicalCoords?: boolean },
 ): ParkingOption {
-  if (!Number.isFinite(driveMinutes) || driveMinutes <= 0) {
+  if (!Number.isFinite(driveMinutes) || driveMinutes < 0) {
     return option;
+  }
+
+  if (driveMinutes === 0) {
+    return {
+      ...option,
+      originDriveSource: source,
+      ...(routeTarget
+        ? {
+            routeTargetLat: routeTarget.lat,
+            routeTargetLng: routeTarget.lng,
+            routesUsedCanonicalCoords: routeTarget.usedCanonicalCoords === true,
+          }
+        : {}),
+    };
   }
 
   return {
     ...option,
     originToParkingMinutes: driveMinutes,
     routeToParkingMinutes: driveMinutes,
-    driveMinutes,
-    distance: driveMinutes,
-    duration: driveMinutes,
+    originDriveSource: source,
+    ...(routeTarget
+      ? {
+          routeTargetLat: routeTarget.lat,
+          routeTargetLng: routeTarget.lng,
+          routesUsedCanonicalCoords: routeTarget.usedCanonicalCoords === true,
+        }
+      : {}),
   };
+}
+
+export function formatDriveToLotMinutes(
+  minutes: number,
+  source: ParkingDriveSource | null,
+): string {
+  if (source === 'same-place') {
+    return '0m';
+  }
+
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return source === 'haversine-estimated' ? 'est. pending' : '—';
+  }
+
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (source === 'haversine-estimated') {
+    if (hours > 0 && mins > 0) return `~${hours}h ${mins}m`;
+    if (hours > 0) return `~${hours}h`;
+    return `~${mins}m`;
+  }
+
+  if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${mins}m`;
+}
+
+export function logMissingParkingDriveDiagnostic(args: {
+  lotName: string;
+  origin?: string;
+  hasOriginCoords: boolean;
+  hasLotCoords: boolean;
+  routeDestination?: string;
+  routeFailed?: boolean;
+  googleRoutesCalled?: boolean;
+}): void {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.warn('[Parking drive] originToParkingMinutes missing after enrichment', args);
 }

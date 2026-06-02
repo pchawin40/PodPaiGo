@@ -122,6 +122,32 @@ function getShuttleNote(option: ParkWhizPurchaseOption): string | undefined {
     return option.disclaimers?.find((text) => text.toLowerCase().includes('shuttle'));
 }
 
+function extractLocationCoordinates(location?: {
+    entrances?: Array<{ coordinates?: [number, number] }>;
+}): { lat?: number; lng?: number } {
+    const coords = location?.entrances?.[0]?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+        return {};
+    }
+
+    const [first, second] = coords;
+    if (typeof first !== 'number' || typeof second !== 'number') {
+        return {};
+    }
+
+    // ParkWhiz returns GeoJSON order: [longitude, latitude]
+    if (Math.abs(first) <= 90 && Math.abs(second) <= 180) {
+        return { lat: first, lng: second };
+    }
+
+    return { lat: second, lng: first };
+}
+
+function formatLiveParkWhizTotal(totalPrice: number): string {
+    const rounded = Number.isInteger(totalPrice) ? String(Math.round(totalPrice)) : totalPrice.toFixed(2);
+    return `Live $${rounded} total`;
+}
+
 function normalizeAvailability(status?: string): ParkingOption['availabilityStatus'] {
     if (status === 'available') return 'available';
     if (status === 'unavailable') return 'unavailable';
@@ -138,11 +164,12 @@ function estimateAvailabilityScore(status: ParkingOption['availabilityStatus']):
 
 function normalizeParkWhizQuoteToParkingOptions(args: {
     quote: ParkWhizQuote;
-    airportCode: string;
+    airportCode?: string;
+    mode?: 'airport' | 'city';
 }): ParkingOption[] {
-    const { quote, airportCode } = args;
+    const { quote, airportCode, mode = 'airport' } = args;
     const location = quote._embedded?.['pw:location'];
-    const locationName = location?.name ?? 'ParkWhiz Airport Parking';
+    const locationName = location?.name ?? (mode === 'city' ? 'City Parking' : 'ParkWhiz Airport Parking');
     const address = [
         location?.address1,
         location?.city,
@@ -152,10 +179,11 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
         .filter(Boolean)
         .join(', ');
 
-    const mapQuery = address || `${locationName} ${airportCode}`;
+    const mapQuery = address || locationName;
     const distanceFeet = quote.distance?.straight_line?.feet;
     const distanceMiles =
         typeof distanceFeet === 'number' ? Number((distanceFeet / 5280).toFixed(1)) : null;
+    const lotCoordinates = extractLocationCoordinates(location);
 
     return (quote.purchase_options ?? []).map((option) => {
         const totalPrice = moneyToNumber(option.price?.USD);
@@ -191,58 +219,72 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
         const security = hasAmenity(option, 'security');
 
         const transferToTerminalMinutes = hasShuttle ? shuttleMinutes : walkingMinutes;
+        const isCity = mode === 'city';
+        const liveTotal = totalPrice ?? null;
 
         return {
             id: `parkwhiz-${quote.location_id}-${option.id}`,
             name: `${locationName}${option.name ? ` - ${option.name}` : ''}`,
-            serviceAirportCode: airportCode.toUpperCase(),
+            serviceAirportCode: airportCode?.toUpperCase(),
             distanceToAirport: distanceMiles ?? undefined,
-            type: 'off-airport',
-            price: totalPrice ?? basePrice ?? 999,
-            priceDisplay: totalPrice ? 'live' : 'check-live',
+            type: isCity ? 'off-airport' : 'off-airport',
+            price: liveTotal ?? basePrice ?? 999,
+            priceDisplay: liveTotal ? 'live' : 'check-live',
             priceUnit: 'total',
-            priceNote: totalPrice
-                ? 'Live ParkWhiz total for the selected parking dates. Daily display is calculated by the app.'
+            pricingConfidence: liveTotal ? 'live' : 'final_on_provider',
+            priceNote: liveTotal
+                ? isCity
+                    ? `${formatLiveParkWhizTotal(liveTotal)} from ParkWhiz for your selected duration.`
+                    : `${formatLiveParkWhizTotal(liveTotal)} from ParkWhiz for the selected parking dates. Daily display is calculated by the app.`
                 : 'Open ParkWhiz to confirm selected-date price.',
             priceSource: 'marketplace-link',
-            priceConfidence: totalPrice ? 'high' : 'low',
+            priceConfidence: liveTotal ? 'high' : 'low',
 
-            distance: transferToTerminalMinutes,
+            distance: 0,
             availability: estimateAvailabilityScore(availabilityStatus),
-            trustStatus: totalPrice ? 'live' : 'estimated',
+            trustStatus: liveTotal ? 'live' : 'estimated',
             routeUnavailable: false,
             sourceName: 'ParkWhiz',
             sourceLink: bookingUrl,
             mapLink: googleMapsSearchUrl(mapQuery),
             address: address || undefined,
             normalizedAddress: address || undefined,
-            routeDestination: address || undefined,
+            routeDestination: address || locationName,
+            lat: lotCoordinates.lat,
+            lng: lotCoordinates.lng,
             lastUpdated: new Date().toISOString(),
 
-            parkingBufferMinutes: 15,
-            transferToTerminalMinutes,
-            transferType: hasShuttle ? 'shuttle' : 'walk',
-            walkingMinutes,
+            parkingBufferMinutes: isCity ? 8 : 15,
+            transferToTerminalMinutes: isCity && !hasShuttle ? walkingMinutes : transferToTerminalMinutes,
+            transferType: isCity ? (hasShuttle ? 'shuttle' : 'walk') : hasShuttle ? 'shuttle' : 'walk',
+            walkingMinutes: isCity && hasShuttle ? undefined : walkingMinutes,
             shuttleMinutes: hasShuttle ? shuttleMinutes : undefined,
+            shuttleWaitMinutes: isCity ? undefined : undefined,
+            bufferRiskMinutes: isCity ? undefined : undefined,
 
             covered,
             bookingProvider: 'ParkWhiz',
             availabilityStatus,
             isAvailable: availabilityStatus !== 'unavailable',
             availabilityScore: estimateAvailabilityScore(availabilityStatus),
+            priceFreshness: liveTotal ? 'live' : 'estimated',
+            providerSource: 'parkwhiz',
 
             assumptions: [
-                'Live bookable off-airport parking quote from ParkWhiz.',
+                isCity
+                    ? 'Live bookable city parking quote from ParkWhiz.'
+                    : 'Live bookable off-airport parking quote from ParkWhiz.',
                 address ? `Lot address: ${address}` : 'Lot address unavailable from provider.',
-                distanceMiles !== null
+                distanceMiles !== null && !isCity
                     ? `Straight-line distance from airport coordinates: about ${distanceMiles} miles.`
-                    : 'Distance unavailable from provider.',
-                shuttleNote || 'Open ParkWhiz to verify shuttle details and final booking terms.',
+                    : null,
+                shuttleNote || 'Open ParkWhiz to verify access details and final booking terms.',
                 option.cancellable_status?.message || 'Cancellation policy unavailable from provider.',
-            ].filter(Boolean),
+            ].filter(Boolean) as string[],
 
             bestFor: [
-                totalPrice && totalPrice < 130 ? 'Cheapest live quote' : '',
+                liveTotal && liveTotal < 130 ? 'Cheapest live quote' : '',
+                liveTotal ? 'Live provider price' : '',
                 covered ? 'Covered' : '',
                 evCharging ? 'EV Charging' : '',
                 accessible ? 'Accessible' : '',
@@ -371,6 +413,67 @@ export async function getParkWhizParkingOptions(args: {
         }
 
         throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+export async function getParkWhizDestinationParkingOptions(args: {
+    destination: string;
+    coordinates: { lat: number; lng: number };
+    checkInDate?: string;
+    checkOutDate?: string;
+    checkInAt?: string;
+    checkOutAt?: string;
+}): Promise<ParkingOption[]> {
+    if (!args.checkInDate || !args.checkOutDate) return [];
+
+    const startTime = args.checkInAt || toParkWhizDateTime(args.checkInDate, '09:00');
+    const endTime = args.checkOutAt || toParkWhizDateTime(args.checkOutDate, '18:00');
+    const distanceMiles = 1.5;
+
+    const url = new URL('https://api.parkwhiz.com/v4/quotes/');
+    url.searchParams.set(
+        'q',
+        `coordinates:${args.coordinates.lat},${args.coordinates.lng} distance:${distanceMiles}`
+    );
+    url.searchParams.set('start_time', startTime);
+    url.searchParams.set('end_time', endTime);
+    url.searchParams.set('returns', 'offstreet_bookable');
+
+    if (process.env.NODE_ENV === 'development') {
+        console.log('[ParkWhiz city] fetching quotes', {
+            destination: args.destination,
+            coordinates: args.coordinates,
+            startTime,
+            endTime,
+            distanceMiles,
+        });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    try {
+        const response = await fetch(url.toString(), {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+            signal: controller.signal,
+        });
+
+        if (!response.ok) return [];
+
+        const json = (await response.json()) as unknown;
+        if (!Array.isArray(json)) return [];
+
+        return json.flatMap((quote) =>
+            normalizeParkWhizQuoteToParkingOptions({
+                quote: quote as ParkWhizQuote,
+                mode: 'city',
+            })
+        );
+    } catch {
+        return [];
     } finally {
         clearTimeout(timeout);
     }

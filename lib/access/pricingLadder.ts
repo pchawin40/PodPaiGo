@@ -79,6 +79,22 @@ export function confidenceToScore(confidence: PricingConfidenceLabel): number {
 export function resolvePricingConfidence(
   option: PriceableParkingLike,
 ): PricingConfidenceLabel {
+  if (option.pricingConfidence === 'live') {
+    return 'live';
+  }
+
+  const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
+  const isParkWhiz = provider.includes('parkwhiz');
+
+  if (
+    isParkWhiz &&
+    option.priceDisplay === 'live' &&
+    typeof option.price === 'number' &&
+    option.price > 0
+  ) {
+    return 'live';
+  }
+
   if (option.pricingConfidence) {
     return option.pricingConfidence;
   }
@@ -102,7 +118,6 @@ export function resolvePricingConfidence(
     return 'official';
   }
 
-  const provider = `${option.bookingProvider || ''} ${option.sourceName || ''}`.toLowerCase();
   const isProviderSelectedDate =
     option.priceSource === 'marketplace-link' ||
     provider.includes('parkwhiz') ||
@@ -127,7 +142,8 @@ export function resolvePricingConfidence(
   if (
     typeof option.price === 'number' &&
     option.price > 0 &&
-    (option.priceDisplay === 'check-live' || option.priceDisplay === 'from-per-day')
+    (option.priceDisplay === 'check-live' || option.priceDisplay === 'from-per-day') &&
+    !isParkWhiz
   ) {
     return 'final_on_provider';
   }

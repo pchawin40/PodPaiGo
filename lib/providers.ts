@@ -19,7 +19,40 @@ import { buildRideshareEstimateOptions } from './rideshare/estimate';
 import {
   applyParkingOriginDriveMinutes,
   estimateParkingDriveMinutesFallback,
+  logMissingParkingDriveDiagnostic,
 } from './parking/routeMinutes';
+import {
+  getParkingRouteCoordinates,
+  logParkingCoordinateDiagnostic,
+} from './parking/parkingCoordinates';
+import {
+  applyCanonicalCoordinatesToOption,
+  resolveCanonicalParkingCoordinates,
+} from './parking/resolveCanonicalCoordinates';
+import {
+  buildRouteEstimateCacheKey,
+  shortRequestKey,
+} from './apiUsage/routeCacheKey';
+import { getLiveRouteCacheTtlMs } from './apiUsage/config';
+import {
+  canMakeLiveApiCall,
+  emitProviderCall,
+  isProviderKillSwitchEnabled,
+  recordApiUsage,
+} from './apiUsage/guard';
+import {
+  cacheGeocode,
+  dedupeGeocodeRequest,
+  getCachedGeocode,
+} from './apiUsage/geocodeCache';
+import {
+  getCachedRouteQuoteSnapshot,
+  routeSnapshotToTrafficEstimate,
+  saveRouteQuoteSnapshot,
+  snapshotToEstimate,
+} from './db/routeQuoteSnapshots';
+import { resolveParkingLotDestination } from './parking/routeDisplay';
+import { googleMapsDirectionsLink } from './maps';
 import { getGoogleMapsServerApiKey } from './env/googleMapsServerKey';
 
 
@@ -247,7 +280,13 @@ type ParkingOptionsRequestContext = {
 };
 
 export interface TrafficProvider {
-  getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate>;
+  getTrafficEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    destinationLatLng?: { lat: number; lng: number } | null,
+    routeContext?: { airportCode?: string | null; lotId?: string | null },
+  ): Promise<TrafficEstimate>;
 }
 
 export interface ParkingProvider {
@@ -294,7 +333,13 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
 }
 
 export class MockTrafficProvider implements TrafficProvider {
-  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+  async getTrafficEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    _destinationLatLng?: { lat: number; lng: number } | null,
+    _routeContext?: { airportCode?: string | null; lotId?: string | null },
+  ): Promise<TrafficEstimate> {
     const route = normalizeTrafficRoute(origin, destination);
     if (isClearlyNonDrivableRoute(origin, destination)) {
       return unavailableTrafficEstimate(
@@ -320,30 +365,10 @@ export class MockTrafficProvider implements TrafficProvider {
 // Simple in-memory cache for route estimates
 const ROUTE_CACHE = new Map<string, { ts: number; estimate: TrafficEstimate }>();
 const ROUTE_INFLIGHT = new Map<string, Promise<TrafficEstimate>>();
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT = 24;
+const DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT = 3;
 
-function normalizeRouteCachePart(value: string): string {
-  const raw = String(value || '').trim();
-  const lower = raw.toLowerCase();
-
-  if (
-    raw.toUpperCase() === 'SEA' ||
-    lower.includes('seattle-tacoma international airport') ||
-    lower.includes('seatac airport') ||
-    lower.includes('sea-tac airport') ||
-    lower.includes('17801 international blvd')
-  ) {
-    return 'sea airport';
-  }
-
-  return lower
-    .replace(/&/g, ' and ')
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+function getRouteCacheTtlMs(): number {
+  return getLiveRouteCacheTtlMs();
 }
 
 function initialLiveParkingRouteLimit(): number {
@@ -353,35 +378,12 @@ function initialLiveParkingRouteLimit(): number {
   return DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT;
 }
 
-function buildRouteEstimateCacheKey(args: {
-  origin: string;
-  destination: string;
-  dateTime: string;
-  mode?: string;
-}): string {
-  return [
-    args.mode || 'DRIVE',
-    normalizeRouteCachePart(args.origin),
-    normalizeRouteCachePart(args.destination),
-    String(args.dateTime || '').trim(),
-  ].join('|');
-}
-
-function hashCacheKey(input: string): string {
-  // Non-cryptographic hash for log correlation without leaking address strings.
-  let h = 0;
-  for (let i = 0; i < input.length; i++) {
-    h = (h * 31 + input.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h).toString(36);
-}
-
 function getCachedRouteEstimate(cacheKey: string): TrafficEstimate | null {
   const cached = ROUTE_CACHE.get(cacheKey);
 
   if (!cached) return null;
 
-  if (Date.now() - cached.ts >= CACHE_TTL_MS) {
+  if (Date.now() - cached.ts >= getRouteCacheTtlMs()) {
     ROUTE_CACHE.delete(cacheKey);
     return null;
   }
@@ -402,7 +404,7 @@ function logRoutesApiCache(
   if (process.env.NODE_ENV !== 'development') return;
 
   console.log(message, {
-    id: hashCacheKey(cacheKey),
+    id: shortRequestKey(cacheKey),
     route: routeLabel,
   });
 }
@@ -411,32 +413,88 @@ export class LiveTrafficProvider implements TrafficProvider {
   private serverKey = getGoogleMapsServerApiKey();
 
   async geocodeAddress(address: string): Promise<{ lat: number, lng: number } | null> {
-    try {
-      if (!this.serverKey) return null;
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.serverKey}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.status === 'OK' && data.results && data.results.length > 0) {
-        const loc = data.results[0].geometry.location;
-        return { lat: loc.lat, lng: loc.lng };
-      }
-      return null;
-    } catch (err) {
+    const requestKey = shortRequestKey(address);
+    const cached = getCachedGeocode(address);
+    if (cached) {
+      emitProviderCall({
+        provider: 'geocoding',
+        requestKey,
+        cacheHit: true,
+      });
+      return cached;
+    }
+
+    if (isProviderKillSwitchEnabled('geocoding')) {
+      emitProviderCall({
+        provider: 'geocoding',
+        requestKey,
+        blockedByKillSwitch: true,
+      });
       return null;
     }
+
+    const budget = await canMakeLiveApiCall('geocoding');
+    if (!budget.allowed) {
+      emitProviderCall({
+        provider: 'geocoding',
+        requestKey,
+        blockedByBudget: budget.reason !== 'kill_switch',
+        blockedByKillSwitch: budget.reason === 'kill_switch',
+        note: budget.reason,
+      });
+      return null;
+    }
+
+    return dedupeGeocodeRequest(address, async () => {
+      try {
+        if (!this.serverKey) return null;
+        await recordApiUsage('geocoding');
+        emitProviderCall({
+          provider: 'geocoding',
+          requestKey,
+          liveCall: true,
+          estimatedCost: 0.005,
+        });
+
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${this.serverKey}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.status === 'OK' && data.results && data.results.length > 0) {
+          const loc = data.results[0].geometry.location;
+          const coords = { lat: loc.lat, lng: loc.lng };
+          cacheGeocode(address, coords);
+          return coords;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    });
   }
 
-  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+  async getTrafficEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    destinationLatLng?: { lat: number; lng: number } | null,
+    routeContext?: { airportCode?: string | null; lotId?: string | null },
+  ): Promise<TrafficEstimate> {
     // dateTime can be undefined at runtime (e.g., tests). Default to "now" to keep routing functional.
     const resolvedDateTime = (dateTime ?? new Date().toISOString());
+    const destinationKey = destinationLatLng
+      ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+      : destination;
     const cacheKey = buildRouteEstimateCacheKey({
       origin,
-      destination,
+      destination: destinationKey,
       dateTime: resolvedDateTime,
       mode: 'DRIVE',
+      airportCode: routeContext?.airportCode,
+      lotId: routeContext?.lotId,
     });
     const routeKey = normalizeTrafficRoute(origin, destination);
     const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
+    const requestKey = shortRequestKey(cacheKey);
 
     try {
       if (isClearlyNonDrivableRoute(origin, destination)) {
@@ -447,27 +505,136 @@ export class LiveTrafficProvider implements TrafficProvider {
         );
       }
 
+      if (isProviderKillSwitchEnabled('google_routes')) {
+        const snapshotEstimate = await routeSnapshotToTrafficEstimate({
+          origin,
+          destination: destinationKey,
+          dateTime: resolvedDateTime,
+          airportCode: routeContext?.airportCode,
+          lotId: routeContext?.lotId,
+          routeLabel: routeKey,
+        });
+        if (snapshotEstimate) {
+          emitProviderCall({
+            provider: 'google_routes',
+            requestKey,
+            snapshotHit: true,
+            blockedByKillSwitch: true,
+          });
+          return cacheRouteEstimate(cacheKey, snapshotEstimate);
+        }
+
+        emitProviderCall({
+          provider: 'google_routes',
+          requestKey,
+          blockedByKillSwitch: true,
+        });
+        return unavailableTrafficEstimate(
+          routeKey,
+          'Google Routes API',
+          'Live routing disabled; using cached or estimated timing only.',
+        );
+      }
+
       if (!this.serverKey) {
         throw new Error('Google Maps server API key not configured');
       }
 
       const cached = getCachedRouteEstimate(cacheKey);
       if (cached) {
+        emitProviderCall({
+          provider: 'google_routes',
+          requestKey,
+          cacheHit: true,
+        });
         logRoutesApiCache('Routes API cache hit', cacheKey, routeLabel);
         return cached;
       }
 
+      const snapshotEstimate = await routeSnapshotToTrafficEstimate({
+        origin,
+        destination: destinationKey,
+        dateTime: resolvedDateTime,
+        airportCode: routeContext?.airportCode,
+        lotId: routeContext?.lotId,
+        routeLabel: routeKey,
+      });
+      if (snapshotEstimate) {
+        emitProviderCall({
+          provider: 'google_routes',
+          requestKey,
+          snapshotHit: true,
+        });
+        logRoutesApiCache('Routes API cache hit', cacheKey, routeLabel);
+        return cacheRouteEstimate(cacheKey, snapshotEstimate);
+      }
+
       const existingInFlight = ROUTE_INFLIGHT.get(cacheKey);
       if (existingInFlight) {
+        emitProviderCall({
+          provider: 'google_routes',
+          requestKey,
+          cacheHit: true,
+          note: 'in-flight',
+        });
         logRoutesApiCache('Routes API in-flight hit', cacheKey, routeLabel);
         return await existingInFlight;
       }
 
       const inflightPromise = (async () => {
+        const budget = await canMakeLiveApiCall('google_routes');
+        if (!budget.allowed) {
+          emitProviderCall({
+            provider: 'google_routes',
+            requestKey,
+            blockedByBudget: budget.reason !== 'kill_switch',
+            blockedByKillSwitch: budget.reason === 'kill_switch',
+            note: budget.reason,
+          });
+
+          const staleSnapshot = await getCachedRouteQuoteSnapshot({
+            origin,
+            destination: destinationKey,
+            dateTime: resolvedDateTime,
+            airportCode: routeContext?.airportCode,
+            lotId: routeContext?.lotId,
+            allowStale: true,
+          });
+
+          if (staleSnapshot) {
+            emitProviderCall({
+              provider: 'google_routes',
+              requestKey,
+              snapshotHit: true,
+              note: 'stale-fallback',
+            });
+            return cacheRouteEstimate(cacheKey, snapshotToEstimate(staleSnapshot, routeKey));
+          }
+
+          return cacheRouteEstimate(
+            cacheKey,
+            unavailableTrafficEstimate(
+              routeKey,
+              'Google Routes API',
+              'Route budget exceeded; open map directions to confirm drive time.',
+            ),
+          );
+        }
+
+        await recordApiUsage('google_routes');
+        emitProviderCall({
+          provider: 'google_routes',
+          requestKey,
+          liveCall: true,
+          estimatedCost: 0.01,
+        });
+
         // Geocode origin and destination where possible
         const [originLatLng, destLatLng] = await Promise.all([
           this.geocodeAddress(origin),
-          this.geocodeAddress(destination),
+          destinationLatLng
+            ? Promise.resolve(destinationLatLng)
+            : this.geocodeAddress(destination),
         ]);
 
         // Prepare computeRouteMatrix request body
@@ -700,6 +867,22 @@ export class LiveTrafficProvider implements TrafficProvider {
         };
 
         if (process.env.NODE_ENV === 'development') console.log('Routes API: success (live) HTTP status OK');
+
+        void saveRouteQuoteSnapshot({
+          provider: 'google_routes',
+          origin,
+          destination: destinationKey,
+          dateTime: resolvedDateTime,
+          airportCode: routeContext?.airportCode,
+          lotId: routeContext?.lotId,
+          travelMinutes: durationMinutes,
+          distanceMiles:
+            typeof element.distanceMeters === 'number'
+              ? element.distanceMeters / 1609.34
+              : null,
+          rawResponse: element,
+        }).catch(() => undefined);
+
         return cacheRouteEstimate(cacheKey, estimate);
       })();
 
@@ -730,6 +913,8 @@ export class LiveTrafficProvider implements TrafficProvider {
 function buildParkingDateRange(dateTime: string, parkingDurationMinutes?: number): {
   checkInDate?: string;
   checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
 } {
   const start = new Date(dateTime);
   if (isNaN(start.getTime())) return {};
@@ -744,9 +929,20 @@ function buildParkingDateRange(dateTime: string, parkingDurationMinutes?: number
     return `${y}-${m}-${day}`;
   };
 
+  const toParkWhizDateTime = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day}T${hours}:${mins}`;
+  };
+
   return {
     checkInDate: toYYYYMMDD(start),
     checkOutDate: toYYYYMMDD(end),
+    checkInAt: toParkWhizDateTime(start),
+    checkOutAt: toParkWhizDateTime(end),
   };
 }
 
@@ -807,13 +1003,20 @@ export class MockProvider implements DataProvider {
     origin: string,
     destination: string,
     dateTime: string,
-    allowLive: boolean
+    allowLive: boolean,
+    destinationLatLng?: { lat: number; lng: number } | null,
+    routeContext?: { airportCode?: string | null; lotId?: string | null },
   ): Promise<TrafficEstimate> {
+    const destinationKey = destinationLatLng
+      ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+      : destination;
     const cacheKey = buildRouteEstimateCacheKey({
       origin,
-      destination,
+      destination: destinationKey,
       dateTime,
       mode: allowLive ? 'DRIVE_LIVE' : 'DRIVE_ESTIMATED',
+      airportCode: routeContext?.airportCode,
+      lotId: routeContext?.lotId,
     });
 
     if (this.routeCache.has(cacheKey)) {
@@ -844,7 +1047,9 @@ export class MockProvider implements DataProvider {
         estimate = await this.trafficProvider.getTrafficEstimate(
           origin,
           destination,
-          dateTime
+          dateTime,
+          destinationLatLng,
+          routeContext,
         );
       } else {
         estimate = this.estimateRouteDuration(origin, destination, 35);
@@ -863,9 +1068,21 @@ export class MockProvider implements DataProvider {
     }
   }
 
-  async getTrafficEstimate(origin: string, destination: string, dateTime: string): Promise<TrafficEstimate> {
+  async getTrafficEstimate(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    destinationLatLng?: { lat: number; lng: number } | null,
+    routeContext?: { airportCode?: string | null; lotId?: string | null },
+  ): Promise<TrafficEstimate> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
-    return this.trafficProvider.getTrafficEstimate(origin, routeDestination, dateTime);
+    return this.trafficProvider.getTrafficEstimate(
+      origin,
+      routeDestination,
+      dateTime,
+      destinationLatLng,
+      routeContext,
+    );
   }
 
   async getParkingOptions(
@@ -879,6 +1096,10 @@ export class MockProvider implements DataProvider {
 
     const destinationKind = context?.destinationKind ?? 'airport';
     const isAirportDestination = destinationKind === 'airport';
+
+    if (!isAirportDestination) {
+      return [];
+    }
 
     const authoritativeCode = context?.airportCode?.toUpperCase();
     const airport = isAirportDestination
@@ -896,6 +1117,14 @@ export class MockProvider implements DataProvider {
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
+    const destinationCoords =
+      typeof context?.destinationLat === 'number' &&
+      typeof context?.destinationLng === 'number'
+        ? { lat: context.destinationLat, lng: context.destinationLng }
+        : !isAirportDestination
+          ? await this.geocodeLatLng(destination)
+          : undefined;
+
     const liveParkingOptions = await import('./providers/parkingAggregator')
       .then(({ getLiveParkingOptions, getDestinationParkingOptions }) =>
         isAirportDestination
@@ -911,6 +1140,12 @@ export class MockProvider implements DataProvider {
             destination,
             dateTime,
             parkingDurationMinutes,
+            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+            checkInDate: parkingDates.checkInDate,
+            checkOutDate: parkingDates.checkOutDate,
+            checkInAt: parkingDates.checkInAt,
+            checkOutAt: parkingDates.checkOutAt,
           })
       )
       .catch((error) => {
@@ -918,7 +1153,18 @@ export class MockProvider implements DataProvider {
         return [];
       });
 
-    const parkingSource = liveParkingOptions;
+    const parkingSource = await Promise.all(
+      liveParkingOptions.map(async (option) => {
+        const canonicalUpdate = await resolveCanonicalParkingCoordinates({
+          option,
+          airportCode: isAirportDestination ? airportCode : null,
+          destinationContext: isAirportDestination ? undefined : destination,
+          geocodeAddress: (address) => this.geocodeLatLng(address),
+        });
+
+        return applyCanonicalCoordinatesToOption(option, canonicalUpdate);
+      }),
+    );
 
     const routeDestination = isAirportDestination
       ? resolveAirportDestinationForRouting(destination)
@@ -936,27 +1182,46 @@ export class MockProvider implements DataProvider {
     // Parking discovery can still be useful; individual lot routes can be checked separately.
     const destinationDriveUnavailable = Boolean(destinationRouteEstimate.routeUnavailable);
 
-    const routeDestinationFor = (option: ParkingOption): string =>
-      option.routeDestination ||
-      option.address ||
-      option.name ||
-      routeDestination;
+    const routeDestinationFor = (option: ParkingOption): string => {
+      const resolved = resolveParkingLotDestination(option, routeDestination);
+      if (resolved.destination) {
+        return resolved.destination;
+      }
+
+      return (
+        option.routeDestination ||
+        option.address ||
+        option.name ||
+        routeDestination
+      );
+    };
 
     const parkingRouteEntries = parkingSource.map((option) => {
-      const routeDestination = routeDestinationFor(option);
+      const lotDestination = resolveParkingLotDestination(option, routeDestination);
+      const routeDestinationForLot = lotDestination.destination || routeDestinationFor(option);
+      const routeCoords = getParkingRouteCoordinates(option);
+      const destinationLatLng =
+        typeof routeCoords.lat === 'number' && typeof routeCoords.lng === 'number'
+          ? { lat: routeCoords.lat, lng: routeCoords.lng }
+          : null;
+      const routeDestinationKey = destinationLatLng
+        ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+        : routeDestinationForLot;
 
       return {
         option,
-        routeDestination,
+        lotDestination,
+        routeDestination: routeDestinationForLot,
+        destinationLatLng,
         routeCacheKey: buildRouteEstimateCacheKey({
           origin,
-          destination: routeDestination,
+          destination: routeDestinationKey,
           dateTime,
           mode: 'DRIVE_LIVE',
         }),
         liveRouteCacheKey: buildRouteEstimateCacheKey({
           origin,
-          destination: routeDestination,
+          destination: routeDestinationKey,
           dateTime,
           mode: 'DRIVE',
         }),
@@ -1008,7 +1273,16 @@ export class MockProvider implements DataProvider {
         return existing;
       }
 
-      const promise = this.getRouteEstimate(origin, entry.routeDestination, dateTime, true);
+      const promise = this.getRouteEstimate(
+        origin,
+        entry.routeDestination,
+        dateTime,
+        true,
+        typeof entry.destinationLatLng?.lat === 'number' &&
+          typeof entry.destinationLatLng?.lng === 'number'
+          ? entry.destinationLatLng
+          : null,
+      );
       parkingRouteEstimates.set(entry.routeCacheKey, promise);
 
       return promise;
@@ -1016,11 +1290,9 @@ export class MockProvider implements DataProvider {
 
     const enriched = await Promise.all(
       parkingRouteEntries.map(async (entry) => {
-        const { option, routeDestination } = entry;
+        const { option, routeDestination, lotDestination } = entry;
 
-        const routeEstimate = liveRouteKeys.has(entry.routeCacheKey)
-          ? await getParkingRouteEstimate(entry)
-          : null;
+        const routeEstimate = await getParkingRouteEstimate(entry);
 
         const meta = resolveParkingTransferMeta(option);
         const parkingBufferMinutes =
@@ -1029,7 +1301,12 @@ export class MockProvider implements DataProvider {
           option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
         const transferType = option.transferType ?? meta.transferType;
 
-        const mapLink = this.buildGoogleDirectionsLink(origin, routeDestination);
+        const mapLink =
+          origin && routeDestination
+            ? googleMapsDirectionsLink(origin, routeDestination, 'driving', {
+                destinationPlaceId: lotDestination.googlePlaceId,
+              })
+            : this.buildGoogleDirectionsLink(origin, routeDestination);
         const sourceLink =
           option.sourceLink && option.sourceLink.includes('example.com')
             ? undefined
@@ -1080,6 +1357,30 @@ export class MockProvider implements DataProvider {
           return minutes;
         };
 
+        const routeTargetCoords = entry.destinationLatLng;
+        const canonicalRouteCoords = getParkingRouteCoordinates(option);
+        const usedCanonicalCoords = Boolean(
+          option.coordinateSource === 'google_place' &&
+            routeTargetCoords &&
+            typeof canonicalRouteCoords.lat === 'number' &&
+            typeof canonicalRouteCoords.lng === 'number' &&
+            Math.abs(routeTargetCoords.lat - canonicalRouteCoords.lat) <= 0.001 &&
+            Math.abs(routeTargetCoords.lng - canonicalRouteCoords.lng) <= 0.001,
+        );
+        const routeTarget = routeTargetCoords
+          ? {
+              lat: routeTargetCoords.lat,
+              lng: routeTargetCoords.lng,
+              usedCanonicalCoords,
+            }
+          : undefined;
+        const parkingRouteDebug = {
+          routesApiDestination: routeTargetCoords
+            ? `${routeTargetCoords.lat},${routeTargetCoords.lng}`
+            : routeDestination,
+          googleMapsUrlDestination: lotDestination.destination || routeDestination,
+        };
+
         if (!routeEstimate) {
           const fallbackDriveMinutes = await resolveFallbackDriveMinutes();
 
@@ -1087,6 +1388,7 @@ export class MockProvider implements DataProvider {
             {
               ...option,
               ...commonRouteFields,
+              parkingRouteDebug,
               routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
               routeUnavailable: false,
               routeUnavailableReason: option.routeUnavailableReason,
@@ -1098,7 +1400,20 @@ export class MockProvider implements DataProvider {
               ],
             },
             fallbackDriveMinutes,
+            fallbackDriveMinutes > 0 ? 'haversine-estimated' : 'google-routes',
+            routeTarget,
           );
+
+          if (fallbackDriveMinutes <= 0) {
+            logMissingParkingDriveDiagnostic({
+              lotName: option.name,
+              origin,
+              hasOriginCoords: Boolean(originCoords),
+              hasLotCoords: Boolean(option.lat && option.lng),
+              routeDestination,
+              googleRoutesCalled: false,
+            });
+          }
 
           return deferredOption;
         }
@@ -1118,6 +1433,7 @@ export class MockProvider implements DataProvider {
           {
             ...option,
             ...commonRouteFields,
+            parkingRouteDebug,
             routeTrustStatus: routeFailed
               ? option.routeTrustStatus ?? option.trustStatus
               : routeEstimate.trustStatus,
@@ -1140,7 +1456,36 @@ export class MockProvider implements DataProvider {
             ],
           },
           driveMinutes,
+          routeFailed
+            ? fallbackDriveMinutes > 0
+              ? 'haversine-estimated'
+              : 'google-routes'
+            : 'google-routes',
+          routeTarget,
         );
+
+        if (driveMinutes <= 0) {
+          logMissingParkingDriveDiagnostic({
+            lotName: option.name,
+            origin,
+            hasOriginCoords: Boolean(originCoords),
+            hasLotCoords: Boolean(getParkingRouteCoordinates(option).lat && getParkingRouteCoordinates(option).lng),
+            routeDestination,
+            routeFailed,
+            googleRoutesCalled: true,
+          });
+        } else if (process.env.NODE_ENV === 'development') {
+          logParkingCoordinateDiagnostic({
+            lotName: option.name,
+            providerLat: option.providerLat,
+            providerLng: option.providerLng,
+            googleLat: canonicalRouteCoords.lat,
+            googleLng: canonicalRouteCoords.lng,
+            coordinateSource: option.coordinateSource,
+            routeMinutes: driveMinutes,
+            mapsDestination: parkingRouteDebug.googleMapsUrlDestination,
+          });
+        }
 
         return enrichedOption;
       })

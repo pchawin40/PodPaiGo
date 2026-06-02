@@ -56,7 +56,7 @@ describe('aggregateAirportParkingOptions', () => {
       destination: 'Seattle-Tacoma International Airport (SEA)',
     });
 
-    expect(options.map((option) => option.id)).toEqual(['inv-1', 'pw-1']);
+    expect(options.map((option) => option.id)).toEqual(['pw-1', 'inv-1']);
   });
 
   it('registers default providers once', () => {
@@ -94,6 +94,6 @@ describe('mergeLiveParkingSourceResults', () => {
       },
     );
 
-    expect(merged.map((option) => option.id)).toEqual(['inv-1', 'pw-1']);
+    expect(merged.map((option) => option.id)).toEqual(['pw-1', 'inv-1']);
   });
 });

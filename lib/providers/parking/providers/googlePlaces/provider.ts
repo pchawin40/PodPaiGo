@@ -1,5 +1,6 @@
 import type { ParkingOption } from '../../../../types';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
+import { isGoogleParkingDiscoveryLiveBlocked } from '../../../../parking/googlePlacesGuard';
 import type { ParkingProvider, ParkingSearchContext, ProviderHealth } from '../../types';
 import { tagParkingFreshness, inferPriceFreshness } from '../../types';
 import { getGoogleParkingPlaces } from './airportSearch';
@@ -13,11 +14,19 @@ export class GooglePlacesParkingProvider implements ParkingProvider {
   id = 'google';
 
   enabled(): boolean {
+    if (isGoogleParkingDiscoveryLiveBlocked()) return false;
     return discoveryModeIncludes('google');
   }
 
   async health(): Promise<ProviderHealth> {
     const checkedAt = new Date().toISOString();
+    if (isGoogleParkingDiscoveryLiveBlocked()) {
+      return {
+        status: 'offline',
+        message: 'Live Google parking discovery disabled',
+        checkedAt,
+      };
+    }
     if (!this.enabled()) {
       return {
         status: 'offline',

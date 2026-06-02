@@ -5,20 +5,7 @@ import {
 } from './pricingLadder';
 import type { AccessStrategyOption } from './types';
 
-const PARK_AND_RIDE_NAME_PATTERNS = [
-  'park & ride',
-  'park and ride',
-  'park-and-ride',
-  'park n ride',
-  'transit center',
-  'transit centre',
-  'link station',
-  'light rail',
-  'sound transit',
-  'station parking',
-  'narrows park',
-  'northgate transit',
-];
+import { looksLikeParkAndRideTransitName } from '../parking/parkAndRideClassification';
 
 export const PARK_AND_RIDE_UI_COPY = {
   notRecommendedOvernight: 'Not recommended for overnight airport parking',
@@ -38,8 +25,7 @@ export function isParkAndRideParkingOption(option: ParkingOption): boolean {
   if (option.type === 'park-and-ride') return true;
   if (option.transferType === 'transit') return true;
 
-  const name = option.name.toLowerCase();
-  return PARK_AND_RIDE_NAME_PATTERNS.some((pattern) => name.includes(pattern));
+  return looksLikeParkAndRideTransitName(option.name);
 }
 
 export function resolveParkAndRideRules(parking: ParkingOption): ParkAndRideParkingRules {

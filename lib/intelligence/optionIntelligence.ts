@@ -17,6 +17,7 @@ import {
   buildParkingDriveContextFromOption,
   getParkingTerminalTimeMinutes,
 } from '../parking/routeMinutes';
+import { resolveTripParkingContext } from '../trip/tripContext';
 
 type OptionKind = 'parking' | 'rideshare' | 'transit';
 
@@ -104,10 +105,14 @@ function getParkingTransferMinutes(option: ParkingOption) {
   );
 }
 
-function getParkingRouteMinutes(option: ParkingOption) {
+function getParkingRouteMinutes(option: ParkingOption, trip: TripData) {
   if (isParkingRouteUnavailable(option)) return 999;
 
-  return getParkingTerminalTimeMinutes(option, buildParkingDriveContextFromOption(option));
+  return getParkingTerminalTimeMinutes(
+    option,
+    buildParkingDriveContextFromOption(option),
+    resolveTripParkingContext(trip),
+  );
 }
 
 function getOptionRouteTrust(option: IntelligentOption) {
@@ -513,11 +518,12 @@ function calculateTrustRisk(option: IntelligentOption) {
 
 function calculateDurationPressure(
   kind: OptionKind,
-  option: IntelligentOption
+  option: IntelligentOption,
+  trip: TripData,
 ) {
   const rawDuration =
     kind === 'parking' && isParking(option)
-      ? getParkingRouteMinutes(option)
+      ? getParkingRouteMinutes(option, trip)
       : getDurationSafe(option);
 
   const duration =
@@ -587,7 +593,7 @@ export function buildOptionIntelligence(
   const shuttleReliability = calculateShuttleReliability(kind, option);
   const trueTotalCost = calculateTrueTotalCost(kind, option, trip);
   const trustRiskScore = calculateTrustRisk(option);
-  const durationPressureScore = calculateDurationPressure(kind, option);
+  const durationPressureScore = calculateDurationPressure(kind, option, trip);
 
   const stress = calculateStressScore({
     walkingBurdenScore: walkingBurden.score,

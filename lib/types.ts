@@ -207,6 +207,11 @@ export type ParkingOption = {
   driveMinutes?: number;
   /** Live or estimated origin→lot drive duration in minutes. */
   duration?: number;
+  /** How origin→lot drive time was derived. */
+  originDriveSource?: 'google-routes' | 'haversine-estimated' | 'same-place';
+  /** Geocoded trip origin used for drive-time fallback. */
+  originLat?: number;
+  originLng?: number;
   availability: number; // percentage
   trustStatus: TrustStatus;
   routeTrustStatus?: TrustStatus;
@@ -245,6 +250,26 @@ export type ParkingOption = {
   normalizedAddress?: string;
   address?: string;
   canonicalLotKey?: string;
+  /** Canonical routing latitude from Google Place or fallback resolver. */
+  canonicalLat?: number;
+  /** Canonical routing longitude from Google Place or fallback resolver. */
+  canonicalLng?: number;
+  /** Canonical formatted address used for routing links. */
+  canonicalAddress?: string;
+  coordinateSource?: 'google_place' | 'provider' | 'geocoded_address' | 'haversine_fallback';
+  /** Original provider-supplied coordinates before canonical enrichment. */
+  providerLat?: number;
+  providerLng?: number;
+  /** Whether origin→lot route minutes were computed against canonical coordinates. */
+  routesUsedCanonicalCoords?: boolean;
+  /** Lat/lng passed to Google Routes for origin→lot drive time. */
+  routeTargetLat?: number;
+  routeTargetLng?: number;
+  /** Temporary routing diagnostics for QA (Jiffy / dev). */
+  parkingRouteDebug?: {
+    routesApiDestination?: string;
+    googleMapsUrlDestination?: string;
+  };
   lat?: number;
   lng?: number;
   shuttleWaitMinutes?: number;
@@ -314,6 +339,8 @@ export type ParkingGooglePlaceSnapshot = {
   googlePlaceName?: string;
   googleFormattedAddress?: string;
   googleMapsUri?: string;
+  lat?: number;
+  lng?: number;
   rating?: number;
   reviewCount?: number;
   reviews: ParkingGoogleReview[];
@@ -514,4 +541,5 @@ export type Recommendation = {
   trafficEstimate?: TrafficEstimate;
   flightInfo?: FlightInfo;
   locationInfo?: LocationInfo;
+  parkingDiscoveryNotice?: string;
 };

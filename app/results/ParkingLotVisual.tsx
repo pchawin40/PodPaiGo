@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
+import type { TripParkingContext } from '../../lib/trip/tripContext';
 
 type ParkingLike = {
     name?: string;
@@ -10,44 +12,26 @@ type ParkingLike = {
     imageUrl?: string;
     photoAttributions?: string[];
     transferType?: string;
+    covered?: boolean;
 };
 
-type FallbackKind =
-    | 'park-and-ride'
-    | 'hotel-parking'
-    | 'airport-garage'
-    | 'off-site-shuttle'
-    | 'airport-parking';
+function getFallbackKind(option: ParkingLike, context: TripParkingContext) {
+    const label = getParkingVisualBadgeLabel(option, context).toLowerCase();
 
-function getFallbackKind(option: ParkingLike): FallbackKind {
-    const text = `${option.name ?? ''} ${option.category ?? ''} ${option.type ?? ''}`.toLowerCase();
-
-    if (text.includes('park') && text.includes('ride')) return 'park-and-ride';
-    if (option.transferType === 'transit') return 'park-and-ride';
-    if (text.includes('hotel') || text.includes('inn') || text.includes('suites')) return 'hotel-parking';
-    if (text.includes('garage') || text.includes('official') || option.type === 'official') {
-        return 'airport-garage';
+    if (label.includes('park & ride')) return 'park-and-ride';
+    if (label.includes('hotel')) return 'hotel-parking';
+    if (context === 'city_destination_trip') {
+        if (label.includes('garage') || label.includes('covered')) return 'airport-garage';
+        if (label.includes('lot')) return 'airport-parking';
+        return 'airport-parking';
     }
-    if (text.includes('shuttle') || text.includes('off-airport') || option.type === 'off-airport') {
-        return 'off-site-shuttle';
-    }
-
+    if (label.includes('garage')) return 'airport-garage';
+    if (label.includes('shuttle')) return 'off-site-shuttle';
     return 'airport-parking';
 }
 
-function getFallbackLabel(option: ParkingLike) {
-    const kind = getFallbackKind(option);
-
-    if (kind === 'park-and-ride') return 'Park & Ride';
-    if (kind === 'hotel-parking') return 'Hotel Parking';
-    if (kind === 'airport-garage') return 'Airport Garage';
-    if (kind === 'off-site-shuttle') return 'Off-site Shuttle';
-
-    return 'Airport Parking';
-}
-
-function getFallbackImageSrc(option: ParkingLike): string {
-    const kind = getFallbackKind(option);
+function getFallbackImageSrc(option: ParkingLike, context: TripParkingContext): string {
+    const kind = getFallbackKind(option, context);
     return `/assets/parking/${kind}.svg`;
 }
 
@@ -66,13 +50,19 @@ function getImages(option: ParkingLike) {
     ).slice(0, 4);
 }
 
-export default function ParkingLotVisual({ option }: { option: ParkingLike }) {
+export default function ParkingLotVisual({
+    option,
+    tripContext = 'airport_trip',
+}: {
+    option: ParkingLike;
+    tripContext?: TripParkingContext;
+}) {
     const src = getImageSrc(option);
     const images = getImages(option);
     const hasPhotos = images.length > 0;
     const [failedSrc, setFailedSrc] = useState<string | null>(null);
-    const label = getFallbackLabel(option);
-    const fallbackSrc = getFallbackImageSrc(option);
+    const label = getParkingVisualBadgeLabel(option, tripContext);
+    const fallbackSrc = getFallbackImageSrc(option, tripContext);
 
     if (src && failedSrc !== src && hasPhotos) {
         return (

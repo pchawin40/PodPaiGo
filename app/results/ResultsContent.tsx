@@ -18,6 +18,10 @@ import AirportSearchPicker from '../components/AirportSearchPicker';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
+import { buildParkingDriveContextFromOption, getParkingTerminalTimeMinutes } from '../../lib/parking/routeMinutes';
+import { getParkingRouteCoordinates } from '../../lib/parking/parkingCoordinates';
+import { getParkingTimeSummaryTitle, getParkingTransferLinkLabel } from '../../lib/parking/parkingLabels';
+import { resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
@@ -208,22 +212,92 @@ function formatMiniMinutes(minutes: number): string {
   return `${mins}m`;
 }
 
-function parkingTimeParts(option: ParkingOption) {
-  const breakdown = parkingTimeBreakdown(option);
+function formatParkingPartMinutes(part: { label: string; minutes: number; display?: string }): string {
+  if (part.display) return part.display;
+  return formatMiniMinutes(part.minutes);
+}
+
+function parkingTimeParts(option: ParkingOption, tripContext = resolveTripParkingContext({ type: 'one-way-departure', destinationKind: 'airport' })) {
+  const breakdown = parkingTimeBreakdown(
+    option,
+    buildParkingDriveContextFromOption(option),
+    tripContext,
+  );
   return {
     total: breakdown.totalMinutes,
     parts: breakdown.parts,
   };
 }
 
+function isJiffyParkingLot(option: Pick<ParkingOption, 'name'>): boolean {
+  return option.name.toLowerCase().includes('jiffy');
+}
+
+function ParkingRouteDebugPanel({
+  option,
+  googleMapsUrl,
+}: {
+  option: ParkingOption;
+  googleMapsUrl?: string | null;
+}) {
+  if (process.env.NODE_ENV === 'production' || !isJiffyParkingLot(option)) {
+    return null;
+  }
+
+  const routeCoords = getParkingRouteCoordinates(option);
+  const debug = option.parkingRouteDebug;
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Jiffy parking route debug]', {
+      name: option.name,
+      address: option.address,
+      providerLat: option.providerLat,
+      providerLng: option.providerLng,
+      canonicalLat: option.canonicalLat ?? routeCoords.lat,
+      canonicalLng: option.canonicalLng ?? routeCoords.lng,
+      googlePlaceId: option.googlePlaceId,
+      coordinateSource: option.coordinateSource,
+      originToParkingMinutes: option.originToParkingMinutes,
+      routeToParkingMinutes: option.routeToParkingMinutes,
+      routesApiDestination: debug?.routesApiDestination,
+      googleMapsUrlDestination: debug?.googleMapsUrlDestination ?? googleMapsUrl,
+      routesUsedCanonicalCoords: option.routesUsedCanonicalCoords,
+      routeTargetLat: option.routeTargetLat,
+      routeTargetLng: option.routeTargetLng,
+    });
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-[11px] leading-relaxed text-violet-950">
+      <div className="mb-1 font-semibold uppercase tracking-wide text-violet-700">
+        Jiffy route debug (temporary)
+      </div>
+      <dl className="grid gap-1 sm:grid-cols-2">
+        <div><dt className="font-medium">name</dt><dd className="font-mono">{option.name}</dd></div>
+        <div><dt className="font-medium">address</dt><dd className="font-mono">{option.address || '—'}</dd></div>
+        <div><dt className="font-medium">providerLat/Lng</dt><dd className="font-mono">{option.providerLat ?? '—'}, {option.providerLng ?? '—'}</dd></div>
+        <div><dt className="font-medium">canonicalLat/Lng</dt><dd className="font-mono">{option.canonicalLat ?? routeCoords.lat ?? '—'}, {option.canonicalLng ?? routeCoords.lng ?? '—'}</dd></div>
+        <div><dt className="font-medium">googlePlaceId</dt><dd className="font-mono break-all">{option.googlePlaceId || '—'}</dd></div>
+        <div><dt className="font-medium">coordinateSource</dt><dd className="font-mono">{option.coordinateSource || '—'}</dd></div>
+        <div><dt className="font-medium">originToParkingMinutes</dt><dd className="font-mono">{option.originToParkingMinutes ?? '—'}</dd></div>
+        <div><dt className="font-medium">routeToParkingMinutes</dt><dd className="font-mono">{option.routeToParkingMinutes ?? '—'}</dd></div>
+        <div className="sm:col-span-2"><dt className="font-medium">Routes API destination</dt><dd className="font-mono break-all">{debug?.routesApiDestination || '—'}</dd></div>
+        <div className="sm:col-span-2"><dt className="font-medium">Google Maps URL destination</dt><dd className="font-mono break-all">{debug?.googleMapsUrlDestination ?? googleMapsUrl ?? '—'}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
 function ParkingTimeSummary({
   option,
   compact = false,
   routeUnavailable = false,
+  tripContext = 'airport_trip',
 }: {
   option: ParkingOption;
   compact?: boolean;
   routeUnavailable?: boolean;
+  tripContext?: ReturnType<typeof resolveTripParkingContext>;
 }) {
   const unavailable = routeUnavailable || isParkingRouteUnavailable(option);
 
@@ -249,7 +323,7 @@ function ParkingTimeSummary({
     );
   }
 
-  const breakdown = parkingTimeParts(option);
+  const breakdown = parkingTimeParts(option, tripContext);
 
   if (compact) {
     return (
@@ -263,7 +337,7 @@ function ParkingTimeSummary({
             key={`${part.label}-${part.minutes}`}
             className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
           >
-            {part.label} {formatMiniMinutes(part.minutes)}
+            {part.label} {formatParkingPartMinutes(part)}
           </span>
         ))}
       </div>
@@ -274,7 +348,7 @@ function ParkingTimeSummary({
     <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-xs font-medium text-zinc-500">
-          Total time to terminal
+          {getParkingTimeSummaryTitle(tripContext)}
         </span>
         <span className="text-base font-bold text-zinc-900">
           {formatMiniMinutes(breakdown.total)}
@@ -287,7 +361,7 @@ function ParkingTimeSummary({
             key={`${part.label}-${part.minutes}`}
             className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
           >
-            {part.label} {formatMiniMinutes(part.minutes)}
+            {part.label} {formatParkingPartMinutes(part)}
           </span>
         ))}
       </div>
@@ -1621,6 +1695,8 @@ function OptionCard({
       ? (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption
       : null;
 
+  const parkingTripContext = tripData ? resolveTripParkingContext(tripData) : 'airport_trip';
+
   const parkingRoutes =
     displayParkingOption
       ? parkingRouteLinks(displayParkingOption, tripData)
@@ -1631,7 +1707,15 @@ function OptionCard({
     (isParkingRouteUnavailable(opt as ParkingOption) || !tripData?.origin);
 
   const parkingLotRouteLink = routeUnavailable ? null : parkingRoutes?.routeToParkingUrl || null;
-  const parkingToTerminalRouteLink = routeUnavailable ? null : parkingRoutes?.parkingToAirportUrl || null;
+  const parkingToTerminalRouteLink =
+    routeUnavailable || parkingTripContext !== 'airport_trip'
+      ? null
+      : parkingRoutes?.parkingToAirportUrl || null;
+  const parkingToDestinationRouteLink =
+    routeUnavailable || parkingTripContext !== 'city_destination_trip'
+      ? null
+      : parkingRoutes?.parkingToDestinationUrl || null;
+  const parkingTransferLinkLabel = parkingRoutes?.transferLinkLabel || getParkingTransferLinkLabel(parkingTripContext);
 
   const routeLink =
     item.type === 'parking'
@@ -1677,8 +1761,12 @@ function OptionCard({
       : null;
 
   const parkingBreakdown =
-    item.type === 'parking'
-      ? parkingTimeBreakdown(opt as ParkingOption)
+    item.type === 'parking' && displayParkingOption
+      ? parkingTimeBreakdown(
+          displayParkingOption,
+          buildParkingDriveContextFromOption(displayParkingOption),
+          parkingTripContext,
+        )
       : null;
 
   const parkingPrice =
@@ -1746,7 +1834,7 @@ function OptionCard({
     >
       {item.type === 'parking' && displayParkingOption && (
         <div className="mb-4">
-          <ParkingLotVisual option={displayParkingOption} />
+          <ParkingLotVisual option={displayParkingOption} tripContext={parkingTripContext} />
         </div>
       )}
 
@@ -1941,9 +2029,17 @@ function OptionCard({
 
           {item.type === 'parking' && (
             <ParkingTimeSummary
-              option={opt as ParkingOption}
+              option={(displayParkingOption || (opt as ParkingOption)) as ParkingOption}
               compact={compact}
               routeUnavailable={routeUnavailable}
+              tripContext={parkingTripContext}
+            />
+          )}
+
+          {item.type === 'parking' && displayParkingOption && (
+            <ParkingRouteDebugPanel
+              option={displayParkingOption}
+              googleMapsUrl={parkingLotRouteLink}
             />
           )}
 
@@ -2127,6 +2223,17 @@ function OptionCard({
                 </a>
               )}
 
+              {item.type === 'parking' && parkingToDestinationRouteLink && (
+                <a
+                  href={parkingToDestinationRouteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  {parkingTransferLinkLabel}
+                </a>
+              )}
+
               {item.type === 'parking' && parkingToTerminalRouteLink && (
                 <a
                   href={parkingToTerminalRouteLink}
@@ -2184,6 +2291,17 @@ function OptionCard({
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
                   Route to parking
+                </a>
+              )}
+
+              {item.type === 'parking' && parkingToDestinationRouteLink && (
+                <a
+                  href={parkingToDestinationRouteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  {parkingTransferLinkLabel}
                 </a>
               )}
 
@@ -2297,6 +2415,13 @@ function OptionCard({
             {opt.lastUpdated && (
               <div className="mt-1"><span className="font-medium">Updated:</span> {new Date(opt.lastUpdated).toLocaleString()}</div>
             )}
+            {item.type === 'parking' &&
+              (opt as ParkingOption).coordinateSource &&
+              (opt as ParkingOption).coordinateSource !== 'google_place' && (
+                <div className="mt-2 text-xs text-zinc-500">
+                  Parking location estimated from provider/address data.
+                </div>
+              )}
             {Array.isArray(opt.assumptions) && opt.assumptions.length > 0 && (
               <>
                 <div className="mt-3 font-medium">Assumptions</div>
@@ -2944,32 +3069,62 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       ? [enriched.imageUrl]
       : enriched.images ?? base.images;
 
-    const driveContext = {
-      originToParkingMinutes:
-        merged.originToParkingMinutes ?? base.originToParkingMinutes,
-      routeToParkingMinutes:
-        merged.routeToParkingMinutes ?? base.routeToParkingMinutes,
-      driveMinutes: merged.driveMinutes ?? base.driveMinutes,
-      duration: merged.duration ?? base.duration,
-    };
+    const canonicalLat = enriched.canonicalLat ?? enriched.lat ?? merged.canonicalLat ?? base.canonicalLat;
+    const canonicalLng = enriched.canonicalLng ?? enriched.lng ?? merged.canonicalLng ?? base.canonicalLng;
+    const coordinateSource =
+      enriched.coordinateSource ?? merged.coordinateSource ?? base.coordinateSource;
 
-    const recomputedDrive =
-      !driveContext.originToParkingMinutes &&
-      typeof enriched.lat === 'number' &&
-      typeof enriched.lng === 'number' &&
-      typeof base.originToParkingMinutes === 'number'
-        ? base.originToParkingMinutes
-        : undefined;
+    const routeTargetLat = base.routeTargetLat ?? merged.routeTargetLat;
+    const routeTargetLng = base.routeTargetLng ?? merged.routeTargetLng;
+    const canonicalCoordsChanged =
+      coordinateSource === 'google_place' &&
+      typeof canonicalLat === 'number' &&
+      typeof canonicalLng === 'number' &&
+      typeof routeTargetLat === 'number' &&
+      typeof routeTargetLng === 'number' &&
+      (Math.abs(canonicalLat - routeTargetLat) > 0.01 ||
+        Math.abs(canonicalLng - routeTargetLng) > 0.01);
+
+    const gainedGooglePlaceCoords =
+      coordinateSource === 'google_place' &&
+      base.coordinateSource !== 'google_place' &&
+      typeof canonicalLat === 'number' &&
+      typeof canonicalLng === 'number';
+
+    const staleDriveMinutes =
+      canonicalCoordsChanged ||
+      gainedGooglePlaceCoords ||
+      (coordinateSource === 'google_place' && base.routesUsedCanonicalCoords !== true);
+
+    const driveContext = staleDriveMinutes
+      ? {}
+      : {
+          originToParkingMinutes:
+            merged.originToParkingMinutes ?? base.originToParkingMinutes,
+          routeToParkingMinutes:
+            merged.routeToParkingMinutes ?? base.routeToParkingMinutes,
+          driveMinutes: merged.driveMinutes ?? base.driveMinutes,
+          duration: merged.duration ?? base.duration,
+        };
 
     return {
       ...merged,
       ...driveContext,
-      originToParkingMinutes:
-        driveContext.originToParkingMinutes ?? recomputedDrive,
-      routeToParkingMinutes:
-        driveContext.routeToParkingMinutes ?? recomputedDrive,
-      lat: enriched.lat ?? merged.lat ?? base.lat,
-      lng: enriched.lng ?? merged.lng ?? base.lng,
+      providerLat: base.providerLat ?? merged.providerLat ?? enriched.providerLat,
+      providerLng: base.providerLng ?? merged.providerLng ?? enriched.providerLng,
+      canonicalLat,
+      canonicalLng,
+      canonicalAddress: enriched.canonicalAddress ?? merged.canonicalAddress ?? base.canonicalAddress,
+      coordinateSource,
+      lat: canonicalLat ?? enriched.lat ?? merged.lat ?? base.lat,
+      lng: canonicalLng ?? enriched.lng ?? merged.lng ?? base.lng,
+      googlePlaceId: enriched.googlePlaceId ?? merged.googlePlaceId ?? base.googlePlaceId,
+      parkingRouteDebug: enriched.parkingRouteDebug ?? merged.parkingRouteDebug ?? base.parkingRouteDebug,
+      routesUsedCanonicalCoords: staleDriveMinutes
+        ? undefined
+        : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
+      routeTargetLat: staleDriveMinutes ? undefined : routeTargetLat,
+      routeTargetLng: staleDriveMinutes ? undefined : routeTargetLng,
       imageUrl: imageUrl || undefined,
       images: images?.length ? images : undefined,
     };
@@ -3037,6 +3192,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
+    if (!shouldDiscoverParkingForTrip(tripData)) return;
     const airportCode = getTripAirportCode(tripData);
 
     const parkingOptions = rankedOptions
@@ -3768,6 +3924,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
+    if (!shouldDiscoverParkingForTrip(tripData)) return;
     if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;
 
@@ -3775,6 +3932,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     const body = {
       airportCode: getTripAirportCode(tripData),
       destination: tripData.destination,
+      destinationKind: tripData.destinationKind ?? 'airport',
       checkInDate: tripExtras.parkingCheckInDate,
       checkOutDate: tripExtras.parkingCheckOutDate,
     };
@@ -4311,11 +4469,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             999999,
           duration: routeUnavailable
             ? 999999
-            : (typeof parkingOption.distance === 'number'
-              ? parkingOption.distance
-              : 999999) +
-            (parkingOption.parkingBufferMinutes ?? 0) +
-            (parkingOption.transferToTerminalMinutes ?? 0),
+            : getParkingTerminalTimeMinutes(
+                parkingOption,
+                buildParkingDriveContextFromOption(parkingOption),
+                tripData ? resolveTripParkingContext(tripData) : 'airport_trip',
+              ),
         }),
         type: 'parking',
         option: parkingOption,
@@ -5254,6 +5412,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         ) : null}
 
         {
+          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && recommendation.parkingDiscoveryNotice && parkingDisplayOptions.length === 0 && !airportRouteUnavailable && (
+            <div className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
+              {recommendation.parkingDiscoveryNotice}
+            </div>
+          )
+        }
+
+        {
           showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
             <div id="parking-options-section" className="mt-6 scroll-mt-6">
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -5263,6 +5429,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     : 'Parking options'}
                 </h2>
               </div>
+
+              {recommendation.parkingDiscoveryNotice ? (
+                <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
+                  {recommendation.parkingDiscoveryNotice}
+                </div>
+              ) : null}
 
               {allParkingRoutesUnavailable && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">

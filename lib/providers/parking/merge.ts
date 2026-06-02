@@ -3,10 +3,13 @@ import { getLatestParkingPriceSnapshots } from '../../db/parkingCache';
 import { enrichInventoryOptionsWithPrices as enrichInventoryOptionsWithPricesImpl } from '../../parking/priceMatcher';
 import { normalizeParkingPriceForTrip } from '../../parking/parkingPriceNormalizer';
 import { withStableParkingRouteStatus } from '../../parking/routeStatus';
+import { isLiveParkWhizOption } from '../../parking/parkWhizMatch';
 import { dedupeParkingOptions } from './shared/dedupe';
 import { withAvailabilityScore } from './shared/availability';
 import { getParkingPriceSnapshotsCached } from './shared/snapshots';
 import { buildSnapshotParkingOptions } from './providers/snapshot/buildOptions';
+import { inferPriceFreshness } from './types';
+import { isLiveGoogleParkingDiscoveryEnabled } from '../../parking/parkingDiscoveryMode';
 
 function normalizeSnapshotName(name: string): string {
   return name
@@ -21,6 +24,19 @@ function normalizeSnapshotName(name: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function applySafeModeProviderLabels(options: ParkingOption[]): ParkingOption[] {
+  if (isLiveGoogleParkingDiscoveryEnabled()) return options;
+
+  return options.map((option) => ({
+    ...option,
+    priceFreshness: option.priceFreshness ?? inferPriceFreshness(option),
+    assumptions: [
+      ...(option.assumptions || []),
+      'Cached/provider parking data (live Google Places discovery disabled).',
+    ],
+  }));
 }
 
 export function applyPriceSnapshotsToOptions(
@@ -42,6 +58,7 @@ export function applyPriceSnapshotsToOptions(
     });
 
     if (!match || typeof match.priceDaily !== 'number') return option;
+    if (isLiveParkWhizOption(option)) return option;
 
     return {
       ...option,
@@ -122,11 +139,11 @@ export async function mergeLiveParkingSources(
 
   const discoveredLots = dedupeParkingOptions(parts.liveGoogleOptions);
 
-  return dedupeParkingOptions([
-    ...snapshotOptions,
-    ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
+  const merged = dedupeParkingOptions([
     ...parts.parkWhizOptions,
     ...parts.aprOptions,
+    ...snapshotOptions,
+    ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
     ...discoveredLots,
     ...parts.marketplaceOptions.filter((option) => {
       const hasRealParkWhiz = parts.parkWhizOptions.some(
@@ -148,6 +165,8 @@ export async function mergeLiveParkingSources(
     )
     .map(withStableParkingRouteStatus)
     .map(withAvailabilityScore);
+
+  return applySafeModeProviderLabels(merged);
 }
 
 export async function mergeLiveParkingSourceResults(

@@ -14,6 +14,9 @@ import {
   parkingRouteLinks,
   parkingTimeBreakdown,
 } from '../../lib/parking/routeDisplay';
+import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
+import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
+import { resolveTripParkingContext } from '../../lib/trip/tripContext';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
@@ -363,7 +366,15 @@ export default function ParkingSmartPick({
 
   const bestPriceDisplay = parkingPriceLine(best, tripData);
 
-  const bestTime = parkingTimeBreakdown(best);
+  const parkingTripContext = tripData
+    ? resolveTripParkingContext(tripData)
+    : 'airport_trip';
+
+  const bestTime = parkingTimeBreakdown(
+    best,
+    buildParkingDriveContextFromOption(best),
+    parkingTripContext,
+  );
 
   const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
 
@@ -397,7 +408,7 @@ export default function ParkingSmartPick({
       </div>
 
       <div className="mt-4">
-        <ParkingLotVisual option={best} />
+        <ParkingLotVisual option={best} tripContext={parkingTripContext} />
       </div>
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -437,11 +448,13 @@ export default function ParkingSmartPick({
             )}
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-              {best.transferType === 'walk'
-                ? 'Walk'
-                : best.transferType === 'airport-garage'
-                  ? 'Airport garage'
-                  : 'Shuttle'}
+              {parkingTripContext === 'city_destination_trip'
+                ? getParkingVisualBadgeLabel(best, parkingTripContext)
+                : best.transferType === 'walk'
+                  ? 'Walk'
+                  : best.transferType === 'airport-garage'
+                    ? 'Airport garage'
+                    : 'Shuttle'}
             </span>
 
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
@@ -485,7 +498,7 @@ export default function ParkingSmartPick({
                 key={`${part.label}-${part.minutes}`}
                 className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
               >
-                {part.label} {formatCompactMinutes(part.minutes)}
+                {part.label} {part.display ?? formatCompactMinutes(part.minutes)}
               </span>
             ))}
           </div>
@@ -543,7 +556,7 @@ export default function ParkingSmartPick({
                     >
                       <span>{part.label}</span>
                       <span className="font-medium text-zinc-900">
-                        {formatCompactMinutes(part.minutes)}
+                        {part.display ?? formatCompactMinutes(part.minutes)}
                       </span>
                     </div>
                   ))}
@@ -619,6 +632,17 @@ export default function ParkingSmartPick({
               className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
             >
               Route to parking
+            </a>
+          )}
+
+          {bestRouteLinks.parkingToDestinationUrl && (
+            <a
+              href={bestRouteLinks.parkingToDestinationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+            >
+              {bestRouteLinks.transferLinkLabel}
             </a>
           )}
 

@@ -1,6 +1,8 @@
 import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { attachSeaCheckpointRoute } from './airports/seaCheckpointRouting';
+import { getParkingDiscoveryNotice } from './parking/parkingDiscoveryMode';
 import { mockTransitOptions } from '../data/mockData';
 import {
   calculateTripDuration,
@@ -334,6 +336,7 @@ export class RecommendationEngine {
       : undefined;
 
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
+    const shouldLoadParking = allowCarOptions && shouldDiscoverParkingForTrip(tripData);
     const allowRideshare =
       transportAvailability === 'rideshare' || transportAvailability === 'all';
     const allowTransit =
@@ -348,7 +351,7 @@ export class RecommendationEngine {
       flightInfo,
       locationInfo,
     ] = await Promise.all([
-      allowCarOptions
+      shouldLoadParking
         ? this.provider.getParkingOptions(
           tripData.origin,
           tripData.destination,
@@ -732,6 +735,7 @@ export class RecommendationEngine {
       rideshare: finalRideshare,
       transit: finalTransit,
       accessStrategies,
+      parkingDiscoveryNotice: isAirportTrip ? getParkingDiscoveryNotice() : undefined,
       tsaEstimate: resolvedTsaEstimate,
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
       airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,

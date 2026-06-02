@@ -14,6 +14,7 @@
     "import:airports": "node scripts/generate-airports-json.mjs",
     "import:airports:db": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/import-us-airports.ts",
     "audit:parking-coverage": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/audit-parking-coverage.ts",
+    "backfill:place-snapshot-coords": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/backfill-place-snapshot-coords.ts",
     "activate:parking-providers": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/activate-parking-providers.ts",
     "lint": "eslint",
     "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\"",
