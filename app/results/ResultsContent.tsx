@@ -2920,6 +2920,197 @@ function logRecommendationsFetch(
   });
 }
 
+type MatchedParkingPriceEntry = {
+  price: number;
+  priceUnit?: string;
+  provider?: string;
+  sourceLink?: string;
+};
+
+type SmartPickParkingBundles = {
+  smartPickParkingOptions: ParkingOption[];
+  cheapestSmartPickOptions: ParkingOption[];
+};
+
+type AirportCompanionCardData = {
+  transportMode: AirportDayTransportMode;
+  transportModeLabel: string | null;
+  travelMinutes: number | null;
+  shuttleWalkMinutes: number | null;
+  bookingUrl: string | null;
+  directionsUrl: string | null;
+  bagPlan: BagPlan;
+  returnDate: string | null;
+};
+
+function computeSmartPickParkingBundles(input: {
+  recommendation: Recommendation;
+  tripData: TripData;
+  sort: SortTab;
+  sortedOptions: RankedRecommendation[];
+  aprLivePrices: Record<string, number>;
+  matchedParkingPrices: Record<string, MatchedParkingPriceEntry>;
+}): SmartPickParkingBundles {
+  const { recommendation, tripData, sort, sortedOptions, aprLivePrices, matchedParkingPrices } =
+    input;
+
+  const parkingOptions = recommendation.parking ?? [];
+
+  const parkingOptionsWithLive = parkingOptions.map((p) => {
+    const aprUpdated = withStableParkingRouteStatus(
+      withAprLivePrice(p, aprLivePrices) as ParkingOption
+    );
+    const matched =
+      matchedParkingPrices[String(p.id || '')] ||
+      matchedParkingPrices[String(p.name || '')] ||
+      matchedParkingPrices[extractBrandKey(p.name)];
+
+    if (!matched) return aprUpdated;
+
+    return mergeParkingRouteStatus(aprUpdated, {
+      ...aprUpdated,
+      price: matched.price,
+      priceUnit: matched.priceUnit || 'per-day',
+      priceDisplay: 'from-per-day',
+      priceNote: `Matched price from ${matched.provider || 'parking provider'}. Confirm final checkout price before booking.`,
+      priceSource: 'marketplace-link',
+      priceConfidence: 'medium',
+      trustStatus: 'live',
+      sourceName: matched.provider || aprUpdated.sourceName,
+      sourceLink: matched.sourceLink || aprUpdated.sourceLink,
+      bestFor: [...(aprUpdated.bestFor || []), 'Live Price'],
+    } as ParkingOption) as ParkingOption;
+  });
+
+  const parkingOptionsOnly = parkingOptionsWithLive.map((p) => {
+    const matchedRanked = sortedOptions.find((o) => {
+      const rankedKey = parkingKeySafe(o.option as AppOption);
+      const parkingKey = parkingKeySafe(p as AppOption);
+      return rankedKey && parkingKey && rankedKey === parkingKey;
+    });
+
+    const routeUnavailable = isParkingRouteUnavailable(p as ParkingOption);
+    const breakdown = routeUnavailable ? null : parkingTimeBreakdown(p as ParkingOption);
+
+    return {
+      ...(matchedRanked || {
+        type: 'parking',
+        score: 0,
+        stressScore: 0,
+        reasons: routeUnavailable
+          ? ['Route unavailable from this origin to this parking lot.']
+          : ['Available parking option'],
+        cost: typeof p.price === 'number' ? p.price : 999,
+        duration: breakdown?.totalMinutes ?? 0,
+      }),
+      type: 'parking',
+      option: withStableParkingRouteStatus(p),
+      cost: typeof p.price === 'number' ? p.price : matchedRanked?.cost ?? 999,
+    } as RankedRecommendation;
+  });
+
+  const parkingOptionsWithAprPricesRaw = parkingOptionsOnly.map((o) => {
+    const updatedOption = withStableParkingRouteStatus(
+      withAprLivePrice(o.option as AppOption, aprLivePrices) as AppOption
+    );
+    const comparableTotal = getParkingComparableTotal(updatedOption, tripData);
+
+    return {
+      ...o,
+      option: updatedOption as ParkingOption,
+      cost: comparableTotal ?? o.cost,
+    } satisfies RankedRecommendation;
+  });
+
+  const parkingOptionsWithAprPrices = dedupeParkingRankedOptions(
+    parkingOptionsWithAprPricesRaw,
+    tripData
+  );
+
+  const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
+    const aOption = a.option as ParkingOption;
+    const bOption = b.option as ParkingOption;
+
+    if (isParkingRouteUnavailable(aOption) !== isParkingRouteUnavailable(bOption)) {
+      return isParkingRouteUnavailable(aOption) ? 1 : -1;
+    }
+
+    const aTotal =
+      getParkingComparableTotal(aOption as AppOption, tripData) ??
+      getParkingTotalPrice(aOption, tripData) ??
+      costOf(a) ??
+      999999;
+    const bTotal =
+      getParkingComparableTotal(bOption as AppOption, tripData) ??
+      getParkingTotalPrice(bOption, tripData) ??
+      costOf(b) ??
+      999999;
+
+    if (sort === 'cheapest') return aTotal - bTotal || a.duration - b.duration;
+    if (sort === 'fastest') {
+      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration || 999;
+      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration || 999;
+
+      return aTime - bTime || aTotal - bTotal;
+    }
+
+    const convenienceScore = (item: RankedRecommendation) => {
+      const option = item.option as ParkingOption;
+      const name = String(option.name || '').toLowerCase();
+
+      let score = 0;
+
+      if (option.type === 'official') score += 100;
+      if (name.includes('parking garage')) score += 80;
+      if (option.transferType === 'walk' || option.transferType === 'airport-garage') score += 50;
+      if (option.covered) score += 25;
+      if (option.trustStatus === 'verified-source' || option.trustStatus === 'live') score += 25;
+      if (option.sourceLink) score += 15;
+
+      const time = parkingTimeBreakdown(option).totalMinutes || item.duration || 999;
+      score -= time * 0.5;
+
+      return score;
+    };
+
+    return convenienceScore(b) - convenienceScore(a) || a.duration - b.duration;
+  });
+
+  const smartPickParkingOptions = (() => {
+    const options =
+      sort === 'easiest'
+        ? dedupeAndSortParkingOptions(
+            sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
+            tripData
+          )
+        : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+
+    const canonical = canonicalizeParkingOptions(options);
+    const routeAvailable = canonical.filter((option) => !isParkingRouteUnavailable(option));
+
+    if (sort === 'cheapest') {
+      const priced = routeAvailable.filter((option) => hasRealParkingPrice(option));
+      if (priced.length > 0) return priced;
+
+      const fallbackPriced = canonical.filter((option) => hasRealParkingPrice(option));
+      return fallbackPriced.length > 0 ? fallbackPriced : canonical;
+    }
+
+    return routeAvailable.length > 0 ? routeAvailable : canonical;
+  })();
+
+  const cheapestSmartPickOptions =
+    sort === 'cheapest'
+      ? [...smartPickParkingOptions].sort((a, b) => {
+          const aPrice = getParkingDailyPrice(a, tripData) ?? 999999;
+          const bPrice = getParkingDailyPrice(b, tripData) ?? 999999;
+          return aPrice - bPrice;
+        })
+      : smartPickParkingOptions;
+
+  return { smartPickParkingOptions, cheapestSmartPickOptions };
+}
+
 export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
   const { session } = useAuth();
@@ -4020,6 +4211,108 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       });
   }, [tripData, recommendation?.parking, recommendation?.weatherImpact]);
 
+  const { smartPickParkingOptions, cheapestSmartPickOptions } = useMemo(() => {
+    if (!recommendation || !tripData) {
+      return {
+        smartPickParkingOptions: [] as ParkingOption[],
+        cheapestSmartPickOptions: [] as ParkingOption[],
+      };
+    }
+
+    return computeSmartPickParkingBundles({
+      recommendation,
+      tripData,
+      sort,
+      sortedOptions,
+      aprLivePrices,
+      matchedParkingPrices,
+    });
+  }, [recommendation, tripData, sort, sortedOptions, aprLivePrices, matchedParkingPrices]);
+
+  const smartPickOption = cheapestSmartPickOptions[0] || null;
+
+  const airportCompanionCard = useMemo((): AirportCompanionCardData | null => {
+    if (!recommendation || !tripData) return null;
+
+    const isAirportTrip =
+      intent === 'flying-out' ||
+      tripData.destinationKind === 'airport' ||
+      Boolean((tripData as TripDataWithExtras).airportCode);
+
+    if (!isAirportTrip) return null;
+
+    const topOption = viableOptions[0] ?? null;
+    const enrichedSmartPick = smartPickOption
+      ? googleEnrichedParking[smartPickOption.id] || smartPickOption
+      : null;
+
+    let transportMode: AirportDayTransportMode = null;
+    let transportModeLabel: string | null = null;
+    let travelMinutes: number | null = null;
+    let shuttleWalkMinutes: number | null = null;
+    let bookingUrl: string | null = null;
+    let directionsUrl: string | null = null;
+
+    if (smartPickOption && enrichedSmartPick && !isParkingRouteUnavailable(enrichedSmartPick)) {
+      transportMode = 'parking';
+      transportModeLabel = 'Parking';
+      const breakdown = parkingTimeBreakdown(enrichedSmartPick);
+      const drivePart = breakdown.parts.find((part) => part.label === 'Drive to lot');
+      travelMinutes = drivePart?.minutes ?? topOption?.duration ?? breakdown.totalMinutes;
+      shuttleWalkMinutes = Math.max(0, breakdown.totalMinutes - (drivePart?.minutes ?? 0));
+      bookingUrl = enrichedSmartPick.sourceLink ?? null;
+      const routeLinks = parkingRouteLinks(enrichedSmartPick, tripData);
+      directionsUrl = routeLinks.routeToParkingUrl || enrichedSmartPick.mapLink || null;
+    } else if (topOption?.type === 'rideshare') {
+      transportMode = 'rideshare';
+      transportModeLabel = 'Rideshare / taxi';
+      travelMinutes = topOption.duration;
+    } else if (topOption?.type === 'transit') {
+      transportMode = 'transit';
+      transportModeLabel = 'Transit';
+      travelMinutes = topOption.duration;
+    } else if (topOption?.type === 'parking') {
+      transportMode = 'parking';
+      transportModeLabel = 'Parking';
+      travelMinutes = topOption.duration;
+    } else if (recommendation.trafficEstimate?.duration) {
+      travelMinutes = recommendation.trafficEstimate.duration;
+    }
+
+    const bagPlan =
+      tripData.type === 'one-way-departure'
+        ? resolveBagPlan({
+            bagPlan: tripData.bagPlan,
+            checkingBags: tripData.checkingBags,
+          })
+        : ('none' as BagPlan);
+
+    const returnDate =
+      tripData.type === 'round-trip'
+        ? tripData.returnDate
+        : tripData.type === 'one-way-departure'
+          ? (tripData as TripDataWithExtras).parkingCheckOutDate || null
+          : null;
+
+    return {
+      transportMode,
+      transportModeLabel,
+      travelMinutes,
+      shuttleWalkMinutes,
+      bookingUrl,
+      directionsUrl,
+      bagPlan,
+      returnDate,
+    };
+  }, [
+    recommendation,
+    tripData,
+    intent,
+    viableOptions,
+    smartPickOption,
+    googleEnrichedParking,
+  ]);
+
   if (loading) {
     return (
       <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
@@ -4261,31 +4554,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     );
   });
 
-  const smartPickParkingOptions = (() => {
-    const options =
-      sort === 'easiest'
-        ? dedupeAndSortParkingOptions(
-          sortedParkingForCurrentTab
-            .map((opt) => opt.option as ParkingOption),
-          tripData
-        )
-        : sortedParkingForCurrentTab
-          .map((opt) => opt.option as ParkingOption);
-
-    const canonical = canonicalizeParkingOptions(options);
-    const routeAvailable = canonical.filter((option) => !isParkingRouteUnavailable(option));
-
-    if (sort === 'cheapest') {
-      const priced = routeAvailable.filter((option) => hasRealParkingPrice(option));
-      if (priced.length > 0) return priced;
-
-      const fallbackPriced = canonical.filter((option) => hasRealParkingPrice(option));
-      return fallbackPriced.length > 0 ? fallbackPriced : canonical;
-    }
-
-    return routeAvailable.length > 0 ? routeAvailable : canonical;
-  })();
-
   const parkingDisplayOptions = (() => {
     const options =
       sort === 'easiest'
@@ -4304,93 +4572,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const allParkingRoutesUnavailable =
     parkingDisplayOptions.length > 0 &&
     parkingDisplayOptions.every((option) => isParkingRouteUnavailable(option));
-
-  const cheapestSmartPickOptions =
-    sort === 'cheapest'
-      ? [...smartPickParkingOptions].sort((a, b) => {
-        const aPrice = getParkingDailyPrice(a, tripData) ?? 999999;
-        const bPrice = getParkingDailyPrice(b, tripData) ?? 999999;
-        return aPrice - bPrice;
-      })
-      : smartPickParkingOptions;
-
-  const smartPickOption = cheapestSmartPickOptions[0] || null;
-
-  const airportCompanionCard = useMemo(() => {
-    const topOption = viableOptions[0] ?? null;
-    const enrichedSmartPick = smartPickOption
-      ? googleEnrichedParking[smartPickOption.id] || smartPickOption
-      : null;
-
-    let transportMode: AirportDayTransportMode = null;
-    let transportModeLabel: string | null = null;
-    let travelMinutes: number | null = null;
-    let shuttleWalkMinutes: number | null = null;
-    let bookingUrl: string | null = null;
-    let directionsUrl: string | null = null;
-
-    if (smartPickOption && enrichedSmartPick && !isParkingRouteUnavailable(enrichedSmartPick)) {
-      transportMode = 'parking';
-      transportModeLabel = 'Parking';
-      const breakdown = parkingTimeBreakdown(enrichedSmartPick);
-      const drivePart = breakdown.parts.find((part) => part.label === 'Drive to lot');
-      travelMinutes = drivePart?.minutes ?? topOption?.duration ?? breakdown.totalMinutes;
-      shuttleWalkMinutes = Math.max(0, breakdown.totalMinutes - (drivePart?.minutes ?? 0));
-      bookingUrl = enrichedSmartPick.sourceLink ?? null;
-      if (tripData) {
-        const routeLinks = parkingRouteLinks(enrichedSmartPick, tripData);
-        directionsUrl = routeLinks.routeToParkingUrl || enrichedSmartPick.mapLink || null;
-      } else {
-        directionsUrl = enrichedSmartPick.mapLink || null;
-      }
-    } else if (topOption?.type === 'rideshare') {
-      transportMode = 'rideshare';
-      transportModeLabel = 'Rideshare / taxi';
-      travelMinutes = topOption.duration;
-    } else if (topOption?.type === 'transit') {
-      transportMode = 'transit';
-      transportModeLabel = 'Transit';
-      travelMinutes = topOption.duration;
-    } else if (topOption?.type === 'parking') {
-      transportMode = 'parking';
-      transportModeLabel = 'Parking';
-      travelMinutes = topOption.duration;
-    } else if (recommendation?.trafficEstimate?.duration) {
-      travelMinutes = recommendation.trafficEstimate.duration;
-    }
-
-    const bagPlan =
-      tripData?.type === 'one-way-departure'
-        ? resolveBagPlan({
-            bagPlan: tripData.bagPlan,
-            checkingBags: tripData.checkingBags,
-          })
-        : ('none' as BagPlan);
-
-    const returnDate =
-      tripData?.type === 'round-trip'
-        ? tripData.returnDate
-        : tripData?.type === 'one-way-departure'
-          ? (tripData as TripDataWithExtras).parkingCheckOutDate || null
-          : null;
-
-    return {
-      transportMode,
-      transportModeLabel,
-      travelMinutes,
-      shuttleWalkMinutes,
-      bookingUrl,
-      directionsUrl,
-      bagPlan,
-      returnDate,
-    };
-  }, [
-    viableOptions,
-    smartPickOption,
-    googleEnrichedParking,
-    recommendation?.trafficEstimate?.duration,
-    tripData,
-  ]);
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
@@ -4684,21 +4865,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
                     : null
                 }
-                bagPlan={airportCompanionCard.bagPlan}
+                bagPlan={
+                  airportCompanionCard?.bagPlan ??
+                  resolveBagPlan({
+                    bagPlan: 'bagPlan' in tripData ? tripData.bagPlan : undefined,
+                    checkingBags: 'checkingBags' in tripData ? !!tripData.checkingBags : false,
+                  })
+                }
                 checkingBags={
                   'checkingBags' in tripData ? !!tripData.checkingBags : false
                 }
-                transportMode={airportCompanionCard.transportMode}
-                transportModeLabel={airportCompanionCard.transportModeLabel}
-                travelMinutes={airportCompanionCard.travelMinutes}
-                shuttleWalkMinutes={airportCompanionCard.shuttleWalkMinutes}
+                transportMode={airportCompanionCard?.transportMode ?? null}
+                transportModeLabel={airportCompanionCard?.transportModeLabel ?? null}
+                travelMinutes={airportCompanionCard?.travelMinutes ?? null}
+                shuttleWalkMinutes={airportCompanionCard?.shuttleWalkMinutes ?? null}
                 departureTime={
                   tripData.type === 'one-way-departure' ? tripData.departureTime : null
                 }
                 airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                bookingUrl={airportCompanionCard.bookingUrl}
-                directionsUrl={airportCompanionCard.directionsUrl}
-                returnDate={airportCompanionCard.returnDate}
+                bookingUrl={airportCompanionCard?.bookingUrl ?? null}
+                directionsUrl={airportCompanionCard?.directionsUrl ?? null}
+                returnDate={airportCompanionCard?.returnDate ?? null}
                 intent={intent}
                 tripData={tripData}
               />

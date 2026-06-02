@@ -90,7 +90,7 @@ describe('mock trip parser', () => {
     };
 
     const params = parsedTripToSearchParams(confirmed, { confirmed: true });
-    expect(params?.get('airlineOrFlight')).toBe('Alaska');
+    expect(params?.get('airlineOrFlight')).toBe('Alaska Airlines');
     expect(params?.get('airport')).toBe('SEA');
   });
 });

@@ -1,6 +1,11 @@
 'use client';
 
+import { useMemo } from 'react';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
+import {
+  normalizeAirlineTextForAssistant,
+  parseFlightInput,
+} from '../../lib/airlines/parseFlightInput';
 
 type TripAssistantConfirmProps = {
   parsed: ParsedTripAssistantResult;
@@ -51,6 +56,19 @@ export default function TripAssistantConfirm({
     Boolean(parsed.airportCode?.trim()) &&
     Boolean(parsed.departureDate?.trim());
 
+  const recognizedAirlineLabel = useMemo(() => {
+    if (!parsed.airlineText?.trim()) return null;
+
+    const normalized = normalizeAirlineTextForAssistant(parsed.airlineText);
+    const flightParsed = parseFlightInput(parsed.airlineText);
+    const recognized =
+      Boolean(flightParsed.matchedCatalogEntry) ||
+      Boolean(flightParsed.airlineCode && flightParsed.flightNumber);
+
+    if (!recognized || !normalized) return null;
+    return normalized;
+  }, [parsed.airlineText]);
+
   return (
     <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -96,6 +114,11 @@ export default function TripAssistantConfirm({
           value={parsed.airlineText || ''}
           onChange={(value) => onChange({ ...parsed, airlineText: value || null })}
         />
+        {recognizedAirlineLabel ? (
+          <p className="sm:col-span-2 text-xs text-slate-600">
+            Detected: {recognizedAirlineLabel}
+          </p>
+        ) : null}
         <Field
           label="Trip type"
           value={parsed.tripType || 'one-way-departure'}

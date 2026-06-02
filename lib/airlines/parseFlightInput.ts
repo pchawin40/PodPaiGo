@@ -40,3 +40,26 @@ export function normalizeAirlineTextForTrip(inputRaw: string | null | undefined)
   if (!inputRaw?.trim()) return null;
   return parseFlightInput(inputRaw).normalizedLabel || inputRaw.trim();
 }
+
+/**
+ * Compact airline/flight label for trip search params and form fields.
+ * Flight numbers stay as "AS 123"; catalog names expand; unknown text is preserved.
+ */
+export function normalizeAirlineTextForAssistant(
+  inputRaw: string | null | undefined,
+): string | null {
+  if (!inputRaw?.trim()) return null;
+
+  const trimmed = inputRaw.trim();
+  const parsed = parseFlightInput(trimmed);
+
+  if (parsed.airlineCode && parsed.flightNumber) {
+    return `${parsed.airlineCode} ${parsed.flightNumber}`;
+  }
+
+  if (parsed.matchedCatalogEntry && parsed.airlineName) {
+    return parsed.airlineName;
+  }
+
+  return trimmed;
+}

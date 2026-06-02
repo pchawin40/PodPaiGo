@@ -1,4 +1,5 @@
 import { getAirportById } from '../airports/catalog';
+import { normalizeAirlineTextForAssistant } from '../airlines/parseFlightInput';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 
 function calculateParkingDurationMinutes(args: {
@@ -59,7 +60,10 @@ export function parsedTripToSearchParams(
   }
 
   if (parsed.airlineText?.trim()) {
-    params.set('airlineOrFlight', parsed.airlineText.trim());
+    params.set(
+      'airlineOrFlight',
+      normalizeAirlineTextForAssistant(parsed.airlineText) || parsed.airlineText.trim(),
+    );
   }
 
   if (tripType === 'round-trip') {
