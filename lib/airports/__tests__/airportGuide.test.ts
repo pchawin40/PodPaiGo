@@ -68,7 +68,7 @@ describe('airport guide static intelligence', () => {
 
     expect(html).toContain('TSA PreCheck');
     expect(html).toContain('CLEAR');
-    expect(html).toContain('Airport day companion');
+    expect(html).toContain('Overview');
     expect(html).toContain('Leave home');
     expect(html).toContain('Travel checklist');
   });

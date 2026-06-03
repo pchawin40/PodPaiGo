@@ -15,6 +15,15 @@ import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
+import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
+import {
+  businessTravelModeNeedsParking,
+  readTravelPreferences,
+  type TripTravelPreferences,
+} from '../../lib/trip/travelPreferences';
+import TravelPreferencesPanel from '../components/TravelPreferencesPanel';
+import { isQuickGoMode, mergeStoredTripSearchParams } from '../../lib/trip/quickGo';
+import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
@@ -489,7 +498,7 @@ function weatherSectionTitle(context?: WeatherContext): string {
 
 function weatherSectionDetail(context?: WeatherContext): string {
   if (context === 'forecast-unavailable') {
-    return 'Weather check becomes available closer to your trip date.';
+    return 'Forecast becomes available closer to your trip.';
   }
 
   if (context === 'current-airport-weather') {
@@ -1819,7 +1828,11 @@ function OptionCard({
     >
       {item.type === 'parking' && displayParkingOption && (
         <div className="mb-4">
-          <ParkingLotVisual option={displayParkingOption} tripContext={parkingTripContext} />
+          <ParkingLotVisual
+            option={displayParkingOption}
+            tripContext={parkingTripContext}
+            airportCode={airportCode}
+          />
         </div>
       )}
 
@@ -3120,18 +3133,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const accessToken = session?.access_token ?? null;
   const routeSearchParams = useSearchParams();
   const routeSearchParamsString = routeSearchParams.toString();
-  const searchParams = useMemo(() => {
-    const params = new URLSearchParams(storedSearchParams || routeSearchParamsString);
-
-    if (storedSearchParams) {
-      const routeParams = new URLSearchParams(routeSearchParamsString);
-      routeParams.forEach((value, key) => {
-        params.set(key, value);
-      });
-    }
-
-    return params;
-  }, [routeSearchParamsString, storedSearchParams]);
+  const searchParams = useMemo(
+    () => mergeStoredTripSearchParams(storedSearchParams, routeSearchParamsString),
+    [routeSearchParamsString, storedSearchParams],
+  );
   const searchParamsString = useMemo(() => searchParams.toString(), [searchParams]);
 
   const [reviewsParking, setReviewsParking] = useState<ParkingOption | null>(null);
@@ -3165,6 +3170,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
   const [openProviderSection, setOpenProviderSection] = useState<'ride' | 'transit' | null>(null);
   const [showParkRideReason, setShowParkRideReason] = useState(false);
+  const [travelPreferences, setTravelPreferences] = useState<TripTravelPreferences>(() =>
+    typeof window === 'undefined' ? { businessTravelMode: 'standard', parkingFilters: {} } : readTravelPreferences(),
+  );
+
+  useEffect(() => {
+    setTravelPreferences(readTravelPreferences());
+  }, []);
 
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
@@ -4357,6 +4369,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     );
   }
 
+  if (isQuickGoMode(searchParams)) {
+    return (
+      <QuickGoResultsView
+        tripData={tripData}
+        recommendation={recommendation}
+        rankedOptions={sortedOptions}
+        searchParams={searchParams}
+      />
+    );
+  }
+
   const parkingOptions = recommendation.parking ?? [];
 
   const parkingOptionsWithLive = parkingOptions.map((p) => {
@@ -4392,7 +4415,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const transitOptions = recommendation.transit ?? [];
 
   const transportAvailability = (tripData as TripDataWithExtras).transportAvailability || 'all';
-  const showParkingProviders = transportAvailability === 'car' || transportAvailability === 'all';
+  const businessMode = travelPreferences.businessTravelMode;
+  const showParkingProviders =
+    businessTravelModeNeedsParking(businessMode) &&
+    (transportAvailability === 'car' || transportAvailability === 'all');
   const showRideProviders = transportAvailability === 'car' || transportAvailability === 'rideshare' || transportAvailability === 'all';
 
   const rideOptions = rideshareOptions;
@@ -4574,7 +4600,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         )
         : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
-    const canonical = canonicalizeParkingOptions(options);
+    const filteredOptions = filterParkingOptionsByFeatures(
+      options,
+      travelPreferences.parkingFilters,
+    );
+
+    const canonical = canonicalizeParkingOptions(filteredOptions);
     const available = canonical.filter((option) => !isParkingRouteUnavailable(option));
     const unavailable = canonical.filter((option) => isParkingRouteUnavailable(option));
 
@@ -4755,15 +4786,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     <div className="airport-page-bg flex flex-1 flex-col font-sans">
       <main className="mx-auto w-full max-w-5xl flex-1 px-3 pb-24 pt-6 sm:px-4 sm:pt-8">
         {/* Hero */}
-        <div className="rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
+        <div className="travel-card rounded-3xl p-4 sm:p-5">
+          {!airportRouteUnavailable && (bestViableLeaveByTime || recommendation.leaveByTime) ? (
+            <div className="sticky top-[58px] z-30 -mx-1 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface-glass px-3 py-2.5 backdrop-blur lg:hidden">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Leave by</span>
+              <span className="text-lg font-bold text-primary">
+                {formatTimeFriendly(bestViableLeaveByTime || recommendation.leaveByTime || '')}
+              </span>
+            </div>
+          ) : null}
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
             {/* Left: main decision */}
             <div>
-              <div className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase text-sky-800">
+              <div className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
                 {searchParams.get('airport') || 'SEA'}
               </div>
 
-              <h1 className="mt-3 text-2xl font-semibold text-slate-950 sm:text-3xl">
+              <h1 className="mt-3 text-2xl font-semibold text-foreground sm:text-3xl">
                 {airportRouteUnavailable
                   ? 'Route unavailable from this origin'
                   : noViableFlyingOut
@@ -4776,7 +4815,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </h1>
 
               {airportRouteUnavailable && (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
                     We could not calculate a real route from your starting location to this airport.
                   </div>
@@ -4784,7 +4823,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     Try an origin near {currentAirport.id}, rideshare/taxi, or another transportation option.
                   </div>
                   {airportRouteUnavailableReason && (
-                    <div className="mt-2 text-xs text-amber-800">
+                    <div className="mt-2 text-xs text-muted-foreground">
                       {airportRouteUnavailableReason}
                     </div>
                   )}
@@ -4792,12 +4831,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               {noViableFlyingOut && bestTooLateSummary?.bestLatestSafeLeave && bestTooLateSummary?.bestArrival && (
-                <div className="mt-2 text-sm text-zinc-600">
+                <div className="mt-2 text-sm text-muted-foreground">
                   Best available attempt leaves at {formatTimeFriendly(bestTooLateSummary.bestLatestSafeLeave)} and reaches terminal around {formatTimeFriendly(bestTooLateSummary.recommendedBy || bestTooLateSummary.bestArrival)}.
                 </div>
               )}
 
-              <p className="mt-3 text-sm leading-6 text-slate-600">
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
                 {displayDestination}
                 {intent ? ` • ${intent.replace(/-/g, ' ')}` : ''}
                 {airlineDisplay ? ` • ${airlineDisplay}` : ''}
@@ -4812,7 +4851,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   />
                 )}
 
-              <p className="mt-2 text-sm text-zinc-500">
+              <p className="mt-2 text-sm text-muted-foreground">
                 {airportRouteUnavailable
                   ? 'Airport readiness and TSA timing shown only; ground route timing is unavailable.'
                   : recommendation.trafficEstimate?.trustStatus === 'live'
@@ -4821,14 +4860,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </p>
 
               {aprLiveChecking && parkingPricesChecking && (
-                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
                   Updating provider parking prices…
                 </div>
               )}
 
               {aprLivePartial && !aprLiveChecking && (
-                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 px-3 py-2 text-sm text-foreground">
                   Some provider prices could not be refreshed. Confirm final parking rates before booking.
                 </div>
               )}
@@ -4843,7 +4882,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
 
             {/* Right: supporting context */}
-            <div className="space-y-3 lg:border-l lg:border-sky-100 lg:pl-5">
+            <div className="space-y-3 lg:border-l lg:border-border lg:pl-5">
               {isCityTrip && tripData ? (
                 <DestinationParkingSummary
                   destination={cityDestinationText}
@@ -4916,7 +4955,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </>
               )}
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
-                <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
+                <div className="flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
                     {recommendation.weatherImpact?.condition === 'rain'
                       ? '🌧️'
@@ -5665,6 +5704,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
           </div>
         ) : null}
+
+        <TravelPreferencesPanel
+          className="mt-6"
+          value={travelPreferences}
+          onChange={setTravelPreferences}
+        />
 
         {
           showParkingProviders && shouldDiscoverParkingForTrip(tripData) && recommendation.parkingDiscoveryNotice && parkingDisplayOptions.length === 0 && !airportRouteUnavailable && (

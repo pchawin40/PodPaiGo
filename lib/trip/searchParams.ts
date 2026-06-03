@@ -220,7 +220,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         destinationKind: 'airport',
       };
     }
-  } else if (type === 'general-trip') {
+  } else if (type === 'general-trip' || type === 'quick-go') {
     const arrivalDate = searchParams.get('arrivalDate') || '';
     const arrivalTime = searchParams.get('arrivalTime') || '';
 
@@ -249,7 +249,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
 
     if (arrivalDate && arrivalTime && origin && destination) {
       data = {
-        type,
+        type: 'general-trip',
         origin,
         destination,
         destinationKind,
@@ -306,6 +306,10 @@ export function tripDataToSearchParams(
 
   if (data.destinationKind) {
     params.set('destinationKind', data.destinationKind);
+  }
+
+  if (options?.preserve?.get('tripMode')) {
+    params.set('tripMode', options.preserve.get('tripMode')!);
   }
 
   const isAirportTrip = data.type !== 'general-trip';

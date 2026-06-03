@@ -4,6 +4,13 @@ import {
   getGooglePlacesCacheWriteTimeoutMs,
   scheduleGooglePlacesCacheWrite,
 } from './googlePlacesCacheWrite';
+import { isGooglePhotoProxyUrl } from './parkingLotPhotos';
+
+/**
+ * Legacy short-lived cache for place photo proxy URLs.
+ * Google Places photo media must NOT be stored long-term in Supabase.
+ * Prefer parking_lot_photos for first-party/partner/provider images instead.
+ */
 
 export type CachedPlacePhotos = {
   placeId: string;
@@ -120,6 +127,15 @@ export async function savePlacePhotoCache(input: {
   photos: string[];
   attributions?: string[];
 }) {
+  if (input.photos.some((photo) => isGooglePhotoProxyUrl(photo))) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.info('[google-places-cache] skipped_google_proxy_photo_cache_write', {
+        placeId: input.placeId,
+      });
+    }
+    return;
+  }
+
   const cacheKey = `photo:${input.placeId}`;
   const existing = await readPlacePhotoCache(input.placeId).catch(() => null);
 

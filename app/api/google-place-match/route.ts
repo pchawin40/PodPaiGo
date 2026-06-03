@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  getBestParkingPhoto,
+} from '../../../lib/parking/parkingLotPhotos';
 import { isGooglePlacePhotosLiveBlocked, isGooglePlacesLiveBlocked } from '../../../lib/parking/googlePlacesGuard';
 import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
 import {
   fetchGooglePlacePhotoName,
-  fetchGooglePlacePhotoNames,
-  googlePlacePhotoImageUrl,
   parkingGooglePlaceToOptionUpdate,
   resolveParkingGooglePlace,
 } from '../../../lib/parking/googlePlacesCache';
@@ -13,18 +14,13 @@ import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from '../../../lib/parking/googlePlaceMatchUtils';
-import {
-  readPlacePhotoCache,
-  savePlacePhotoCache,
-} from '../../../lib/parking/placePhotoCache';
 import { TimeoutError, withTimeout } from '../../../lib/utils/asyncTimeout';
 
 const GOOGLE_PLACE_MATCH_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_MATCH_TIMEOUT_MS || 5000);
 
 type PlaceMatchResult = {
   place: ParkingGooglePlaceCacheRecord;
-  cachedPhotos: string[];
-  cachedAttributions: string[];
+  photoSelection: Awaited<ReturnType<typeof getBestParkingPhoto>>;
 };
 
 async function readBody(req: NextRequest): Promise<Record<string, unknown>> {
@@ -84,69 +80,24 @@ async function withPhotoName(
   return photoName ? { ...place, photoName } : place;
 }
 
-async function resolvePlacePhotos(args: {
+async function resolvePlacePhotoSelection(args: {
   place: ParkingGooglePlaceCacheRecord;
   name: string;
   airport: string | null;
-}): Promise<{ photos: string[]; attributions: string[] }> {
-  const placeId = args.place.googlePlaceId;
-  if (!placeId) {
-    const fallback = googlePlacePhotoImageUrl(args.place.photoName);
-    return {
-      photos: fallback ? [fallback] : [],
-      attributions: [],
-    };
-  }
-
-  const cachedPhotos = await readPlacePhotoCache(placeId);
-  if (cachedPhotos?.photos.length) {
-    return {
-      photos: cachedPhotos.photos,
-      attributions: cachedPhotos.attributions,
-    };
-  }
-
-  if (args.place.photoNames?.length) {
-    const imageUrls = args.place.photoNames
-      .map((photoName) => googlePlacePhotoImageUrl(photoName))
-      .filter((url): url is string => Boolean(url));
-
-    if (imageUrls.length) {
-      return { photos: imageUrls, attributions: [] };
-    }
-  }
-
+  provider: string | null;
+  parkingLotId: string | null;
+}): Promise<Awaited<ReturnType<typeof getBestParkingPhoto>>> {
   const placeWithPhoto = await withPhotoName(args.place);
-  if (isGooglePlacePhotosLiveBlocked()) {
-    const fallbackImageUrl = googlePlacePhotoImageUrl(placeWithPhoto.photoName);
-    return {
-      photos: fallbackImageUrl ? [fallbackImageUrl] : [],
-      attributions: [],
-    };
-  }
 
-  const photoNames = placeWithPhoto.googlePlaceId
-    ? await fetchGooglePlacePhotoNames(placeWithPhoto.googlePlaceId, 4)
-    : [];
-
-  const imageUrls = photoNames
-    .map((photoName) => googlePlacePhotoImageUrl(photoName))
-    .filter((url): url is string => Boolean(url));
-
-  const fallbackImageUrl = googlePlacePhotoImageUrl(placeWithPhoto.photoName);
-  const photos = imageUrls.length ? imageUrls : fallbackImageUrl ? [fallbackImageUrl] : [];
-
-  if (placeWithPhoto.googlePlaceId && photos.length) {
-    await savePlacePhotoCache({
-      placeId: placeWithPhoto.googlePlaceId,
-      parkingName: placeWithPhoto.googlePlaceName || placeWithPhoto.lotName || args.name,
-      airportCode: args.airport || undefined,
-      photos,
-      attributions: [],
-    });
-  }
-
-  return { photos, attributions: [] };
+  return getBestParkingPhoto({
+    parkingLotId: args.parkingLotId,
+    provider: args.provider,
+    providerLotId: args.parkingLotId,
+    googlePlaceId: placeWithPhoto.googlePlaceId,
+    airportCode: args.airport,
+    googlePhotoName: placeWithPhoto.photoName || placeWithPhoto.photoNames?.[0] || null,
+    lotName: args.name,
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -241,16 +192,17 @@ async function handleRequest(input: Record<string, unknown>) {
 
           if (!place) return null;
 
-          const { photos, attributions } = await resolvePlacePhotos({
+          const photoSelection = await resolvePlacePhotoSelection({
             place,
             name,
             airport: airport || null,
+            provider,
+            parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
           });
 
           return {
             place,
-            cachedPhotos: photos,
-            cachedAttributions: attributions,
+            photoSelection,
           };
         })(),
         GOOGLE_PLACE_MATCH_TIMEOUT_MS,
@@ -290,11 +242,11 @@ async function handleRequest(input: Record<string, unknown>) {
     }
 
     const placeWithPhoto = matchResult?.place ?? null;
-    const cachedPhotos = matchResult?.cachedPhotos ?? [];
-    const cachedAttributions = matchResult?.cachedAttributions ?? [];
+    const photoSelection = matchResult?.photoSelection ?? null;
 
-    const imageUrl = cachedPhotos[0] || googlePlacePhotoImageUrl(placeWithPhoto?.photoName);
+    const imageUrl = photoSelection?.imageUrl ?? null;
     const photoUrl = imageUrl;
+    const photoAttributions = photoSelection?.attribution ? [photoSelection.attribution] : [];
     const placeId = placeWithPhoto?.googlePlaceId || null;
     const displayName = placeWithPhoto?.googlePlaceName || placeWithPhoto?.lotName || null;
     const formattedAddress =
@@ -318,8 +270,12 @@ async function handleRequest(input: Record<string, unknown>) {
         userRatingCount,
         photoUrl,
         imageUrl,
-        images: cachedPhotos.length ? cachedPhotos : imageUrl ? [imageUrl] : [],
-        photoAttributions: cachedAttributions,
+        images: imageUrl ? [imageUrl] : [],
+        photoAttributions,
+        photoSource: photoSelection?.source,
+        photoAttribution: photoSelection?.attribution ?? null,
+        photoAttributionUrl: photoSelection?.attributionUrl ?? null,
+        requiresGoogleAttribution: photoSelection?.requiresGoogleAttribution ?? false,
         status: 'matched',
         place: {
           placeId,
@@ -343,8 +299,12 @@ async function handleRequest(input: Record<string, unknown>) {
           ...parkingGooglePlaceToOptionUpdate(placeWithPhoto),
           photoUrl,
           imageUrl,
-          images: cachedPhotos.length ? cachedPhotos : imageUrl ? [imageUrl] : [],
-          photoAttributions: cachedAttributions,
+          images: imageUrl ? [imageUrl] : [],
+          photoAttributions,
+          photoSource: photoSelection?.source,
+          photoAttribution: photoSelection?.attribution ?? null,
+          photoAttributionUrl: photoSelection?.attributionUrl ?? null,
+          requiresGoogleAttribution: photoSelection?.requiresGoogleAttribution ?? false,
           status: 'matched',
         },
         cacheKey: placeWithPhoto.cacheKey,

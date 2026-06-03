@@ -277,6 +277,8 @@ type ParkingOptionsRequestContext = {
   airportCode?: string;
   destinationLat?: number;
   destinationLng?: number;
+  routeDepartureTime?: string;
+  targetTerminalArrivalTime?: string;
 };
 
 export interface TrafficProvider {
@@ -285,7 +287,12 @@ export interface TrafficProvider {
     destination: string,
     dateTime: string,
     destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: { airportCode?: string | null; lotId?: string | null },
+    routeContext?: {
+      airportCode?: string | null;
+      lotId?: string | null;
+      routePurpose?: 'main_to_destination' | 'origin_to_parking';
+      targetTerminalArrivalTime?: string;
+    },
   ): Promise<TrafficEstimate>;
 }
 
@@ -477,7 +484,12 @@ export class LiveTrafficProvider implements TrafficProvider {
     destination: string,
     dateTime: string,
     destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: { airportCode?: string | null; lotId?: string | null },
+    routeContext?: {
+      airportCode?: string | null;
+      lotId?: string | null;
+      routePurpose?: 'main_to_destination' | 'origin_to_parking';
+      targetTerminalArrivalTime?: string;
+    },
   ): Promise<TrafficEstimate> {
     // dateTime can be undefined at runtime (e.g., tests). Default to "now" to keep routing functional.
     const resolvedDateTime = (dateTime ?? new Date().toISOString());
@@ -1005,7 +1017,12 @@ export class MockProvider implements DataProvider {
     dateTime: string,
     allowLive: boolean,
     destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: { airportCode?: string | null; lotId?: string | null },
+    routeContext?: {
+      airportCode?: string | null;
+      lotId?: string | null;
+      routePurpose?: 'main_to_destination' | 'origin_to_parking';
+      targetTerminalArrivalTime?: string;
+    },
   ): Promise<TrafficEstimate> {
     const destinationKey = destinationLatLng
       ? `${destinationLatLng.lat},${destinationLatLng.lng}`
@@ -1073,7 +1090,12 @@ export class MockProvider implements DataProvider {
     destination: string,
     dateTime: string,
     destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: { airportCode?: string | null; lotId?: string | null },
+    routeContext?: {
+      airportCode?: string | null;
+      lotId?: string | null;
+      routePurpose?: 'main_to_destination' | 'origin_to_parking';
+      targetTerminalArrivalTime?: string;
+    },
   ): Promise<TrafficEstimate> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
     return this.trafficProvider.getTrafficEstimate(
@@ -1169,11 +1191,18 @@ export class MockProvider implements DataProvider {
     const routeDestination = isAirportDestination
       ? resolveAirportDestinationForRouting(destination)
       : destination;
+    const routeDepartureTime = context?.routeDepartureTime || dateTime;
     const destinationRouteEstimate = await this.getRouteEstimate(
       origin,
       routeDestination,
-      dateTime,
-      true
+      routeDepartureTime,
+      true,
+      null,
+      {
+        airportCode: isAirportDestination ? airportCode : null,
+        routePurpose: 'main_to_destination',
+        targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
+      },
     );
 
     const originCoords = await this.geocodeLatLng(origin);
@@ -1216,13 +1245,13 @@ export class MockProvider implements DataProvider {
         routeCacheKey: buildRouteEstimateCacheKey({
           origin,
           destination: routeDestinationKey,
-          dateTime,
+          dateTime: routeDepartureTime,
           mode: 'DRIVE_LIVE',
         }),
         liveRouteCacheKey: buildRouteEstimateCacheKey({
           origin,
           destination: routeDestinationKey,
-          dateTime,
+          dateTime: routeDepartureTime,
           mode: 'DRIVE',
         }),
       };
@@ -1276,12 +1305,18 @@ export class MockProvider implements DataProvider {
       const promise = this.getRouteEstimate(
         origin,
         entry.routeDestination,
-        dateTime,
+        routeDepartureTime,
         true,
         typeof entry.destinationLatLng?.lat === 'number' &&
           typeof entry.destinationLatLng?.lng === 'number'
           ? entry.destinationLatLng
           : null,
+        {
+          airportCode: isAirportDestination ? airportCode : null,
+          lotId: entry.option.id || entry.option.name,
+          routePurpose: 'origin_to_parking',
+          targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
+        },
       );
       parkingRouteEstimates.set(entry.routeCacheKey, promise);
 

@@ -5,20 +5,24 @@ import type { AirportDayTimelineMilestone } from '../../lib/airports/airportDayT
 type AirportDayTimelineProps = {
   milestones: AirportDayTimelineMilestone[];
   className?: string;
+  showHeading?: boolean;
 };
 
 export default function AirportDayTimeline({
   milestones,
   className = '',
+  showHeading = true,
 }: AirportDayTimelineProps) {
   if (milestones.length === 0) return null;
 
   return (
     <div className={className}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
-        Airport day timeline
-      </div>
-      <ol className="mt-3 space-y-0">
+      {showHeading ? (
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+          Airport day timeline
+        </div>
+      ) : null}
+      <ol className={`space-y-0 ${showHeading ? 'mt-3' : ''}`}>
         {milestones.map((milestone, index) => (
           <li key={milestone.id} className="relative flex gap-3 pb-4 last:pb-0">
             {index < milestones.length - 1 ? (

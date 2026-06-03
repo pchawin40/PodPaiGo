@@ -1,6 +1,12 @@
 import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
+import {
+  resolveRouteDepartureIsoForPurpose,
+  resolveScheduledTripDateTime,
+  resolveTargetTerminalArrivalIso,
+  resolveTripRouteTiming,
+} from './trip/routeTiming';
 import { attachSeaCheckpointRoute } from './airports/seaCheckpointRouting';
 import { getParkingDiscoveryNotice } from './parking/parkingDiscoveryMode';
 import { mockTransitOptions } from '../data/mockData';
@@ -168,64 +174,11 @@ function genericRideshareFallback(): RideshareOption[] {
 }
 
 function buildTripDateTime(tripData: TripData): string {
-  if (tripData.type === 'general-trip') {
-    return `${tripData.arrivalDate}T${tripData.arrivalTime}`;
-  }
-
-  if (tripData.type === 'one-way-arrival') {
-    return `${tripData.arrivalDate}T${tripData.arrivalTime}`;
-  }
-
-  if (tripData.type === 'round-trip') {
-    return `${tripData.departureDate}T${tripData.departureTime}`;
-  }
-
-  if (tripData.type === 'one-way-departure') {
-    return `${tripData.departureDate}T${tripData.departureTime}`;
-  }
-
-  return `${tripData.airportTripDate}T${tripData.airportTripTime}`;
-}
-
-function localDateTimeWithMinuteOffset(
-  date: string,
-  time: string,
-  offsetMinutes: number
-): string | null {
-  const parsed = new Date(`${date}T${time || '00:00'}`);
-  if (Number.isNaN(parsed.getTime())) return null;
-
-  parsed.setMinutes(parsed.getMinutes() + offsetMinutes);
-
-  const yyyy = parsed.getFullYear();
-  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
-  const dd = String(parsed.getDate()).padStart(2, '0');
-  const hh = String(parsed.getHours()).padStart(2, '0');
-  const min = String(parsed.getMinutes()).padStart(2, '0');
-
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+  return resolveScheduledTripDateTime(tripData) ?? new Date().toISOString();
 }
 
 function plannedAirportArrivalDateTime(tripData: TripData): string | undefined {
-  if (tripData.type !== 'one-way-departure') return undefined;
-
-  if (tripData.timeAnchor === 'airport-arrival') {
-    return `${tripData.departureDate}T${tripData.departureTime}`;
-  }
-
-  const readiness = calculateAirportReadinessBuffer({
-    bagPlan: tripData.bagPlan,
-    checkingBags: !!tripData.checkingBags,
-    securityOption: tripData.securityOption || 'standard',
-    flightType: tripData.flightType || 'domestic',
-    cabin: tripData.cabin || 'economy',
-  });
-
-  return localDateTimeWithMinuteOffset(
-    tripData.departureDate,
-    tripData.departureTime,
-    -readiness.bufferMinutes
-  ) || undefined;
+  return resolveTargetTerminalArrivalIso(tripData) ?? undefined;
 }
 
 function originNearLinkStation(origin: string): boolean {
@@ -324,6 +277,15 @@ export class RecommendationEngine {
     const isAirportTrip = !isGeneralTrip(tripData);
 
     const tripDateTime = buildTripDateTime(tripData);
+    const routeTiming = resolveTripRouteTiming(tripData);
+    const mainRouteDepartureIso = resolveRouteDepartureIsoForPurpose(
+      routeTiming,
+      'main_to_destination',
+    );
+    const parkingRouteDepartureIso = resolveRouteDepartureIsoForPurpose(
+      routeTiming,
+      'origin_to_parking',
+    );
     const route =
       isAirportArrivalTrip(tripData)
         ? 'airport-home'
@@ -365,6 +327,8 @@ export class RecommendationEngine {
               : undefined,
             destinationLat: tripData.destinationLat,
             destinationLng: tripData.destinationLng,
+            routeDepartureTime: parkingRouteDepartureIso,
+            targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
           }
         )
         : Promise.resolve([]),
@@ -409,7 +373,15 @@ export class RecommendationEngine {
       this.provider.getTrafficEstimate(
         tripData.origin,
         tripData.destination,
-        tripDateTime
+        mainRouteDepartureIso,
+        undefined,
+        {
+          airportCode: isAirportTrip
+            ? ((tripData as TripDataWithTransport).airportCode || undefined)
+            : undefined,
+          routePurpose: 'main_to_destination',
+          targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+        },
       ),
 
       isAirportTrip
@@ -451,7 +423,7 @@ export class RecommendationEngine {
     const weatherResult = isAirportTrip
       ? await getWeatherForAirport({
         airportCode,
-        targetDateTime: tripDateTime,
+        targetDateTime: routeTiming.targetTerminalArrivalIso || tripDateTime,
       }).catch((): WeatherLookupResult => ({
         weatherImpact: null,
         context: 'unavailable' as const,

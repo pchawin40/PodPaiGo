@@ -1,6 +1,9 @@
 export const PLACE_PHOTO_NAME_CACHE_TTL_DAYS = 365;
 export const PLACE_PHOTO_SOURCE_GOOGLE = 'google_places';
 
+// Google photo resource names may be cached briefly to avoid repeat GetPlace calls.
+// Photo bytes and long-term image URLs must never be stored in Supabase.
+
 export type PlacePhotoSnapshotFields = {
   photoName?: string | null;
   photoNames?: string[] | null;

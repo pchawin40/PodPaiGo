@@ -28,8 +28,8 @@ export default function HeroBadge() {
 
   return (
     <p
-      className={`mb-4 inline-flex rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 transition-all duration-500 ease-out ${
-        visible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+      className={`mb-4 inline-flex rounded-full border border-border bg-muted px-3 py-1 text-sm font-medium text-muted-foreground transition-all duration-500 ease-out ${
+        visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
       }`}
     >
       {messages[index]}

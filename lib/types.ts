@@ -241,6 +241,10 @@ export type ParkingOption = {
   imageUrl?: string;
   images?: string[];
   photoAttributions?: string[];
+  photoSource?: 'first_party' | 'partner' | 'provider' | 'google_live' | 'placeholder';
+  photoAttribution?: string | null;
+  photoAttributionUrl?: string | null;
+  requiresGoogleAttribution?: boolean;
   availabilityScore?: number; // internal score for availability, used in ranking
   bookingProvider?: string; // e.g. "ParkWhiz", for marketplace options
   bestFor?: string[]; // e.g. ["short trips", "budget travelers"], for marketplace options

@@ -15,7 +15,7 @@ export default function SavedTripsHomeSection() {
       <div className="mt-4 text-center">
         <Link
           href="/trip"
-          className="text-sm font-medium text-blue-700 hover:text-blue-800"
+          className="text-sm font-medium text-primary hover:underline"
         >
           Plan or manage trips
         </Link>

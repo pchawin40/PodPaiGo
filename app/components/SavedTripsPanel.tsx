@@ -9,6 +9,7 @@ import {
   type SavedFavoriteTrip,
 } from '../../lib/trip/favoriteTrips';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
+import TravelCard from './ui/TravelCard';
 
 type SavedTripsPanelProps = {
   title?: string;
@@ -68,37 +69,30 @@ export default function SavedTripsPanel({
 
   if (trips.length === 0) {
     return (
-      <section
-        className={
-          'rounded-2xl border border-dashed border-sky-200 bg-white/80 p-4 text-sm text-slate-600 sm:p-5 ' +
-          className
-        }
+      <TravelCard
+        padding="sm"
+        className={'border-dashed bg-card/80 ' + className}
       >
-        <h2 className="text-base font-semibold text-slate-950">{title}</h2>
-        <p className="mt-2 leading-6">
-          No saved trips yet. Use <span className="font-medium text-slate-900">Save trip</span> on
-          the results page or <span className="font-medium text-slate-900">Save as favorite</span>{' '}
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          No saved trips yet. Use <span className="font-medium text-foreground">Save trip</span> on
+          the results page or <span className="font-medium text-foreground">Save as favorite</span>{' '}
           while planning to store a route on this device.
         </p>
-      </section>
+      </TravelCard>
     );
   }
 
   return (
-    <section
-      className={
-        'rounded-2xl border border-sky-100 bg-white/90 p-4 shadow-sm shadow-sky-900/5 sm:p-5 ' +
-        className
-      }
-    >
+    <TravelCard padding="sm" className={className}>
       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
           {!compact && description ? (
-            <p className="mt-1 text-sm text-slate-600">{description}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
           ) : null}
         </div>
-        <div className="text-xs font-medium text-slate-500">{trips.length} saved</div>
+        <div className="text-xs font-medium text-muted-foreground">{trips.length} saved</div>
       </div>
 
       <ul className="mt-4 space-y-2">
@@ -108,13 +102,13 @@ export default function SavedTripsPanel({
               <button
                 type="button"
                 onClick={() => handleReuse(trip)}
-                className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-sky-200 hover:bg-sky-50/40"
+                className="min-w-0 flex-1 rounded-2xl border border-border bg-card px-4 py-3 text-left transition hover:border-primary/25 hover:bg-muted dark:hover:bg-muted/80"
               >
-                <div className="truncate text-sm font-semibold text-slate-950">{trip.name}</div>
+                <div className="truncate text-sm font-semibold text-foreground">{trip.name}</div>
                 {!compact && (
-                  <div className="mt-1 truncate text-xs text-slate-500">{trip.origin}</div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">{trip.origin}</div>
                 )}
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   <span>{trip.intent.replace('-', ' ')}</span>
                   <span>·</span>
                   <span>{trip.transportAvailability}</span>
@@ -127,7 +121,7 @@ export default function SavedTripsPanel({
                 type="button"
                 aria-label={`Delete ${trip.name}`}
                 onClick={(event) => handleDelete(event, trip.id)}
-                className="inline-flex shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                className="inline-flex shrink-0 items-center justify-center rounded-2xl border border-border bg-card px-3 text-sm font-medium text-muted-foreground transition hover:border-danger/25 hover:bg-danger/10 hover:text-danger"
               >
                 Delete
               </button>
@@ -135,6 +129,6 @@ export default function SavedTripsPanel({
           </li>
         ))}
       </ul>
-    </section>
+    </TravelCard>
   );
 }

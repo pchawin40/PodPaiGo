@@ -332,6 +332,7 @@ export function googlePlacePhotoImageUrl(
   photoName: string | null | undefined,
   maxWidthPx = 900
 ): string | null {
+  // Short-term live proxy URL only. Never persist in Supabase Storage or parking_lot_photos.
   if (isGooglePlacePhotosLiveBlocked()) return null;
 
   const name = typeof photoName === 'string' ? photoName.trim() : '';
@@ -1423,7 +1424,6 @@ export async function resolveParkingGoogleReviews(args: {
 }
 
 export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheRecord): Partial<ParkingOption> {
-  const imageUrl = googlePlacePhotoImageUrl(place.photoName);
   const hasGoogleCoords = typeof place.lat === 'number' && typeof place.lng === 'number';
 
   return {
@@ -1438,8 +1438,6 @@ export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheR
     reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : undefined,
     normalizedAddress: place.googleFormattedAddress || undefined,
     address: place.googleFormattedAddress || undefined,
-    imageUrl: imageUrl || undefined,
-    images: imageUrl ? [imageUrl] : undefined,
     ...(hasGoogleCoords
       ? {
           canonicalLat: place.lat,

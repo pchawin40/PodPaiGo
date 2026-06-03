@@ -25,7 +25,7 @@ function hasRequiredTripFields(query: string): boolean {
 
   const type = params.get('type');
 
-  if (type === 'general-trip' || type === 'point-to-point') {
+  if (type === 'general-trip' || type === 'point-to-point' || type === 'quick-go') {
     return Boolean(
       (params.get('arrivalDate') && params.get('arrivalTime')) ||
       (params.get('parkingCheckInDate') && params.get('parkingCheckInTime')) ||

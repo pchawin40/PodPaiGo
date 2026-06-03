@@ -145,7 +145,7 @@ export function classifyDestinationParking(
     };
   }
 
-  if (PAID_VENUE_PATTERN.test(lower)) {
+  if (PAID_VENUE_PATTERN.test(lower) || /\b(pike place|waterfront|market district)\b/i.test(lower)) {
     return {
       mode: 'paid_likely',
       accessType: 'public',

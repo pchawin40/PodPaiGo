@@ -408,7 +408,11 @@ export default function ParkingSmartPick({
       </div>
 
       <div className="mt-4">
-        <ParkingLotVisual option={best} tripContext={parkingTripContext} />
+        <ParkingLotVisual
+          option={best}
+          tripContext={parkingTripContext}
+          airportCode={(tripData as { airportCode?: string } | null)?.airportCode ?? null}
+        />
       </div>
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

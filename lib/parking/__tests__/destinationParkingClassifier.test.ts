@@ -37,6 +37,12 @@ describe('destinationParkingClassifier', () => {
     expect(result.shouldSearchPaidParking).toBe(true);
   });
 
+  test('Pike Place Market maps to paid_likely', () => {
+    const result = classifyDestinationParking({ destination: 'Pike Place Market' });
+
+    expect(result.mode).toBe('paid_likely');
+  });
+
   test('restaurant maps to validated_possible', () => {
     const result = classifyDestinationParking({ destination: 'Waterfront restaurant' });
 
