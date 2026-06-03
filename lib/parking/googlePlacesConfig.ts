@@ -122,11 +122,18 @@ export function logGooglePlacesConfig(
     console.info(formatGooglePlacesSafetySummary(config));
   }
 
-  if (process.env.DEBUG_LOGS === 'true') {
+  if (process.env.DEBUG_LOGS === 'true' || process.env.NEXT_PUBLIC_DEBUG_UI === 'true') {
     console.info(`google_places_config_${event}`, {
       ...config,
       route: meta?.route ?? null,
       requestKey: meta?.requestKey ?? null,
+    });
+    console.info('parking_reviews_env_debug', {
+      disableGooglePlaces: config.disableGooglePlaces,
+      disableGooglePlaceReviews: config.disableGooglePlaceReviews,
+      maxGooglePlaceReviewsPerRequest: config.maxGooglePlaceReviewsPerRequest,
+      maxGooglePlaceDetailsPerRequest: config.maxGooglePlaceDetailsPerRequest,
+      liveReviewsEnabled: config.liveReviewsEnabled,
     });
   }
 }

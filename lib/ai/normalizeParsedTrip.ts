@@ -1,6 +1,33 @@
-import type { ParsedTripAssistantResult } from './tripParseTypes';
+import type { ParsedTripAssistantResult, TripParseMode } from './tripParseTypes';
+import type { DestinationCategory } from '../parking/destinationParkingClassifier';
 
 const CONFIDENCE_VALUES = new Set<ParsedTripAssistantResult['confidence']>(['high', 'medium', 'low']);
+
+const MODE_VALUES = new Set<TripParseMode>(['airport_trip', 'quick_go', 'unknown']);
+
+const ORIGIN_SOURCE_VALUES = new Set<ParsedTripAssistantResult['originSource']>([
+  'current_location',
+  'manual',
+  'saved',
+  'unknown',
+]);
+
+const DESTINATION_CATEGORY_VALUES = new Set<DestinationCategory>([
+  'airport',
+  'grocery_or_retail',
+  'office_or_workplace',
+  'hiking_or_park',
+  'restaurant',
+  'hotel',
+  'general',
+]);
+
+function resolveMode(parsed: Partial<ParsedTripAssistantResult>): TripParseMode {
+  if (parsed.mode && MODE_VALUES.has(parsed.mode)) {
+    return parsed.mode;
+  }
+  return 'airport_trip';
+}
 
 export function normalizeParsedTripAssistantResult(
   raw: unknown,
@@ -13,7 +40,25 @@ export function normalizeParsedTripAssistantResult(
     ? (parsed.confidence as ParsedTripAssistantResult['confidence'])
     : 'medium';
 
-  return {
+  const mode = resolveMode(parsed);
+  const originSource = ORIGIN_SOURCE_VALUES.has(
+    parsed.originSource as ParsedTripAssistantResult['originSource'],
+  )
+    ? (parsed.originSource as ParsedTripAssistantResult['originSource'])
+    : 'unknown';
+
+  const destinationCategory =
+    parsed.destinationCategory &&
+    DESTINATION_CATEGORY_VALUES.has(parsed.destinationCategory as DestinationCategory)
+      ? (parsed.destinationCategory as DestinationCategory)
+      : null;
+
+  const normalized: ParsedTripAssistantResult = {
+    mode,
+    destinationText:
+      typeof parsed.destinationText === 'string' ? parsed.destinationText.trim() || null : null,
+    originSource,
+    destinationCategory,
     originText: typeof parsed.originText === 'string' ? parsed.originText.trim() || null : null,
     airportCode:
       typeof parsed.airportCode === 'string'
@@ -37,19 +82,29 @@ export function normalizeParsedTripAssistantResult(
       : [],
     parser,
   };
+
+  return computeMissingParsedFields(normalized);
 }
 
 export function computeMissingParsedFields(
   parsed: ParsedTripAssistantResult,
 ): ParsedTripAssistantResult {
-  const missingFields = [...parsed.missingFields];
+  const missingFields = new Set(parsed.missingFields);
 
-  if (!parsed.originText) missingFields.push('originText');
-  if (!parsed.airportCode) missingFields.push('airportCode');
-  if (!parsed.departureDate) missingFields.push('departureDate');
+  if (parsed.mode === 'quick_go') {
+    if (!parsed.destinationText?.trim()) missingFields.add('destinationText');
+    missingFields.delete('airportCode');
+    missingFields.delete('departureDate');
+    missingFields.delete('originText');
+  } else {
+    if (!parsed.originText) missingFields.add('originText');
+    if (!parsed.airportCode) missingFields.add('airportCode');
+    if (!parsed.departureDate) missingFields.add('departureDate');
+    missingFields.delete('destinationText');
+  }
 
   return {
     ...parsed,
-    missingFields: Array.from(new Set(missingFields)),
+    missingFields: Array.from(missingFields),
   };
 }

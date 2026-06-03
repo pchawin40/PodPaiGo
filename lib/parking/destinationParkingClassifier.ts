@@ -34,8 +34,10 @@ export type ClassifyDestinationParkingInput = {
   airportCode?: string | null;
 };
 
-const RETAIL_PATTERN =
-  /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|home depot|lowe'?s?|grocer(?:y|ies)|supermarket)\b/i;
+export const RETAIL_GROCERY_PATTERN =
+  /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|walgreens|cvs|rite aid|pharmacy|grocer(?:y|ies)|supermarket)\b/i;
+
+const RETAIL_PATTERN = RETAIL_GROCERY_PATTERN;
 const MALL_PATTERN =
   /\b(mall|shopping center|shopping centre|outlet mall|town center|town centre|collection|square)\b/i;
 const RESTAURANT_PATTERN =
@@ -71,10 +73,45 @@ function freeRetailClassification(name: string): DestinationParkingClassificatio
     mode: 'free_likely',
     accessType: 'customer_only',
     confidence: 'high',
-    reason: `${name} destinations usually include customer parking.`,
+    reason:
+      'Most grocery and retail locations have free customer parking, but check posted signs.',
     recommendedAction: 'Park in the store lot first. Paid parking search is skipped unless you ask for nearby options.',
     shouldSearchPaidParking: false,
   };
+}
+
+export type DestinationCategory =
+  | 'airport'
+  | 'grocery_or_retail'
+  | 'office_or_workplace'
+  | 'hiking_or_park'
+  | 'restaurant'
+  | 'hotel'
+  | 'general';
+
+export function isRetailOrGroceryDestination(destination: string): boolean {
+  const lower = normalizeDestination(destination).toLowerCase();
+  return RETAIL_GROCERY_PATTERN.test(lower);
+}
+
+export function inferDestinationCategory(
+  input: ClassifyDestinationParkingInput,
+): DestinationCategory {
+  const classification = classifyDestinationParking(input);
+  const destination = normalizeDestination(input.destination);
+  const lower = destination.toLowerCase();
+
+  if (classification.mode === 'airport') return 'airport';
+  if (classification.mode === 'free_likely' && isRetailOrGroceryDestination(destination)) {
+    return 'grocery_or_retail';
+  }
+  if (classification.mode === 'restricted_possible') return 'office_or_workplace';
+  if (classification.mode === 'permit_possible') return 'hiking_or_park';
+  if (classification.mode === 'validated_possible' && RESTAURANT_PATTERN.test(lower)) {
+    return 'restaurant';
+  }
+  if (/\bhotel|motel|inn\b/i.test(lower)) return 'hotel';
+  return 'general';
 }
 
 export function classifyDestinationParking(
@@ -82,16 +119,15 @@ export function classifyDestinationParking(
 ): DestinationParkingClassification {
   const destination = normalizeDestination(input.destination);
   const destinationKind = String(input.destinationKind || '').trim().toLowerCase();
-  const airportCode = String(input.airportCode || '').trim().toUpperCase();
 
-  if (destinationKind === 'airport' || airportCode) {
+  if (destinationKind === 'airport') {
     return airportClassification();
   }
 
   const lower = destination.toLowerCase();
 
-  if (RETAIL_PATTERN.test(lower)) {
-    const match = lower.match(RETAIL_PATTERN)?.[0] || 'Retail';
+  if (isRetailOrGroceryDestination(destination)) {
+    const match = lower.match(RETAIL_GROCERY_PATTERN)?.[0] || 'Retail';
     return freeRetailClassification(match.replace(/\b\w/g, (char) => char.toUpperCase()));
   }
 
@@ -184,7 +220,7 @@ export function classifyDestinationParking(
 export function destinationParkingHeadline(mode: DestinationParkingMode): string {
   switch (mode) {
     case 'free_likely':
-      return 'Parking likely free';
+      return 'Parking likely free at destination';
     case 'validated_possible':
       return 'Validation may be available';
     case 'paid_likely':

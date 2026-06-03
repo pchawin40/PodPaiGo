@@ -8,7 +8,9 @@ import {
   buildQuickGoResultsPath,
   formatQuickGoOriginDisplayLabel,
   isQuickGoMode,
+  quickGoClassificationForTrip,
   readQuickGoOriginFromSearchParams,
+  resolveQuickGoBestWay,
 } from '../../lib/trip/quickGo';
 import type { Recommendation, TripData } from '../../lib/types';
 import QuickGoResultsCard from './QuickGoResultsCard';
@@ -33,12 +35,23 @@ export default function QuickGoResultsView({
   const showAirportPrompt =
     Boolean(detectedAirportCode) && searchParams.get('quickGoConfirmed') !== '1';
 
-  const bestOption = rankedOptions[0] ?? null;
-  const backupOption = rankedOptions[1] ?? null;
+  const destination = tripData.destinationName || tripData.destination;
+  const classification = quickGoClassificationForTrip({
+    destination,
+    destinationKind: tripData.destinationKind,
+    detectedAirportCode,
+  });
+
   const driveMinutes =
     recommendation.trafficEstimate?.duration ??
-    bestOption?.duration ??
     null;
+
+  const { bestWayLabel, backupWayLabel, bestOption, backupOption } = resolveQuickGoBestWay({
+    tripData,
+    rankedOptions,
+    driveMinutes,
+    classification,
+  });
 
   const originDisplayLabel = formatQuickGoOriginDisplayLabel(searchParams);
 
@@ -92,6 +105,9 @@ export default function QuickGoResultsView({
         <QuickGoResultsCard
           tripData={tripData}
           originDisplayLabel={originDisplayLabel}
+          classification={classification}
+          bestWayLabel={bestWayLabel}
+          backupWayLabel={backupWayLabel}
           bestOption={bestOption}
           backupOption={backupOption}
           driveMinutes={driveMinutes}

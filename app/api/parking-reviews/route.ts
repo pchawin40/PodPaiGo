@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
+import { getActivePlacesRequestBudget, runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
 import {
   getCachedParkingGoogleReviews,
   resolveParkingGoogleReviews,
@@ -9,6 +9,9 @@ import {
 } from '../../../lib/parking/googlePlacesConfig';
 import { isGooglePlaceReviewsLiveBlocked } from '../../../lib/parking/googlePlacesGuard';
 import {
+  GOOGLE_LISTING_NOT_FOUND_MESSAGE,
+  GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE,
+  GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE,
   GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
   SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
 } from '../../../lib/parking/googlePlacesSafeMode';
@@ -75,15 +78,29 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
       }
 
       const place = await resolveParkingGoogleReviews(lookupArgs);
+      const budget = getActivePlacesRequestBudget();
+
       if (place?.reviews?.length) {
-        return buildReviewResponse(place, place.source || 'google-places');
+        return buildReviewResponse(
+          place,
+          place.source === 'supabase-cache' || place.source === 'stale-fallback'
+            ? place.source
+            : place.source || 'google-places',
+          place.source === 'supabase-cache' || place.source === 'stale-fallback'
+            ? SHOWING_CACHED_PROVIDER_DATA_MESSAGE
+            : undefined,
+        );
       }
 
-      return buildReviewResponse(
-        place,
-        'unavailable',
-        'Reviews unavailable while live Google review fetching is disabled.',
-      );
+      if (!place?.googlePlaceId) {
+        return buildReviewResponse(place, 'no-listing', GOOGLE_LISTING_NOT_FOUND_MESSAGE);
+      }
+
+      if (budget && budget.blocked > 0) {
+        return buildReviewResponse(place, 'cap-exceeded', GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE);
+      }
+
+      return buildReviewResponse(place, 'no-reviews', GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE);
     },
     { route: '/api/parking-reviews' },
   );

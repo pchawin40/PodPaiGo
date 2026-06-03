@@ -50,11 +50,12 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const type = searchParams.get('type') as TripData['type'] | null;
   const origin = searchParams.get('origin') || '';
   const destination = searchParams.get('destination') || '';
-  const airportCode = (
+  const airportCodeParam = (
     searchParams.get('airportCode') ||
     searchParams.get('airport') ||
-    'SEA'
-  ).toUpperCase();
+    ''
+  ).trim().toUpperCase();
+  const airportCodeForAirportTrips = airportCodeParam || 'SEA';
   const parkingDurationStr = searchParams.get('parkingDuration');
   const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
   const parkingCheckInDate = searchParams.get('parkingCheckInDate') || '';
@@ -149,13 +150,13 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               flightType,
               cabin,
               checkedInAtAirport,
-              airportCode,
+              airportCode: airportCodeForAirportTrips,
             }
           : {
               type,
               origin,
               destination,
-              airportCode,
+              airportCode: airportCodeForAirportTrips,
               departureDate,
               departureTime,
               timeAnchor,
@@ -179,7 +180,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         arrivalTime,
         transportAvailability,
         transitPayment,
-        airportCode,
+        airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
     }
@@ -200,7 +201,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         parkingDuration,
         transportAvailability,
         transitPayment,
-        airportCode,
+        airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
     }
@@ -216,7 +217,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         airportTripTime,
         transportAvailability,
         transitPayment,
-        airportCode,
+        airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
     }
@@ -267,10 +268,23 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
     }
   }
 
-  if (data && !('airportCode' in data && data.airportCode)) {
-    data = { ...data, airportCode, transitPayment } as TripData;
-  } else if (data) {
-    data = { ...data, airportCode, transitPayment } as TripData;
+  if (data) {
+    data = { ...data, transitPayment } as TripData;
+
+    const isAirportStyleTrip =
+      data.destinationKind === 'airport' ||
+      data.type === 'one-way-departure' ||
+      data.type === 'one-way-arrival' ||
+      data.type === 'round-trip' ||
+      data.type === 'dropoff-pickup';
+
+    if (isAirportStyleTrip) {
+      const resolvedCode =
+        ('airportCode' in data && data.airportCode) || airportCodeForAirportTrips;
+      data = { ...data, airportCode: resolvedCode };
+    } else if (airportCodeParam) {
+      data = { ...data, airportCode: airportCodeParam };
+    }
   }
 
   return data;

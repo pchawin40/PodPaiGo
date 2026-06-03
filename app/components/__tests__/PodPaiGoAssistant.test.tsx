@@ -16,6 +16,10 @@ jest.mock('next/navigation', () => ({
 }));
 
 const mockParsed: ParsedTripAssistantResult = {
+  mode: 'airport_trip',
+  destinationText: null,
+  originSource: 'manual',
+  destinationCategory: null,
   originText: 'Monroe',
   airportCode: 'SEA',
   destinationCity: 'Las Vegas',

@@ -21,6 +21,10 @@ export type ParseTripTextOptions = {
 
 function emptyParsedResult(parser: ParsedTripAssistantResult['parser']): ParsedTripAssistantResult {
   return {
+    mode: 'unknown',
+    destinationText: null,
+    originSource: 'unknown',
+    destinationCategory: null,
     originText: null,
     airportCode: null,
     destinationCity: null,

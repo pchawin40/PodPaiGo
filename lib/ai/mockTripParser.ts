@@ -1,4 +1,6 @@
-import type { ParsedTripAssistantResult } from './tripParseTypes';
+import { detectTripIntent } from './detectTripIntent';
+import { inferDestinationCategory } from '../parking/destinationParkingClassifier';
+import type { ParsedTripAssistantResult, ParsedTripOriginSource, TripParseMode } from './tripParseTypes';
 
 const MONTHS: Record<string, number> = {
   jan: 1,
@@ -54,9 +56,18 @@ const CITY_ALIASES: Record<string, string> = {
   'los angeles': 'Los Angeles',
   monroe: 'Monroe',
   bellevue: 'Bellevue',
+  everett: 'Everett',
 };
 
 const KNOWN_AIRPORT_CODES = new Set(Object.values(AIRPORT_ALIASES));
+
+const QUICK_GO_KNOWN_DESTINATIONS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bfred meyer(?:\s+in\s+|\s+)(monroe)\b/i, label: 'Fred Meyer Monroe' },
+  { pattern: /\bsafeway(?:\s+in\s+|\s+)(monroe)\b/i, label: 'Safeway Monroe' },
+  { pattern: /\bcostco(?:\s+in\s+|\s+)(everett)\b/i, label: 'Costco Everett' },
+  { pattern: /\bpse\b[^.;\n]*\bbellevue\b[^.;\n]*\boffice\b/i, label: 'PSE Bellevue office' },
+  { pattern: /\blake serene\b[^.;\n]*\btrailhead\b/i, label: 'Lake Serene trailhead' },
+];
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -65,6 +76,13 @@ function pad2(value: number): string {
 function formatDate(year: number, month: number, day: number): string | null {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function formatQuickGoNow(now: Date): { departureDate: string; departureTime: string } {
+  return {
+    departureDate: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`,
+    departureTime: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
+  };
 }
 
 function defaultYearForMonth(month: number, now = new Date()): number {
@@ -192,12 +210,50 @@ function extractDestinationCity(text: string, airportCode: string | null): strin
   return null;
 }
 
-function extractOrigin(text: string): string | null {
-  const patterns = [
-    /\bleaving from\s+([^,.;\n]+?)(?=\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|find|and|for|to)\b|[,.;\n]|$)/i,
-    /\bfrom\s+([^,.;\n]+?)\s+to\b/i,
-    /\bfrom\s+([^,.;\n]+?)(?=\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|on|at|for)\b|[,.;\n]|$)/i,
+function extractQuickGoDestination(text: string): string | null {
+  for (const { pattern, label } of QUICK_GO_KNOWN_DESTINATIONS) {
+    if (pattern.test(text)) return label;
+  }
+
+  const phrasePatterns = [
+    /\b(?:heading|going|commute|drive|directions|take me|get me|navigate)\s+to\s+([^,.;\n]+?)(?:\s*[,.\n]|$|\s+please\b)/i,
+    /\bcommute\s+for\s+me\s+to\s+([^,.;\n]+)/i,
   ];
+
+  for (const pattern of phrasePatterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+
+    let destination = match[1]
+      .replace(/\b(?:in|at)\s+the\s+/gi, 'in ')
+      .replace(/\bplease\b.*$/i, '')
+      .trim();
+
+    destination = destination.replace(/\s+/g, ' ');
+    if (destination.length >= 3) {
+      return destination
+        .split(/\s+/)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+  }
+
+  return null;
+}
+
+function extractOrigin(text: string, mode: TripParseMode): string | null {
+  const patterns =
+    mode === 'quick_go'
+      ? [
+          /\bfrom\s+([^,.;\n]+?)\s+to\b/i,
+          /\bstarting from\s+([^,.;\n]+?)(?=[,.;\n]|$)/i,
+          /\bleaving from\s+([^,.;\n]+?)(?=\s+(?:to|for)\b|[,.;\n]|$)/i,
+        ]
+      : [
+          /\bleaving from\s+([^,.;\n]+?)(?=\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|find|and|for|to)\b|[,.;\n]|$)/i,
+          /\bfrom\s+([^,.;\n]+?)\s+to\b/i,
+          /\bfrom\s+([^,.;\n]+?)(?=\s+(?:nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|on|at|for)\b|[,.;\n]|$)/i,
+        ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -224,6 +280,11 @@ function extractOrigin(text: string): string | null {
   }
 
   return null;
+}
+
+function inferOriginSource(originText: string | null): ParsedTripOriginSource {
+  if (!originText?.trim()) return 'unknown';
+  return 'manual';
 }
 
 function extractDepartureTime(text: string): string | null {
@@ -287,7 +348,7 @@ function extractParkingDays(text: string): number | null {
   return null;
 }
 
-function computeMissingFields(
+function computeAirportMissingFields(
   result: Omit<ParsedTripAssistantResult, 'missingFields' | 'confidence' | 'parser'>,
 ): string[] {
   const missing: string[] = [];
@@ -299,10 +360,25 @@ function computeMissingFields(
   return missing;
 }
 
+function computeQuickGoMissingFields(
+  result: Omit<ParsedTripAssistantResult, 'missingFields' | 'confidence' | 'parser'>,
+): string[] {
+  const missing: string[] = [];
+  if (!result.destinationText?.trim()) missing.push('destinationText');
+  return missing;
+}
+
 function computeConfidence(
+  mode: TripParseMode,
   missingFields: string[],
   result: Omit<ParsedTripAssistantResult, 'confidence' | 'parser' | 'missingFields'>,
 ): 'high' | 'medium' | 'low' {
+  if (mode === 'quick_go') {
+    if (missingFields.length === 0 && result.destinationText) return 'high';
+    if (result.destinationText) return 'medium';
+    return 'low';
+  }
+
   if (missingFields.length === 0 && result.originText && result.airportCode && result.departureDate) {
     return 'high';
   }
@@ -314,13 +390,49 @@ function computeConfidence(
   return 'low';
 }
 
-export function parseTripTextMock(userText: string, now = new Date()): ParsedTripAssistantResult {
-  const text = userText.trim();
-  const lower = text.toLowerCase();
+function parseQuickGoTrip(text: string, now: Date): ParsedTripAssistantResult {
+  const destinationText = extractQuickGoDestination(text);
+  const originText = extractOrigin(text, 'quick_go');
+  const originSource = inferOriginSource(originText);
+  const timing = formatQuickGoNow(now);
+  const destinationCategory = destinationText
+    ? inferDestinationCategory({ destination: destinationText })
+    : null;
 
+  const needsParking = /\bpark(?:ing)?\b/i.test(text);
+
+  const base: Omit<ParsedTripAssistantResult, 'missingFields' | 'confidence' | 'parser'> = {
+    mode: 'quick_go',
+    destinationText,
+    originSource,
+    destinationCategory,
+    originText,
+    airportCode: null,
+    destinationCity: null,
+    airlineText: null,
+    departureDate: timing.departureDate,
+    departureTime: timing.departureTime,
+    returnDate: null,
+    returnTime: null,
+    tripType: 'quick-go',
+    needsParking,
+    needsLeaveTime: false,
+  };
+
+  const missingFields = computeQuickGoMissingFields(base);
+
+  return {
+    ...base,
+    missingFields,
+    confidence: computeConfidence('quick_go', missingFields, base),
+    parser: 'mock',
+  };
+}
+
+function parseAirportTrip(text: string, now: Date): ParsedTripAssistantResult {
   const airportCode = extractAirportCode(text);
   const destinationCity = extractDestinationCity(text, airportCode);
-  const originText = extractOrigin(text);
+  const originText = extractOrigin(text, 'airport_trip');
   const airlineText = extractAirline(text);
   const { departureDate, returnDate: parsedReturnDate } = extractDates(text, now);
   let returnDate = parsedReturnDate;
@@ -353,7 +465,11 @@ export function parseTripTextMock(userText: string, now = new Date()): ParsedTri
     returnDate = formatDate(checkout.getFullYear(), checkout.getMonth() + 1, checkout.getDate());
   }
 
-  const base = {
+  const base: Omit<ParsedTripAssistantResult, 'missingFields' | 'confidence' | 'parser'> = {
+    mode: 'airport_trip',
+    destinationText: null,
+    originSource: inferOriginSource(originText),
+    destinationCategory: null,
     originText,
     airportCode,
     destinationCity,
@@ -367,12 +483,35 @@ export function parseTripTextMock(userText: string, now = new Date()): ParsedTri
     needsLeaveTime,
   };
 
-  const missingFields = computeMissingFields(base);
+  const missingFields = computeAirportMissingFields(base);
 
   return {
     ...base,
     missingFields,
-    confidence: computeConfidence(missingFields, base),
+    confidence: computeConfidence('airport_trip', missingFields, base),
     parser: 'mock',
   };
+}
+
+export function parseTripTextMock(userText: string, now = new Date()): ParsedTripAssistantResult {
+  const text = userText.trim();
+  if (!text) {
+    return parseAirportTrip(text, now);
+  }
+
+  const detected = detectTripIntent(text);
+  const mode: TripParseMode =
+    detected === 'unknown'
+      ? extractAirportCode(text) || /\b(?:flight|flying|parking at|weekend trip)\b/i.test(text)
+        ? 'airport_trip'
+        : extractQuickGoDestination(text)
+          ? 'quick_go'
+          : 'airport_trip'
+      : detected;
+
+  if (mode === 'quick_go') {
+    return parseQuickGoTrip(text, now);
+  }
+
+  return parseAirportTrip(text, now);
 }

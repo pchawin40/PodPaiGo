@@ -2,9 +2,11 @@ import { getAirportById, AIRPORTS_CATALOG, type AirportInfo } from '../airports/
 import {
   classifyDestinationParking,
   destinationParkingHeadline,
+  isRetailOrGroceryDestination,
   type DestinationParkingClassification,
 } from '../parking/destinationParkingClassifier';
-import type { DestinationKind } from '../types';
+import type { RankedRecommendation } from '../domain';
+import type { DestinationKind, TransportAvailability, TripData } from '../types';
 import { buildResultsPathFromSearchParams } from './searchParams';
 
 export const QUICK_GO_TRIP_MODE = 'quick-go';
@@ -121,9 +123,26 @@ export function formatQuickGoTime(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function matchesAirportHint(haystack: string, token: string): boolean {
+  const normalized = token.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized.length === 3) {
+    return new RegExp(`\\b${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(
+      haystack,
+    );
+  }
+
+  return haystack.includes(normalized);
+}
+
 export function detectAirportFromDestination(destination: string): AirportInfo | null {
   const raw = destination.trim();
   if (!raw) return null;
+
+  if (isRetailOrGroceryDestination(raw)) {
+    return null;
+  }
 
   const upper = raw.toUpperCase();
   const lower = raw.toLowerCase();
@@ -137,18 +156,22 @@ export function detectAirportFromDestination(destination: string): AirportInfo |
     if (byCode) return byCode;
   }
 
-  if (/\bairport\b/i.test(raw)) {
+  if (/\bairport\b/i.test(raw) || /\bterminal\b/i.test(raw) || /\bseatac\b/i.test(raw)) {
     const airportWordMatch = AIRPORTS_CATALOG.find((airport) => {
       const values = [airport.label, airport.destinationName, airport.routingAddress, airport.id];
       return values.some((value) => {
         const text = String(value || '').toLowerCase();
-        return text && lower.includes(text);
+        return text && matchesAirportHint(lower, text);
       });
     });
     if (airportWordMatch) return airportWordMatch;
   }
 
-  if (/\b(sea|sea-tac|seatac)\b/i.test(raw)) {
+  if (/\b(sea-tac|seatac)\b/i.test(raw) || matchesAirportHint(lower, 'sea-tac')) {
+    return getAirportById('SEA');
+  }
+
+  if (matchesAirportHint(lower, 'sea airport') || matchesAirportHint(lower, 'seattle-tacoma')) {
     return getAirportById('SEA');
   }
 
@@ -164,7 +187,10 @@ export function detectAirportFromDestination(destination: string): AirportInfo |
 
       return values.some((value) => {
         const text = String(value || '').toLowerCase();
-        return text && (lower.includes(text) || text.includes(lower));
+        if (!text || text.length < 4) {
+          return airport.id.length === 3 && matchesAirportHint(lower, airport.id);
+        }
+        return matchesAirportHint(lower, text);
       });
     }) || null
   );
@@ -495,7 +521,7 @@ export function quickGoParkingExpectationLabel(
 ): string {
   switch (classification.mode) {
     case 'free_likely':
-      return 'Likely free';
+      return 'Free customer parking likely';
     case 'paid_likely':
       return 'Likely paid';
     case 'restricted_possible':
@@ -536,12 +562,134 @@ export function quickGoClassificationForTrip(input: {
   destination: string;
   destinationKind?: string | null;
   airportCode?: string | null;
+  detectedAirportCode?: string | null;
 }): DestinationParkingClassification {
+  const destinationKind = String(input.destinationKind || '').trim().toLowerCase();
+  const detectedAirportCode = String(input.detectedAirportCode || '').trim().toUpperCase();
+  const isAirportTrip =
+    destinationKind === 'airport' ||
+    Boolean(detectedAirportCode) ||
+    Boolean(detectAirportFromDestination(input.destination));
+
   return classifyDestinationParking({
     destination: input.destination,
-    destinationKind: input.destinationKind,
-    airportCode: input.airportCode,
+    destinationKind: isAirportTrip ? 'airport' : destinationKind || null,
   });
+}
+
+export type QuickGoBestWayResult = {
+  bestWayLabel: string;
+  backupWayLabel: string;
+  bestOption: RankedRecommendation | null;
+  backupOption: RankedRecommendation | null;
+};
+
+function findRankedOption(
+  rankedOptions: RankedRecommendation[],
+  type: RankedRecommendation['type'],
+): RankedRecommendation | null {
+  return rankedOptions.find((option) => option.type === type) ?? null;
+}
+
+function formatRankedOptionLabel(option: RankedRecommendation | null): string | null {
+  if (!option) return null;
+
+  if (option.type === 'parking') {
+    const name = String((option.option as { name?: string }).name || 'Parking');
+    return `Drive + park · ${name}`;
+  }
+
+  if (option.type === 'rideshare') {
+    return 'Rideshare / taxi';
+  }
+
+  return 'Transit';
+}
+
+export function resolveQuickGoBestWay(input: {
+  tripData: TripData;
+  rankedOptions: RankedRecommendation[];
+  driveMinutes: number | null;
+  classification: DestinationParkingClassification;
+}): QuickGoBestWayResult {
+  const transportPreference: TransportAvailability =
+    input.tripData.transportAvailability || 'all';
+  const drivingAvailable =
+    transportPreference === 'all' || transportPreference === 'car';
+  const ridesharePreferred = transportPreference === 'rideshare';
+  const transitPreferred = transportPreference === 'transit';
+  const hasDriveTime =
+    input.driveMinutes != null &&
+    Number.isFinite(input.driveMinutes) &&
+    input.driveMinutes > 0;
+  const freeRetailParking = input.classification.mode === 'free_likely';
+  const restrictedOrPaidParking =
+    input.classification.mode === 'paid_likely' ||
+    input.classification.mode === 'restricted_possible' ||
+    input.classification.mode === 'unknown';
+
+  const rideshareOption = findRankedOption(input.rankedOptions, 'rideshare');
+  const transitOption = findRankedOption(input.rankedOptions, 'transit');
+  const parkingOption = findRankedOption(input.rankedOptions, 'parking');
+  const rankedBest = input.rankedOptions[0] ?? null;
+  const rankedBackup = input.rankedOptions[1] ?? null;
+
+  if (transitPreferred) {
+    return {
+      bestWayLabel: formatRankedOptionLabel(transitOption) || 'Transit',
+      backupWayLabel: formatRankedOptionLabel(rideshareOption) || 'Rideshare / taxi',
+      bestOption: transitOption || rankedBest,
+      backupOption: rideshareOption || rankedBackup,
+    };
+  }
+
+  if (ridesharePreferred) {
+    return {
+      bestWayLabel: 'Rideshare / taxi',
+      backupWayLabel: drivingAvailable ? 'Drive' : 'Transit',
+      bestOption: rideshareOption || rankedBest,
+      backupOption: drivingAvailable ? parkingOption || rankedBackup : transitOption || rankedBackup,
+    };
+  }
+
+  if (
+    freeRetailParking &&
+    drivingAvailable &&
+    (hasDriveTime || input.classification.confidence === 'high')
+  ) {
+    return {
+      bestWayLabel: 'Drive',
+      backupWayLabel: 'Rideshare / taxi',
+      bestOption: parkingOption || rankedBest,
+      backupOption: rideshareOption || rankedBackup,
+    };
+  }
+
+  if (drivingAvailable && !restrictedOrPaidParking && hasDriveTime) {
+    return {
+      bestWayLabel: 'Drive',
+      backupWayLabel: formatRankedOptionLabel(rideshareOption) || 'Rideshare / taxi',
+      bestOption: parkingOption || rankedBest,
+      backupOption: rideshareOption || rankedBackup,
+    };
+  }
+
+  if (restrictedOrPaidParking && rideshareOption && rankedBest?.type === 'rideshare') {
+    return {
+      bestWayLabel: 'Rideshare / taxi',
+      backupWayLabel: drivingAvailable ? 'Drive' : 'Transit',
+      bestOption: rideshareOption,
+      backupOption: drivingAvailable ? parkingOption || rankedBackup : transitOption || rankedBackup,
+    };
+  }
+
+  return {
+    bestWayLabel: formatRankedOptionLabel(rankedBest) || (drivingAvailable ? 'Drive' : 'Compare options'),
+    backupWayLabel:
+      formatRankedOptionLabel(rankedBackup) || formatRankedOptionLabel(rideshareOption) || 'Rideshare / taxi',
+    bestOption: rankedBest,
+    backupOption: rankedBackup,
+  };
 }
 
 export function quickGoParkingHeadline(classification: DestinationParkingClassification): string {

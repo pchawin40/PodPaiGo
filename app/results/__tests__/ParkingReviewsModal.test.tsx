@@ -5,6 +5,12 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import ParkingReviewsModal from '../ParkingReviewsModal';
 import type { ParkingOption } from '@/lib/types';
+import {
+  GOOGLE_LISTING_NOT_FOUND_MESSAGE,
+  GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE,
+  GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE,
+  GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
+} from '@/lib/parking/googlePlacesSafeMode';
 
 const baseParking: ParkingOption = {
   id: 'lot-1',
@@ -35,6 +41,13 @@ const baseParking: ParkingOption = {
   ],
 };
 
+function mockReviewsFetch(payload: Record<string, unknown>) {
+  (global.fetch as jest.Mock).mockResolvedValue({
+    ok: true,
+    json: async () => payload,
+  });
+}
+
 describe('ParkingReviewsModal attribution', () => {
   beforeEach(() => {
     global.fetch = jest.fn();
@@ -56,6 +69,120 @@ describe('ParkingReviewsModal attribution', () => {
       expect(screen.getByText('Easy shuttle.')).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Google Maps' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'View all reviews on Google Maps' })).toBeInTheDocument();
+    });
+  });
+});
+
+describe('ParkingReviewsModal status messages', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  const parkingWithoutPlace: ParkingOption = {
+    ...baseParking,
+    googlePlaceId: undefined,
+    googleReviews: undefined,
+    reviewScore: undefined,
+    reviewCount: undefined,
+  };
+
+  test('shows safe mode message when reviews are disabled', async () => {
+    mockReviewsFetch({
+      reviews: [],
+      source: 'disabled',
+      message: GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
+      liveReviewsEnabled: false,
+      place: null,
+    });
+
+    render(
+      <ParkingReviewsModal
+        parking={parkingWithoutPlace}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(GOOGLE_REVIEWS_SAFE_MODE_MESSAGE)).toBeInTheDocument();
+    });
+  });
+
+  test('shows listing not found when no googlePlaceId is returned', async () => {
+    mockReviewsFetch({
+      reviews: [],
+      source: 'no-listing',
+      message: GOOGLE_LISTING_NOT_FOUND_MESSAGE,
+      liveReviewsEnabled: true,
+      place: null,
+    });
+
+    render(
+      <ParkingReviewsModal
+        parking={parkingWithoutPlace}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(GOOGLE_LISTING_NOT_FOUND_MESSAGE)).toBeInTheDocument();
+    });
+  });
+
+  test('shows demo limit when review cap is exceeded', async () => {
+    mockReviewsFetch({
+      reviews: [],
+      source: 'cap-exceeded',
+      message: GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE,
+      liveReviewsEnabled: true,
+      place: {
+        googlePlaceId: 'place-abc',
+        rating: 4.1,
+        reviewCount: 40,
+      },
+    });
+
+    render(
+      <ParkingReviewsModal
+        parking={parkingWithoutPlace}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE)).toBeInTheDocument();
+    });
+  });
+
+  test('shows no reviews message when listing exists but reviews are empty', async () => {
+    mockReviewsFetch({
+      reviews: [],
+      source: 'no-reviews',
+      message: GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE,
+      liveReviewsEnabled: true,
+      place: {
+        googlePlaceId: 'place-abc',
+        rating: 4.1,
+        reviewCount: 40,
+      },
+    });
+
+    render(
+      <ParkingReviewsModal
+        parking={parkingWithoutPlace}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE)).toBeInTheDocument();
     });
   });
 });

@@ -114,6 +114,53 @@ describe('QuickGoResultsView', () => {
     ).toBeInTheDocument();
   });
 
+  test('Fred Meyer retail shows Drive and free customer parking', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, U.S. 2, Monroe, WA, USA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, U.S. 2, Monroe, WA, USA',
+          destinationName: 'Fred Meyer, U.S. 2, Monroe, WA, USA',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: { duration: 12, trustStatus: 'estimated' },
+        }}
+        rankedOptions={[
+          {
+            type: 'rideshare',
+            option: {
+              id: 'rideshare',
+              name: 'Rideshare',
+              duration: 14,
+              price: 18,
+              trustStatus: 'estimated',
+            },
+            score: 85,
+            cost: 18,
+            duration: 14,
+            stressScore: 68,
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Drive')).toBeInTheDocument();
+    expect(screen.getByText('Free customer parking likely')).toBeInTheDocument();
+    expect(screen.getByText('High confidence')).toBeInTheDocument();
+    expect(screen.getByText('Rideshare / taxi')).toBeInTheDocument();
+  });
+
   test('shows airport planner prompt when airport was detected', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'SEA Airport',

@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ParkingGoogleReview, ParkingOption } from "../../lib/types";
 import {
+    GOOGLE_LISTING_NOT_FOUND_MESSAGE,
+    GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE,
+    GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE,
     GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
     SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
 } from "../../lib/parking/googlePlacesSafeMode";
@@ -173,8 +176,8 @@ export default function ParkingReviewsModal({
                 setReviewMessage(data.message || null);
             } catch {
                 if (!cancelled) {
-                    setReviewMessage("Reviews unavailable while live Google review fetching is disabled.");
-                    setReviewSource("error");
+                    setReviewMessage(GOOGLE_REVIEWS_SAFE_MODE_MESSAGE);
+                    setReviewSource("disabled");
                 }
             } finally {
                 if (!cancelled) {
@@ -278,25 +281,35 @@ export default function ParkingReviewsModal({
                         </div>
                     )}
 
+                    {!loadingGoogleData && reviewSource === "cap-exceeded" && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                            {reviewMessage || GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE}
+                        </div>
+                    )}
+
                     {!loadingGoogleData && cachedReviewLabel && sortedReviews.length > 0 && (
                         <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
                             {cachedReviewLabel}
                         </div>
                     )}
 
-                    {!loadingGoogleData && !resolvedParking.googlePlaceId && (
+                    {!loadingGoogleData &&
+                        !resolvedParking.googlePlaceId &&
+                        reviewSource !== "disabled" &&
+                        reviewSource !== "cap-exceeded" && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                            Google listing is not connected for this lot yet.
+                            {reviewMessage || GOOGLE_LISTING_NOT_FOUND_MESSAGE}
                         </div>
                     )}
 
                     {!loadingGoogleData &&
                         resolvedParking.googlePlaceId &&
                         sortedReviews.length === 0 &&
-                        reviewSource !== "disabled" && (
+                        reviewSource !== "disabled" &&
+                        reviewSource !== "cap-exceeded" &&
+                        reviewSource !== "no-listing" && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                            {reviewMessage ||
-                                "Reviews unavailable while live Google review fetching is disabled."}
+                            {reviewMessage || GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE}
                         </div>
                     )}
 

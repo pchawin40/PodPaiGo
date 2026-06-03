@@ -9,10 +9,12 @@ import {
   canMakeLiveGetPlaceCall,
   canMakeLiveGoogleReviewCall,
   canMakeLiveSearchTextCall,
+  isGoogleParkingDiscoveryLiveBlocked,
   isGooglePlacePhotosLiveBlocked,
   isGooglePlaceReviewsLiveBlocked,
   isGooglePlacesLiveBlocked,
 } from './googlePlacesGuard';
+import { getMaxGoogleSearchTextPerRequest } from '../apiUsage/placesRequestLimits';
 import {
   buildParkingGoogleCacheKey,
   cleanGoogleParkingSearchName,
@@ -507,6 +509,13 @@ function photoNamesFromDetails(details: GoogleLegacyPlaceDetailsResult | null): 
   return [details.photoName];
 }
 
+export function canAttemptReviewPlaceMatch(): boolean {
+  if (isGooglePlacesLiveBlocked()) return false;
+  if (isGoogleParkingDiscoveryLiveBlocked()) return false;
+  if (getMaxGoogleSearchTextPerRequest() <= 0) return false;
+  return true;
+}
+
 async function upsertSnapshotRecord(record: ParkingGooglePlaceCacheRecord): Promise<void> {
   let client: PoolClient | null = null;
   const photoNames = record.photoNames ?? (record.photoName ? [record.photoName] : []);
@@ -706,14 +715,14 @@ async function searchGooglePlaceNew(args: {
   lotAddress?: string | null;
   airportCode?: string | null;
   airportContext?: string | null;
-}): Promise<GoogleLegacyPlaceSearchResult | null> {
+}, options?: { maxQueries?: number; requireDiscovery?: boolean }): Promise<GoogleLegacyPlaceSearchResult | null> {
   if (googlePlacesLiveDisabled()) return null;
 
   const apiKey = getServerApiKey();
   if (!apiKey) return null;
 
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
-  const queries = buildParkingSearchQueries(args);
+  const queries = buildParkingSearchQueries(args).slice(0, options?.maxQueries);
 
   for (const query of queries) {
     const rankedMatch = await fetchSearchResultForQuery({
@@ -736,6 +745,7 @@ async function searchGooglePlaceNew(args: {
                 lotAddress: args.lotAddress,
               }),
             },
+            options?.requireDiscovery ? { discovery: true } : undefined,
           )
         ) {
           return null;
@@ -836,11 +846,11 @@ async function searchGooglePlace(args: {
   airportContext?: string | null;
   provider?: string | null;
   source?: string | null;
-}): Promise<GoogleLegacyPlaceSearchResult | null> {
+}, options?: { maxQueries?: number; requireDiscovery?: boolean }): Promise<GoogleLegacyPlaceSearchResult | null> {
   const apiKey = getServerApiKey();
   if (!apiKey) return null;
 
-  const newApiMatch = await searchGooglePlaceNew(args).catch(() => null);
+  const newApiMatch = await searchGooglePlaceNew(args, options).catch(() => null);
   if (newApiMatch) return newApiMatch;
 
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
@@ -849,7 +859,7 @@ async function searchGooglePlace(args: {
     lotAddress: args.lotAddress,
     airportCode: args.airportCode || null,
     airportContext: args.airportContext || airport?.label || airport?.destinationName || null,
-  });
+  }).slice(0, options?.maxQueries);
 
   for (const query of queries) {
     if (
@@ -860,6 +870,7 @@ async function searchGooglePlace(args: {
           lotName: args.lotName,
           airportCode: args.airportCode ?? null,
         },
+        options?.requireDiscovery ? { discovery: true } : undefined,
       )
     ) {
       continue;
@@ -1154,7 +1165,7 @@ export async function resolveParkingGooglePlace(args: {
   airportContext?: string | null;
   provider?: string | null;
   source?: string | null;
-}): Promise<ParkingGooglePlaceCacheRecord | null> {
+}, options?: { maxSearchQueries?: number; requireDiscovery?: boolean }): Promise<ParkingGooglePlaceCacheRecord | null> {
   if (!shouldAttemptGooglePlaceMatch({
     lotName: args.lotName,
     lotAddress: args.lotAddress,
@@ -1235,6 +1246,9 @@ export async function resolveParkingGooglePlace(args: {
       airportContext: args.airportContext,
       provider: args.provider,
       source: args.source,
+    }, {
+      maxQueries: options?.maxSearchQueries,
+      requireDiscovery: options?.requireDiscovery,
     }).catch(() => null);
 
     matchedPhotoName = matched?.photoName;
@@ -1365,7 +1379,29 @@ export async function resolveParkingGoogleReviews(args: {
     return cached;
   }
 
-  const placeId = args.googlePlaceId || cached?.googlePlaceId || null;
+  let baseRecord = cached;
+  let placeId = args.googlePlaceId || cached?.googlePlaceId || null;
+
+  if (!placeId && canAttemptReviewPlaceMatch()) {
+    const matched = await resolveParkingGooglePlace(
+      {
+        airportCode: args.airportCode,
+        parkingLotId: args.parkingLotId,
+        lotName: args.lotName,
+        lotAddress: args.lotAddress,
+      },
+      { maxSearchQueries: 1, requireDiscovery: true },
+    ).catch(() => null);
+
+    if (matched?.googlePlaceId) {
+      placeId = matched.googlePlaceId;
+      baseRecord = matched;
+      if (matched.reviews?.length) {
+        return matched;
+      }
+    }
+  }
+
   if (!placeId) {
     return cached;
   }
@@ -1380,7 +1416,13 @@ export async function resolveParkingGoogleReviews(args: {
   }).catch(() => null);
 
   if (!details) {
-    return cached;
+    return baseRecord?.googlePlaceId
+      ? {
+          ...baseRecord,
+          googlePlaceId: baseRecord.googlePlaceId || placeId,
+          source: baseRecord.source || 'unavailable',
+        }
+      : cached;
   }
 
   const reviews = (details.reviews || []).slice(0, 5).map((review, index) =>
@@ -1388,11 +1430,37 @@ export async function resolveParkingGoogleReviews(args: {
   );
 
   if (!reviews.length) {
-    return cached;
+    return {
+      ...(baseRecord || {
+        cacheKey,
+        airportCode: String(args.airportCode || 'UNKNOWN').toUpperCase(),
+        lotName: args.lotName,
+        normalizedLotName: normalizeParkingLotName(args.lotName),
+        lotAddress: args.lotAddress || undefined,
+        fetchedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      cacheKey,
+      parkingLotId: numericParkingLotId(args.parkingLotId) ?? baseRecord?.parkingLotId,
+      googlePlaceId: details.place_id || placeId,
+      googlePlaceName: details.name || baseRecord?.googlePlaceName,
+      googleFormattedAddress: details.formatted_address || baseRecord?.googleFormattedAddress,
+      googleMapsUri: details.url || baseRecord?.googleMapsUri,
+      rating: typeof details.rating === 'number' ? details.rating : baseRecord?.rating,
+      reviewCount:
+        typeof details.user_ratings_total === 'number'
+          ? details.user_ratings_total
+          : baseRecord?.reviewCount,
+      reviews: baseRecord?.reviews || [],
+      fetchedAt: baseRecord?.fetchedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      source: baseRecord?.source || 'google-places',
+    };
   }
 
   const record: ParkingGooglePlaceCacheRecord = {
-    ...(cached || {
+    ...(baseRecord || {
       cacheKey,
       airportCode: String(args.airportCode || 'UNKNOWN').toUpperCase(),
       lotName: args.lotName,
@@ -1403,23 +1471,23 @@ export async function resolveParkingGoogleReviews(args: {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     }),
     cacheKey,
-    parkingLotId: numericParkingLotId(args.parkingLotId) ?? cached?.parkingLotId,
+    parkingLotId: numericParkingLotId(args.parkingLotId) ?? baseRecord?.parkingLotId,
     googlePlaceId: details.place_id || placeId,
-    googlePlaceName: details.name || cached?.googlePlaceName,
-    googleFormattedAddress: details.formatted_address || cached?.googleFormattedAddress,
-    googleMapsUri: details.url || cached?.googleMapsUri,
-    rating: typeof details.rating === 'number' ? details.rating : cached?.rating,
+    googlePlaceName: details.name || baseRecord?.googlePlaceName,
+    googleFormattedAddress: details.formatted_address || baseRecord?.googleFormattedAddress,
+    googleMapsUri: details.url || baseRecord?.googleMapsUri,
+    rating: typeof details.rating === 'number' ? details.rating : baseRecord?.rating,
     reviewCount:
       typeof details.user_ratings_total === 'number'
         ? details.user_ratings_total
-        : cached?.reviewCount,
+        : baseRecord?.reviewCount,
     reviews,
     fetchedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     source: 'google-places',
   };
 
-  scheduleSnapshotCacheWrite(record, cached);
+  scheduleSnapshotCacheWrite(record, baseRecord);
   return record;
 }
 

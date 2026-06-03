@@ -6,6 +6,8 @@ import {
   normalizeAirlineTextForAssistant,
   parseFlightInput,
 } from '../../lib/airlines/parseFlightInput';
+import { classifyDestinationParking } from '../../lib/parking/destinationParkingClassifier';
+import { quickGoParkingExpectationLabel } from '../../lib/trip/quickGo';
 
 type TripAssistantConfirmProps = {
   parsed: ParsedTripAssistantResult;
@@ -51,10 +53,22 @@ export default function TripAssistantConfirm({
   onCancel,
   submitting = false,
 }: TripAssistantConfirmProps) {
-  const canConfirm =
-    Boolean(parsed.originText?.trim()) &&
-    Boolean(parsed.airportCode?.trim()) &&
-    Boolean(parsed.departureDate?.trim());
+  const isQuickGo = parsed.mode === 'quick_go';
+
+  const canConfirm = isQuickGo
+    ? Boolean(parsed.destinationText?.trim())
+    : Boolean(parsed.originText?.trim()) &&
+      Boolean(parsed.airportCode?.trim()) &&
+      Boolean(parsed.departureDate?.trim());
+
+  const parkingExpectation = useMemo(() => {
+    if (!isQuickGo || !parsed.destinationText?.trim()) return null;
+    const classification = classifyDestinationParking({
+      destination: parsed.destinationText,
+      destinationKind: parsed.destinationCategory || null,
+    });
+    return quickGoParkingExpectationLabel(classification);
+  }, [isQuickGo, parsed.destinationCategory, parsed.destinationText]);
 
   const recognizedAirlineLabel = useMemo(() => {
     if (!parsed.airlineText?.trim()) return null;
@@ -68,6 +82,127 @@ export default function TripAssistantConfirm({
     if (!recognized || !normalized) return null;
     return normalized;
   }, [parsed.airlineText]);
+
+  const timingLabel = useMemo(() => {
+    if (!parsed.departureDate) return 'Now';
+    const time = parsed.departureTime || '12:00';
+    return `${parsed.departureDate} at ${time}`;
+  }, [parsed.departureDate, parsed.departureTime]);
+
+  if (isQuickGo) {
+    return (
+      <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-semibold text-slate-950">Review Quick Go trip</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Confirm your destination and starting point, then run recommendations.
+            </p>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600">
+            {parsed.parser} · {parsed.confidence} confidence
+          </span>
+        </div>
+
+        {parsed.missingFields.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            Missing: {parsed.missingFields.join(', ')}
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Destination"
+            value={parsed.destinationText || ''}
+            onChange={(value) => onChange({ ...parsed, destinationText: value || null })}
+            required
+          />
+          <div className="block text-sm sm:col-span-2">
+            <span className="font-medium text-slate-700">Starting point</span>
+            {parsed.originText?.trim() || parsed.originSource === 'current_location' ? (
+              <p className="mt-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-950">
+                {parsed.originSource === 'current_location'
+                  ? 'Current location'
+                  : parsed.originText}
+              </p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      ...parsed,
+                      originSource: 'current_location',
+                      originText: null,
+                    })
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                >
+                  Use current location
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({
+                      ...parsed,
+                      originSource: 'manual',
+                      originText: parsed.originText || '',
+                    })
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                >
+                  Add starting point
+                </button>
+              </div>
+            )}
+            {parsed.originSource === 'manual' && !parsed.originText?.trim() ? (
+              <input
+                type="text"
+                value={parsed.originText || ''}
+                placeholder="Enter starting address"
+                onChange={(event) =>
+                  onChange({
+                    ...parsed,
+                    originText: event.target.value || null,
+                    originSource: 'manual',
+                  })
+                }
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-slate-950"
+              />
+            ) : null}
+          </div>
+          <div className="text-sm">
+            <span className="font-medium text-slate-700">Timing</span>
+            <p className="mt-1 text-slate-600">{timingLabel}</p>
+          </div>
+          {parkingExpectation ? (
+            <div className="text-sm">
+              <span className="font-medium text-slate-700">Parking expectation</span>
+              <p className="mt-1 text-slate-600">{parkingExpectation}</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            disabled={!canConfirm || submitting}
+            onClick={onConfirm}
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? 'Starting…' : 'Confirm and run recommendations'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            Start over
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">

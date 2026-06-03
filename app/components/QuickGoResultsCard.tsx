@@ -2,6 +2,7 @@
 
 import type { RankedRecommendation } from '../../lib/domain';
 import { googleMapsDirectionsLink } from '../../lib/maps';
+import type { DestinationParkingClassification } from '../../lib/parking/destinationParkingClassifier';
 import {
   quickGoClassificationForTrip,
   quickGoParkingConfidenceLabel,
@@ -17,30 +18,22 @@ import TravelCard from './ui/TravelCard';
 type QuickGoResultsCardProps = {
   tripData: TripData;
   originDisplayLabel: string;
+  classification?: DestinationParkingClassification;
+  bestWayLabel: string;
+  backupWayLabel: string;
   bestOption: RankedRecommendation | null;
   backupOption: RankedRecommendation | null;
   driveMinutes: number | null;
   className?: string;
 };
 
-function formatBestWay(option: RankedRecommendation | null): string {
-  if (!option) return 'Drive';
-
-  if (option.type === 'parking') {
-    const name = String((option.option as { name?: string }).name || 'Parking');
-    return `Drive + park · ${name}`;
+function formatBackup(option: RankedRecommendation | null, fallback: string): string {
+  if (option) {
+    if (option.type === 'parking') return 'Drive';
+    if (option.type === 'rideshare') return 'Rideshare / taxi';
+    return 'Transit';
   }
-
-  if (option.type === 'rideshare') {
-    return 'Rideshare / taxi';
-  }
-
-  return 'Transit';
-}
-
-function formatBackup(option: RankedRecommendation | null): string | null {
-  if (!option) return null;
-  return formatBestWay(option);
+  return fallback;
 }
 
 function formatMinutesLabel(minutes: number | null): string {
@@ -54,17 +47,21 @@ function formatMinutesLabel(minutes: number | null): string {
 export default function QuickGoResultsCard({
   tripData,
   originDisplayLabel,
+  classification: classificationProp,
+  bestWayLabel,
+  backupWayLabel,
   bestOption,
   backupOption,
   driveMinutes,
   className = '',
 }: QuickGoResultsCardProps) {
   const destination = tripData.destinationName || tripData.destination;
-  const classification = quickGoClassificationForTrip({
-    destination,
-    destinationKind: tripData.destinationKind,
-    airportCode: 'airportCode' in tripData ? tripData.airportCode : null,
-  });
+  const classification =
+    classificationProp ??
+    quickGoClassificationForTrip({
+      destination,
+      destinationKind: tripData.destinationKind,
+    });
 
   const directionsUrl =
     tripData.origin && destination
@@ -90,7 +87,7 @@ export default function QuickGoResultsCard({
           <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Best way to go
           </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">{formatBestWay(bestOption)}</dd>
+          <dd className="mt-2 text-lg font-semibold text-foreground">{bestWayLabel}</dd>
         </div>
 
         <div className="rounded-2xl border border-border bg-card/80 p-4">
@@ -137,7 +134,7 @@ export default function QuickGoResultsCard({
             Backup option
           </dt>
           <dd className="mt-2 text-lg font-semibold text-foreground">
-            {formatBackup(backupOption) || 'Compare rideshare or transit'}
+            {formatBackup(backupOption, backupWayLabel)}
           </dd>
         </div>
       </dl>

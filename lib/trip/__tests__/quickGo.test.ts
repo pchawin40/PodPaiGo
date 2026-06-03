@@ -7,6 +7,7 @@ import {
   mergeStoredTripSearchParams,
   quickGoParkingExpectationLabel,
   quickGoClassificationForTrip,
+  resolveQuickGoBestWay,
   readQuickGoOriginFromSearchParams,
 } from '../quickGo';
 import { classifyDestinationParking } from '../../parking/destinationParkingClassifier';
@@ -103,18 +104,92 @@ describe('quickGo', () => {
     expect(params.get('originLng')).toBe('-122.2015');
   });
 
-  test('grocery stores classify as likely free parking', () => {
+  test('grocery stores classify as free customer parking likely', () => {
     expect(
       quickGoParkingExpectationLabel(
         classifyDestinationParking({ destination: 'Neighborhood grocery store' }),
       ),
-    ).toBe('Likely free');
+    ).toBe('Free customer parking likely');
 
     expect(
       quickGoParkingExpectationLabel(
         classifyDestinationParking({ destination: 'Community supermarket' }),
       ),
-    ).toBe('Likely free');
+    ).toBe('Free customer parking likely');
+  });
+
+  test('Fred Meyer Monroe address is retail not airport', () => {
+    const destination = 'Fred Meyer, U.S. 2, Monroe, WA, USA';
+    const classification = quickGoClassificationForTrip({ destination });
+
+    expect(classification.mode).toBe('free_likely');
+    expect(classification.confidence).toBe('high');
+    expect(quickGoParkingExpectationLabel(classification)).toBe('Free customer parking likely');
+    expect(detectAirportFromDestination(destination)).toBeNull();
+  });
+
+  test('USA in address does not detect SEA airport', () => {
+    expect(detectAirportFromDestination('Fred Meyer, U.S. 2, Monroe, WA, USA')).toBeNull();
+  });
+
+  test('resolveQuickGoBestWay prefers Drive for free retail with drive time', () => {
+    const classification = classifyDestinationParking({
+      destination: 'Safeway Monroe',
+    });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '123 Main Street',
+        destination: 'Safeway Monroe',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+        transportAvailability: 'all',
+      },
+      rankedOptions: [
+        {
+          type: 'rideshare',
+          option: { id: 'rideshare', name: 'Rideshare', duration: 18, price: 22, trustStatus: 'estimated' },
+          score: 90,
+          cost: 22,
+          duration: 18,
+          stressScore: 70,
+        },
+      ],
+      driveMinutes: 16,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Drive');
+    expect(result.backupWayLabel).toBe('Rideshare / taxi');
+  });
+
+  test('Costco Everett prefers Drive when transport is all', () => {
+    const classification = classifyDestinationParking({ destination: 'Costco Everett' });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '123 Main Street',
+        destination: 'Costco Everett',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+        transportAvailability: 'all',
+      },
+      rankedOptions: [],
+      driveMinutes: 22,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Drive');
+  });
+
+  test('SEA Airport uses airport parking rules', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'SEA Airport',
+      destinationKind: 'airport',
+      detectedAirportCode: 'SEA',
+    });
+
+    expect(quickGoParkingExpectationLabel(classification)).toBe('Airport parking rules');
   });
 
   test('corporate building can show restricted parking', () => {

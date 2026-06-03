@@ -31,6 +31,7 @@ describe('normalizeParsedTripAssistantResult', () => {
     );
 
     expect(parsed).toMatchObject({
+      mode: 'airport_trip',
       originText: 'Monroe',
       airportCode: 'SEA',
       destinationCity: 'Las Vegas',

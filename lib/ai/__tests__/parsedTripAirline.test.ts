@@ -4,6 +4,10 @@ import type { ParsedTripAssistantResult } from '../tripParseTypes';
 
 function buildParsed(airlineText: string | null): ParsedTripAssistantResult {
   return {
+    mode: 'airport_trip',
+    destinationText: null,
+    originSource: 'manual',
+    destinationCategory: null,
     originText: 'Monroe',
     airportCode: 'SEA',
     destinationCity: 'Las Vegas',

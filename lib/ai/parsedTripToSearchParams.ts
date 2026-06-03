@@ -1,6 +1,8 @@
 import { getAirportById } from '../airports/catalog';
 import { normalizeAirlineTextForAssistant } from '../airlines/parseFlightInput';
+import { buildQuickGoSearchParams } from '../trip/quickGo';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
+import type { QuickGoOriginSelection } from '../trip/quickGo';
 
 function calculateParkingDurationMinutes(args: {
   checkInDate: string;
@@ -19,12 +21,72 @@ export function assistantRequiresConfirmation(confirmed: boolean): boolean {
   return !confirmed;
 }
 
+function buildQuickGoOriginFromParsed(
+  parsed: ParsedTripAssistantResult,
+): QuickGoOriginSelection | null {
+  if (parsed.originSource === 'current_location') {
+    return {
+      origin: 'Current location',
+      originLabel: 'Current location',
+      originSource: 'geolocation',
+    };
+  }
+
+  if (parsed.originText?.trim()) {
+    return {
+      origin: parsed.originText.trim(),
+      originLabel: parsed.originText.trim(),
+      originSource: parsed.originSource === 'saved' ? 'saved' : 'manual',
+    };
+  }
+
+  return null;
+}
+
+function parsedQuickGoToSearchParams(
+  parsed: ParsedTripAssistantResult,
+): URLSearchParams | null {
+  const destinationText = parsed.destinationText?.trim();
+  if (!destinationText) return null;
+
+  const origin = buildQuickGoOriginFromParsed(parsed);
+  if (!origin) return null;
+
+  const now = new Date();
+  if (parsed.departureDate && parsed.departureTime) {
+    const parsedNow = new Date(`${parsed.departureDate}T${parsed.departureTime}:00`);
+    if (!Number.isNaN(parsedNow.getTime())) {
+      now.setTime(parsedNow.getTime());
+    }
+  }
+
+  const params = buildQuickGoSearchParams({
+    destinationText,
+    origin,
+    continueAsQuickGo: true,
+    now,
+  });
+
+  params.set('assistantParsed', '1');
+  params.set('recalc', String(Date.now()));
+
+  if (parsed.destinationCategory) {
+    params.set('assistantDestinationCategory', parsed.destinationCategory);
+  }
+
+  return params;
+}
+
 export function parsedTripToSearchParams(
   parsed: ParsedTripAssistantResult,
   options?: { confirmed?: boolean },
 ): URLSearchParams | null {
   if (assistantRequiresConfirmation(options?.confirmed ?? false)) {
     return null;
+  }
+
+  if (parsed.mode === 'quick_go') {
+    return parsedQuickGoToSearchParams(parsed);
   }
 
   if (!parsed.originText?.trim() || !parsed.airportCode || !parsed.departureDate) {

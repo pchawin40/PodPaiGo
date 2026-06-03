@@ -1,6 +1,7 @@
 import {
   classifyDestinationParking,
   destinationParkingHeadline,
+  inferDestinationCategory,
   shouldSearchPaidParkingForTrip,
 } from '../destinationParkingClassifier';
 
@@ -12,7 +13,7 @@ describe('destinationParkingClassifier', () => {
     expect(result.accessType).toBe('customer_only');
     expect(result.confidence).toBe('high');
     expect(result.shouldSearchPaidParking).toBe(false);
-    expect(destinationParkingHeadline(result.mode)).toBe('Parking likely free');
+    expect(destinationParkingHeadline(result.mode)).toBe('Parking likely free at destination');
   });
 
   test('Safeway maps to free_likely', () => {
@@ -74,6 +75,22 @@ describe('destinationParkingClassifier', () => {
 
     expect(office.mode).toBe('restricted_possible');
     expect(corporate.mode).toBe('restricted_possible');
+  });
+
+  test('Fred Meyer full address maps to grocery_or_retail free parking', () => {
+    const destination = 'Fred Meyer, U.S. 2, Monroe, WA, USA';
+    const result = classifyDestinationParking({ destination, airportCode: 'SEA' });
+
+    expect(result.mode).toBe('free_likely');
+    expect(result.confidence).toBe('high');
+    expect(inferDestinationCategory({ destination })).toBe('grocery_or_retail');
+    expect(result.reason).toMatch(/free customer parking/i);
+  });
+
+  test('pharmacy chains map to free_likely', () => {
+    expect(classifyDestinationParking({ destination: 'Walgreens Seattle' }).mode).toBe('free_likely');
+    expect(classifyDestinationParking({ destination: 'CVS Pharmacy' }).mode).toBe('free_likely');
+    expect(classifyDestinationParking({ destination: 'Rite Aid Everett' }).mode).toBe('free_likely');
   });
 
   test('airport destination kind maps to airport mode', () => {

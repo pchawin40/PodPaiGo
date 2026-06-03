@@ -12,6 +12,7 @@ import StatusPill from './ui/StatusPill';
 
 const EXAMPLE_PROMPTS = [
   'I’m flying from SEA to Las Vegas Friday night and coming back Sunday',
+  "I'm heading to Fred Meyer in Monroe",
   'Weekend trip from Monroe to SeaTac, Nov 15 to Nov 18',
   'Need parking at LAX for 4 days',
 ];
@@ -104,7 +105,11 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     const params = parsedTripToSearchParams(parsed, { confirmed: true });
     if (!params) {
-      setError('Please fill origin, airport, and departure date before continuing.');
+      setError(
+        parsed.mode === 'quick_go'
+          ? 'Please add a destination and starting point (or use current location) before continuing.'
+          : 'Please fill origin, airport, and departure date before continuing.',
+      );
       return;
     }
 
@@ -147,9 +152,9 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
               AI trip planner
             </span>
           </div>
-          <h2 className="text-xl font-bold text-foreground">Describe a full airport trip</h2>
+          <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Best for flights, parking duration, airline, bags, and timing.
+            Use it for airport trips or quick point A to B plans.
           </p>
         </div>
 

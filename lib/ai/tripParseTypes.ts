@@ -1,4 +1,18 @@
+import type { DestinationCategory } from '../parking/destinationParkingClassifier';
+
+export type TripParseMode = 'airport_trip' | 'quick_go' | 'unknown';
+
+export type ParsedTripOriginSource =
+  | 'current_location'
+  | 'manual'
+  | 'saved'
+  | 'unknown';
+
 export type ParsedTripAssistantResult = {
+  mode: TripParseMode;
+  destinationText: string | null;
+  originSource: ParsedTripOriginSource;
+  destinationCategory: DestinationCategory | null;
   originText: string | null;
   airportCode: string | null;
   destinationCity: string | null;
@@ -21,6 +35,7 @@ export type ParseTripTextInput = {
 
 export const PARSED_TRIP_FIELD_KEYS = [
   'originText',
+  'destinationText',
   'airportCode',
   'departureDate',
   'returnDate',

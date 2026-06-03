@@ -62,7 +62,7 @@ describe('DestinationParkingSummary', () => {
   test('shows free_likely outlook copy', () => {
     render(<DestinationParkingSummary destination="Costco Wholesale" origin="Home" />);
 
-    expect(screen.getByText('Parking likely free')).toBeInTheDocument();
+    expect(screen.getByText('Parking likely free at destination')).toBeInTheDocument();
     expect(
       screen.getByText(/Destination appears to have customer parking/),
     ).toBeInTheDocument();
