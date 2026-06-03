@@ -2,9 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ParkingGoogleReview, ParkingOption } from "../../lib/types";
-import { attachGooglePlaceToParking } from "../../lib/parking/googlePlaceMatch";
 
 type SortMode = "most_relevant" | "newest" | "highest" | "lowest";
+
+type ReviewsApiResponse = {
+    reviews?: ParkingGoogleReview[];
+    source?: string;
+    message?: string;
+    liveReviewsEnabled?: boolean;
+    place?: {
+        googlePlaceId?: string;
+        name?: string;
+        rating?: number;
+        reviewCount?: number;
+        address?: string;
+    } | null;
+};
 
 function stars(rating?: number) {
     const value = Math.round(rating ?? 0);
@@ -26,6 +39,16 @@ function parkingReviewKey(parking: ParkingOption | null, airportCode?: string | 
         parking.name,
         parking.address || parking.normalizedAddress || parking.routeDestination || "",
     ].join("|");
+}
+
+function buildReviewQuery(parking: ParkingOption, airportCode?: string | null): URLSearchParams {
+    const params = new URLSearchParams();
+    if (parking.googlePlaceId) params.set("placeId", parking.googlePlaceId);
+    params.set("name", parking.name);
+    if (airportCode) params.set("airport", airportCode);
+    const address = parking.address || parking.normalizedAddress || parking.routeDestination;
+    if (address) params.set("address", address);
+    return params;
 }
 
 export default function ParkingReviewsModal({
@@ -50,6 +73,8 @@ export default function ParkingReviewsModal({
     const resolvedParking =
         resolvedParkingState.key === parkingKey ? resolvedParkingState.parking : parking;
     const [loadingGoogleData, setLoadingGoogleData] = useState(false);
+    const [reviewSource, setReviewSource] = useState<string | null>(null);
+    const [reviewMessage, setReviewMessage] = useState<string | null>(null);
     const modalFetchAttemptedKeysRef = useRef(new Set<string>());
     const onResolvedParkingRef = useRef(onResolvedParking);
 
@@ -92,10 +117,6 @@ export default function ParkingReviewsModal({
         async function loadGoogleData() {
             if (!open || !parking) return;
 
-            // if (process.env.NODE_ENV !== "production") {
-            //     console.log("[ParkingReviewsModal selected option]", parking);
-            // }
-
             const hasCompleteGoogleData =
                 !!parking.googlePlaceId &&
                 typeof parking.reviewScore === "number" &&
@@ -104,6 +125,8 @@ export default function ParkingReviewsModal({
                 parking.googleReviews.length > 0;
 
             if (hasCompleteGoogleData) {
+                setReviewSource("embedded");
+                setReviewMessage(null);
                 return;
             }
 
@@ -115,19 +138,43 @@ export default function ParkingReviewsModal({
 
             modalFetchAttemptedKeysRef.current.add(attemptKey);
             setLoadingGoogleData(true);
+            setReviewSource(null);
+            setReviewMessage(null);
 
-            const enriched = await attachGooglePlaceToParking(parking, null, airportCode ?? null, {
-                force: true,
-            });
+            try {
+                const params = buildReviewQuery(parking, airportCode);
+                const response = await fetch(`/api/parking-reviews?${params.toString()}`);
+                const data = (await response.json()) as ReviewsApiResponse;
 
-            if (process.env.NODE_ENV !== "production") {
-                console.log("[ParkingReviewsModal fetch response]", enriched);
-            }
+                if (cancelled) return;
 
-            if (!cancelled) {
+                const enriched: ParkingOption = {
+                    ...parking,
+                    googlePlaceId: data.place?.googlePlaceId || parking.googlePlaceId,
+                    reviewScore:
+                        typeof data.place?.rating === "number"
+                            ? data.place.rating
+                            : parking.reviewScore,
+                    reviewCount:
+                        typeof data.place?.reviewCount === "number"
+                            ? data.place.reviewCount
+                            : parking.reviewCount,
+                    googleReviews: data.reviews?.length ? data.reviews : parking.googleReviews,
+                };
+
                 setResolvedParkingState({ key: attemptKey, parking: enriched });
                 onResolvedParkingRef.current?.(enriched);
-                setLoadingGoogleData(false);
+                setReviewSource(data.source || null);
+                setReviewMessage(data.message || null);
+            } catch {
+                if (!cancelled) {
+                    setReviewMessage("Reviews unavailable while live Google review fetching is disabled.");
+                    setReviewSource("error");
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoadingGoogleData(false);
+                }
             }
         }
 
@@ -139,6 +186,11 @@ export default function ParkingReviewsModal({
     }, [airportCode, open, parking]);
 
     if (!open || !resolvedParking) return null;
+
+    const cachedReviewLabel =
+        reviewSource === "supabase-cache" || reviewSource === "stale-fallback"
+            ? "Cached review data"
+            : null;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4">
@@ -211,7 +263,20 @@ export default function ParkingReviewsModal({
                 <div className="flex-1 overflow-y-auto px-6 py-5">
                     {loadingGoogleData && (
                         <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-900">
-                            Loading Google reviews...
+                            Loading cached Google reviews...
+                        </div>
+                    )}
+
+                    {!loadingGoogleData && reviewSource === "disabled" && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                            Reviews disabled in safe mode
+                            {reviewMessage ? ` — ${reviewMessage}` : ""}
+                        </div>
+                    )}
+
+                    {!loadingGoogleData && cachedReviewLabel && sortedReviews.length > 0 && (
+                        <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                            {cachedReviewLabel}
                         </div>
                     )}
 
@@ -221,9 +286,13 @@ export default function ParkingReviewsModal({
                         </div>
                     )}
 
-                    {!loadingGoogleData && resolvedParking.googlePlaceId && sortedReviews.length === 0 && (
+                    {!loadingGoogleData &&
+                        resolvedParking.googlePlaceId &&
+                        sortedReviews.length === 0 &&
+                        reviewSource !== "disabled" && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                            Google rating is connected, but Google did not return review snippets for this listing. Use the button above to open the full Google review feed.
+                            {reviewMessage ||
+                                "Reviews unavailable while live Google review fetching is disabled."}
                         </div>
                     )}
 
@@ -283,8 +352,8 @@ export default function ParkingReviewsModal({
                 </div>
 
                 <div className="border-t border-zinc-200 px-6 py-3 text-xs text-zinc-500">
-                    Reviews shown are from Google Places when available. Google may return
-                    only a limited sample of reviews.
+                    Reviews shown are from cached Google Places data when available. Live Google review
+                    fetching stays disabled in safe mode.
                 </div>
             </div>
         </div>

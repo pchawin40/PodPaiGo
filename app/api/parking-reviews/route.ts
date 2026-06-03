@@ -1,10 +1,88 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveParkingGooglePlace } from '../../../lib/parking/googlePlacesCache';
+import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
+import {
+  getCachedParkingGoogleReviews,
+  resolveParkingGoogleReviews,
+} from '../../../lib/parking/googlePlacesCache';
+import {
+  getEffectiveGooglePlacesConfig,
+} from '../../../lib/parking/googlePlacesConfig';
+import { isGooglePlaceReviewsLiveBlocked } from '../../../lib/parking/googlePlacesGuard';
 
 function getString(value: FormDataEntryValue | string | null): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+type ReviewLookupArgs = {
+  placeId: string | null;
+  name: string | null;
+  airport: string | null;
+  address: string | null;
+};
+
+function buildReviewResponse(
+  place: Awaited<ReturnType<typeof getCachedParkingGoogleReviews>>,
+  source: string,
+  message?: string,
+) {
+  const config = getEffectiveGooglePlacesConfig();
+
+  return NextResponse.json({
+    reviews: place?.reviews ?? [],
+    source,
+    message,
+    liveReviewsEnabled: config.liveReviewsEnabled,
+    place: place
+      ? {
+          googlePlaceId: place.googlePlaceId,
+          name: place.googlePlaceName || place.lotName,
+          rating: place.rating,
+          reviewCount: place.reviewCount,
+          address: place.googleFormattedAddress || place.lotAddress,
+        }
+      : null,
+  });
+}
+
+async function handleReviewLookup(args: ReviewLookupArgs) {
+  const lookupArgs = {
+    airportCode: args.airport,
+    lotName: args.name || args.placeId || 'Parking lot',
+    lotAddress: args.address,
+    googlePlaceId: args.placeId,
+  };
+
+  return runWithPlacesRequestBudget(
+    `parking-reviews:${args.placeId || args.name || 'unknown'}`,
+    async () => {
+      if (isGooglePlaceReviewsLiveBlocked()) {
+        const cached = await getCachedParkingGoogleReviews(lookupArgs);
+        if (cached?.reviews?.length) {
+          return buildReviewResponse(cached, 'supabase-cache');
+        }
+
+        return buildReviewResponse(
+          cached,
+          'disabled',
+          'Live Google reviews are disabled in safe mode.',
+        );
+      }
+
+      const place = await resolveParkingGoogleReviews(lookupArgs);
+      if (place?.reviews?.length) {
+        return buildReviewResponse(place, place.source || 'google-places');
+      }
+
+      return buildReviewResponse(
+        place,
+        'unavailable',
+        'Reviews unavailable while live Google review fetching is disabled.',
+      );
+    },
+    { route: '/api/parking-reviews' },
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -17,30 +95,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       reviews: [],
       source: 'missing-input',
+      liveReviewsEnabled: getEffectiveGooglePlacesConfig().liveReviewsEnabled,
     });
   }
 
-  const place = await resolveParkingGooglePlace({
-    airportCode: airport,
-    lotName: name || placeId || 'Parking lot',
-    lotAddress: address,
-    googlePlaceId: placeId,
-    airportContext: airport,
-  });
-
-  return NextResponse.json({
-    reviews: place?.reviews ?? [],
-    source: place?.source ?? 'unavailable',
-    place: place
-      ? {
-          googlePlaceId: place.googlePlaceId,
-          name: place.googlePlaceName || place.lotName,
-          rating: place.rating,
-          reviewCount: place.reviewCount,
-          address: place.googleFormattedAddress || place.lotAddress,
-        }
-      : null,
-  });
+  return handleReviewLookup({ placeId, name, airport, address });
 }
 
 export async function POST(req: NextRequest) {
@@ -55,28 +114,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       reviews: [],
       source: 'missing-input',
+      liveReviewsEnabled: getEffectiveGooglePlacesConfig().liveReviewsEnabled,
     });
   }
 
-  const place = await resolveParkingGooglePlace({
-    airportCode: airport,
-    lotName: name || placeId || 'Parking lot',
-    lotAddress: address,
-    googlePlaceId: placeId,
-    airportContext: airport,
-  });
-
-  return NextResponse.json({
-    reviews: place?.reviews ?? [],
-    source: place?.source ?? 'unavailable',
-    place: place
-      ? {
-          googlePlaceId: place.googlePlaceId,
-          name: place.googlePlaceName || place.lotName,
-          rating: place.rating,
-          reviewCount: place.reviewCount,
-          address: place.googleFormattedAddress || place.lotAddress,
-        }
-      : null,
-  });
+  return handleReviewLookup({ placeId, name, airport, address });
 }

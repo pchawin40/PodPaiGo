@@ -18,6 +18,8 @@ describe('googlePlacesConfig logging', () => {
     delete process.env.MAX_GOOGLE_SEARCHTEXT_PER_REQUEST;
     delete process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST;
     delete process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST;
+    delete process.env.DISABLE_GOOGLE_PLACE_REVIEWS;
+    delete process.env.MAX_GOOGLE_PLACE_REVIEWS_PER_REQUEST;
     delete process.env.DEBUG_LOGS;
     process.env.NODE_ENV = 'development';
   });
@@ -30,12 +32,15 @@ describe('googlePlacesConfig logging', () => {
 
     expect(config.disableGooglePlaces).toBe(true);
     expect(config.disableGooglePlacePhotos).toBe(true);
+    expect(config.disableGooglePlaceReviews).toBe(true);
     expect(config.disableGoogleParkingDiscovery).toBe(true);
     expect(config.livePlacesEnabled).toBe(false);
+    expect(config.liveReviewsEnabled).toBe(false);
     expect(config.dbCacheEnabled).toBe(true);
     expect(config.maxGoogleSearchTextPerRequest).toBe(0);
     expect(config.maxGooglePlaceDetailsPerRequest).toBe(0);
     expect(config.maxGooglePhotoMediaPerRequest).toBe(0);
+    expect(config.maxGooglePlaceReviewsPerRequest).toBe(0);
     expect(config.maxGooglePlacesCallsPerRequest).toBe(0);
   });
 
@@ -93,6 +98,9 @@ describe('googlePlacesConfig logging', () => {
     expect(inferGooglePlacesRequestRoute('live-refresh:{"airportCode":"SEA"}')).toBe(
       '/api/parking/live-refresh',
     );
+    expect(inferGooglePlacesRequestRoute('parking-reviews:place-123')).toBe(
+      '/api/parking-reviews',
+    );
     expect(inferGooglePlacesRequestRoute('{"origin":"Monroe"}')).toBe('/api/recommendations');
   });
 
@@ -105,12 +113,13 @@ describe('googlePlacesConfig logging', () => {
       searchTextUsed: 0,
       getPlaceUsed: 0,
       photoMediaUsed: 0,
+      reviewsUsed: 0,
       totalUsed: 0,
       blocked: 3,
     });
 
     expect(info).toHaveBeenCalledWith(
-      '[google-places-config] request /api/recommendations used=0/0/0/0 blocked=3',
+      '[google-places-config] request /api/recommendations used=0/0/0/0 reviews=0 blocked=3',
     );
 
     info.mockRestore();

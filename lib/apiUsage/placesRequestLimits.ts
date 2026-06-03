@@ -23,3 +23,7 @@ export function getMaxGooglePhotoMediaPerRequest(): number {
 export function getMaxGooglePlacesCallsPerRequest(): number {
   return readPerRequestCap('MAX_GOOGLE_PLACES_CALLS_PER_REQUEST', 100);
 }
+
+export function getMaxGooglePlaceReviewsPerRequest(): number {
+  return readPerRequestCap('MAX_GOOGLE_PLACE_REVIEWS_PER_REQUEST', 0);
+}

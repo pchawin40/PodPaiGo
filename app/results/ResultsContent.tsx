@@ -14,6 +14,7 @@ import {
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
+import DestinationParkingSummary from '../components/DestinationParkingSummary';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
@@ -28,7 +29,7 @@ import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/p
 import { buildParkingDriveContextFromOption, getParkingTerminalTimeMinutes } from '../../lib/parking/routeMinutes';
 import { getParkingRouteCoordinates } from '../../lib/parking/parkingCoordinates';
 import { getParkingTimeSummaryTitle, getParkingTransferLinkLabel } from '../../lib/parking/parkingLabels';
-import { resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
+import { isCityDestinationTrip, resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
@@ -3881,6 +3882,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = currentAirport.label;
+  const isCityTrip = Boolean(tripData && isCityDestinationTrip(tripData));
+  const cityDestinationText =
+    tripData?.type === 'general-trip'
+      ? tripData.destinationName || tripData.destination
+      : tripData?.destination || '';
+  const scrollToParkingOptions = () => {
+    document.getElementById('parking-options-section')?.scrollIntoView({ behavior: 'smooth' });
+  };
   const airportRouteUnavailable =
     Boolean(recommendation?.airportRouteUnavailable) ||
     Boolean(recommendation?.trafficEstimate?.routeUnavailable);
@@ -4688,33 +4697,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   async function handleShowReviews(parking: ParkingOption) {
     const airportCode = getTripAirportCode(tripData);
-    const key = parkingGoogleMatchKey(parking, airportCode);
     const cached = googleEnrichedParking[parking.id];
-    const selectedParking = cached || parking;
 
     if (cached?.googleReviews?.length) {
       setReviewsParking(cached);
       return;
     }
 
-    setReviewsParking(selectedParking);
-    googlePlaceAttemptedKeysRef.current.add(key);
-
-    let promise = googlePlaceInFlightKeysRef.current.get(key);
-    if (!promise) {
-      promise = attachGooglePlaceToParking(selectedParking, tripData, airportCode, {
-        force: true,
-      });
-      googlePlaceInFlightKeysRef.current.set(key, promise);
-    }
-
-    try {
-      const enriched = mergeGoogleEnrichedParkingOption(parking, await promise);
-      mergeGooglePlaceResultIntoParking(parking, enriched);
-      setReviewsParking(enriched);
-    } finally {
-      googlePlaceInFlightKeysRef.current.delete(key);
-    }
+    setReviewsParking(cached || parking);
   }
 
   function parkingHasRealPrice(option: ParkingOption): boolean {
@@ -4854,65 +4844,77 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             {/* Right: supporting context */}
             <div className="space-y-3 lg:border-l lg:border-sky-100 lg:pl-5">
-              <AirportTripCard
-                airportCode={currentAirportCode}
-                airlineOrFlight={airlineOrFlight || null}
-                leaveByTime={
-                  airportRouteUnavailable
-                    ? null
-                    : bestViableLeaveByTime || recommendation.leaveByTime || null
-                }
-                parkingPickName={
-                  smartPickOption
-                    ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
-                    : null
-                }
-                bagPlan={
-                  airportCompanionCard?.bagPlan ??
-                  resolveBagPlan({
-                    bagPlan: 'bagPlan' in tripData ? tripData.bagPlan : undefined,
-                    checkingBags: 'checkingBags' in tripData ? !!tripData.checkingBags : false,
-                  })
-                }
-                checkingBags={
-                  'checkingBags' in tripData ? !!tripData.checkingBags : false
-                }
-                transportMode={airportCompanionCard?.transportMode ?? null}
-                transportModeLabel={airportCompanionCard?.transportModeLabel ?? null}
-                travelMinutes={airportCompanionCard?.travelMinutes ?? null}
-                shuttleWalkMinutes={airportCompanionCard?.shuttleWalkMinutes ?? null}
-                departureTime={
-                  tripData.type === 'one-way-departure' ? tripData.departureTime : null
-                }
-                airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                bookingUrl={airportCompanionCard?.bookingUrl ?? null}
-                directionsUrl={airportCompanionCard?.directionsUrl ?? null}
-                returnDate={airportCompanionCard?.returnDate ?? null}
-                intent={intent}
-                tripData={tripData}
-              />
-              <RouteLookaheadPanel
-                origin={tripData.origin}
-                destination={
-                  currentAirport.routingAddress ||
-                  currentAirport.destinationName ||
-                  currentAirport.label
-                }
-                destinationLatLng={currentAirport.geoLocation}
-                airportCode={currentAirportCode}
-                departureDate={
-                  tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                    ? tripData.departureDate
-                    : null
-                }
-                departureTime={
-                  tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                    ? tripData.departureTime
-                    : null
-                }
-                airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                disabled={airportRouteUnavailable || !tripData.origin?.trim()}
-              />
+              {isCityTrip && tripData ? (
+                <DestinationParkingSummary
+                  destination={cityDestinationText}
+                  origin={tripData.origin}
+                  destinationKind={tripData.destinationKind}
+                  airportCode={(tripData as TripDataWithExtras).airportCode}
+                  onCheckNearbyParking={scrollToParkingOptions}
+                />
+              ) : (
+                <>
+                  <AirportTripCard
+                    airportCode={currentAirportCode}
+                    airlineOrFlight={airlineOrFlight || null}
+                    leaveByTime={
+                      airportRouteUnavailable
+                        ? null
+                        : bestViableLeaveByTime || recommendation.leaveByTime || null
+                    }
+                    parkingPickName={
+                      smartPickOption
+                        ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
+                        : null
+                    }
+                    bagPlan={
+                      airportCompanionCard?.bagPlan ??
+                      resolveBagPlan({
+                        bagPlan: 'bagPlan' in tripData ? tripData.bagPlan : undefined,
+                        checkingBags: 'checkingBags' in tripData ? !!tripData.checkingBags : false,
+                      })
+                    }
+                    checkingBags={
+                      'checkingBags' in tripData ? !!tripData.checkingBags : false
+                    }
+                    transportMode={airportCompanionCard?.transportMode ?? null}
+                    transportModeLabel={airportCompanionCard?.transportModeLabel ?? null}
+                    travelMinutes={airportCompanionCard?.travelMinutes ?? null}
+                    shuttleWalkMinutes={airportCompanionCard?.shuttleWalkMinutes ?? null}
+                    departureTime={
+                      tripData.type === 'one-way-departure' ? tripData.departureTime : null
+                    }
+                    airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                    bookingUrl={airportCompanionCard?.bookingUrl ?? null}
+                    directionsUrl={airportCompanionCard?.directionsUrl ?? null}
+                    returnDate={airportCompanionCard?.returnDate ?? null}
+                    intent={intent}
+                    tripData={tripData}
+                  />
+                  <RouteLookaheadPanel
+                    origin={tripData.origin}
+                    destination={
+                      currentAirport.routingAddress ||
+                      currentAirport.destinationName ||
+                      currentAirport.label
+                    }
+                    destinationLatLng={currentAirport.geoLocation}
+                    airportCode={currentAirportCode}
+                    departureDate={
+                      tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                        ? tripData.departureDate
+                        : null
+                    }
+                    departureTime={
+                      tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                        ? tripData.departureTime
+                        : null
+                    }
+                    airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                    disabled={airportRouteUnavailable || !tripData.origin?.trim()}
+                  />
+                </>
+              )}
               {(recommendation.weatherImpact || recommendation.weatherContext) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>

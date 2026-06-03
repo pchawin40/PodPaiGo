@@ -1,6 +1,7 @@
 import {
   getMaxGooglePhotoMediaPerRequest,
   getMaxGooglePlaceDetailsPerRequest,
+  getMaxGooglePlaceReviewsPerRequest,
   getMaxGooglePlacesCallsPerRequest,
   getMaxGoogleSearchTextPerRequest,
 } from '../apiUsage/placesRequestLimits';
@@ -8,22 +9,26 @@ import { getGooglePlacesCacheWriteTimeoutMs } from './googlePlacesCacheWrite';
 import {
   isGoogleParkingDiscoveryLiveBlocked,
   isGooglePlacePhotosLiveBlocked,
+  isGooglePlaceReviewsLiveBlocked,
   isGooglePlacesLiveBlocked,
 } from './googlePlacesGuard';
 
 export type EffectiveGooglePlacesConfig = {
   disableGooglePlaces: boolean;
   disableGooglePlacePhotos: boolean;
+  disableGooglePlaceReviews: boolean;
   disableGoogleParkingDiscovery: boolean;
   disableParkingDbCache: boolean;
   maxGooglePlacesCallsPerRequest: number;
   maxGoogleSearchTextPerRequest: number;
   maxGooglePlaceDetailsPerRequest: number;
   maxGooglePhotoMediaPerRequest: number;
+  maxGooglePlaceReviewsPerRequest: number;
   googlePlacesCacheWriteTimeoutMs: number;
   nodeEnv: string;
   livePlacesEnabled: boolean;
   livePhotosEnabled: boolean;
+  liveReviewsEnabled: boolean;
   discoveryEnabled: boolean;
   dbCacheEnabled: boolean;
 };
@@ -34,6 +39,7 @@ export type GooglePlacesRequestSummary = {
   searchTextUsed: number;
   getPlaceUsed: number;
   photoMediaUsed: number;
+  reviewsUsed: number;
   totalUsed: number;
   blocked: number;
 };
@@ -45,22 +51,26 @@ export function isParkingDbCacheDisabled(): boolean {
 export function getEffectiveGooglePlacesConfig(): EffectiveGooglePlacesConfig {
   const disableGooglePlaces = isGooglePlacesLiveBlocked();
   const disableGooglePlacePhotos = isGooglePlacePhotosLiveBlocked();
+  const disableGooglePlaceReviews = isGooglePlaceReviewsLiveBlocked();
   const disableGoogleParkingDiscovery = isGoogleParkingDiscoveryLiveBlocked();
   const disableParkingDbCache = isParkingDbCacheDisabled();
 
   return {
     disableGooglePlaces,
     disableGooglePlacePhotos,
+    disableGooglePlaceReviews,
     disableGoogleParkingDiscovery,
     disableParkingDbCache,
     maxGooglePlacesCallsPerRequest: getMaxGooglePlacesCallsPerRequest(),
     maxGoogleSearchTextPerRequest: getMaxGoogleSearchTextPerRequest(),
     maxGooglePlaceDetailsPerRequest: getMaxGooglePlaceDetailsPerRequest(),
     maxGooglePhotoMediaPerRequest: getMaxGooglePhotoMediaPerRequest(),
+    maxGooglePlaceReviewsPerRequest: getMaxGooglePlaceReviewsPerRequest(),
     googlePlacesCacheWriteTimeoutMs: getGooglePlacesCacheWriteTimeoutMs(),
     nodeEnv: process.env.NODE_ENV ?? 'development',
     livePlacesEnabled: !disableGooglePlaces,
     livePhotosEnabled: !disableGooglePlacePhotos,
+    liveReviewsEnabled: !disableGooglePlaceReviews,
     discoveryEnabled: !disableGoogleParkingDiscovery,
     dbCacheEnabled: !disableParkingDbCache,
   };
@@ -88,12 +98,13 @@ export function formatGooglePlacesRequestSummaryLine(summary: GooglePlacesReques
   ].join('/');
 
   const route = summary.route ?? 'unknown';
-  return `[google-places-config] request ${route} used=${used} blocked=${summary.blocked}`;
+  return `[google-places-config] request ${route} used=${used} reviews=${summary.reviewsUsed} blocked=${summary.blocked}`;
 }
 
 export function inferGooglePlacesRequestRoute(requestKey: string): string {
   if (requestKey.startsWith('google-place-match:')) return '/api/google-place-match';
   if (requestKey.startsWith('google-place-photo:')) return '/api/google-place-photo';
+  if (requestKey.startsWith('parking-reviews:')) return '/api/parking-reviews';
   if (requestKey.startsWith('live-refresh:')) return '/api/parking/live-refresh';
   return '/api/recommendations';
 }

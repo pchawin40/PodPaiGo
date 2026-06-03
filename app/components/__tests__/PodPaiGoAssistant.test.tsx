@@ -41,7 +41,7 @@ describe('PodPaiGoAssistant', () => {
   test('assistant disabled state hides launcher', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ disabled: true, provider: 'mock' }),
+      json: async () => ({ disabled: true, provider: 'mock', assistantLabel: 'Assistant disabled' }),
     } as Response);
 
     render(<PodPaiGoAssistant page="home" />);
@@ -54,7 +54,7 @@ describe('PodPaiGoAssistant', () => {
   test('mock chat response appears in drawer', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ disabled: false, provider: 'mock' }),
+      json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
     } as Response);
 
     render(<PodPaiGoAssistant page="home" />);
@@ -72,7 +72,7 @@ describe('PodPaiGoAssistant', () => {
     await waitFor(() => {
       expect(screen.getByText('hello there')).toBeInTheDocument();
       expect(screen.getByText(/Hi!/i)).toBeInTheDocument();
-      expect(screen.getByText('Mock assistant')).toBeInTheDocument();
+      expect(screen.getByText('Basic assistant')).toBeInTheDocument();
     });
   });
 
@@ -83,7 +83,7 @@ describe('PodPaiGoAssistant', () => {
       if (url.includes('/api/ai/status')) {
         return {
           ok: true,
-          json: async () => ({ disabled: false, provider: 'mock' }),
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
         } as Response;
       }
 
@@ -124,7 +124,7 @@ describe('PodPaiGoAssistant', () => {
   test('results explanation uses existing recommendation data', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ disabled: false, provider: 'mock' }),
+      json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
     } as Response);
 
     render(

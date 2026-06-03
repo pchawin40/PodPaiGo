@@ -44,11 +44,13 @@ jest.mock('../lib/db/parkingCache', () => ({
 function applySafeModeEnv(): void {
   process.env.DISABLE_GOOGLE_PLACES = 'true';
   process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'true';
+  process.env.DISABLE_GOOGLE_PLACE_REVIEWS = 'true';
   process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
   process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '0';
   process.env.MAX_GOOGLE_SEARCHTEXT_PER_REQUEST = '0';
   process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST = '0';
   process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST = '0';
+  process.env.MAX_GOOGLE_PLACE_REVIEWS_PER_REQUEST = '0';
   process.env.DISABLE_PARKING_DB_CACHE = 'false';
 }
 
@@ -365,10 +367,11 @@ describe('parking safe mode', () => {
         searchTextUsed: 0,
         getPlaceUsed: 0,
         photoMediaUsed: 0,
+        reviewsUsed: 0,
         totalUsed: 0,
         blocked: 3,
       }),
-    ).toBe('[google-places-config] request /api/recommendations used=0/0/0/0 blocked=3');
+    ).toBe('[google-places-config] request /api/recommendations used=0/0/0/0 reviews=0 blocked=3');
 
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'development';
@@ -380,12 +383,13 @@ describe('parking safe mode', () => {
       searchTextUsed: 0,
       getPlaceUsed: 0,
       photoMediaUsed: 0,
+      reviewsUsed: 0,
       totalUsed: 0,
       blocked: 3,
     });
 
     expect(info).toHaveBeenCalledWith(
-      '[google-places-config] request /api/recommendations used=0/0/0/0 blocked=3',
+      '[google-places-config] request /api/recommendations used=0/0/0/0 reviews=0 blocked=3',
     );
 
     info.mockRestore();

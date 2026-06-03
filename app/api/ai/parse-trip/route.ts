@@ -3,10 +3,12 @@ import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOut
 import { beginAiParseRequest, resetAiParseBudgetForTests } from '../../../../lib/ai/tripParseBudget';
 import { parseTripText } from '../../../../lib/ai/parseTripText';
 import {
-  getAiAssistantProvider,
-  isAiAssistantDisabled,
-  isLiveAiAssistantActive,
-} from '../../../../lib/ai/tripParseConfig';
+  clientRequestedLiveAi,
+  getAiParseRemainingToday,
+  resolveAiEntitlements,
+} from '../../../../lib/ai/aiEntitlements';
+import { resolveUserPlan } from '../../../../lib/auth/userPlan';
+import { isAiAssistantDisabled } from '../../../../lib/ai/tripParseConfig';
 
 export const runtime = 'nodejs';
 
@@ -18,12 +20,27 @@ function jsonError(status: number, error: string, message: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    let body: { userText?: unknown; sessionId?: unknown };
+    let body: {
+      userText?: unknown;
+      sessionId?: unknown;
+      forceLive?: unknown;
+      live?: unknown;
+      provider?: unknown;
+      aiMode?: unknown;
+    };
 
     try {
       body = await request.json();
     } catch {
       return jsonError(400, 'invalid_request_body', 'Expected JSON body with userText.');
+    }
+
+    if (clientRequestedLiveAi(body as Record<string, unknown>)) {
+      return jsonError(
+        400,
+        'live_ai_not_client_configurable',
+        'Live AI provider selection is server-controlled.',
+      );
     }
 
     const userText = typeof body.userText === 'string' ? body.userText : '';
@@ -45,15 +62,22 @@ export async function POST(request: NextRequest) {
       userId = data.user?.id ?? null;
     }
 
+    const plan = resolveUserPlan({ userId });
+    const entitlements = resolveAiEntitlements({ userId });
+    const remainingToday = await getAiParseRemainingToday({ userId, sessionId });
+
     beginAiParseRequest();
 
-    const parsed = await parseTripText(userText, { userId, sessionId });
+    const parsed = await parseTripText(userText, { userId, sessionId, plan });
 
     return NextResponse.json({
       ...parsed,
       assistantDisabled: isAiAssistantDisabled(),
-      liveProviderActive: isLiveAiAssistantActive(),
-      configuredProvider: getAiAssistantProvider(),
+      providerUsed: entitlements.providerUsed,
+      plan: entitlements.plan,
+      mode: entitlements.mode,
+      assistantLabel: entitlements.assistantLabel,
+      remainingToday,
       requiresConfirmation: true,
     });
   } catch (error) {

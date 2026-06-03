@@ -7,8 +7,10 @@ import { withTimeout } from '../utils/asyncTimeout';
 import { scheduleGooglePlacesCacheWrite, resetGooglePlacesCacheWriteForTests } from './googlePlacesCacheWrite';
 import {
   canMakeLiveGetPlaceCall,
+  canMakeLiveGoogleReviewCall,
   canMakeLiveSearchTextCall,
   isGooglePlacePhotosLiveBlocked,
+  isGooglePlaceReviewsLiveBlocked,
   isGooglePlacesLiveBlocked,
 } from './googlePlacesGuard';
 import {
@@ -903,16 +905,25 @@ async function fetchGooglePlaceDetailsLive(
     lotName?: string | null;
     airportCode?: string | null;
     cacheKey?: string | null;
+    reason?: string;
+    purpose?: 'coordinates' | 'photos' | 'reviews';
   },
 ): Promise<GoogleLegacyPlaceDetailsResult | null> {
-  if (
-    !canMakeLiveGetPlaceCall({
-      reason: 'place_details',
-      route: 'fetchGooglePlaceDetailsLive',
-      lotName: context?.lotName ?? null,
-      airportCode: context?.airportCode ?? null,
-      cacheKey: context?.cacheKey ?? placeId,
-    })
+  const purpose = context?.purpose ?? 'coordinates';
+  const callContext = {
+    reason: context?.reason || purpose,
+    route: 'fetchGooglePlaceDetailsLive',
+    lotName: context?.lotName ?? null,
+    airportCode: context?.airportCode ?? null,
+    cacheKey: context?.cacheKey ?? placeId,
+  };
+
+  if (purpose === 'reviews') {
+    if (!canMakeLiveGoogleReviewCall(callContext)) {
+      return null;
+    }
+  } else if (
+    !canMakeLiveGetPlaceCall(callContext)
   ) {
     return null;
   }
@@ -920,21 +931,27 @@ async function fetchGooglePlaceDetailsLive(
   const apiKey = getServerApiKey();
   if (!apiKey) return null;
 
+  const newFieldMask =
+    purpose === 'reviews'
+      ? [
+          'id',
+          'displayName',
+          'formattedAddress',
+          'location',
+          'rating',
+          'userRatingCount',
+          'googleMapsUri',
+          'reviews',
+        ].join(',')
+      : purpose === 'photos'
+        ? ['id', 'location', 'photos'].join(',')
+        : ['id', 'displayName', 'formattedAddress', 'location', 'googleMapsUri'].join(',');
+
   const newRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': [
-        'id',
-        'displayName',
-        'formattedAddress',
-        'location',
-        'rating',
-        'userRatingCount',
-        'googleMapsUri',
-        'reviews',
-        'photos',
-      ].join(','),
+      'X-Goog-FieldMask': newFieldMask,
     },
     cache: 'no-store',
   }).catch(() => null);
@@ -947,9 +964,16 @@ async function fetchGooglePlaceDetailsLive(
     await logGooglePlacesError('places-new-details', newRes);
   }
 
+  const legacyFields =
+    purpose === 'reviews'
+      ? 'name,rating,user_ratings_total,reviews,formatted_address,url,geometry'
+      : purpose === 'photos'
+        ? 'photos,geometry'
+        : 'name,formatted_address,url,geometry';
+
   const params = new URLSearchParams({
     place_id: placeId,
-    fields: 'name,rating,user_ratings_total,reviews,formatted_address,url,geometry',
+    fields: legacyFields,
     key: apiKey,
   });
 
@@ -977,6 +1001,8 @@ async function fetchGooglePlaceDetails(
     lotName?: string | null;
     airportCode?: string | null;
     cacheKey?: string | null;
+    reason?: string;
+    purpose?: 'coordinates' | 'photos' | 'reviews';
   },
 ): Promise<GoogleLegacyPlaceDetailsResult | null> {
   const normalizedPlaceId = placeId.trim();
@@ -1002,7 +1028,11 @@ async function fetchGooglePlaceDetails(
   const inFlight = detailsInFlight.get(normalizedPlaceId);
   if (inFlight) return inFlight;
 
-  const promise = fetchGooglePlaceDetailsLive(normalizedPlaceId, context);
+  const promise = fetchGooglePlaceDetailsLive(normalizedPlaceId, {
+    ...context,
+    purpose: context?.purpose ?? 'coordinates',
+    reason: context?.reason ?? 'place_details',
+  });
   detailsInFlight.set(normalizedPlaceId, promise);
 
   try {
@@ -1095,6 +1125,8 @@ export async function fetchGooglePlacePhotoNames(
 
   const details = await fetchGooglePlaceDetailsLive(normalizedPlaceId, {
     cacheKey: normalizedPlaceId,
+    reason: 'place_photo_names',
+    purpose: 'photos',
   }).catch(() => null);
   const photoNames = details?.photoNames?.length
     ? details.photoNames
@@ -1284,6 +1316,109 @@ export async function resolveParkingGooglePlace(args: {
 
   scheduleSnapshotCacheWrite(record, cachedMetadata);
 
+  return record;
+}
+
+export async function getCachedParkingGoogleReviews(args: {
+  airportCode?: string | null;
+  parkingLotId?: string | number | null;
+  lotName: string;
+  lotAddress?: string | null;
+  googlePlaceId?: string | null;
+}): Promise<ParkingGooglePlaceCacheRecord | null> {
+  const cacheKey = buildParkingGoogleCacheKey(args);
+  const freshCached = await getFreshCachedRecordByKey(cacheKey);
+  if (freshCached) {
+    return { ...freshCached, source: 'supabase-cache' };
+  }
+
+  const staleCached = await getCachedRecordByKey(cacheKey);
+  if (staleCached) {
+    return { ...staleCached, source: 'stale-fallback' };
+  }
+
+  const lookupPlaceId = args.googlePlaceId || null;
+  if (lookupPlaceId) {
+    const byPlaceId = await getCachedRecordByPlaceId(lookupPlaceId);
+    if (byPlaceId) {
+      return { ...byPlaceId, cacheKey, lotName: args.lotName, source: 'supabase-cache' };
+    }
+  }
+
+  return null;
+}
+
+export async function resolveParkingGoogleReviews(args: {
+  airportCode?: string | null;
+  parkingLotId?: string | number | null;
+  lotName: string;
+  lotAddress?: string | null;
+  googlePlaceId?: string | null;
+}): Promise<ParkingGooglePlaceCacheRecord | null> {
+  const cached = await getCachedParkingGoogleReviews(args);
+  if (cached?.reviews?.length) {
+    return cached;
+  }
+
+  if (isGooglePlaceReviewsLiveBlocked()) {
+    return cached;
+  }
+
+  const placeId = args.googlePlaceId || cached?.googlePlaceId || null;
+  if (!placeId) {
+    return cached;
+  }
+
+  const cacheKey = buildParkingGoogleCacheKey(args);
+  const details = await fetchGooglePlaceDetails(placeId, {
+    lotName: args.lotName,
+    airportCode: args.airportCode ?? null,
+    cacheKey,
+    reason: 'reviews',
+    purpose: 'reviews',
+  }).catch(() => null);
+
+  if (!details) {
+    return cached;
+  }
+
+  const reviews = (details.reviews || []).slice(0, 5).map((review, index) =>
+    toReview(review, index, details.place_id || placeId),
+  );
+
+  if (!reviews.length) {
+    return cached;
+  }
+
+  const record: ParkingGooglePlaceCacheRecord = {
+    ...(cached || {
+      cacheKey,
+      airportCode: String(args.airportCode || 'UNKNOWN').toUpperCase(),
+      lotName: args.lotName,
+      normalizedLotName: normalizeParkingLotName(args.lotName),
+      lotAddress: args.lotAddress || undefined,
+      fetchedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    }),
+    cacheKey,
+    parkingLotId: numericParkingLotId(args.parkingLotId) ?? cached?.parkingLotId,
+    googlePlaceId: details.place_id || placeId,
+    googlePlaceName: details.name || cached?.googlePlaceName,
+    googleFormattedAddress: details.formatted_address || cached?.googleFormattedAddress,
+    googleMapsUri: details.url || cached?.googleMapsUri,
+    rating: typeof details.rating === 'number' ? details.rating : cached?.rating,
+    reviewCount:
+      typeof details.user_ratings_total === 'number'
+        ? details.user_ratings_total
+        : cached?.reviewCount,
+    reviews,
+    fetchedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    source: 'google-places',
+  };
+
+  scheduleSnapshotCacheWrite(record, cached);
   return record;
 }
 

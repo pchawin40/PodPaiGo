@@ -6,15 +6,17 @@ import {
 import {
   getMaxGooglePhotoMediaPerRequest,
   getMaxGooglePlaceDetailsPerRequest,
+  getMaxGooglePlaceReviewsPerRequest,
   getMaxGooglePlacesCallsPerRequest,
   getMaxGoogleSearchTextPerRequest,
 } from './placesRequestLimits';
 
-export type GooglePlacesEndpoint = 'searchText' | 'getPlace' | 'photoMedia';
+export type GooglePlacesEndpoint = 'searchText' | 'getPlace' | 'photoMedia' | 'reviews';
 
 export {
   getMaxGooglePhotoMediaPerRequest,
   getMaxGooglePlaceDetailsPerRequest,
+  getMaxGooglePlaceReviewsPerRequest,
   getMaxGooglePlacesCallsPerRequest,
   getMaxGoogleSearchTextPerRequest,
 } from './placesRequestLimits';
@@ -25,6 +27,7 @@ type ActivePlacesRequestBudget = {
   searchText: number;
   getPlace: number;
   photoMedia: number;
+  reviews: number;
   total: number;
   blocked: number;
 };
@@ -44,6 +47,7 @@ export function runWithPlacesRequestBudget<T>(
     searchText: 0,
     getPlace: 0,
     photoMedia: 0,
+    reviews: 0,
     total: 0,
     blocked: 0,
   };
@@ -59,6 +63,7 @@ export function runWithPlacesRequestBudget<T>(
         searchTextUsed: budget.searchText,
         getPlaceUsed: budget.getPlace,
         photoMediaUsed: budget.photoMedia,
+        reviewsUsed: budget.reviews,
         totalUsed: budget.total,
         blocked: budget.blocked,
       });
@@ -120,6 +125,35 @@ export function tryConsumePlacesRequestCall(endpoint: GooglePlacesEndpoint): boo
   if (endpoint === 'getPlace') budget.getPlace += 1;
   if (endpoint === 'photoMedia') budget.photoMedia += 1;
 
+  return true;
+}
+
+export function tryConsumePlacesReviewCall(): boolean {
+  const reviewsLimit = getMaxGooglePlaceReviewsPerRequest();
+  const detailsLimit = getMaxGooglePlaceDetailsPerRequest();
+  const totalLimit = getMaxGooglePlacesCallsPerRequest();
+
+  if (!activePlacesRequestBudget) {
+    if (reviewsLimit === 0 || detailsLimit === 0 || totalLimit === 0) {
+      return false;
+    }
+    return true;
+  }
+
+  const budget = activePlacesRequestBudget;
+
+  if (
+    budget.reviews >= reviewsLimit ||
+    budget.getPlace >= detailsLimit ||
+    budget.total >= totalLimit
+  ) {
+    budget.blocked += 1;
+    return false;
+  }
+
+  budget.reviews += 1;
+  budget.getPlace += 1;
+  budget.total += 1;
   return true;
 }
 

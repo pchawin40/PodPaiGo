@@ -2,6 +2,7 @@ import {
   getActivePlacesRequestBudget,
   recordPlacesRequestBlocked,
   tryConsumePlacesRequestCall,
+  tryConsumePlacesReviewCall,
   type GooglePlacesEndpoint,
 } from '../apiUsage/placesRequestBudget';
 
@@ -22,6 +23,14 @@ export function isGooglePlacePhotosLiveBlocked(): boolean {
     process.env.DISABLE_GOOGLE_PLACE_PHOTOS === 'true' ||
     isGooglePlacesLiveBlocked()
   );
+}
+
+export function isGooglePlaceReviewsLiveBlocked(): boolean {
+  if (isGooglePlacesLiveBlocked()) return true;
+
+  const flag = process.env.DISABLE_GOOGLE_PLACE_REVIEWS;
+  if (flag === 'false') return false;
+  return true;
 }
 
 export function isGoogleParkingDiscoveryLiveBlocked(): boolean {
@@ -135,4 +144,20 @@ export function canMakeLivePhotoMediaCall(context: GooglePlacesCallContext): boo
     isGooglePlacePhotosLiveBlocked(),
     'DISABLE_GOOGLE_PLACE_PHOTOS',
   );
+}
+
+export function canMakeLiveGoogleReviewCall(context: GooglePlacesCallContext): boolean {
+  if (isGooglePlaceReviewsLiveBlocked()) {
+    recordPlacesRequestBlocked();
+    logBlocked('reviews', { ...context, reason: context.reason || 'reviews' }, 'kill_switch', 'DISABLE_GOOGLE_PLACE_REVIEWS');
+    return false;
+  }
+
+  if (!tryConsumePlacesReviewCall()) {
+    logBlocked('reviews', { ...context, reason: context.reason || 'reviews' }, 'request_budget');
+    return false;
+  }
+
+  logAllowedLiveCall('reviews', { ...context, reason: context.reason || 'reviews' });
+  return true;
 }

@@ -29,7 +29,10 @@ type PodPaiGoAssistantProps = {
 
 type ParseTripApiResponse = ParsedTripAssistantResult & {
   message?: string;
-  configuredProvider?: 'mock' | 'openai';
+  providerUsed?: 'mock' | 'openai';
+  plan?: 'anonymous' | 'free' | 'plus' | 'pro' | 'admin';
+  assistantLabel?: string;
+  remainingToday?: number | null;
 };
 
 function createMessage(role: ChatMessage['role'], text: string): ChatMessage {
@@ -48,7 +51,7 @@ export default function PodPaiGoAssistant({
   const { session } = useAuth();
   const [open, setOpen] = useState(false);
   const [disabled, setDisabled] = useState<boolean | null>(null);
-  const [provider, setProvider] = useState<'mock' | 'openai'>('mock');
+  const [assistantLabel, setAssistantLabel] = useState('Basic assistant');
   const [messages, setMessages] = useState<ChatMessage[]>([
     createMessage(
       'assistant',
@@ -71,12 +74,19 @@ export default function PodPaiGoAssistant({
   useEffect(() => {
     let cancelled = false;
 
-    fetch('/api/ai/status')
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    fetch('/api/ai/status', { headers })
       .then((response) => response.json())
-      .then((data: { disabled?: boolean; provider?: 'mock' | 'openai' }) => {
+      .then((data: { disabled?: boolean; assistantLabel?: string }) => {
         if (cancelled) return;
         setDisabled(Boolean(data.disabled));
-        setProvider(data.provider === 'openai' ? 'openai' : 'mock');
+        if (data.assistantLabel) {
+          setAssistantLabel(data.assistantLabel);
+        }
       })
       .catch(() => {
         if (!cancelled) setDisabled(false);
@@ -85,7 +95,7 @@ export default function PodPaiGoAssistant({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -105,8 +115,8 @@ export default function PodPaiGoAssistant({
   const statusLabel = useMemo(() => {
     if (disabled) return 'Assistant disabled';
     if (loading) return 'Thinking…';
-    return provider === 'openai' ? 'AI assistant' : 'Mock assistant';
-  }, [disabled, loading, provider]);
+    return assistantLabel;
+  }, [disabled, loading, assistantLabel]);
 
   if (disabled) {
     return null;
@@ -141,6 +151,9 @@ export default function PodPaiGoAssistant({
       }
 
       setParsed(data);
+      if (data.assistantLabel) {
+        setAssistantLabel(data.assistantLabel);
+      }
       appendMessage(
         createMessage(
           'assistant',

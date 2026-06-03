@@ -317,6 +317,29 @@ export type ParkingOption = {
 
   /** Overnight/time-limit rules for park-and-ride lots discovered from listings. */
   parkAndRideRules?: ParkAndRideParkingRules;
+
+  validationStatus?: 'free' | 'validated' | 'possibly_validated' | 'paid_only' | 'unknown';
+  validationType?: string;
+  validationNotes?: string;
+  validationSourceUrl?: string;
+  validationLastCheckedAt?: string;
+  validationConfidence?: 'high' | 'medium' | 'low' | 'unknown';
+  freeParkingMinutes?: number;
+  freeParkingNotes?: string;
+  accessType?:
+    | 'public'
+    | 'customer_only'
+    | 'validated_customer'
+    | 'employee_only'
+    | 'resident_only'
+    | 'tenant_only'
+    | 'permit_only'
+    | 'event_only'
+    | 'trailhead_permit'
+    | 'unknown';
+  accessNotes?: string;
+  accessConfidence?: 'high' | 'medium' | 'low' | 'unknown';
+  userAccessEligible?: boolean;
 };
 
 export type ParkingGoogleReview = {

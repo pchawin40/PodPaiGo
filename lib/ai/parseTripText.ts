@@ -8,12 +8,15 @@ import {
   getMaxAiParseInputChars,
   isAiAssistantDisabled,
 } from './tripParseConfig';
+import { resolveAiProviderForRequest } from './aiEntitlements';
+import { resolveUserPlan } from '../auth/userPlan';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 import { tryConsumeAiParseCall } from './tripParseBudget';
 
 export type ParseTripTextOptions = {
   userId?: string | null;
   sessionId?: string | null;
+  plan?: import('../auth/userPlan').UserPlan;
 };
 
 function emptyParsedResult(parser: ParsedTripAssistantResult['parser']): ParsedTripAssistantResult {
@@ -49,7 +52,9 @@ export async function parseTripText(
   options: ParseTripTextOptions = {},
 ): Promise<ParsedTripAssistantResult> {
   const trimmed = userText.trim();
-  const parserLabel = isAiAssistantDisabled() ? 'disabled' : getAiAssistantProvider();
+  const plan = options.plan ?? resolveUserPlan({ userId: options.userId });
+  const providerForRequest = resolveAiProviderForRequest(plan);
+  const parserLabel = isAiAssistantDisabled() ? 'disabled' : providerForRequest;
 
   if (!trimmed) {
     logAiParseEvent('ai_parse_failed', { reason: 'empty_input' });
@@ -104,12 +109,12 @@ export async function parseTripText(
   }
 
   logAiParseEvent('ai_parse_attempt', {
-    provider: getAiAssistantProvider(),
+    provider: providerForRequest,
     disabled: isAiAssistantDisabled(),
   });
 
   try {
-    if (!isAiAssistantDisabled() && getAiAssistantProvider() === 'openai') {
+    if (!isAiAssistantDisabled() && providerForRequest === 'openai') {
       const openAiResult = await parseTripTextOpenAi(trimmed);
       recordAiDailyBudgetUse({
         userId: options.userId,
