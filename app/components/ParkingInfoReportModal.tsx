@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 import type { ParkingAccessType } from '../../lib/parking/destinationParkingClassifier';
 
 export type ParkingReportContext = {
@@ -52,6 +53,16 @@ export default function ParkingInfoReportModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    trackEvent('parking_report_started', {
+      eventProperties: {
+        airportCode: context.airportCode ?? undefined,
+        lotId: context.parkingLotId ?? undefined,
+      },
+    });
+  }, [context.airportCode, context.parkingLotId, open]);
 
   if (!open) return null;
 
@@ -108,6 +119,14 @@ export default function ParkingInfoReportModal({
       }
 
       setSuccess(true);
+      trackEvent('parking_report_submitted', {
+        eventProperties: {
+          reportType,
+          airportCode: context.airportCode ?? undefined,
+          lotId: context.parkingLotId ?? undefined,
+          accessType,
+        },
+      });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Could not submit report.');
     } finally {
@@ -160,7 +179,13 @@ export default function ParkingInfoReportModal({
               </span>
               <select
                 value={reportType}
-                onChange={(event) => setReportType(event.target.value)}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  setReportType(nextType);
+                  trackEvent('parking_report_type_selected', {
+                    eventProperties: { reportType: nextType },
+                  });
+                }}
                 className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2"
               >
                 {REPORT_TYPES.map((option) => (

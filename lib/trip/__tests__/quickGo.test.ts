@@ -43,6 +43,10 @@ describe('quickGo', () => {
     expect(params.get('type')).toBe('quick-go');
     expect(params.get('tripMode')).toBe('quick-go');
     expect(params.get('destination')).toBe('Grocery store');
+    expect(params.get('destinationLabel')).toBe('Grocery store');
+    expect(params.get('destinationAddress')).toBe('Grocery store');
+    expect(params.get('destinationSource')).toBe('typed');
+    expect(params.get('destinationConfidence')).toBe('low');
     expect(params.get('origin')).toBe(manualOrigin.origin);
     expect(params.get('originLabel')).toBe(manualOrigin.originLabel);
     expect(params.get('originSource')).toBe('manual');

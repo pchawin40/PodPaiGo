@@ -7,6 +7,10 @@ import {
   type ParkingPhotoSelection,
 } from '../../lib/parking/parkingLotPhotoShared';
 import type { TripParkingContext } from '../../lib/trip/tripContext';
+import {
+  GOOGLE_MAPS_ATTRIBUTION_LABEL,
+  GOOGLE_MAPS_ATTRIBUTION_URL,
+} from '../../lib/parking/googlePlacesSafeMode';
 
 type ParkingLike = {
     id?: string;
@@ -130,9 +134,20 @@ export default function ParkingLotVisual({
 
     const src = resolved.imageUrl;
     const showAttribution = Boolean(resolved.attribution);
+    const showGoogleMapsAttribution =
+      resolved.requiresGoogleAttribution || resolved.source === 'google_live';
 
     if (src && failedSrc !== src) {
         return (
+            <div className="flex flex-col gap-2">
+            {resolved.safeModeNotice ? (
+              <p
+                className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-950"
+                role="status"
+              >
+                {resolved.safeModeNotice}
+              </p>
+            ) : null}
             <div
                 className="group relative h-36 w-full overflow-hidden rounded-2xl bg-slate-100 text-left shadow-sm outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500 sm:h-40"
                 aria-label={`${option.name ?? 'Parking lot'} photo`}
@@ -169,12 +184,23 @@ export default function ParkingLotVisual({
                         ) : (
                           resolved.attribution
                         )}
-                        {resolved.requiresGoogleAttribution
-                          ? ' Confirm usage rules with Google before reusing this photo.'
-                          : null}
+                      </p>
+                    ) : null}
+                    {showGoogleMapsAttribution ? (
+                      <p className="text-[10px] leading-snug text-white/90">
+                        Photo via{' '}
+                        <a
+                          href={GOOGLE_MAPS_ATTRIBUTION_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline decoration-white/40 underline-offset-2"
+                        >
+                          {GOOGLE_MAPS_ATTRIBUTION_LABEL}
+                        </a>
                       </p>
                     ) : null}
                 </div>
+            </div>
             </div>
         );
     }

@@ -35,7 +35,7 @@ export type ClassifyDestinationParkingInput = {
 };
 
 const RETAIL_PATTERN =
-  /\b(costco|safeway|walmart|target|fred meyer|home depot|lowe'?s?|grocer(?:y|ies)|supermarket)\b/i;
+  /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|home depot|lowe'?s?|grocer(?:y|ies)|supermarket)\b/i;
 const MALL_PATTERN =
   /\b(mall|shopping center|shopping centre|outlet mall|town center|town centre|collection|square)\b/i;
 const RESTAURANT_PATTERN =

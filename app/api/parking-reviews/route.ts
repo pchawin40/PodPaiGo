@@ -8,6 +8,10 @@ import {
   getEffectiveGooglePlacesConfig,
 } from '../../../lib/parking/googlePlacesConfig';
 import { isGooglePlaceReviewsLiveBlocked } from '../../../lib/parking/googlePlacesGuard';
+import {
+  GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
+  SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
+} from '../../../lib/parking/googlePlacesSafeMode';
 
 function getString(value: FormDataEntryValue | string | null): string | null {
   if (typeof value !== 'string') return null;
@@ -60,14 +64,14 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
       if (isGooglePlaceReviewsLiveBlocked()) {
         const cached = await getCachedParkingGoogleReviews(lookupArgs);
         if (cached?.reviews?.length) {
-          return buildReviewResponse(cached, 'supabase-cache');
+          return buildReviewResponse(
+            cached,
+            'supabase-cache',
+            SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
+          );
         }
 
-        return buildReviewResponse(
-          cached,
-          'disabled',
-          'Live Google reviews are disabled in safe mode.',
-        );
+        return buildReviewResponse(cached, 'disabled', GOOGLE_REVIEWS_SAFE_MODE_MESSAGE);
       }
 
       const place = await resolveParkingGoogleReviews(lookupArgs);

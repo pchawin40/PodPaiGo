@@ -126,6 +126,12 @@ import {
 } from '../../lib/trip/searchParams';
 import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
+import { trackEvent } from '../../lib/analytics/trackEvent';
+import {
+  getTransitPassAppliedBadge,
+  getTransitPassCoveredLabel,
+  resolveTransitPaymentRegionContext,
+} from '../../lib/transit/transitPaymentLabels';
 
 type PriceableOption = {
   id?: string;
@@ -261,14 +267,14 @@ function ParkingRouteDebugPanel({
   option: ParkingOption;
   googleMapsUrl?: string | null;
 }) {
-  if (process.env.NODE_ENV === 'production' || !isJiffyParkingLot(option)) {
+  if (!isPodPaiGoDebugUIEnabled() || !isJiffyParkingLot(option)) {
     return null;
   }
 
   const routeCoords = getParkingRouteCoordinates(option);
   const debug = option.parkingRouteDebug;
 
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.DEBUG_LOGS === 'true') {
     console.log('[Jiffy parking route debug]', {
       name: option.name,
       address: option.address,
@@ -885,6 +891,9 @@ function PricingLinksSection({
 
   const isRideSection = title.toLowerCase().includes('ride');
   const isTransitSection = title.toLowerCase().includes('transit');
+  const transitPassContext = resolveTransitPaymentRegionContext({
+    airportCode: tripData?.airportCode ?? getTripAirportCode(tripData ?? null),
+  });
 
   return (
     <div className="divide-y divide-slate-100 bg-white">
@@ -923,7 +932,7 @@ function PricingLinksSection({
 
         const secondaryPrice =
           isTransitSection && transitPayment === 'orca-pass'
-            ? 'Covered by ORCA pass'
+            ? getTransitPassCoveredLabel(transitPassContext)
             : transitPriceDisplay?.secondary
               ? transitPriceDisplay.secondary
               : isRideSection
@@ -1057,7 +1066,7 @@ function PricingLinksSection({
                         {isTransitSection && transitPriceDisplay ? (
                           <div className="text-xs font-medium text-zinc-500">
                             {transitPayment === 'orca-pass'
-                              ? 'pass applied'
+                              ? getTransitPassAppliedBadge(transitPassContext)
                               : transitPriceDisplay.includesReturnLeg
                                 ? 'round-trip fare estimate'
                                 : 'one-way fare estimate'}
@@ -1066,7 +1075,9 @@ function PricingLinksSection({
 
                         {isTransitSection && !transitPriceDisplay && typeof it.price === 'number' ? (
                           <div className="text-xs font-medium text-zinc-500">
-                            {transitPayment === 'orca-pass' ? 'pass applied' : 'fare estimate'}
+                            {transitPayment === 'orca-pass'
+                              ? getTransitPassAppliedBadge(transitPassContext)
+                              : 'fare estimate'}
                           </div>
                         ) : null}
 
@@ -3525,6 +3536,34 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   })();
 
   const [sort, setSort] = useState<SortTab>(initialSort);
+  const resultsViewedTracked = useRef(false);
+  const lastRecalcTrackedKey = useRef<string | null>(null);
+  const lastParkingCardTrackedId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (resultsViewedTracked.current) return;
+    resultsViewedTracked.current = true;
+    trackEvent('results_viewed', {
+      accessToken,
+      eventProperties: {
+        airportCode: searchParams.get('airportCode') || searchParams.get('airport') || undefined,
+        intent: searchParams.get('intent') || undefined,
+        tripType: searchParams.get('type') || undefined,
+      },
+    });
+  }, [accessToken, searchParams]);
+
+  useEffect(() => {
+    if (!selectedParkingId || selectedParkingId === lastParkingCardTrackedId.current) return;
+    lastParkingCardTrackedId.current = selectedParkingId;
+    trackEvent('parking_card_viewed', {
+      accessToken,
+      eventProperties: {
+        lotId: selectedParkingId,
+        airportCode: tripData?.airportCode || searchParams.get('airportCode') || undefined,
+      },
+    });
+  }, [accessToken, selectedParkingId, searchParams, tripData?.airportCode]);
 
   useEffect(() => {
     // Sync URL param with current sort state
@@ -3536,6 +3575,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       window.history.replaceState(null, '', newUrl);
     }
   }, [sort]);
+
+  const handleSortChange = (next: SortTab) => {
+    if (next !== sort) {
+      trackEvent('sort_changed', {
+        accessToken,
+        eventProperties: { sort: next },
+      });
+    }
+    setSort(next);
+  };
 
   useEffect(() => {
     if (!showMapModal) return;
@@ -3665,6 +3714,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           }
 
           recommendationsLoadedKeyRef.current = requestKey;
+          if (lastRecalcTrackedKey.current !== requestKey) {
+            lastRecalcTrackedKey.current = requestKey;
+            trackEvent('recommendation_recalculated', {
+              accessToken,
+              eventProperties: {
+                airportCode: data.airportCode || undefined,
+                tripType: data.type,
+              },
+            });
+          }
           setRecommendation(rec);
           setTripData(data);
 
@@ -5683,7 +5742,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
         {/* Sort */}
         <div className="mt-6">
-          <SortTabs value={sort} onChange={setSort} />
+          <SortTabs value={sort} onChange={handleSortChange} />
         </div>
 
         {recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
@@ -5765,7 +5824,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/90 p-1.5 shadow-[0_12px_35px_rgba(15,23,42,0.18)] backdrop-blur-md">
                   <button
                     type="button"
-                    onClick={() => setShowMapModal(true)}
+                    onClick={() => {
+                      trackEvent('map_tab_clicked', {
+                        accessToken,
+                        eventProperties: {
+                          airportCode: tripData?.airportCode || currentAirport.id,
+                        },
+                      });
+                      setShowMapModal(true);
+                    }}
                     className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 active:scale-[0.98]"
                   >
                     <span className="text-base leading-none">🗺️</span>
@@ -5775,7 +5842,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   {/* Show Airport Indoor Map */}
                   <button
                     type="button"
-                    onClick={() => setShowAirportGuideModal(true)}
+                    onClick={() => {
+                      trackEvent('airport_tab_clicked', {
+                        accessToken,
+                        eventProperties: {
+                          airportCode: currentAirportCode,
+                        },
+                      });
+                      setShowAirportGuideModal(true);
+                    }}
                     className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98]"
                   >
                     <span className="text-base leading-none">✈️</span>
@@ -6549,6 +6624,7 @@ function EditTripForm({
             <TransitPaymentPicker
               value={transitPayment}
               onChange={setTransitPayment}
+              airportCode={airportCode}
               className="mt-4"
             />
           )}

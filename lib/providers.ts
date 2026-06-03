@@ -26,6 +26,10 @@ import {
   logParkingCoordinateDiagnostic,
 } from './parking/parkingCoordinates';
 import {
+  logParkingRouteCoordinateAudit,
+  parkingRouteAuditFromOption,
+} from './parking/parkingRouteAuditLog';
+import {
   applyCanonicalCoordinatesToOption,
   resolveCanonicalParkingCoordinates,
 } from './parking/resolveCanonicalCoordinates';
@@ -1326,6 +1330,15 @@ export class MockProvider implements DataProvider {
     const enriched = await Promise.all(
       parkingRouteEntries.map(async (entry) => {
         const { option, routeDestination, lotDestination } = entry;
+
+        logParkingRouteCoordinateAudit(
+          parkingRouteAuditFromOption(
+            option,
+            entry,
+            routeDepartureTime,
+            liveRouteKeys.has(entry.routeCacheKey),
+          ),
+        );
 
         const routeEstimate = await getParkingRouteEstimate(entry);
 

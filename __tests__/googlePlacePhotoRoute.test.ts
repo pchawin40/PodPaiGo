@@ -45,4 +45,31 @@ describe('/api/google-place-photo safe mode', () => {
       fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
     ).toHaveLength(0);
   });
+
+  test('photos enabled with cap makes one PhotoMedia upstream call per request', async () => {
+    process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'false';
+    process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '1';
+
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: { get: (name: string) => (name === 'content-type' ? 'image/jpeg' : null) },
+      body: new ReadableStream(),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+    } as Response);
+
+    const photoName = 'places/ChIJ_test/photos/abc123';
+    const url = `http://localhost/api/google-place-photo?name=${encodeURIComponent(photoName)}&maxWidthPx=900`;
+
+    const res = await GET(new NextRequest(url));
+
+    expect(res.status).toBe(200);
+
+    const mediaCalls = fetchMock.mock.calls.filter(([u]) =>
+      String(u).includes('places.googleapis.com') && String(u).includes('/media'),
+    );
+    expect(mediaCalls).toHaveLength(1);
+
+    fetchMock.mockRestore();
+  });
 });

@@ -13,6 +13,7 @@ import {
 } from '../../lib/parking/destinationParkingClassifier';
 import { accessBadgeLabel } from './ParkingAccessBadge';
 import ParkingInfoReportModal from './ParkingInfoReportModal';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 
 type DestinationParkingSummaryProps = {
   destination: string;
@@ -166,7 +167,15 @@ export default function DestinationParkingSummary({
               ) : null}
               <button
                 type="button"
-                onClick={() => setReportOpen(true)}
+                onClick={() => {
+                  trackEvent('parking_report_started', {
+                    eventProperties: {
+                      airportCode: airportCode ?? undefined,
+                      destinationCategory: destinationKind ?? undefined,
+                    },
+                  });
+                  setReportOpen(true);
+                }}
                 className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
               >
                 Report parking rules
@@ -175,7 +184,15 @@ export default function DestinationParkingSummary({
           ) : (
             <button
               type="button"
-              onClick={() => setReportOpen(true)}
+              onClick={() => {
+                trackEvent('parking_report_started', {
+                  eventProperties: {
+                    airportCode: airportCode ?? undefined,
+                    destinationCategory: destinationKind ?? undefined,
+                  },
+                });
+                setReportOpen(true);
+              }}
               className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
             >
               Report parking info

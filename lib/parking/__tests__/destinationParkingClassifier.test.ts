@@ -22,6 +22,24 @@ describe('destinationParkingClassifier', () => {
     expect(result.shouldSearchPaidParking).toBe(false);
   });
 
+  test('Fred Meyer maps to free_likely with high confidence', () => {
+    const result = classifyDestinationParking({ destination: 'Fred Meyer, Monroe' });
+
+    expect(result.mode).toBe('free_likely');
+    expect(result.confidence).toBe('high');
+    expect(result.shouldSearchPaidParking).toBe(false);
+  });
+
+  test('QFC and Whole Foods map to free_likely', () => {
+    expect(classifyDestinationParking({ destination: 'QFC Kirkland' }).mode).toBe('free_likely');
+    expect(classifyDestinationParking({ destination: 'Whole Foods Bellevue' }).mode).toBe(
+      'free_likely',
+    );
+    expect(classifyDestinationParking({ destination: "Trader Joe's Seattle" }).mode).toBe(
+      'free_likely',
+    );
+  });
+
   test('hiking trail maps to permit_possible', () => {
     const result = classifyDestinationParking({ destination: 'Mailbox Peak trailhead' });
 

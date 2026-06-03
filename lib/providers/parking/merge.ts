@@ -10,6 +10,7 @@ import { getParkingPriceSnapshotsCached } from './shared/snapshots';
 import { buildSnapshotParkingOptions } from './providers/snapshot/buildOptions';
 import { inferPriceFreshness } from './types';
 import { isLiveGoogleParkingDiscoveryEnabled } from '../../parking/parkingDiscoveryMode';
+import { SHOWING_CACHED_PROVIDER_DATA_MESSAGE } from '../../parking/googlePlacesSafeMode';
 
 function normalizeSnapshotName(name: string): string {
   return name
@@ -34,7 +35,7 @@ function applySafeModeProviderLabels(options: ParkingOption[]): ParkingOption[] 
     priceFreshness: option.priceFreshness ?? inferPriceFreshness(option),
     assumptions: [
       ...(option.assumptions || []),
-      'Cached/provider parking data (live Google Places discovery disabled).',
+      SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
     ],
   }));
 }

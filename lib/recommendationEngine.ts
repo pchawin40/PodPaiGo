@@ -23,6 +23,11 @@ import {
 } from './domain';
 import { getWeatherForAirport } from './weather/nws';
 import type { WeatherLookupResult } from './weather/types';
+import {
+  getTransitPassAssumption,
+  getTransitPassPriceNote,
+  resolveTransitPaymentRegionContext,
+} from './transit/transitPaymentLabels';
 import { calculateAirportReadinessBuffer } from './airports/airportReadiness';
 import { buildOptionIntelligence } from './intelligence/optionIntelligence';
 import { buildSmartTags } from './intelligence/tags';
@@ -492,6 +497,9 @@ export class RecommendationEngine {
     }));
 
     const hasOrcaPass = tripData.transitPayment === 'orca-pass';
+    const transitPassContext = resolveTransitPaymentRegionContext({
+      airportCode: tripData.airportCode,
+    });
 
     const transitWithCosts = transit.map(t => ({
       ...t,
@@ -499,12 +507,12 @@ export class RecommendationEngine {
       totalCost: hasOrcaPass && 'totalCost' in t ? 0 : (t as { totalCost?: number }).totalCost,
       calculatedCost: hasOrcaPass ? 0 : calculateTransitCost(t, tripData),
       priceNote: hasOrcaPass
-        ? '$0 with ORCA / employer transit pass'
+        ? getTransitPassPriceNote(transitPassContext)
         : t.priceNote,
       assumptions: hasOrcaPass
         ? [
           ...(t.assumptions || []),
-          'Transit fare shown as $0 because ORCA / employer pass was selected.',
+          getTransitPassAssumption(transitPassContext),
           'Park & Ride lot rules, time limits, and permit requirements may still apply.',
         ]
         : t.assumptions,

@@ -20,12 +20,31 @@ export const QUICK_GO_EXAMPLE_DESTINATIONS = [
 
 export type QuickGoOriginSource = 'manual' | 'geolocation' | 'saved';
 
+export type QuickGoDestinationSource =
+  | 'saved'
+  | 'recent'
+  | 'airport'
+  | 'geocoder'
+  | 'google'
+  | 'typed';
+
 export type QuickGoOriginSelection = {
   origin: string;
   originLabel: string;
   originSource: QuickGoOriginSource;
   originLat?: number;
   originLng?: number;
+};
+
+export type QuickGoDestinationSelection = {
+  destination: string;
+  destinationLabel: string;
+  destinationAddress: string;
+  destinationSource: QuickGoDestinationSource;
+  destinationLat?: number;
+  destinationLng?: number;
+  destinationConfidence?: 'high' | 'medium' | 'low';
+  detectedAirportCode?: string;
 };
 
 export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
@@ -38,6 +57,12 @@ export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
   'originLng',
   'destination',
   'destinationName',
+  'destinationLabel',
+  'destinationAddress',
+  'destinationSource',
+  'destinationLat',
+  'destinationLng',
+  'destinationConfidence',
   'destinationKind',
   'intent',
   'transport',
@@ -260,24 +285,114 @@ export async function resolveGeolocationOrigin(): Promise<QuickGoOriginSelection
   };
 }
 
+export function buildQuickGoDestinationSelectionFromText(
+  destinationText: string,
+): QuickGoDestinationSelection {
+  const destination = destinationText.trim();
+
+  return {
+    destination,
+    destinationLabel: destination,
+    destinationAddress: destination,
+    destinationSource: 'typed',
+    destinationConfidence: 'low',
+  };
+}
+
+export function readQuickGoDestinationFromSearchParams(
+  params: Pick<URLSearchParams, 'get'>,
+): QuickGoDestinationSelection | null {
+  const destination = params.get('destination')?.trim();
+  if (!destination) return null;
+
+  const destinationSource = params.get('destinationSource') as QuickGoDestinationSource | null;
+  const destinationLabel = params.get('destinationLabel')?.trim() || destination;
+  const destinationAddress = params.get('destinationAddress')?.trim() || destination;
+  const destinationLatRaw = params.get('destinationLat');
+  const destinationLngRaw = params.get('destinationLng');
+  const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
+  const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
+  const destinationConfidenceRaw = params.get('destinationConfidence');
+  const destinationConfidence =
+    destinationConfidenceRaw === 'high' ||
+    destinationConfidenceRaw === 'medium' ||
+    destinationConfidenceRaw === 'low'
+      ? destinationConfidenceRaw
+      : undefined;
+
+  return {
+    destination,
+    destinationLabel,
+    destinationAddress,
+    destinationSource:
+      destinationSource === 'saved' ||
+      destinationSource === 'recent' ||
+      destinationSource === 'airport' ||
+      destinationSource === 'geocoder' ||
+      destinationSource === 'google' ||
+      destinationSource === 'typed'
+        ? destinationSource
+        : 'typed',
+    destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
+    destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
+    destinationConfidence,
+    detectedAirportCode: params.get('detectedAirportCode')?.trim() || undefined,
+  };
+}
+
+export function applyQuickGoDestinationToSearchParams(
+  params: URLSearchParams,
+  destination: QuickGoDestinationSelection,
+): void {
+  params.set('destination', destination.destination.trim());
+  params.set('destinationName', destination.destinationLabel.trim() || destination.destination.trim());
+  params.set('destinationLabel', destination.destinationLabel.trim() || destination.destination.trim());
+  params.set('destinationAddress', destination.destinationAddress.trim() || destination.destination.trim());
+  params.set('destinationSource', destination.destinationSource);
+
+  if (typeof destination.destinationLat === 'number' && Number.isFinite(destination.destinationLat)) {
+    params.set('destinationLat', String(destination.destinationLat));
+  } else {
+    params.delete('destinationLat');
+  }
+
+  if (typeof destination.destinationLng === 'number' && Number.isFinite(destination.destinationLng)) {
+    params.set('destinationLng', String(destination.destinationLng));
+  } else {
+    params.delete('destinationLng');
+  }
+
+  if (destination.destinationConfidence) {
+    params.set('destinationConfidence', destination.destinationConfidence);
+  } else {
+    params.delete('destinationConfidence');
+  }
+}
+
 export type BuildQuickGoSearchParamsInput = {
-  destinationText: string;
+  destinationText?: string;
+  destination?: QuickGoDestinationSelection;
   origin: QuickGoOriginSelection;
   continueAsQuickGo?: boolean;
   now?: Date;
 };
 
 export function buildQuickGoSearchParams(input: BuildQuickGoSearchParamsInput): URLSearchParams {
-  const destination = input.destinationText.trim();
+  const destinationSelection =
+    input.destination ??
+    buildQuickGoDestinationSelectionFromText(input.destinationText || '');
+  const destination = destinationSelection.destination.trim();
   const now = input.now ?? new Date();
-  const airport = input.continueAsQuickGo ? null : detectAirportFromDestination(destination);
+  const airportCode =
+    destinationSelection.detectedAirportCode ||
+    (input.continueAsQuickGo ? null : detectAirportFromDestination(destination)?.id);
+  const airport = airportCode ? getAirportById(airportCode) : null;
 
   const params = new URLSearchParams();
   params.set('type', QUICK_GO_TRIP_MODE);
   params.set('tripMode', QUICK_GO_TRIP_MODE);
   applyQuickGoOriginToSearchParams(params, input.origin);
-  params.set('destination', destination);
-  params.set('destinationName', destination);
+  applyQuickGoDestinationToSearchParams(params, destinationSelection);
   params.set('intent', 'general-trip');
   params.set('transport', 'all');
   params.set('transitPayment', 'normal');

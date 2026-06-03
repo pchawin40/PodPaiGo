@@ -9,6 +9,7 @@ import {
   copyTextThenOpenWithTracking,
   openTrackedUrl,
 } from '../../lib/monetization/trackOutboundClick';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 
 type ParkingProviderActionsProps = {
   bookingUrl: string | null;
@@ -57,14 +58,23 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
       {ctas.reserveEnabled ? (
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            trackEvent('parking_cta_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: {
+                provider: props.provider ?? undefined,
+                airportCode: props.airportCode ?? undefined,
+                lotId: props.parkingLotId ?? undefined,
+                ctaType: 'reserve_parking',
+              },
+            });
             void copyTextThenOpenWithTracking(
               props.searchQuery,
               ctas.reserveUrl!,
               buildTracking('reserve_parking', ctas.reserveUrl, props),
               props.accessToken,
-            )
-          }
+            );
+          }}
           className={buttonClass + ' bg-blue-600 text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700'}
         >
           {ctas.reserveLabel}
@@ -104,13 +114,22 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
       {ctas.directionsEnabled ? (
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            trackEvent('directions_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: {
+                provider: props.provider ?? undefined,
+                airportCode: props.airportCode ?? undefined,
+                lotId: props.parkingLotId ?? undefined,
+                ctaType: 'get_directions',
+              },
+            });
             openTrackedUrl(
               ctas.directionsUrl!,
               buildTracking('get_directions', ctas.directionsUrl, props),
               props.accessToken,
-            )
-          }
+            );
+          }}
           className={
             buttonClass +
             ' border border-slate-200 bg-white text-slate-900 hover:bg-slate-50'

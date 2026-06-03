@@ -170,3 +170,97 @@ export type SavedFavoriteTripPreferences = {
   businessTravelMode?: BusinessTravelMode;
   parkingFilters?: ParkingFeatureFilters;
 };
+
+export type SavedParkingLot = {
+  id: string;
+  label?: string;
+  name: string;
+  airportCode?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  accessType?: 'free' | 'paid' | 'validated' | 'employee-only' | 'permit' | 'unknown';
+  savedAt: string;
+  updatedAt?: string;
+};
+
+export const SAVED_PARKING_LOTS_STORAGE_KEY = 'podpaigo-saved-parking-lots';
+export const MAX_SAVED_PARKING_LOTS = 24;
+
+export function readSavedParkingLots(): SavedParkingLot[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(SAVED_PARKING_LOTS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SavedParkingLot[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeSavedParkingLots(lots: SavedParkingLot[]): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      SAVED_PARKING_LOTS_STORAGE_KEY,
+      JSON.stringify(lots.slice(0, MAX_SAVED_PARKING_LOTS)),
+    );
+  } catch {
+    // Ignore quota / private mode errors.
+  }
+}
+
+export function upsertSavedParkingLot(input: {
+  label?: string;
+  lotName: string;
+  address?: string | null;
+  notes?: string | null;
+  accessType?: SavedParkingLot['accessType'];
+  airportCode?: string | null;
+}): SavedParkingLot[] {
+  const now = new Date().toISOString();
+  const existing = readSavedParkingLots();
+  const normalizedLot = input.lotName.trim().toLowerCase();
+  const found = existing.find((item) => item.name.trim().toLowerCase() === normalizedLot);
+
+  if (found) {
+    const next = existing.map((item) =>
+      item.id === found.id
+        ? {
+            ...item,
+            label: input.label?.trim() || item.label,
+            name: input.lotName.trim(),
+            address: input.address ?? item.address,
+            notes: input.notes ?? item.notes,
+            accessType: input.accessType ?? item.accessType,
+            airportCode: input.airportCode ?? item.airportCode,
+            updatedAt: now,
+          }
+        : item,
+    );
+    writeSavedParkingLots(next);
+    return next;
+  }
+
+  const created: SavedParkingLot = {
+    id: crypto.randomUUID?.() ?? `saved-parking-lot-${Date.now()}`,
+    label: input.label?.trim() || input.lotName.trim(),
+    name: input.lotName.trim(),
+    address: input.address ?? null,
+    notes: input.notes ?? null,
+    accessType: input.accessType ?? 'unknown',
+    airportCode: input.airportCode ?? null,
+    savedAt: now,
+    updatedAt: now,
+  };
+
+  const next = [created, ...existing].slice(0, MAX_SAVED_PARKING_LOTS);
+  writeSavedParkingLots(next);
+  return next;
+}
+
+export function deleteSavedParkingLot(id: string): SavedParkingLot[] {
+  const next = readSavedParkingLots().filter((item) => item.id !== id);
+  writeSavedParkingLots(next);
+  return next;
+}

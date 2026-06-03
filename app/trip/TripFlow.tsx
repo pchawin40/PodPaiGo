@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 import { useRouter } from 'next/navigation';
 import { AddressInput } from './AddressInput';
 import {
@@ -335,6 +336,14 @@ function Card({
 
 export default function TripFlow() {
   const router = useRouter();
+  const plannerStartedTracked = useRef(false);
+
+  useEffect(() => {
+    if (plannerStartedTracked.current) return;
+    plannerStartedTracked.current = true;
+    trackEvent('trip_planner_started');
+  }, []);
+
   const [step, setStep] = useState<Step>(1);
   const [errors, setErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -780,6 +789,18 @@ export default function TripFlow() {
       params.set('airportTripTime', state.time);
     }
 
+    trackEvent('trip_form_submitted', {
+      eventProperties: {
+        tripType,
+        intent: state.intent ?? undefined,
+        airportCode: isGeneralTrip ? undefined : selectedAirport.id,
+        destinationCategory: isGeneralTrip ? state.destinationKind : 'airport',
+        preference: state.transportAvailability,
+        mode: state.bagPlan,
+        sort: state.securityOption,
+      },
+    });
+
     router.push(buildResultsPathFromSearchParams(params));
   };
 
@@ -878,7 +899,10 @@ export default function TripFlow() {
                 title="Compare a local trip"
                 subtitle="Going to work, downtown, an event, hotel, hospital, restaurant, or anywhere in WA."
                 selected={state.intent === 'general-trip'}
-                onClick={() =>
+                onClick={() => {
+                  trackEvent('trip_type_selected', {
+                    eventProperties: { tripType: 'general-trip', intent: 'general-trip' },
+                  });
                   setState((s) => ({
                     ...s,
                     intent: 'general-trip',
@@ -889,15 +913,18 @@ export default function TripFlow() {
                     parkingDurationHours: '8',
                     parkingCheckOutDate: '',
                     parkingCheckOutTime: '',
-                  }))
-                }
+                  }));
+                }}
               />
 
               <Card
                 title="Airport trip"
                 subtitle="Flying out or parking at the airport? Compare airport parking, rideshare, transit, and when to leave."
                 selected={state.intent === 'flying-out'}
-                onClick={() =>
+                onClick={() => {
+                  trackEvent('trip_type_selected', {
+                    eventProperties: { tripType: 'one-way-departure', intent: 'flying-out' },
+                  });
                   setState((s) => ({
                     ...s,
                     intent: 'flying-out',
@@ -910,8 +937,8 @@ export default function TripFlow() {
                     parkingCheckOutTime: '',
                     airportCode: s.airportCode || 'SEA',
                     timeAnchor: 'flight-departure',
-                  }))
-                }
+                  }));
+                }}
               />
             </div>
 
@@ -1017,7 +1044,12 @@ export default function TripFlow() {
                         <button
                           key={opt.key}
                           type="button"
-                          onClick={() => setState((s) => ({ ...s, transportAvailability: opt.key }))}
+                          onClick={() => {
+                            trackEvent('transport_preference_selected', {
+                              eventProperties: { preference: opt.key },
+                            });
+                            setState((s) => ({ ...s, transportAvailability: opt.key }));
+                          }}
                           className={
                             'w-full rounded-2xl border p-4 text-left shadow-sm transition ' +
                             (selected
@@ -1037,6 +1069,7 @@ export default function TripFlow() {
                       onChange={(transitPayment) =>
                         setState((s) => ({ ...s, transitPayment }))
                       }
+                      airportCode={state.airportCode}
                       className="mt-5"
                     />
                   )}
@@ -1086,9 +1119,12 @@ export default function TripFlow() {
                               <button
                                 key={opt.value}
                                 type="button"
-                                onClick={() =>
-                                  setState((s) => ({ ...s, bagPlan: opt.value }))
-                                }
+                                onClick={() => {
+                                  trackEvent('bag_plan_selected', {
+                                    eventProperties: { mode: opt.value },
+                                  });
+                                  setState((s) => ({ ...s, bagPlan: opt.value }));
+                                }}
                                 className={
                                   'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
                                   (selected
@@ -1120,9 +1156,12 @@ export default function TripFlow() {
                               <button
                                 key={opt.value}
                                 type="button"
-                                onClick={() =>
-                                  setState((s) => ({ ...s, securityOption: opt.value }))
-                                }
+                                onClick={() => {
+                                  trackEvent('security_option_selected', {
+                                    eventProperties: { preference: opt.value },
+                                  });
+                                  setState((s) => ({ ...s, securityOption: opt.value }));
+                                }}
                                 className={
                                   'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
                                   (selected

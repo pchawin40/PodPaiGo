@@ -10,6 +10,7 @@ import PrimaryButton from './components/ui/PrimaryButton';
 import SectionHeader from './components/ui/SectionHeader';
 import StatusPill from './components/ui/StatusPill';
 import TravelCard from './components/ui/TravelCard';
+import HomeAnalytics from './components/HomeAnalytics';
 
 const featureChips = [
   'Smart leave time',
@@ -52,6 +53,7 @@ const steps = [
 export default function Home() {
   return (
     <main className="travel-page-bg min-h-screen text-foreground">
+      <HomeAnalytics />
       <SiteHeader />
 
       <section className="travel-atmosphere scroll-mt-20 mx-auto max-w-6xl rounded-[2rem] px-4 py-10 sm:px-6 md:py-16 md:pb-12">

@@ -1,7 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  buildTypedDestinationFallback,
+  destinationSearchResultToSelection,
+  formatDestinationSearchCategory,
+  formatDestinationSearchSource,
+  searchDestinations,
+  type DestinationSearchResult,
+} from '../../lib/search/destinationSearch';
 import {
   QUICK_GO_EXAMPLE_DESTINATIONS,
   buildFullAirportPlannerPath,
@@ -10,8 +18,15 @@ import {
   getRecentOrigins,
   rememberRecentOrigin,
   resolveGeolocationOrigin,
+  type QuickGoDestinationSelection,
   type QuickGoOriginSelection,
 } from '../../lib/trip/quickGo';
+import {
+  getRecentDestinations,
+  readSavedDestinations,
+  rememberRecentDestination,
+} from '../../lib/trip/savedDestinations';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 import PrimaryButton from './ui/PrimaryButton';
 import StatusPill from './ui/StatusPill';
 
@@ -48,9 +63,35 @@ function compactOriginLabel(
   return 'Choose starting point';
 }
 
+function resolveAirportCode(
+  destinationSelection: QuickGoDestinationSelection | null,
+  destinationText: string,
+): string | null {
+  if (destinationSelection?.detectedAirportCode) {
+    return destinationSelection.detectedAirportCode;
+  }
+
+  return detectAirportFromDestination(destinationText)?.id ?? null;
+}
+
 export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const router = useRouter();
+  const quickGoStartedTracked = useRef(false);
+
+  useEffect(() => {
+    if (quickGoStartedTracked.current) return;
+    quickGoStartedTracked.current = true;
+    trackEvent('quick_go_started');
+  }, []);
   const [destinationText, setDestinationText] = useState('');
+  const [destinationSelection, setDestinationSelection] =
+    useState<QuickGoDestinationSelection | null>(null);
+  const [destinationSuggestions, setDestinationSuggestions] = useState<DestinationSearchResult[]>(
+    [],
+  );
+  const [destinationSearchOpen, setDestinationSearchOpen] = useState(false);
+  const [destinationSearchLoading, setDestinationSearchLoading] = useState(false);
+  const [destinationSearchError, setDestinationSearchError] = useState<string | null>(null);
   const [originInputText, setOriginInputText] = useState('');
   const [originSelection, setOriginSelection] = useState<QuickGoOriginSelection | null>(null);
   const [showOriginEditor, setShowOriginEditor] = useState(false);
@@ -58,15 +99,63 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [pendingAirportCode, setPendingAirportCode] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
+  const destinationInputRef = useRef<HTMLInputElement>(null);
 
   const recentOrigins = useMemo(() => getRecentOrigins(), []);
+  const savedDestinations = useMemo(() => readSavedDestinations(), []);
+  const recentDestinations = useMemo(() => getRecentDestinations(), []);
   const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
   const originSummary = compactOriginLabel(originInputText, originSelection);
 
-  const detectedAirport = useMemo(
-    () => (destinationText.trim() ? detectAirportFromDestination(destinationText) : null),
-    [destinationText],
+  const detectedAirportCode = useMemo(
+    () => resolveAirportCode(destinationSelection, destinationText),
+    [destinationSelection, destinationText],
   );
+
+  useEffect(() => {
+    const query = destinationText.trim();
+    if (query.length < 3) {
+      setDestinationSuggestions([]);
+      setDestinationSearchLoading(false);
+      setDestinationSearchError(null);
+      return;
+    }
+
+    setDestinationSearchLoading(true);
+    setDestinationSearchError(null);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      void searchDestinations(
+        {
+          query,
+          savedDestinations,
+          recentDestinations,
+          signal: controller.signal,
+        },
+        {},
+      )
+        .then((results) => {
+          if (controller.signal.aborted) return;
+          setDestinationSuggestions(results);
+          setDestinationSearchOpen(true);
+          setDestinationSearchLoading(false);
+        })
+        .catch((searchError) => {
+          if (controller.signal.aborted) return;
+          console.warn('Destination search failed', searchError);
+          setDestinationSuggestions([]);
+          setDestinationSearchOpen(true);
+          setDestinationSearchLoading(false);
+          setDestinationSearchError('Unable to load destination suggestions.');
+        });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [destinationText, savedDestinations, recentDestinations]);
 
   const resolveOriginForSubmit = (): QuickGoOriginSelection | null => {
     const typedOrigin = originInputText.trim();
@@ -93,12 +182,33 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     rememberRecentOrigin(origin.origin);
   };
 
-  const submitQuickGo = (continueAsQuickGo = false) => {
-    const destination = destinationText.trim();
+  const submitQuickGo = (continueAsQuickGo = false, forcedDestination?: QuickGoDestinationSelection) => {
+    const destination = forcedDestination ?? destinationSelection;
+    const trimmedText = destinationText.trim();
     const origin = resolveOriginForSubmit();
 
-    if (!destination) {
+    if (!trimmedText) {
       setError('Enter where you are going.');
+      return;
+    }
+
+    if (!destination) {
+      if (destinationSuggestions.length > 1) {
+        setDestinationSearchOpen(true);
+        setError('Choose a destination from the suggestions.');
+        return;
+      }
+
+      if (destinationSuggestions.length === 1) {
+        const selected = destinationSearchResultToSelection(destinationSuggestions[0]!);
+        setDestinationSelection(selected);
+        submitQuickGo(continueAsQuickGo, selected);
+        return;
+      }
+
+      const typedFallback = destinationSearchResultToSelection(buildTypedDestinationFallback(trimmedText));
+      setDestinationSelection(typedFallback);
+      submitQuickGo(continueAsQuickGo, typedFallback);
       return;
     }
 
@@ -109,11 +219,22 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     }
 
     rememberSubmittedOrigin(origin);
+    rememberRecentDestination(destination.destination);
     setError(null);
+
+    trackEvent('quick_go_submitted', {
+      eventProperties: {
+        airportCode: destination.detectedAirportCode ?? detectedAirportCode ?? undefined,
+        mode: continueAsQuickGo ? 'quick_go' : 'planner_handoff',
+        originSource: origin.originSource,
+        destinationSource: destination.destinationSource,
+        destinationConfidence: destination.destinationConfidence,
+      },
+    });
 
     router.push(
       buildQuickGoResultsPath({
-        destinationText: destination,
+        destination,
         origin,
         continueAsQuickGo,
       }),
@@ -123,16 +244,39 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (detectedAirport && !pendingAirportCode) {
-      setPendingAirportCode(detectedAirport.id);
+    const airportCode = pendingAirportCode || detectedAirportCode;
+    if (airportCode && !pendingAirportCode) {
+      setPendingAirportCode(airportCode);
       return;
     }
 
     submitQuickGo(Boolean(pendingAirportCode));
   };
 
+  const handleDestinationSelect = (result: DestinationSearchResult) => {
+    const selection = destinationSearchResultToSelection(result);
+    setDestinationSelection(selection);
+    setDestinationText(result.label);
+    setDestinationSearchOpen(false);
+    setDestinationSearchError(null);
+    setPendingAirportCode(null);
+    setError(null);
+  };
+
+  const handleUseTypedDestination = () => {
+    const trimmedText = destinationText.trim();
+    if (!trimmedText) return;
+
+    const selection = destinationSearchResultToSelection(buildTypedDestinationFallback(trimmedText));
+    setDestinationSelection(selection);
+    setDestinationSearchOpen(false);
+    setError(null);
+    setPendingAirportCode(null);
+  };
+
   const handleExampleClick = (example: string) => {
     setDestinationText(example);
+    setDestinationSelection(null);
     setPendingAirportCode(null);
     setError(null);
   };
@@ -170,7 +314,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
 
   const handleUseFullPlanner = () => {
     const origin = resolveOriginForSubmit();
-    const airportCode = pendingAirportCode || detectedAirport?.id;
+    const airportCode = pendingAirportCode || detectedAirportCode;
 
     if (!airportCode) return;
 
@@ -191,6 +335,12 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
 
   const inputClassName =
     'w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15';
+
+  const showTypedDestinationFallback =
+    destinationSearchOpen &&
+    destinationText.trim().length >= 3 &&
+    !destinationSearchLoading &&
+    destinationSuggestions.length === 0;
 
   return (
     <section
@@ -221,20 +371,81 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
 
       <form onSubmit={handleSubmit} className="relative mt-4 space-y-3">
         <div className="flex flex-col gap-3 md:flex-row md:items-stretch">
-          <label className="block min-w-0 flex-1">
-            <span className="sr-only">Where are you going?</span>
-            <input
-              type="text"
-              value={destinationText}
-              onChange={(event) => {
-                setDestinationText(event.target.value);
-                setPendingAirportCode(null);
-                setError(null);
-              }}
-              placeholder="Where are you going?"
-              className={inputClassName}
-            />
-          </label>
+          <div className="relative min-w-0 flex-1">
+            <label className="block">
+              <span className="sr-only">Where are you going?</span>
+              <input
+                ref={destinationInputRef}
+                type="text"
+                value={destinationText}
+                onChange={(event) => {
+                  setDestinationText(event.target.value);
+                  setDestinationSelection(null);
+                  setPendingAirportCode(null);
+                  setError(null);
+                  setDestinationSearchOpen(true);
+                }}
+                onFocus={() => setDestinationSearchOpen(true)}
+                onBlur={() => window.setTimeout(() => setDestinationSearchOpen(false), 150)}
+                placeholder="Where are you going?"
+                className={inputClassName}
+                role="combobox"
+                aria-expanded={destinationSearchOpen}
+                aria-controls="quick-go-destination-suggestions"
+                aria-autocomplete="list"
+              />
+            </label>
+
+            {destinationSearchOpen && destinationText.trim().length >= 3 ? (
+              <div
+                id="quick-go-destination-suggestions"
+                role="listbox"
+                className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-border bg-card shadow-xl"
+              >
+                {destinationSearchLoading ? (
+                  <div className="px-4 py-3 text-sm text-muted-foreground">Searching destinations…</div>
+                ) : null}
+
+                {!destinationSearchLoading && destinationSearchError ? (
+                  <div className="px-4 py-3 text-sm text-destructive">{destinationSearchError}</div>
+                ) : null}
+
+                {!destinationSearchLoading &&
+                  destinationSuggestions.map((result) => (
+                    <button
+                      key={result.id}
+                      type="button"
+                      role="option"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => handleDestinationSelect(result)}
+                      className="block w-full border-b border-border/60 px-4 py-3 text-left last:border-b-0 hover:bg-muted/50"
+                    >
+                      <div className="text-sm font-medium text-foreground">{result.label}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">{result.address}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <span>{formatDestinationSearchCategory(result.category)}</span>
+                        <span>·</span>
+                        <span>{formatDestinationSearchSource(result.source)}</span>
+                      </div>
+                    </button>
+                  ))}
+
+                {showTypedDestinationFallback ? (
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handleUseTypedDestination}
+                    className="block w-full px-4 py-3 text-left text-sm text-foreground hover:bg-muted/50"
+                  >
+                    Use typed destination: <span className="font-medium">{destinationText.trim()}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Lower confidence · no address match found
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
           {!pendingAirportCode ? (
             <PrimaryButton type="submit" className="w-full shrink-0 md:w-auto md:self-stretch md:px-6">
@@ -242,6 +453,13 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
             </PrimaryButton>
           ) : null}
         </div>
+
+        {destinationSelection ? (
+          <p className="text-xs text-muted-foreground">
+            Selected: {destinationSelection.destinationLabel}
+            {destinationSelection.destinationConfidence === 'low' ? ' · lower confidence' : ''}
+          </p>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="text-muted-foreground">Starting from:</span>

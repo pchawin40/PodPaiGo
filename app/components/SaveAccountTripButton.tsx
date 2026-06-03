@@ -8,6 +8,7 @@ import { getSaveTripUiState } from '../../lib/auth/saveTripUi';
 import { insertSavedTrip } from '../../lib/auth/savedTrips';
 import { getSupabaseClient } from '../../lib/supabase/client';
 import { useAuth } from './AuthProvider';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 
 type SaveAccountTripButtonProps = {
   tripData: TripData;
@@ -55,6 +56,14 @@ export default function SaveAccountTripButton({
     const client = getSupabaseClient();
     if (!client || !user) return;
 
+    trackEvent('save_trip_clicked', {
+      eventProperties: {
+        airportCode: tripData.airportCode || undefined,
+        tripType: tripData.type,
+        hasUser: true,
+      },
+    });
+
     setErrorMessage(null);
     const { error } = await insertSavedTrip(client, tripData, user.id, { intent });
 
@@ -63,6 +72,14 @@ export default function SaveAccountTripButton({
       setErrorMessage(error.message);
       return;
     }
+
+    trackEvent('save_trip_completed', {
+      eventProperties: {
+        airportCode: tripData.airportCode || undefined,
+        tripType: tripData.type,
+        hasUser: true,
+      },
+    });
 
     setStatus('saved');
     window.setTimeout(() => setStatus('idle'), 2200);

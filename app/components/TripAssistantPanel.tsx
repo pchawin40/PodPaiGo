@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
@@ -40,6 +41,13 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   );
 
   const accessToken = session?.access_token ?? null;
+  const assistantStartedTracked = useRef(false);
+
+  useEffect(() => {
+    if (assistantStartedTracked.current) return;
+    assistantStartedTracked.current = true;
+    trackEvent('ai_assistant_started', { accessToken });
+  }, [accessToken]);
 
   const assistantStatusLabel = useMemo(() => {
     if (loading) return 'AI parse in progress…';
@@ -75,6 +83,14 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
       setParsed(data);
       setLiveProviderActive(Boolean(data.liveProviderActive));
       setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
+      trackEvent('ai_assistant_submitted', {
+        accessToken,
+        eventProperties: {
+          configuredProvider: data.configuredProvider === 'openai' ? 'openai' : 'mock',
+          liveProviderActive: Boolean(data.liveProviderActive),
+          confirmed: false,
+        },
+      });
     } catch (parseError) {
       setParsed(null);
       setError(parseError instanceof Error ? parseError.message : 'Could not parse trip.');
@@ -93,6 +109,15 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     }
 
     setConfirmed(true);
+    trackEvent('ai_assistant_submitted', {
+      accessToken,
+      eventProperties: {
+        configuredProvider,
+        liveProviderActive,
+        confirmed: true,
+        airportCode: parsed.airportCode ?? undefined,
+      },
+    });
     router.push(buildResultsPathFromSearchParams(params));
   };
 

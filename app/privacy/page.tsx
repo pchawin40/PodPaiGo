@@ -98,6 +98,23 @@ export default function PrivacyPage() {
           </section>
 
           <section>
+            <h2 className="text-xl font-semibold">Product analytics</h2>
+            <p className="mt-2 leading-7 text-slate-600">
+              PodPaiGo records privacy-conscious product analytics to understand which features are
+              used and where the experience breaks down. Events are sent to our server API and stored
+              in Supabase when configured. We use a random anonymous identifier and a short-lived
+              session identifier in your browser storage — not advertising IDs and not Google Analytics.
+            </p>
+            <p className="mt-2 leading-7 text-slate-600">
+              Event properties are limited to coarse fields such as airport code, destination category,
+              transport preference, and provider name. Raw home or work addresses, email, phone numbers,
+              and API keys are stripped before storage. Signed-in users may be linked by account id for
+              product improvement; analytics rows are not readable from the client and are intended for
+              admin review only.
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-xl font-semibold">Outbound clicks and partner links</h2>
             <p className="mt-2 leading-7 text-slate-600">
               When you click provider booking or directions links, PodPaiGo may record a lightweight

@@ -5,6 +5,12 @@ import {
   tryConsumePlacesReviewCall,
   type GooglePlacesEndpoint,
 } from '../apiUsage/placesRequestBudget';
+import {
+  getMaxGooglePhotoMediaPerRequest,
+  getMaxGooglePlaceDetailsPerRequest,
+  getMaxGooglePlaceReviewsPerRequest,
+  getMaxGooglePlacesCallsPerRequest,
+} from '../apiUsage/placesRequestLimits';
 
 export type GooglePlacesCallContext = {
   reason: string;
@@ -19,18 +25,20 @@ export function isGooglePlacesLiveBlocked(): boolean {
 }
 
 export function isGooglePlacePhotosLiveBlocked(): boolean {
-  return (
-    process.env.DISABLE_GOOGLE_PLACE_PHOTOS === 'true' ||
-    isGooglePlacesLiveBlocked()
-  );
+  if (isGooglePlacesLiveBlocked()) return true;
+  if (process.env.DISABLE_GOOGLE_PLACE_PHOTOS !== 'false') return true;
+  if (getMaxGooglePhotoMediaPerRequest() <= 0) return true;
+  if (getMaxGooglePlacesCallsPerRequest() <= 0) return true;
+  return false;
 }
 
 export function isGooglePlaceReviewsLiveBlocked(): boolean {
   if (isGooglePlacesLiveBlocked()) return true;
-
-  const flag = process.env.DISABLE_GOOGLE_PLACE_REVIEWS;
-  if (flag === 'false') return false;
-  return true;
+  if (process.env.DISABLE_GOOGLE_PLACE_REVIEWS !== 'false') return true;
+  if (getMaxGooglePlaceReviewsPerRequest() <= 0) return true;
+  if (getMaxGooglePlaceDetailsPerRequest() <= 0) return true;
+  if (getMaxGooglePlacesCallsPerRequest() <= 0) return true;
+  return false;
 }
 
 export function isGoogleParkingDiscoveryLiveBlocked(): boolean {

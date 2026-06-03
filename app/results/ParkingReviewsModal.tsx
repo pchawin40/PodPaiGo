@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ParkingGoogleReview, ParkingOption } from "../../lib/types";
+import {
+    GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
+    SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
+} from "../../lib/parking/googlePlacesSafeMode";
+import GoogleMapsAttribution from "./GoogleMapsAttribution";
 
 type SortMode = "most_relevant" | "newest" | "highest" | "lowest";
 
@@ -189,7 +194,7 @@ export default function ParkingReviewsModal({
 
     const cachedReviewLabel =
         reviewSource === "supabase-cache" || reviewSource === "stale-fallback"
-            ? "Cached review data"
+            ? SHOWING_CACHED_PROVIDER_DATA_MESSAGE
             : null;
 
     return (
@@ -269,8 +274,7 @@ export default function ParkingReviewsModal({
 
                     {!loadingGoogleData && reviewSource === "disabled" && (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                            Reviews disabled in safe mode
-                            {reviewMessage ? ` — ${reviewMessage}` : ""}
+                            {reviewMessage || GOOGLE_REVIEWS_SAFE_MODE_MESSAGE}
                         </div>
                     )}
 
@@ -327,17 +331,6 @@ export default function ParkingReviewsModal({
                                                 </span>
                                             </div>
 
-                                            {resolvedParking.googlePlaceId && (
-                                                <a
-                                                    href={googleReviewsUrl(resolvedParking.googlePlaceId) ?? "#"}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="mt-4 inline-flex rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50"
-                                                >
-                                                    View all Google reviews
-                                                </a>
-                                            )}
-
                                             {review.text && (
                                                 <p className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-700">
                                                     {review.text}
@@ -351,9 +344,22 @@ export default function ParkingReviewsModal({
                     )}
                 </div>
 
-                <div className="border-t border-zinc-200 px-6 py-3 text-xs text-zinc-500">
-                    Reviews shown are from cached Google Places data when available. Live Google review
-                    fetching stays disabled in safe mode.
+                <div className="space-y-2 border-t border-zinc-200 px-6 py-3">
+                    <GoogleMapsAttribution className="text-xs text-zinc-600" />
+                    {resolvedParking.googlePlaceId ? (
+                        <a
+                            href={googleReviewsUrl(resolvedParking.googlePlaceId) ?? "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex text-xs font-semibold text-zinc-800 underline decoration-zinc-400 underline-offset-2"
+                        >
+                            View all reviews on Google Maps
+                        </a>
+                    ) : null}
+                    <p className="text-xs text-zinc-500">
+                        Review text, ratings, and relative times are shown when available from Google
+                        Places. Live review fetching respects safe-mode caps on Vercel.
+                    </p>
                 </div>
             </div>
         </div>

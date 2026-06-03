@@ -24,6 +24,8 @@ describe('getBestParkingPhoto', () => {
     getDb.mockReturnValue({ query: queryMock });
     delete process.env.DISABLE_GOOGLE_PLACE_PHOTOS;
     delete process.env.DISABLE_GOOGLE_PLACES;
+    delete process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST;
+    delete process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST;
   });
 
   test('first-party photo wins over Google photo', async () => {
@@ -98,12 +100,18 @@ describe('getBestParkingPhoto', () => {
 
   test('Google photo proxy only used when explicitly enabled', async () => {
     queryMock.mockResolvedValueOnce({ rows: [] });
+    process.env.DISABLE_GOOGLE_PLACES = 'false';
     process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'false';
+    process.env.MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '1';
 
     const enabled = buildGoogleLiveParkingPhoto('places/ChIJ_test/photos/abc123');
     expect(enabled?.source).toBe('google_live');
     expect(enabled?.imageUrl).toContain('/api/google-place-photo');
     expect(enabled?.requiresGoogleAttribution).toBe(true);
+
+    delete process.env.DISABLE_GOOGLE_PLACE_PHOTOS;
+    expect(buildGoogleLiveParkingPhoto('places/ChIJ_test/photos/abc123')).toBeNull();
 
     process.env.DISABLE_GOOGLE_PLACE_PHOTOS = 'true';
     const disabled = buildGoogleLiveParkingPhoto('places/ChIJ_test/photos/abc123');

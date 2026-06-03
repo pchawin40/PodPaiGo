@@ -318,7 +318,7 @@ describe('parking safe mode', () => {
 
     expect(merged[0]?.assumptions).toEqual(
       expect.arrayContaining([
-        'Cached/provider parking data (live Google Places discovery disabled).',
+        'Showing cached/provider data',
       ]),
     );
   });

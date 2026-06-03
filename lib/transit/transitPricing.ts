@@ -1,4 +1,8 @@
 import type { TransitJourney, TransitOption, TripData } from '../types';
+import {
+  getTransitPassCoveredLabel,
+  resolveTransitPaymentRegionContext,
+} from './transitPaymentLabels';
 
 type TransitWithComputedCost = (TransitOption | TransitJourney) & {
   calculatedCost?: number;
@@ -110,12 +114,16 @@ export function formatTransitCostDisplay(
   tripData: TripData,
 ): TransitCostDisplay {
   if (tripData.transitPayment === 'orca-pass') {
+    const context = resolveTransitPaymentRegionContext({
+      airportCode: tripData.airportCode,
+    });
+
     return {
       tripTotal: 0,
       oneWay: 0,
       includesReturnLeg: false,
       primary: '$0',
-      secondary: 'Covered by ORCA pass',
+      secondary: getTransitPassCoveredLabel(context),
     };
   }
 

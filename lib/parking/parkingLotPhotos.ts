@@ -2,6 +2,7 @@ import { getDb } from '../db/client';
 import { withTimeout } from '../utils/asyncTimeout';
 import { googlePlacePhotoImageUrl } from '../providers/parking/shared/urls';
 import { isGooglePlacePhotosLiveBlocked } from './googlePlacesGuard';
+import { GOOGLE_PHOTOS_SAFE_MODE_MESSAGE } from './googlePlacesSafeMode';
 import {
   applyParkingPhotoSelectionToOption,
   buildPlaceholderParkingPhoto,
@@ -148,5 +149,13 @@ export async function getBestParkingPhoto(
     return googlePhoto;
   }
 
-  return buildPlaceholderParkingPhoto(lot, tripContext);
+  const placeholder = buildPlaceholderParkingPhoto(lot, tripContext);
+  if (lot.googlePhotoName?.trim() && isGooglePlacePhotosLiveBlocked()) {
+    return {
+      ...placeholder,
+      safeModeNotice: GOOGLE_PHOTOS_SAFE_MODE_MESSAGE,
+    };
+  }
+
+  return placeholder;
 }

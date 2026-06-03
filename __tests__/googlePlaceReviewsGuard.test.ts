@@ -171,7 +171,7 @@ describe('/api/parking-reviews route', () => {
     expect(response.status).toBe(200);
     expect(json.reviews).toEqual([]);
     expect(json.source).toBe('disabled');
-    expect(json.message).toMatch(/safe mode/i);
+    expect(json.message).toBe('Google reviews unavailable in safe mode');
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
     ).toHaveLength(0);

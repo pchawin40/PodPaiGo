@@ -14,6 +14,8 @@ export type ParkingPhotoSelection = {
   attribution: string | null;
   attributionUrl: string | null;
   requiresGoogleAttribution: boolean;
+  /** Set when a Google photo was requested but live PhotoMedia is blocked. */
+  safeModeNotice?: string | null;
 };
 
 export type ParkingLotPhotoLookup = {

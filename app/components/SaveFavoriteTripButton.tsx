@@ -5,6 +5,7 @@ import {
   upsertFavoriteTrip,
   type FavoriteTripInput,
 } from '../../lib/trip/favoriteTrips';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 
 type SaveFavoriteTripButtonProps = {
   trip: FavoriteTripInput;
@@ -22,11 +23,27 @@ export default function SaveFavoriteTripButton({
   const [status, setStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
   const handleSave = () => {
+    trackEvent('save_trip_clicked', {
+      eventProperties: {
+        airportCode: trip.airportCode || undefined,
+        intent: trip.intent,
+        hasUser: false,
+      },
+    });
+
     const saved = upsertFavoriteTrip(trip, window.localStorage);
     if (!saved) {
       setStatus('error');
       return;
     }
+
+    trackEvent('save_trip_completed', {
+      eventProperties: {
+        airportCode: trip.airportCode || undefined,
+        intent: trip.intent,
+        hasUser: false,
+      },
+    });
 
     setStatus('saved');
     window.setTimeout(() => setStatus('idle'), 2200);

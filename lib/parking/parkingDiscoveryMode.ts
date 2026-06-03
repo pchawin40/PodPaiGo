@@ -2,9 +2,9 @@ import {
   isGoogleParkingDiscoveryLiveBlocked,
   isGooglePlacesLiveBlocked,
 } from './googlePlacesGuard';
+import { SHOWING_CACHED_PROVIDER_DATA_MESSAGE } from './googlePlacesSafeMode';
 
-export const LIVE_PARKING_DISCOVERY_DISABLED_MESSAGE =
-  'Live parking discovery is disabled. Showing cached/provider parking options only.';
+export const LIVE_PARKING_DISCOVERY_DISABLED_MESSAGE = `${SHOWING_CACHED_PROVIDER_DATA_MESSAGE} (live Google Places discovery disabled).`;
 
 export const CACHED_PARKING_UNAVAILABLE_MESSAGE =
   'Cached parking options are unavailable for this airport right now.';
