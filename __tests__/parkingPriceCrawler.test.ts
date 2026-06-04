@@ -1,7 +1,15 @@
 import { extractPriceFromPage } from '../lib/providers/parkingPriceCrawler';
 import { PROVIDER_LINKS } from '../lib/providerCatalog';
 
-describe('parking price crawler', () => {
+// Live integration suite: hits real provider pages over the network and can be
+// slow/flaky. Skipped by default so it never blocks `npm test`. Opt in with
+// RUN_LIVE_PARKING_CRAWLER_TESTS=true.
+const runLiveCrawlerTests = process.env.RUN_LIVE_PARKING_CRAWLER_TESTS === 'true';
+const describeLive = runLiveCrawlerTests ? describe : describe.skip;
+
+describeLive('parking price crawler', () => {
+  jest.setTimeout(30000);
+
   test('tries WallyPark SEA page', async () => {
     const result = await extractPriceFromPage({
       lotKey: 'wallypark',

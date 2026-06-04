@@ -86,30 +86,60 @@ create policy user_parking_spaces_select_own
   to authenticated
   using (user_id = auth.uid());
 
--- Owners can insert rows for themselves only.
+-- Owners may insert only safe, unverified submissions for themselves.
+-- The public anon key is shared, so a signed-in client could otherwise craft an
+-- insert that self-verifies. Pin the moderation-controlled columns here so that
+-- only the server (service role) can ever produce a verified/public row.
 drop policy if exists user_parking_spaces_insert_own on public.user_parking_spaces;
 create policy user_parking_spaces_insert_own
   on public.user_parking_spaces
   for insert
   to authenticated
-  with check (user_id = auth.uid());
+  with check (
+    user_id = auth.uid()
+    and status = 'pending'
+    and is_free = true
+    and price = 0
+    and source = 'user-submitted'
+    and verified_by is null
+    and verified_at is null
+    and rejection_reason is null
+  );
 
--- Owners can edit their own rows only.
+-- Owners may edit only their own still-editable rows (pending / needs_more_info),
+-- and the edited row must stay an unverified, free, user-submitted submission.
+-- This blocks a client from flipping status to 'verified' (which would make it public).
 drop policy if exists user_parking_spaces_update_own on public.user_parking_spaces;
 create policy user_parking_spaces_update_own
   on public.user_parking_spaces
   for update
   to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (
+    user_id = auth.uid()
+    and status in ('pending', 'needs_more_info')
+  )
+  with check (
+    user_id = auth.uid()
+    and status = 'pending'
+    and is_free = true
+    and price = 0
+    and source = 'user-submitted'
+    and verified_by is null
+    and verified_at is null
+    and rejection_reason is null
+  );
 
--- Owners can delete their own rows only.
+-- Owners may delete only their own still-editable rows. Verified/rejected rows are
+-- immutable to clients and can only be changed by the server (service role).
 drop policy if exists user_parking_spaces_delete_own on public.user_parking_spaces;
 create policy user_parking_spaces_delete_own
   on public.user_parking_spaces
   for delete
   to authenticated
-  using (user_id = auth.uid());
+  using (
+    user_id = auth.uid()
+    and status in ('pending', 'needs_more_info')
+  );
 
 grant select on public.user_parking_spaces to anon, authenticated;
 grant insert, update, delete on public.user_parking_spaces to authenticated;
