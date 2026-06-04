@@ -48,8 +48,9 @@ export default function PodPaiGoAssistant({
   resultsContext = null,
 }: PodPaiGoAssistantProps) {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, user, loading: authLoading } = useAuth();
   const [open, setOpen] = useState(false);
+  const [showFeatureInfo, setShowFeatureInfo] = useState(false);
   const [disabled, setDisabled] = useState<boolean | null>(null);
   const [assistantLabel, setAssistantLabel] = useState('Basic assistant');
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -64,12 +65,21 @@ export default function PodPaiGoAssistant({
   const [parsed, setParsed] = useState<ParsedTripAssistantResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [redirectPath, setRedirectPath] = useState('');
   const [sessionId] = useState(
     () => `assistant-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const accessToken = session?.access_token ?? null;
+  const signedIn = Boolean(user && accessToken);
+  const signInHref = redirectPath
+    ? `/login?redirect=${encodeURIComponent(redirectPath)}`
+    : '/login';
+
+  useEffect(() => {
+    setRedirectPath(window.location.pathname + window.location.search);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,9 +124,10 @@ export default function PodPaiGoAssistant({
 
   const statusLabel = useMemo(() => {
     if (disabled) return 'Assistant disabled';
+    if (!signedIn) return 'Sign in to use AI Trip Planner';
     if (loading) return 'Thinking…';
     return assistantLabel;
-  }, [disabled, loading, assistantLabel]);
+  }, [disabled, signedIn, loading, assistantLabel]);
 
   if (disabled) {
     return null;
@@ -127,6 +138,16 @@ export default function PodPaiGoAssistant({
   };
 
   const handleTripParse = async (userText: string) => {
+    if (!signedIn) {
+      appendMessage(
+        createMessage(
+          'assistant',
+          'Sign in to use AI Trip Planner. Ask PodPaiGo can explain routes, parking, timing, and tradeoffs using your trip results.',
+        ),
+      );
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setParsed(null);
@@ -182,6 +203,16 @@ export default function PodPaiGoAssistant({
     setError(null);
     setParsed(null);
 
+    if (!signedIn) {
+      appendMessage(
+        createMessage(
+          'assistant',
+          'AI planning is available for signed-in users. Register or sign in to use Ask PodPaiGo and save your trip context.',
+        ),
+      );
+      return;
+    }
+
     if (page === 'results' && resultsContext && !isTripPlanningMessage(userText)) {
       appendMessage(
         createMessage('assistant', buildResultsExplanation(userText, resultsContext)),
@@ -217,15 +248,34 @@ export default function PodPaiGoAssistant({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-4 z-40 inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)] hover:bg-blue-700 sm:right-6"
-        aria-label="Ask PodPaiGo"
-      >
-        <span aria-hidden="true">💬</span>
-        Ask PodPaiGo
-      </button>
+      <div className="fixed bottom-5 right-4 z-40 flex items-center gap-2 sm:right-6">
+        {showFeatureInfo ? (
+          <div className="absolute bottom-full right-0 mb-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl">
+            AI planning is available for signed-in users. Ask PodPaiGo can explain routes,
+            parking, timing, and tradeoffs using your trip results.
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            setShowFeatureInfo(false);
+          }}
+          className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)] hover:bg-blue-700"
+          aria-label="Ask PodPaiGo"
+        >
+          Ask PodPaiGo
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowFeatureInfo((current) => !current)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-700 shadow-lg hover:bg-slate-50"
+          aria-label="AI Trip Planner info"
+          title="AI planning is available for signed-in users."
+        >
+          ?
+        </button>
+      </div>
 
       {open ? (
         <div className="fixed inset-0 z-50 flex items-end justify-end bg-slate-950/30 p-0 sm:p-4">
@@ -252,6 +302,22 @@ export default function PodPaiGoAssistant({
             </div>
 
             <div ref={messagesRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              {!authLoading && !signedIn ? (
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-3 text-sm text-blue-950">
+                  <div className="font-semibold">Sign in to use AI Trip Planner</div>
+                  <p className="mt-1">
+                    AI planning is available for signed-in users. Register or sign in to use Ask
+                    PodPaiGo and save your trip context.
+                  </p>
+                  <a
+                    href={signInHref}
+                    className="mt-3 inline-flex rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                  >
+                    Register or sign in
+                  </a>
+                </div>
+              ) : null}
+
               {messages.map((message) => (
                 <div
                   key={message.id}
@@ -297,6 +363,7 @@ export default function PodPaiGoAssistant({
                 id="podpaigo-assistant-input"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
+                disabled={!signedIn || authLoading}
                 rows={2}
                 placeholder={
                   page === 'results'
@@ -308,7 +375,7 @@ export default function PodPaiGoAssistant({
 
               <div className="mt-2 flex items-center justify-between gap-2">
                 <TripAssistantVoiceButton
-                  disabled={loading}
+                  disabled={loading || !signedIn}
                   onTranscript={(transcript) => {
                     setInput(transcript);
                     void handleSend(transcript);
@@ -317,7 +384,7 @@ export default function PodPaiGoAssistant({
 
                 <button
                   type="submit"
-                  disabled={!input.trim() || loading}
+                  disabled={!input.trim() || loading || !signedIn || authLoading}
                   className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Send
@@ -325,8 +392,9 @@ export default function PodPaiGoAssistant({
               </div>
 
               <p className="mt-2 text-[11px] leading-4 text-slate-500">
-                Trip planning always shows a review step first. No Google Places, Routes, or paid
-                speech APIs are used in this assistant.
+                {signedIn
+                  ? 'Trip planning always shows a review step first. No Google Places, Routes, or paid speech APIs are used in this assistant.'
+                  : 'Sign in to use AI Trip Planner and Ask PodPaiGo with your trip context.'}
               </p>
             </form>
           </div>

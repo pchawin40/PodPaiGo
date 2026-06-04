@@ -1,4 +1,5 @@
 import type { ParkingOption } from '../../types';
+import { debugLog } from '../../utils/debug';
 
 export type ParkingSearchCacheArgs = {
   airportCode?: string;
@@ -32,13 +33,17 @@ export async function withParkingSearchCache(
   const cached = searchResultCache.get(key);
 
   if (cached && cached.expiresAt > now) {
+    debugLog('parking_search_cache_hit', { cacheKey: key });
     return cached.options;
   }
 
   const inFlight = searchInFlight.get(key);
   if (inFlight) {
+    debugLog('parking_search_cache_hit', { cacheKey: key, inFlight: true });
     return inFlight;
   }
+
+  debugLog('parking_search_cache_miss', { cacheKey: key });
 
   const promise = execute()
     .then((options) => {

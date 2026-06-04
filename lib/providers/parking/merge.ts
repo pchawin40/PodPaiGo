@@ -103,6 +103,7 @@ export type LiveParkingSourceParts = {
   liveGoogleOptions: ParkingOption[];
   snapshotOptions: ParkingOption[];
   marketplaceOptions: ParkingOption[];
+  communityOptions: ParkingOption[];
   latestPriceSnapshots: Awaited<ReturnType<typeof getLatestParkingPriceSnapshots>>;
 };
 
@@ -145,6 +146,7 @@ export async function mergeLiveParkingSources(
     ...parts.aprOptions,
     ...snapshotOptions,
     ...applyPriceSnapshotsToOptions(pricedInventoryOptions, latestPriceSnapshots),
+    ...parts.communityOptions,
     ...discoveredLots,
     ...parts.marketplaceOptions.filter((option) => {
       const hasRealParkWhiz = parts.parkWhizOptions.some(

@@ -7,8 +7,10 @@ import PodPaiGoAssistant from '@/app/components/PodPaiGoAssistant';
 import TripAssistantVoiceButton from '@/app/components/TripAssistantVoiceButton';
 import type { ParsedTripAssistantResult } from '@/lib/ai/tripParseTypes';
 
+const mockUseAuth = jest.fn();
+
 jest.mock('@/app/components/AuthProvider', () => ({
-  useAuth: () => ({ session: null }),
+  useAuth: () => mockUseAuth(),
 }));
 
 jest.mock('next/navigation', () => ({
@@ -39,8 +41,23 @@ const mockParsed: ParsedTripAssistantResult = {
 describe('PodPaiGoAssistant', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
+    mockUseAuth.mockReturnValue({
+      session: null,
+      user: null,
+      loading: false,
+      configured: true,
+    });
     global.fetch = jest.fn();
   });
+
+  function mockSignedInAuth() {
+    mockUseAuth.mockReturnValue({
+      session: { access_token: 'token-1' },
+      user: { id: 'user-1', email: 'test@example.com' },
+      loading: false,
+      configured: true,
+    });
+  }
 
   test('assistant disabled state hides launcher', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -56,6 +73,7 @@ describe('PodPaiGoAssistant', () => {
   });
 
   test('mock chat response appears in drawer', async () => {
+    mockSignedInAuth();
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
@@ -80,7 +98,30 @@ describe('PodPaiGoAssistant', () => {
     });
   });
 
+  test('signed-out user sees sign-in prompt and does not call parse route', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+    } as Response);
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+
+    expect(screen.getAllByText('Sign in to use AI Trip Planner').length).toBeGreaterThan(0);
+    expect(screen.getByText(/AI planning is available for signed-in users/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Register or sign in' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ai/parse-trip'))).toBe(
+      false,
+    );
+  });
+
   test('trip parse opens confirm review', async () => {
+    mockSignedInAuth();
     const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
 
@@ -126,6 +167,7 @@ describe('PodPaiGoAssistant', () => {
   });
 
   test('results explanation uses existing recommendation data', async () => {
+    mockSignedInAuth();
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),

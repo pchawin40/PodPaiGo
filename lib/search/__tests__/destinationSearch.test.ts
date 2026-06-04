@@ -1,9 +1,10 @@
 import {
   buildTypedDestinationFallback,
   destinationSearchResultToSelection,
+  isGenericLocalDestinationQuery,
   searchDestinations,
 } from '../destinationSearch';
-import type { SavedDestination } from '../trip/savedDestinations';
+import type { SavedDestination } from '../../trip/savedDestinations';
 
 describe('destinationSearch', () => {
   test('Fred Meyer Monroe search returns selectable destination with mocked geocoder', async () => {
@@ -129,5 +130,80 @@ describe('destinationSearch', () => {
 
     expect(fetchGooglePlaces).toHaveBeenCalledTimes(1);
     expect(results.some((result) => result.source === 'google')).toBe(true);
+  });
+
+  test('detects generic local destination queries without forcing airports', () => {
+    expect(isGenericLocalDestinationQuery('nearest grocery store')).toBe(true);
+    expect(isGenericLocalDestinationQuery('Thai food')).toBe(true);
+    expect(isGenericLocalDestinationQuery('SEA Airport')).toBe(false);
+  });
+
+  test('passes origin location bias for generic local queries with coordinates', async () => {
+    const fetchGooglePlaces = jest.fn(async () => [
+      {
+        id: 'google:safeway',
+        label: 'Safeway',
+        address: 'Safeway, Monroe, WA',
+        category: 'retail' as const,
+        source: 'google' as const,
+        confidence: 'medium' as const,
+        lat: 47.85,
+        lng: -121.98,
+      },
+    ]);
+
+    const results = await searchDestinations(
+      {
+        query: 'Safeway',
+        savedDestinations: [],
+        recentDestinations: [],
+        originLat: 47.86,
+        originLng: -121.99,
+        originSource: 'geolocation',
+      },
+      {
+        fetchGeocoder: async () => [
+          {
+            description: 'Safeway, 19651 Highway 2, Monroe, WA',
+            place_id: 'safeway-geocoder',
+          },
+        ],
+        fetchGooglePlaces,
+      },
+    );
+
+    expect(fetchGooglePlaces).toHaveBeenCalledWith(
+      'Safeway',
+      undefined,
+      {
+        originLat: 47.86,
+        originLng: -121.99,
+        originSource: 'geolocation',
+      },
+    );
+    expect(results.some((result) => result.source === 'google')).toBe(true);
+  });
+
+  test('generic local query without coordinates falls back safely', async () => {
+    const fetchGooglePlaces = jest.fn(async () => []);
+
+    await searchDestinations(
+      {
+        query: 'coffee',
+        savedDestinations: [],
+        recentDestinations: [],
+      },
+      {
+        fetchGeocoder: async () => [
+          {
+            description: 'Coffee Shop, Seattle, WA',
+            place_id: 'coffee-geocoder',
+          },
+        ],
+        fetchGooglePlaces,
+      },
+    );
+
+    expect(fetchGooglePlaces).not.toHaveBeenCalled();
   });
 });

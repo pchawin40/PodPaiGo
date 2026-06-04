@@ -7,6 +7,7 @@ const ACCOUNT_SECTIONS = [
   { href: '/account', label: 'Dashboard' },
   { href: '/account/destinations', label: 'Saved destinations' },
   { href: '/account/parking-lots', label: 'Saved parking lots' },
+  { href: '/parking/my', label: 'My parking submissions' },
 ] as const;
 
 export default function AccountSectionsNav() {

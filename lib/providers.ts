@@ -1149,32 +1149,26 @@ export class MockProvider implements DataProvider {
           ? await this.geocodeLatLng(destination)
           : undefined;
 
-    const liveParkingOptions = await import('./providers/parkingAggregator')
-      .then(({ getLiveParkingOptions, getDestinationParkingOptions }) =>
-        isAirportDestination
-          ? getLiveParkingOptions({
-            airportCode: airportCode!,
-            airportCoordinates,
-            destination,
-            checkInDate: parkingDates.checkInDate,
-            checkOutDate: parkingDates.checkOutDate,
-          })
-          : getDestinationParkingOptions({
-            origin,
-            destination,
-            dateTime,
-            parkingDurationMinutes,
-            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
-            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
-            checkInDate: parkingDates.checkInDate,
-            checkOutDate: parkingDates.checkOutDate,
-            checkInAt: parkingDates.checkInAt,
-            checkOutAt: parkingDates.checkOutAt,
-          })
-      )
-      .catch((error) => {
-        console.warn('Live parking options unavailable; returning empty parking list', error);
-        return [];
+    const { getLiveParkingOptions, getDestinationParkingOptions } = await import('./providers/parkingAggregator');
+    const liveParkingOptions = isAirportDestination
+      ? await getLiveParkingOptions({
+        airportCode: airportCode!,
+        airportCoordinates,
+        destination,
+        checkInDate: parkingDates.checkInDate,
+        checkOutDate: parkingDates.checkOutDate,
+      })
+      : await getDestinationParkingOptions({
+        origin,
+        destination,
+        dateTime,
+        parkingDurationMinutes,
+        destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+        destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+        checkInDate: parkingDates.checkInDate,
+        checkOutDate: parkingDates.checkOutDate,
+        checkInAt: parkingDates.checkInAt,
+        checkOutAt: parkingDates.checkOutAt,
       });
 
     const parkingSource = await Promise.all(

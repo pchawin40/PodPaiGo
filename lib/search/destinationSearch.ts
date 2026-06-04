@@ -21,9 +21,18 @@ export type {
 
 const RETAIL_HINT_PATTERN =
   /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|home depot|lowe'?s?|grocer(?:y|ies)|supermarket)\b/i;
+const GENERIC_LOCAL_DESTINATION_PATTERN =
+  /\b(nearest\s+)?(grocery store|grocer(?:y|ies)|supermarket|safeway|costco|mall|shopping district|downtown shopping|downtown|pharmacy|coffee|coffee shop|restaurant|thai food|gym|park|store|retail|target|walmart|whole foods|trader joe'?s?)\b/i;
 
 function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
+}
+
+export function isGenericLocalDestinationQuery(query: string): boolean {
+  const normalized = normalizeQuery(query).toLowerCase();
+  if (!normalized) return false;
+  if (detectAirportFromDestination(normalized)) return false;
+  return GENERIC_LOCAL_DESTINATION_PATTERN.test(normalized);
 }
 
 function dedupeResults(results: DestinationSearchResult[]): DestinationSearchResult[] {
@@ -186,9 +195,17 @@ async function defaultFetchGeocoder(
 async function defaultFetchGooglePlaces(
   input: string,
   signal?: AbortSignal,
+  locationBias?: { originLat?: number; originLng?: number; originSource?: string },
 ): Promise<DestinationSearchResult[]> {
+  const params = new URLSearchParams({ input });
+  if (typeof locationBias?.originLat === 'number' && typeof locationBias.originLng === 'number') {
+    params.set('originLat', String(locationBias.originLat));
+    params.set('originLng', String(locationBias.originLng));
+    if (locationBias.originSource) params.set('originSource', locationBias.originSource);
+  }
+
   const response = await fetch(
-    `/api/search/destinations/places?input=${encodeURIComponent(input)}`,
+    `/api/search/destinations/places?${params.toString()}`,
     { signal },
   );
 
@@ -217,6 +234,12 @@ export async function searchDestinations(
 ): Promise<DestinationSearchResult[]> {
   const query = normalizeQuery(options.query);
   const limit = options.limit ?? 8;
+  const hasOriginBias =
+    typeof options.originLat === 'number' &&
+    Number.isFinite(options.originLat) &&
+    typeof options.originLng === 'number' &&
+    Number.isFinite(options.originLng);
+  const genericLocalQuery = isGenericLocalDestinationQuery(query);
 
   if (query.length < 3) {
     return [];
@@ -251,13 +274,25 @@ export async function searchDestinations(
 
   let merged = dedupeResults([...localResults, ...remoteResults]);
 
-  const shouldFetchGooglePlaces = geocoderPredictions.length === 0 && merged.length < limit;
+  const shouldFetchGooglePlaces =
+    (genericLocalQuery && hasOriginBias && merged.length < limit) ||
+    (geocoderPredictions.length === 0 && merged.length < limit);
 
   if (shouldFetchGooglePlaces) {
     try {
       googlePlacesCalled = true;
       remoteRequestCount += 1;
-      const googleResults = await fetchGooglePlaces(query, options.signal);
+      const googleResults = await fetchGooglePlaces(
+        query,
+        options.signal,
+        genericLocalQuery && hasOriginBias
+          ? {
+              originLat: options.originLat,
+              originLng: options.originLng,
+              originSource: options.originSource,
+            }
+          : undefined,
+      );
       merged = dedupeResults([...merged, ...googleResults]);
     } catch {
       // Ignore Google Places failures; geocoder and local providers may still be enough.
@@ -271,6 +306,8 @@ export async function searchDestinations(
     mergedCount: merged.length,
     googlePlacesCalled,
     remoteRequestCount,
+    genericLocalQuery,
+    locationBiasUsed: genericLocalQuery && hasOriginBias,
   });
 
   return merged.slice(0, limit);

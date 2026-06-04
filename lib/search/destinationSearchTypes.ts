@@ -32,6 +32,9 @@ export type DestinationSearchOptions = {
   query: string;
   savedDestinations?: SavedDestination[];
   recentDestinations?: string[];
+  originLat?: number;
+  originLng?: number;
+  originSource?: 'geolocation' | 'manual' | 'saved';
   limit?: number;
   signal?: AbortSignal;
 };
@@ -43,5 +46,9 @@ export type GeocoderPrediction = {
 
 export type DestinationSearchDeps = {
   fetchGeocoder?: (input: string, signal?: AbortSignal) => Promise<GeocoderPrediction[]>;
-  fetchGooglePlaces?: (input: string, signal?: AbortSignal) => Promise<DestinationSearchResult[]>;
+  fetchGooglePlaces?: (
+    input: string,
+    signal?: AbortSignal,
+    locationBias?: { originLat?: number; originLng?: number; originSource?: string },
+  ) => Promise<DestinationSearchResult[]>;
 };

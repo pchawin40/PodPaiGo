@@ -4,6 +4,7 @@ import { parkingProviderRegistry } from '../registry';
 import { registerDefaultParkingProviders, resetDefaultParkingProvidersForTests } from '../registerDefaults';
 import { applyLegacyDisplayOrder } from '../displayOrder';
 import { mergeLiveParkingSourceResults } from '../merge';
+import { resetParkingSearchCacheForTests } from '../searchCache';
 
 jest.mock('../shared/snapshots', () => ({
   getParkingPriceSnapshotsCached: jest.fn(async () => []),
@@ -34,6 +35,7 @@ function baseOption(overrides: Partial<ParkingOption> = {}): ParkingOption {
 describe('aggregateAirportParkingOptions', () => {
   beforeEach(() => {
     resetDefaultParkingProvidersForTests();
+    resetParkingSearchCacheForTests();
     jest.restoreAllMocks();
   });
 
@@ -57,6 +59,39 @@ describe('aggregateAirportParkingOptions', () => {
     });
 
     expect(options.map((option) => option.id)).toEqual(['pw-1', 'inv-1']);
+  });
+
+  it('keeps successful airport providers when one provider reports a failure', async () => {
+    jest.spyOn(parkingProviderRegistry, 'executeSearch').mockResolvedValueOnce([
+      {
+        providerId: 'google',
+        options: [],
+        health: {
+          status: 'offline',
+          message: 'Google provider failed',
+          checkedAt: new Date().toISOString(),
+        },
+        error: 'Google provider failed',
+      },
+      {
+        providerId: 'inventory',
+        options: [baseOption({ id: 'inv-available', name: 'Inventory Available Lot' })],
+        health: { status: 'healthy', checkedAt: new Date().toISOString() },
+      },
+      {
+        providerId: 'parkwhiz',
+        options: [baseOption({ id: 'pw-available', name: 'ParkWhiz Available Lot', sourceName: 'ParkWhiz' })],
+        health: { status: 'healthy', checkedAt: new Date().toISOString() },
+      },
+    ]);
+
+    const options = await aggregateAirportParkingOptions({
+      airportCode: 'SEA',
+      destination: 'Seattle-Tacoma International Airport (SEA)',
+    });
+
+    expect(options.map((option) => option.id)).toContain('inv-available');
+    expect(options.map((option) => option.id)).toContain('pw-available');
   });
 
   it('registers default providers once', () => {
@@ -90,6 +125,7 @@ describe('mergeLiveParkingSourceResults', () => {
         liveGoogleOptions: [],
         snapshotOptions: [],
         marketplaceOptions: [],
+        communityOptions: [],
         latestPriceSnapshots: [],
       },
     );

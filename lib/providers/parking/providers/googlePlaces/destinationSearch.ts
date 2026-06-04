@@ -9,6 +9,7 @@ import { findMatchingParkWhizOption } from '../../../../parking/parkWhizMatch';
 import { canMakeLiveSearchTextCall, isGoogleParkingDiscoveryLiveBlocked } from '../../../../parking/googlePlacesGuard';
 import { getGoogleMapsServerApiKey } from '../../../../env/googleMapsServerKey';
 import { getParkWhizDestinationParkingOptions } from '../../../parkWhiz';
+import { getCommunityFreeParkingOptions } from '../communityFree/provider';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
 import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
@@ -271,8 +272,6 @@ export async function getDestinationParkingOptions(args: {
 }): Promise<ParkingOption[]> {
   const key = getGoogleMapsServerApiKey();
 
-  if (!key) return [];
-
   const searchRadiusMeters = Number(
     process.env.DESTINATION_PARKING_SEARCH_RADIUS_METERS || 2500,
   );
@@ -291,22 +290,38 @@ export async function getDestinationParkingOptions(args: {
   const executedQueries: string[] = [];
   let places: GooglePlace[] = [];
 
-  for (const textQuery of searchQueryPlan) {
-    executedQueries.push(textQuery);
-    const queryPlaces = await fetchPlacesForDestinationQuery({
-      textQuery,
-      searchRadiusMeters,
-      destinationLat: args.destinationLat,
-      destinationLng: args.destinationLng,
-      apiKey: key,
-      metrics,
-    });
+  if (key) {
+    for (const textQuery of searchQueryPlan) {
+      executedQueries.push(textQuery);
+      const queryPlaces = await fetchPlacesForDestinationQuery({
+        textQuery,
+        searchRadiusMeters,
+        destinationLat: args.destinationLat,
+        destinationLng: args.destinationLng,
+        apiKey: key,
+        metrics,
+      }).catch((error) => {
+        debugLog('destination_parking_provider_failed', {
+          provider: 'google',
+          destination: args.destination,
+          textQuery,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      });
 
-    places = dedupeGooglePlaces([...places, ...queryPlaces]);
+      places = dedupeGooglePlaces([...places, ...queryPlaces]);
 
-    if (hasEnoughDestinationParkingCandidates(places)) {
-      break;
+      if (hasEnoughDestinationParkingCandidates(places)) {
+        break;
+      }
     }
+  } else {
+    debugLog('destination_parking_provider_failed', {
+      provider: 'google',
+      destination: args.destination,
+      error: 'missing_google_maps_server_api_key',
+    });
   }
 
   const durationMinutes = Math.max(60, args.parkingDurationMinutes ?? 4 * 60);
@@ -323,10 +338,39 @@ export async function getDestinationParkingOptions(args: {
           checkOutDate: args.checkOutDate,
           checkInAt: args.checkInAt,
           checkOutAt: args.checkOutAt,
-        }).catch(() => [])
+        }).catch((error) => {
+          debugLog('destination_parking_provider_failed', {
+            provider: 'parkwhiz',
+            destination: args.destination,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [];
+        })
       : [];
 
   const matchedLiveParkWhizIds = new Set<string>();
+  const communityOptions =
+    typeof args.destinationLat === 'number' &&
+    typeof args.destinationLng === 'number'
+      ? await getCommunityFreeParkingOptions({
+          airportCode: 'GENERAL',
+          destination: args.destination,
+          destinationKind: 'general',
+          destinationLat: args.destinationLat,
+          destinationLng: args.destinationLng,
+          dateTime: args.dateTime,
+          parkingDurationMinutes: args.parkingDurationMinutes,
+          checkInDate: args.checkInDate,
+          checkOutDate: args.checkOutDate,
+        }).catch((error) => {
+          debugLog('destination_parking_provider_failed', {
+            provider: 'community-free',
+            destination: args.destination,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [];
+        })
+      : [];
 
   const mapped = places
     .filter(isValidDestinationParkingPlace)
@@ -453,7 +497,20 @@ export async function getDestinationParkingOptions(args: {
       }),
     );
 
-  return dedupeParkingOptions([...mapped, ...unmatchedLiveParkWhiz])
+  const finalOptions = dedupeParkingOptions([...communityOptions, ...mapped, ...unmatchedLiveParkWhiz])
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
     .slice(0, maxResults);
+
+  debugLog('destination_parking_fetch_summary', {
+    destination: args.destination,
+    destinationLat: args.destinationLat,
+    destinationLng: args.destinationLng,
+    googleResultCount: mapped.length,
+    parkWhizResultCount: liveParkWhizOptions.length,
+    communityResultCount: communityOptions.length,
+    finalResultCount: finalOptions.length,
+    googleEnabled: Boolean(key),
+  });
+
+  return finalOptions;
 }

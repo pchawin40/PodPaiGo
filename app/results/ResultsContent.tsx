@@ -178,6 +178,7 @@ type AppOption = PriceableOption & {
 type TripDataWithExtras = TripData & {
   airportCode?: string;
   parkingCheckInDate?: string;
+  parkingCheckInTime?: string;
   parkingCheckOutDate?: string;
   parkingCheckOutTime?: string;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
@@ -2045,6 +2046,46 @@ function OptionCard({
             />
           )}
 
+          {item.type === 'parking' && (() => {
+            const parking = opt as ParkingOption;
+            const isFreeCommunity =
+              parking.providerSource === 'community-free' ||
+              parking.sourceName === 'PodPaiGo verified free parking' ||
+              parking.validationStatus === 'free';
+            if (!isFreeCommunity) return null;
+
+            return (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-950">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full border border-emerald-300 bg-white px-2.5 py-1 text-xs font-semibold">
+                    Free
+                  </span>
+                  <span className="rounded-full border border-emerald-300 bg-white px-2.5 py-1 text-xs font-semibold">
+                    Verified by PodPaiGo
+                  </span>
+                  {parking.accessType === 'customer_only' ? (
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                      Customer-only
+                    </span>
+                  ) : null}
+                </div>
+                {parking.validationNotes ? (
+                  <div className="mt-2 font-medium">{parking.validationNotes}</div>
+                ) : null}
+                {parking.freeParkingNotes ? (
+                  <div className="mt-1">{parking.freeParkingNotes}</div>
+                ) : null}
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  <li>Check signs before leaving your car.</li>
+                  {parking.accessType === 'customer_only' ? (
+                    <li>Customer-only parking may require shopping or validation.</li>
+                  ) : null}
+                  <li>Do not assume overnight parking unless verified.</li>
+                </ul>
+              </div>
+            );
+          })()}
+
           {item.type === 'parking' && displayParkingOption && (
             <ParkingRouteDebugPanel
               option={displayParkingOption}
@@ -2582,6 +2623,35 @@ function dedupeParkingRankedOptions(
   }
 
   return Array.from(byKey.values());
+}
+
+function mergeRefreshedParkingOptions(
+  existing: ParkingOption[],
+  refreshed: ParkingOption[],
+): ParkingOption[] {
+  const usedRefreshedIndexes = new Set<number>();
+  const merged = existing.map((current) => {
+    const currentKey = parkingKeySafe(current);
+    const matchIndex = refreshed.findIndex((fresh, index) => {
+      if (usedRefreshedIndexes.has(index)) return false;
+      if (fresh.id && current.id && fresh.id === current.id) return true;
+
+      const freshKey = parkingKeySafe(fresh);
+      return Boolean(currentKey && freshKey && currentKey === freshKey);
+    });
+
+    if (matchIndex < 0) return withStableParkingRouteStatus(current);
+
+    usedRefreshedIndexes.add(matchIndex);
+    return mergeParkingRouteStatus(current, refreshed[matchIndex]!) as ParkingOption;
+  });
+
+  for (let index = 0; index < refreshed.length; index += 1) {
+    if (usedRefreshedIndexes.has(index)) continue;
+    merged.push(withStableParkingRouteStatus(refreshed[index]!));
+  }
+
+  return merged;
 }
 
 function ProviderDropdownSection({
@@ -4123,18 +4193,38 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
-    if (isCityDestinationTrip(tripData)) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
     if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;
 
     const tripExtras = tripData as TripDataWithExtras;
+    const refreshDateTime =
+      tripData.type === 'general-trip'
+        ? buildLocalDateTime(tripData.arrivalDate, tripData.arrivalTime)?.toISOString()
+        : tripData.type === 'one-way-departure'
+          ? buildLocalDateTime(tripData.departureDate, tripData.departureTime)?.toISOString()
+          : tripData.type === 'round-trip'
+            ? buildLocalDateTime(tripData.departureDate, tripData.departureTime)?.toISOString()
+            : undefined;
     const body = {
-      airportCode: getTripAirportCode(tripData),
+      airportCode: isCityDestinationTrip(tripData) ? undefined : getTripAirportCode(tripData),
+      origin: tripData.origin,
       destination: tripData.destination,
       destinationKind: tripData.destinationKind ?? 'airport',
+      destinationLat: tripData.destinationLat,
+      destinationLng: tripData.destinationLng,
+      dateTime: refreshDateTime,
+      parkingDurationMinutes: calculateParkingDuration(tripData),
       checkInDate: tripExtras.parkingCheckInDate,
       checkOutDate: tripExtras.parkingCheckOutDate,
+      checkInAt:
+        tripExtras.parkingCheckInDate && tripExtras.parkingCheckInTime
+          ? `${tripExtras.parkingCheckInDate}T${tripExtras.parkingCheckInTime}`
+          : refreshDateTime,
+      checkOutAt:
+        tripExtras.parkingCheckOutDate && tripExtras.parkingCheckOutTime
+          ? `${tripExtras.parkingCheckOutDate}T${tripExtras.parkingCheckOutTime}`
+          : undefined,
     };
     const refreshKey = JSON.stringify(body);
 
@@ -4172,19 +4262,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             return {
               ...prev,
-              parking: prev.parking.map((existing) => {
-                const existingKey = parkingKeySafe(existing);
-                const match = refreshed.find((fresh) => {
-                  if (fresh.id && existing.id && fresh.id === existing.id) return true;
-
-                  const freshKey = parkingKeySafe(fresh);
-                  return Boolean(existingKey && freshKey && existingKey === freshKey);
-                });
-
-                return match
-                  ? mergeParkingRouteStatus(existing, match) as ParkingOption
-                  : withStableParkingRouteStatus(existing);
-              }),
+              parking: mergeRefreshedParkingOptions(prev.parking, refreshed),
+              parkingDataStatus: 'available',
+              parkingDataMessage: undefined,
             };
           });
         }
@@ -4682,6 +4762,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const allParkingRoutesUnavailable =
     parkingDisplayOptions.length > 0 &&
     parkingDisplayOptions.every((option) => isParkingRouteUnavailable(option));
+  const parkingEmptyStateMessage =
+    recommendation.parkingDataStatus === 'unavailable'
+      ? recommendation.parkingDataMessage ||
+        'Parking data unavailable right now. Try again or open directions.'
+      : recommendation.parkingDiscoveryNotice ||
+        (recommendation.parkingDataStatus === 'empty'
+          ? isCityTrip
+            ? 'No parking found near this destination yet.'
+            : 'No parking found near this airport yet.'
+          : undefined);
+  const parkingEmptyStateClass =
+    recommendation.parkingDataStatus === 'unavailable'
+      ? 'border-amber-200 bg-amber-50 text-amber-950'
+      : 'border-sky-200 bg-sky-50 text-sky-950';
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
@@ -5786,9 +5880,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         />
 
         {
-          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && recommendation.parkingDiscoveryNotice && parkingDisplayOptions.length === 0 && !airportRouteUnavailable && (
-            <div className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">
-              {recommendation.parkingDiscoveryNotice}
+          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !airportRouteUnavailable && (
+            <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
+              {parkingEmptyStateMessage}
             </div>
           )
         }
