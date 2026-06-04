@@ -8,6 +8,7 @@ import { resolveDynamicParkingPrice } from '../../../dynamicParkingPricing';
 import { withAvailabilityScore } from '../../shared/availability';
 import { milesBetween } from '../../shared/geo';
 import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
+import { debugLog } from '../../../../utils/debug';
 
 type GooglePlace = {
   id?: string;
@@ -27,6 +28,21 @@ type GooglePlace = {
     heightPx?: number;
   }>;
 };
+
+type AirportSearchMetrics = {
+  cacheHits: number;
+  cacheMisses: number;
+  searchTextCallsAttempted: number;
+};
+
+const airportSearchQueryCache = new Map<string, { ts: number; places: GooglePlace[] }>();
+const airportSearchInFlight = new Map<string, Promise<GooglePlace[]>>();
+const AIRPORT_SEARCH_QUERY_TTL_MS =
+  Number(process.env.PLACES_SEARCH_QUERY_CACHE_TTL_HOURS || 24) * 60 * 60 * 1000;
+
+function getMinParkingResultsToStop(): number {
+  return Number(process.env.GOOGLE_PARKING_MIN_RESULTS_BEFORE_STOP || 5);
+}
 
 const UNRELATED_BUSINESS_PATTERNS = [
   'restaurant',
@@ -77,6 +93,40 @@ const PARKING_TRANSIT_NAME_PATTERNS = [
   'terminal parking',
 ];
 
+export function resetAirportSearchCacheForTests(): void {
+  airportSearchQueryCache.clear();
+  airportSearchInFlight.clear();
+}
+
+function roundCoord(value: number, decimals = 3): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeTextQuery(textQuery: string): string {
+  return textQuery.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function buildAirportSearchCacheKey(args: {
+  airportCode: string;
+  airportCoordinates: { lat: number; lng: number };
+  radiusMeters: number;
+  textQuery: string;
+}): string {
+  const lat = roundCoord(args.airportCoordinates.lat);
+  const lng = roundCoord(args.airportCoordinates.lng);
+  const query = normalizeTextQuery(args.textQuery);
+  return `${args.airportCode.toUpperCase()}|${lat},${lng}|${args.radiusMeters}|${query}`;
+}
+
+function buildSearchQueryPlan(airportLabel: string): string[] {
+  return [
+    `airport parking near ${airportLabel}`,
+    `off airport parking near ${airportLabel}`,
+    `park and ride to ${airportLabel}`,
+  ];
+}
+
 export function looksLikeParkingOrTransitName(name: string): boolean {
   const normalized = name.toLowerCase().trim();
   if (!normalized) return false;
@@ -112,6 +162,67 @@ export function looksLikeParkingOrTransitName(name: string): boolean {
   }
 
   return false;
+}
+
+function isHighConfidenceParkingPlace(place: GooglePlace): boolean {
+  const name = String(place.displayName?.text || '');
+  if (!looksLikeParkingOrTransitName(name)) return false;
+
+  const rating = typeof place.rating === 'number' ? place.rating : 0;
+  const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : 0;
+  return rating >= 4 || reviewCount >= 20;
+}
+
+function filterRawGooglePlaces(
+  places: GooglePlace[],
+  airportCoordinates: { lat: number; lng: number },
+  maxParkingDistanceMiles: number,
+): { filtered: GooglePlace[]; droppedByName: number; droppedByGeo: number } {
+  let droppedByName = 0;
+  let droppedByGeo = 0;
+
+  const filtered = places.filter((place) => {
+    const name = String(place.displayName?.text || '');
+
+    if (!looksLikeParkingOrTransitName(name)) {
+      droppedByName += 1;
+      return false;
+    }
+
+    const lat = place.location?.latitude;
+    const lng = place.location?.longitude;
+
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      const milesFromAirport = milesBetween(
+        { lat: airportCoordinates.lat, lng: airportCoordinates.lng },
+        { lat, lng },
+      );
+
+      if (milesFromAirport > maxParkingDistanceMiles) {
+        droppedByGeo += 1;
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  return { filtered, droppedByName, droppedByGeo };
+}
+
+function hasEnoughParkingCandidates(
+  places: GooglePlace[],
+  airportCoordinates: { lat: number; lng: number },
+  maxParkingDistanceMiles: number,
+): boolean {
+  const { filtered } = filterRawGooglePlaces(places, airportCoordinates, maxParkingDistanceMiles);
+
+  if (filtered.length >= getMinParkingResultsToStop()) {
+    return true;
+  }
+
+  const highConfidenceCount = filtered.filter(isHighConfidenceParkingPlace).length;
+  return filtered.length >= 3 && highConfidenceCount >= 2;
 }
 
 function scoreGoogleParkingOption(p: ParkingOption): number {
@@ -176,80 +287,73 @@ function logGoogleParkingDiagnostics(stats: {
   console.log('[google-parking]', stats);
 }
 
-export async function getGoogleParkingPlaces(args: {
-  airportCode?: string;
-  airportCoordinates?: { lat: number; lng: number };
-  destination: string;
-}): Promise<ParkingOption[]> {
-  const key = getGoogleMapsServerApiKey();
-  const airportCode = (args.airportCode || 'SEA').toUpperCase();
-  const airport = getAirportById(airportCode);
-  const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;
-  const airportLabel = airport?.label ?? airportCode;
-  const searchQueries = [
-    `airport parking near ${airportLabel}`,
-    `long term parking near ${airportCode}`,
-    `parking near ${airportLabel}`,
-    `airport shuttle parking near ${airportCode}`,
-    `hotel parking near ${airportCode}`,
-    `park and ride to ${airportLabel}`,
-    `park and ride to ${airportCode}`,
-    `transit center to ${airportCode}`,
-    `light rail parking to ${airportCode}`,
-    `cheap airport parking near ${airportCode}`,
-    `off airport parking near ${airportLabel}`,
-    `airport parking reservations near ${airportLabel}`,
-  ];
+async function fetchPlacesForQuery(args: {
+  textQuery: string;
+  airportCode: string;
+  airportCoordinates: { lat: number; lng: number };
+  parkingSearchRadiusMeters: number;
+  apiKey: string;
+  metrics: AirportSearchMetrics;
+}): Promise<GooglePlace[]> {
+  if (isGoogleParkingDiscoveryLiveBlocked()) return [];
 
-  const parkingSearchRadiusMeters = Number(
-    process.env.PARKING_SEARCH_RADIUS_METERS || 50000,
-  );
+  const cacheKey = buildAirportSearchCacheKey({
+    airportCode: args.airportCode,
+    airportCoordinates: args.airportCoordinates,
+    radiusMeters: args.parkingSearchRadiusMeters,
+    textQuery: args.textQuery,
+  });
 
-  const maxParkingDistanceMiles = Number(
-    process.env.PARKING_MAX_DISTANCE_MILES || 25,
-  );
+  const cached = airportSearchQueryCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < AIRPORT_SEARCH_QUERY_TTL_MS) {
+    args.metrics.cacheHits += 1;
+    debugLog('airport_parking_search_cache_hit', {
+      airportCode: args.airportCode,
+      cacheKey,
+      textQuery: args.textQuery,
+    });
+    return cached.places;
+  }
 
-  const maxReturnedOptions = Number(
-    process.env.GOOGLE_PARKING_MAX_RESULTS || 50,
-  );
+  const inFlight = airportSearchInFlight.get(cacheKey);
+  if (inFlight) {
+    debugLog('airport_parking_search_inflight_hit', {
+      airportCode: args.airportCode,
+      cacheKey,
+      textQuery: args.textQuery,
+    });
+    return inFlight;
+  }
 
-  const airportSearchQueryCache = new Map<string, { ts: number; places: GooglePlace[] }>();
-  const airportSearchInFlight = new Map<string, Promise<GooglePlace[]>>();
-  const AIRPORT_SEARCH_QUERY_TTL_MS =
-    Number(process.env.PLACES_SEARCH_QUERY_CACHE_TTL_HOURS || 24) * 60 * 60 * 1000;
+  args.metrics.cacheMisses += 1;
 
-  async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
-    if (isGoogleParkingDiscoveryLiveBlocked()) return [];
-
-    const cacheKey = `${airportCode}|${textQuery}`.toLowerCase();
-    const cached = airportSearchQueryCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < AIRPORT_SEARCH_QUERY_TTL_MS) {
-      return cached.places;
+  const promise = (async () => {
+    if (
+      !canMakeLiveSearchTextCall(
+        {
+          reason: 'airport_parking_discovery',
+          route: 'searchAirportGoogleParking',
+          airportCode: args.airportCode,
+          cacheKey,
+        },
+        { discovery: true },
+      )
+    ) {
+      return [];
     }
 
-    const inFlight = airportSearchInFlight.get(cacheKey);
-    if (inFlight) return inFlight;
+    args.metrics.searchTextCallsAttempted += 1;
+    debugLog('airport_parking_search_google_call', {
+      airportCode: args.airportCode,
+      cacheKey,
+      textQuery: args.textQuery,
+    });
 
-    const promise = (async () => {
-      if (
-        !canMakeLiveSearchTextCall(
-          {
-            reason: 'airport_parking_discovery',
-            route: 'searchAirportGoogleParking',
-            airportCode,
-            cacheKey,
-          },
-          { discovery: true },
-        )
-      ) {
-        return [];
-      }
-
-      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key!,
+        'X-Goog-Api-Key': args.apiKey,
         'X-Goog-FieldMask': [
           'places.id',
           'places.displayName',
@@ -263,14 +367,14 @@ export async function getGoogleParkingPlaces(args: {
         ].join(','),
       },
       body: JSON.stringify({
-        textQuery,
+        textQuery: args.textQuery,
         locationBias: {
           circle: {
             center: {
-              latitude: airportCoordinates?.lat ?? 0,
-              longitude: airportCoordinates?.lng ?? 0,
+              latitude: args.airportCoordinates.lat,
+              longitude: args.airportCoordinates.lng,
             },
-            radius: parkingSearchRadiusMeters,
+            radius: args.parkingSearchRadiusMeters,
           },
         },
       }),
@@ -282,24 +386,69 @@ export async function getGoogleParkingPlaces(args: {
     const places = Array.isArray(data.places) ? data.places : [];
     airportSearchQueryCache.set(cacheKey, { ts: Date.now(), places });
     return places;
-    })();
+  })();
 
-    airportSearchInFlight.set(cacheKey, promise);
+  airportSearchInFlight.set(cacheKey, promise);
 
-    try {
-      return await promise;
-    } finally {
-      airportSearchInFlight.delete(cacheKey);
-    }
+  try {
+    return await promise;
+  } finally {
+    airportSearchInFlight.delete(cacheKey);
   }
+}
+
+export async function getGoogleParkingPlaces(args: {
+  airportCode?: string;
+  airportCoordinates?: { lat: number; lng: number };
+  destination: string;
+}): Promise<ParkingOption[]> {
+  const key = getGoogleMapsServerApiKey();
+  const airportCode = (args.airportCode || 'SEA').toUpperCase();
+  const airport = getAirportById(airportCode);
+  const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;
+  const airportLabel = airport?.label ?? airportCode;
+  const searchQueryPlan = buildSearchQueryPlan(airportLabel);
+
+  const parkingSearchRadiusMeters = Number(
+    process.env.PARKING_SEARCH_RADIUS_METERS || 50000,
+  );
+
+  const maxParkingDistanceMiles = Number(
+    process.env.PARKING_MAX_DISTANCE_MILES || 25,
+  );
+
+  const maxReturnedOptions = Number(
+    process.env.GOOGLE_PARKING_MAX_RESULTS || 50,
+  );
 
   if (!key || !airportCoordinates) return [];
 
-  const placesByQuery = await Promise.all(
-    searchQueries.map((query) => fetchPlacesForQuery(query)),
-  );
+  const metrics: AirportSearchMetrics = {
+    cacheHits: 0,
+    cacheMisses: 0,
+    searchTextCallsAttempted: 0,
+  };
 
-  const fetchedPlaces = placesByQuery.flat();
+  const executedQueries: string[] = [];
+  let fetchedPlaces: GooglePlace[] = [];
+
+  for (const textQuery of searchQueryPlan) {
+    executedQueries.push(textQuery);
+    const places = await fetchPlacesForQuery({
+      textQuery,
+      airportCode,
+      airportCoordinates,
+      parkingSearchRadiusMeters,
+      apiKey: key,
+      metrics,
+    });
+    fetchedPlaces = dedupeGooglePlaces([...fetchedPlaces, ...places]);
+
+    if (hasEnoughParkingCandidates(fetchedPlaces, airportCoordinates, maxParkingDistanceMiles)) {
+      break;
+    }
+  }
+
   const dedupedPlaces = dedupeGooglePlaces(fetchedPlaces);
 
   let droppedByName = 0;
@@ -393,7 +542,7 @@ export async function getGoogleParkingPlaces(args: {
           bookingProvider: staticPricing.bookingProvider,
           trustStatus: dynamicPricing?.status === 'found' ? 'verified-source' : 'estimated',
           sourceName: 'Google Places',
-          searchQuery: searchQueries.join(' | '),
+          searchQuery: executedQueries.join(' | '),
           distance: 10,
           availability: 50,
           routeUnavailable: false,
@@ -445,6 +594,17 @@ export async function getGoogleParkingPlaces(args: {
   const returned = mapped
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
     .slice(0, maxReturnedOptions);
+
+  const fallbackQueryCount = Math.max(0, executedQueries.length - 1);
+
+  debugLog('[google-parking-search]', {
+    airportCode,
+    searchTextCallsAttempted: metrics.searchTextCallsAttempted,
+    cacheHits: metrics.cacheHits,
+    cacheMisses: metrics.cacheMisses,
+    fallbackQueryCount,
+    finalResultCount: returned.length,
+  });
 
   logGoogleParkingDiagnostics({
     airportCode,

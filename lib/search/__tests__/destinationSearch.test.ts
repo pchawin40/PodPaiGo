@@ -68,4 +68,66 @@ describe('destinationSearch', () => {
     expect(selection.destinationSource).toBe('typed');
     expect(selection.destinationConfidence).toBe('low');
   });
+
+  test('skips Google Places when geocoder already returned predictions', async () => {
+    const fetchGooglePlaces = jest.fn(async () => [
+      {
+        id: 'google:extra',
+        label: 'Extra Place',
+        address: 'Extra Place',
+        category: 'address' as const,
+        source: 'google' as const,
+        confidence: 'medium' as const,
+      },
+    ]);
+
+    const results = await searchDestinations(
+      {
+        query: 'Fred Meyer Monroe',
+        savedDestinations: [],
+        recentDestinations: [],
+        limit: 8,
+      },
+      {
+        fetchGeocoder: async () => [
+          {
+            description: 'Fred Meyer, 19500 Hwy 2, Monroe, WA 98272',
+            place_id: 'fred-meyer-monroe',
+          },
+        ],
+        fetchGooglePlaces,
+      },
+    );
+
+    expect(fetchGooglePlaces).not.toHaveBeenCalled();
+    expect(results.some((result) => result.source === 'geocoder')).toBe(true);
+  });
+
+  test('falls back to Google Places only when geocoder is empty', async () => {
+    const fetchGooglePlaces = jest.fn(async () => [
+      {
+        id: 'google:costco',
+        label: 'Costco Wholesale',
+        address: 'Costco Wholesale, Kirkland, WA',
+        category: 'retail' as const,
+        source: 'google' as const,
+        confidence: 'medium' as const,
+      },
+    ]);
+
+    const results = await searchDestinations(
+      {
+        query: 'costco kirkland',
+        savedDestinations: [],
+        recentDestinations: [],
+      },
+      {
+        fetchGeocoder: async () => [],
+        fetchGooglePlaces,
+      },
+    );
+
+    expect(fetchGooglePlaces).toHaveBeenCalledTimes(1);
+    expect(results.some((result) => result.source === 'google')).toBe(true);
+  });
 });

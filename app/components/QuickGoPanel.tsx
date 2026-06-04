@@ -149,7 +149,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
           setDestinationSearchLoading(false);
           setDestinationSearchError('Unable to load destination suggestions.');
         });
-    }, 250);
+    }, 300);
 
     return () => {
       window.clearTimeout(timeoutId);

@@ -354,6 +354,9 @@ describe('/api/parking-reviews route', () => {
   test('cap exceeded returns demo limit message', async () => {
     process.env.DISABLE_GOOGLE_PLACE_REVIEWS = 'false';
     process.env.DISABLE_GOOGLE_PLACES = 'false';
+    process.env.MAX_GOOGLE_PLACE_REVIEWS_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '2';
 
     const cacheModule = await import('../lib/parking/googlePlacesCache');
     jest.spyOn(cacheModule, 'resolveParkingGoogleReviews').mockResolvedValue({

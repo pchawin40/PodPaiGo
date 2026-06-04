@@ -1262,15 +1262,13 @@ export class MockProvider implements DataProvider {
     });
 
     const liveRouteLimit = initialLiveParkingRouteLimit();
-    const uniqueRouteKeys = new Set(parkingRouteEntries.map((entry) => entry.routeCacheKey));
-    const liveRouteKeys = new Set(
-      liveRouteLimit > 0
-        ? parkingRouteEntries.slice(0, liveRouteLimit).map((entry) => entry.routeCacheKey)
-        : parkingRouteEntries.map((entry) => entry.routeCacheKey)
-    );
+    const liveRouteKeys = new Set<string>();
 
-    if (liveRouteLimit <= 0 || liveRouteLimit >= uniqueRouteKeys.size) {
-      uniqueRouteKeys.forEach((routeCacheKey) => liveRouteKeys.add(routeCacheKey));
+    if (liveRouteLimit > 0) {
+      for (const entry of parkingRouteEntries) {
+        liveRouteKeys.add(entry.routeCacheKey);
+        if (liveRouteKeys.size >= liveRouteLimit) break;
+      }
     }
 
     let selectedCachedRoutes = 0;
@@ -1289,20 +1287,26 @@ export class MockProvider implements DataProvider {
     // if (process.env.NODE_ENV === 'development') {
     //   console.log('[Parking route enrichment]', {
     //     totalParkingOptions: parkingSource.length,
-    //     uniqueRouteDestinations: uniqueRouteKeys.size,
+    //     uniqueRouteDestinations: new Set(parkingRouteEntries.map((entry) => entry.routeCacheKey)).size,
     //     liveRouteLimit,
     //     routesActuallyFetched: Math.max(0, liveRouteKeys.size - selectedCachedRoutes - selectedInFlightRoutes),
     //     routesSkippedCached: selectedCachedRoutes + selectedInFlightRoutes,
-    //     routesDeferred: Math.max(0, uniqueRouteKeys.size - liveRouteKeys.size),
+    //     routesDeferred: Math.max(0, new Set(parkingRouteEntries.map((entry) => entry.routeCacheKey)).size - liveRouteKeys.size),
     //   });
     // }
 
     const parkingRouteEstimates = new Map<string, Promise<TrafficEstimate>>();
-    const getParkingRouteEstimate = (entry: typeof parkingRouteEntries[number]): Promise<TrafficEstimate> => {
-      const existing = parkingRouteEstimates.get(entry.routeCacheKey);
+    const getParkingRouteEstimate = (
+      entry: typeof parkingRouteEntries[number],
+      allowLiveRoute: boolean,
+    ): Promise<TrafficEstimate> => {
+      const parkingEstimateKey = `${entry.routeCacheKey}|${allowLiveRoute ? 'live' : 'estimated'}`;
+      const existing = parkingRouteEstimates.get(parkingEstimateKey);
 
       if (existing) {
-        logRoutesApiCache('Routes API in-flight hit', entry.routeCacheKey, 'parking-route');
+        if (allowLiveRoute) {
+          logRoutesApiCache('Routes API in-flight hit', entry.routeCacheKey, 'parking-route');
+        }
         return existing;
       }
 
@@ -1310,7 +1314,7 @@ export class MockProvider implements DataProvider {
         origin,
         entry.routeDestination,
         routeDepartureTime,
-        true,
+        allowLiveRoute,
         typeof entry.destinationLatLng?.lat === 'number' &&
           typeof entry.destinationLatLng?.lng === 'number'
           ? entry.destinationLatLng
@@ -1322,7 +1326,7 @@ export class MockProvider implements DataProvider {
           targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
         },
       );
-      parkingRouteEstimates.set(entry.routeCacheKey, promise);
+      parkingRouteEstimates.set(parkingEstimateKey, promise);
 
       return promise;
     };
@@ -1330,17 +1334,18 @@ export class MockProvider implements DataProvider {
     const enriched = await Promise.all(
       parkingRouteEntries.map(async (entry) => {
         const { option, routeDestination, lotDestination } = entry;
+        const shouldUseLiveRoute = liveRouteKeys.has(entry.routeCacheKey);
 
         logParkingRouteCoordinateAudit(
           parkingRouteAuditFromOption(
             option,
             entry,
             routeDepartureTime,
-            liveRouteKeys.has(entry.routeCacheKey),
+            shouldUseLiveRoute,
           ),
         );
 
-        const routeEstimate = await getParkingRouteEstimate(entry);
+        const routeEstimate = await getParkingRouteEstimate(entry, shouldUseLiveRoute);
 
         const meta = resolveParkingTransferMeta(option);
         const parkingBufferMinutes =
@@ -1476,6 +1481,7 @@ export class MockProvider implements DataProvider {
         const driveMinutes = routeFailed
           ? fallbackDriveMinutes
           : liveDriveMinutes!;
+        const routeWasLive = shouldUseLiveRoute && routeEstimate.trustStatus === 'live';
 
         const enrichedOption = applyParkingOriginDriveMinutes(
           {
@@ -1498,9 +1504,11 @@ export class MockProvider implements DataProvider {
                 : `Route from ${origin} to ${routeDestination}`,
               routeFailed
                 ? routeEstimate.routeUnavailableReason || 'Open map directions to confirm drive time.'
-                : routeEstimate.trustStatus === 'live'
+                : routeWasLive
                   ? `Based on live routing: ${driveMinutes} min drive`
-                  : `Estimated route time: ${driveMinutes} min drive`,
+                  : shouldUseLiveRoute
+                    ? `Estimated route time: ${driveMinutes} min drive`
+                    : `Live route calculation deferred for parking options outside the initially visible set; estimated ${driveMinutes} min drive.`,
             ],
           },
           driveMinutes,
@@ -1508,7 +1516,9 @@ export class MockProvider implements DataProvider {
             ? fallbackDriveMinutes > 0
               ? 'haversine-estimated'
               : 'google-routes'
-            : 'google-routes',
+            : routeWasLive
+              ? 'google-routes'
+              : 'haversine-estimated',
           routeTarget,
         );
 
@@ -1520,7 +1530,7 @@ export class MockProvider implements DataProvider {
             hasLotCoords: Boolean(getParkingRouteCoordinates(option).lat && getParkingRouteCoordinates(option).lng),
             routeDestination,
             routeFailed,
-            googleRoutesCalled: true,
+            googleRoutesCalled: shouldUseLiveRoute,
           });
         } else if (process.env.NODE_ENV === 'development') {
           logParkingCoordinateDiagnostic({

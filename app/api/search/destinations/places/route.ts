@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { dedupeDestinationPlacesRequest } from '@/lib/apiUsage/destinationSearchCache';
+import { runWithPlacesRequestBudget } from '@/lib/apiUsage/placesRequestBudget';
 import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 import {
   canMakeLiveSearchTextCall,
   isGooglePlacesLiveBlocked,
 } from '@/lib/parking/googlePlacesGuard';
 import type { DestinationSearchResult } from '@/lib/search/destinationSearchTypes';
+import { debugLog } from '@/lib/utils/debug';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,55 +68,76 @@ export async function GET(request: NextRequest) {
     return jsonResponse({ results: [], status: 'MISSING_API_KEY' });
   }
 
-  if (
-    !canMakeLiveSearchTextCall(
-      {
-        reason: 'destination_search',
-        route: '/api/search/destinations/places',
-        airportCode: null,
-        cacheKey: input,
-      },
-      { discovery: false },
-    )
-  ) {
-    return jsonResponse({ results: [], status: 'REQUEST_BUDGET_EXCEEDED' });
-  }
-
   try {
-    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': [
-          'places.id',
-          'places.displayName',
-          'places.formattedAddress',
-          'places.location',
-        ].join(','),
-      },
-      body: JSON.stringify({
-        textQuery: input,
-        regionCode: 'US',
-        languageCode: 'en',
-        maxResultCount: 5,
-      }),
-      cache: 'no-store',
+    const body = await dedupeDestinationPlacesRequest(input, async () => {
+      return runWithPlacesRequestBudget(
+        `destination-search:${input}`,
+        async () => {
+          if (
+            !canMakeLiveSearchTextCall(
+              {
+                reason: 'destination_search',
+                route: '/api/search/destinations/places',
+                airportCode: null,
+                cacheKey: input,
+              },
+              { discovery: false },
+            )
+          ) {
+            return { results: [], status: 'REQUEST_BUDGET_EXCEEDED' };
+          }
+
+          debugLog('destination_search_google_call', {
+            endpoint: 'places-search-text-new',
+            query: input,
+          });
+
+          const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': [
+                'places.id',
+                'places.displayName',
+                'places.formattedAddress',
+                'places.location',
+              ].join(','),
+            },
+            body: JSON.stringify({
+              textQuery: input,
+              regionCode: 'US',
+              languageCode: 'en',
+              maxResultCount: 5,
+            }),
+            cache: 'no-store',
+          });
+
+          if (!response.ok) {
+            return { results: [], status: 'GOOGLE_FAILED' };
+          }
+
+          const data = (await response.json()) as { places?: GooglePlace[] };
+          const results = (data.places || [])
+            .map(placeToResult)
+            .filter((result): result is DestinationSearchResult => Boolean(result));
+
+          debugLog('destination_search_places_summary', {
+            query: input,
+            googleCallCount: 1,
+            resultCount: results.length,
+          });
+
+          return {
+            results,
+            status: results.length > 0 ? 'OK' : 'ZERO_RESULTS',
+          };
+        },
+        { route: '/api/search/destinations/places' },
+      );
     });
 
-    if (!response.ok) {
-      return jsonResponse({ results: [], status: 'GOOGLE_FAILED' });
-    }
-
-    const data = (await response.json()) as { places?: GooglePlace[] };
-    const results = (data.places || [])
-      .map(placeToResult)
-      .filter((result): result is DestinationSearchResult => Boolean(result));
-
-    return jsonResponse({
-      results,
-      status: results.length > 0 ? 'OK' : 'ZERO_RESULTS',
-    });
+    return jsonResponse(body);
   } catch {
     return jsonResponse({ results: [], status: 'ROUTE_FAILED' });
   }

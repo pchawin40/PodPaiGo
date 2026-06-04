@@ -161,7 +161,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
           setLoadingPredictions(false);
           setPredictionError('Unable to load suggestions. Try again in a moment.');
         });
-    }, 250);
+    }, 300);
 
     return () => {
       clearTimeout(timeoutId);

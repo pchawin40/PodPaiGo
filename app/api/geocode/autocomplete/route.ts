@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { dedupeDestinationAutocompleteRequest } from '@/lib/apiUsage/destinationSearchCache';
+import { runWithPlacesRequestBudget } from '@/lib/apiUsage/placesRequestBudget';
 import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
+import {
+  canMakeLiveSearchTextCall,
+  isGooglePlacesLiveBlocked,
+} from '@/lib/parking/googlePlacesGuard';
+import { debugLog } from '@/lib/utils/debug';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +144,11 @@ async function fetchGoogleJson<T>(url: URL): Promise<{
 }
 
 async function fetchAutocomplete(input: string, apiKey: string): Promise<GooglePredictionResult> {
+  debugLog('destination_search_google_call', {
+    endpoint: 'places-autocomplete',
+    query: input,
+  });
+
   const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
   url.searchParams.set('input', input);
   url.searchParams.set('key', apiKey);
@@ -158,6 +170,11 @@ async function fetchAutocomplete(input: string, apiKey: string): Promise<GoogleP
 }
 
 async function fetchTextSearch(input: string, apiKey: string): Promise<GooglePredictionResult> {
+  debugLog('destination_search_google_call', {
+    endpoint: 'places-text-search-legacy',
+    query: input,
+  });
+
   const url = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
   url.searchParams.set('query', input);
   url.searchParams.set('key', apiKey);
@@ -196,6 +213,10 @@ export async function GET(request: NextRequest) {
     return jsonResponse({ predictions: [], status: 'INPUT_TOO_SHORT' });
   }
 
+  if (isGooglePlacesLiveBlocked()) {
+    return jsonResponse({ predictions: [], status: 'GOOGLE_PLACES_DISABLED' });
+  }
+
   if (!apiKey) {
     console.warn('Google address autocomplete: missing GOOGLE_MAPS_SERVER_API_KEY');
     return jsonResponse({
@@ -206,47 +227,107 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const autocomplete = await fetchAutocomplete(input, apiKey);
+    const body = await dedupeDestinationAutocompleteRequest(input, async () => {
+      return runWithPlacesRequestBudget(
+        `destination-autocomplete:${input}`,
+        async () => {
+          let googleCallCount = 0;
 
-    if (autocomplete.predictions.length > 0) {
-      return jsonResponse({
-        predictions: autocomplete.predictions,
-        status: autocomplete.status,
-        source: 'places-autocomplete',
-      });
-    }
+          if (
+            !canMakeLiveSearchTextCall(
+              {
+                reason: 'destination_autocomplete',
+                route: '/api/geocode/autocomplete',
+                airportCode: null,
+                cacheKey: input,
+              },
+              { discovery: false },
+            )
+          ) {
+            return { predictions: [], status: 'REQUEST_BUDGET_EXCEEDED' };
+          }
 
-    const textSearch = await fetchTextSearch(input, apiKey);
+          const autocomplete = await fetchAutocomplete(input, apiKey);
+          googleCallCount += 1;
 
-    if (textSearch.predictions.length > 0) {
-      return jsonResponse({
-        predictions: textSearch.predictions,
-        status: textSearch.status,
-        source: 'places-text-search',
-      });
-    }
+          if (autocomplete.predictions.length > 0) {
+            debugLog('destination_search_autocomplete_summary', {
+              query: input,
+              googleCallCount,
+              source: 'places-autocomplete',
+            });
 
-    if (autocomplete.failed || textSearch.failed) {
-      console.warn('Google address autocomplete failed', {
-        input,
-        autocomplete: devDetails(autocomplete) || autocomplete.status,
-        textSearch: devDetails(textSearch) || textSearch.status,
-      });
+            return {
+              predictions: autocomplete.predictions,
+              status: autocomplete.status,
+              source: 'places-autocomplete',
+            };
+          }
 
-      return jsonResponse({
-        predictions: [],
-        status: textSearch.status || autocomplete.status || 'GOOGLE_FAILED',
-        error: 'Google address autocomplete failed',
-        autocomplete: devDetails(autocomplete),
-        textSearch: devDetails(textSearch),
-      });
-    }
+          if (
+            !canMakeLiveSearchTextCall(
+              {
+                reason: 'destination_text_search_fallback',
+                route: '/api/geocode/autocomplete',
+                airportCode: null,
+                cacheKey: input,
+              },
+              { discovery: false },
+            )
+          ) {
+            return { predictions: [], status: 'REQUEST_BUDGET_EXCEEDED' };
+          }
 
-    return jsonResponse({
-      predictions: [],
-      status: textSearch.status || autocomplete.status || 'ZERO_RESULTS',
-      source: 'none',
+          const textSearch = await fetchTextSearch(input, apiKey);
+          googleCallCount += 1;
+
+          if (textSearch.predictions.length > 0) {
+            debugLog('destination_search_autocomplete_summary', {
+              query: input,
+              googleCallCount,
+              source: 'places-text-search',
+            });
+
+            return {
+              predictions: textSearch.predictions,
+              status: textSearch.status,
+              source: 'places-text-search',
+            };
+          }
+
+          if (autocomplete.failed || textSearch.failed) {
+            console.warn('Google address autocomplete failed', {
+              input,
+              autocomplete: devDetails(autocomplete) || autocomplete.status,
+              textSearch: devDetails(textSearch) || textSearch.status,
+            });
+
+            return {
+              predictions: [],
+              status: textSearch.status || autocomplete.status || 'GOOGLE_FAILED',
+              error: 'Google address autocomplete failed',
+              autocomplete: devDetails(autocomplete),
+              textSearch: devDetails(textSearch),
+            };
+          }
+
+          debugLog('destination_search_autocomplete_summary', {
+            query: input,
+            googleCallCount,
+            source: 'none',
+          });
+
+          return {
+            predictions: [],
+            status: textSearch.status || autocomplete.status || 'ZERO_RESULTS',
+            source: 'none',
+          };
+        },
+        { route: '/api/geocode/autocomplete' },
+      );
     });
+
+    return jsonResponse(body);
   } catch (error) {
     console.warn('Google address autocomplete route failed', error);
 

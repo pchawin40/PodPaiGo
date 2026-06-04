@@ -12,6 +12,7 @@ import { getParkWhizDestinationParkingOptions } from '../../../parkWhiz';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
 import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
+import { debugLog } from '../../../../utils/debug';
 
 type GooglePlace = {
   id?: string;
@@ -32,6 +33,113 @@ type GooglePlace = {
   }>;
 };
 
+type DestinationSearchMetrics = {
+  cacheHits: number;
+  cacheMisses: number;
+  inFlightHits: number;
+  searchTextCallsAttempted: number;
+};
+
+const destinationSearchQueryCache = new Map<string, { ts: number; places: GooglePlace[] }>();
+const destinationSearchInFlight = new Map<string, Promise<GooglePlace[]>>();
+
+function destinationSearchQueryTtlMs(): number {
+  const hours = Number(process.env.PLACES_SEARCH_QUERY_CACHE_TTL_HOURS || 24);
+  return (Number.isFinite(hours) && hours > 0 ? hours : 24) * 60 * 60 * 1000;
+}
+
+function minDestinationParkingResultsToStop(): number {
+  const configured = Number(process.env.DESTINATION_PARKING_MIN_RESULTS_BEFORE_STOP || 5);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 5;
+}
+
+function roundCoord(value: number, decimals = 3): number {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeTextQuery(textQuery: string): string {
+  return textQuery.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildDestinationSearchQueryPlan(destination: string): string[] {
+  return [
+    `parking near ${destination}`,
+    `parking garage near ${destination}`,
+    `public parking near ${destination}`,
+  ];
+}
+
+export function buildDestinationParkingSearchCacheKey(args: {
+  destinationLat?: number;
+  destinationLng?: number;
+  radiusMeters: number;
+  textQuery: string;
+}): string {
+  const lat = typeof args.destinationLat === 'number' ? roundCoord(args.destinationLat) : 'none';
+  const lng = typeof args.destinationLng === 'number' ? roundCoord(args.destinationLng) : 'none';
+  return `${lat},${lng}|${args.radiusMeters}|${normalizeTextQuery(args.textQuery)}`;
+}
+
+export function resetDestinationParkingSearchCacheForTests(): void {
+  destinationSearchQueryCache.clear();
+  destinationSearchInFlight.clear();
+}
+
+function dedupeGooglePlaces(places: GooglePlace[]): GooglePlace[] {
+  const seen = new Set<string>();
+  const unique: GooglePlace[] = [];
+
+  for (const place of places) {
+    const key = (place.id || place.displayName?.text || place.formattedAddress || '').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(place);
+  }
+
+  return unique;
+}
+
+function isValidDestinationParkingPlace(place: GooglePlace): boolean {
+  const name = String(place.displayName?.text || '').toLowerCase();
+  const address = String(place.formattedAddress || '').toLowerCase();
+
+  const looksLikeParking =
+    name.includes('parking') ||
+    name.includes('garage') ||
+    name.includes('lot') ||
+    address.includes('parking');
+
+  if (!looksLikeParking) return false;
+  if (place.businessStatus === 'CLOSED_PERMANENTLY') return false;
+
+  return true;
+}
+
+function hasEnoughDestinationParkingCandidates(places: GooglePlace[]): boolean {
+  return places.filter(isValidDestinationParkingPlace).length >= minDestinationParkingResultsToStop();
+}
+
+function destinationLocationBias(args: {
+  destinationLat?: number;
+  destinationLng?: number;
+  searchRadiusMeters: number;
+}): Record<string, unknown> | undefined {
+  if (typeof args.destinationLat !== 'number' || typeof args.destinationLng !== 'number') {
+    return undefined;
+  }
+
+  return {
+    circle: {
+      center: {
+        latitude: args.destinationLat,
+        longitude: args.destinationLng,
+      },
+      radius: args.searchRadiusMeters,
+    },
+  };
+}
+
 function scoreGoogleParkingOption(p: ParkingOption): number {
   const reviewScore = p.reviewScore ?? 0;
   const reviewCount = p.reviewCount ?? 0;
@@ -46,6 +154,107 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
     transferMinutes -
     estimatedPrice * 0.25
   );
+}
+
+async function fetchPlacesForDestinationQuery(args: {
+  textQuery: string;
+  searchRadiusMeters: number;
+  destinationLat?: number;
+  destinationLng?: number;
+  apiKey: string;
+  metrics: DestinationSearchMetrics;
+}): Promise<GooglePlace[]> {
+  if (isGoogleParkingDiscoveryLiveBlocked()) return [];
+
+  const cacheKey = buildDestinationParkingSearchCacheKey({
+    destinationLat: args.destinationLat,
+    destinationLng: args.destinationLng,
+    radiusMeters: args.searchRadiusMeters,
+    textQuery: args.textQuery,
+  });
+
+  const cached = destinationSearchQueryCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < destinationSearchQueryTtlMs()) {
+    args.metrics.cacheHits += 1;
+    debugLog('destination_parking_search_cache_hit', { cacheKey, textQuery: args.textQuery });
+    return cached.places;
+  }
+
+  const inFlight = destinationSearchInFlight.get(cacheKey);
+  if (inFlight) {
+    args.metrics.inFlightHits += 1;
+    debugLog('destination_parking_search_inflight_hit', { cacheKey, textQuery: args.textQuery });
+    return inFlight;
+  }
+
+  args.metrics.cacheMisses += 1;
+
+  const promise = (async () => {
+    if (
+      !canMakeLiveSearchTextCall(
+        {
+          reason: 'destination_parking_discovery',
+          route: 'getDestinationParkingOptions',
+          airportCode: null,
+          cacheKey,
+        },
+        { discovery: true },
+      )
+    ) {
+      return [];
+    }
+
+    args.metrics.searchTextCallsAttempted += 1;
+    debugLog('destination_parking_search_google_call', {
+      textQuery: args.textQuery,
+      cacheKey,
+    });
+
+    const body: Record<string, unknown> = {
+      textQuery: args.textQuery,
+    };
+    const locationBias = destinationLocationBias({
+      destinationLat: args.destinationLat,
+      destinationLng: args.destinationLng,
+      searchRadiusMeters: args.searchRadiusMeters,
+    });
+    if (locationBias) body.locationBias = locationBias;
+
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': args.apiKey,
+        'X-Goog-FieldMask': [
+          'places.id',
+          'places.displayName',
+          'places.formattedAddress',
+          'places.googleMapsUri',
+          'places.rating',
+          'places.userRatingCount',
+          'places.businessStatus',
+          'places.location',
+          'places.photos',
+        ].join(','),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) return [];
+
+    const data = (await res.json()) as { places?: GooglePlace[] };
+    const places = Array.isArray(data.places) ? data.places : [];
+    destinationSearchQueryCache.set(cacheKey, { ts: Date.now(), places });
+    return places;
+  })();
+
+  destinationSearchInFlight.set(cacheKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    destinationSearchInFlight.delete(cacheKey);
+  }
 }
 
 export async function getDestinationParkingOptions(args: {
@@ -72,73 +281,33 @@ export async function getDestinationParkingOptions(args: {
     process.env.DESTINATION_PARKING_MAX_RESULTS || 20,
   );
 
-  const searchQueries = [
-    `parking near ${args.destination}`,
-    `parking garage near ${args.destination}`,
-    `public parking near ${args.destination}`,
-  ];
+  const searchQueryPlan = buildDestinationSearchQueryPlan(args.destination);
+  const metrics: DestinationSearchMetrics = {
+    cacheHits: 0,
+    cacheMisses: 0,
+    inFlightHits: 0,
+    searchTextCallsAttempted: 0,
+  };
+  const executedQueries: string[] = [];
+  let places: GooglePlace[] = [];
 
-  async function fetchPlacesForQuery(textQuery: string): Promise<GooglePlace[]> {
-    if (isGoogleParkingDiscoveryLiveBlocked()) {
-      return [];
-    }
-
-    if (
-      !canMakeLiveSearchTextCall(
-        {
-          reason: 'destination_parking_discovery',
-          route: 'getDestinationParkingOptions',
-          airportCode: null,
-          cacheKey: textQuery,
-        },
-        { discovery: true },
-      )
-    ) {
-      return [];
-    }
-
-    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key!,
-        'X-Goog-FieldMask': [
-          'places.id',
-          'places.displayName',
-          'places.formattedAddress',
-          'places.googleMapsUri',
-          'places.rating',
-          'places.userRatingCount',
-          'places.businessStatus',
-          'places.location',
-          'places.photos',
-        ].join(','),
-      },
-      body: JSON.stringify({
-        textQuery,
-        locationBias: {
-          circle: {
-            center: {
-              latitude: 47.6062,
-              longitude: -122.3321,
-            },
-            radius: searchRadiusMeters,
-          },
-        },
-      }),
+  for (const textQuery of searchQueryPlan) {
+    executedQueries.push(textQuery);
+    const queryPlaces = await fetchPlacesForDestinationQuery({
+      textQuery,
+      searchRadiusMeters,
+      destinationLat: args.destinationLat,
+      destinationLng: args.destinationLng,
+      apiKey: key,
+      metrics,
     });
 
-    if (!res.ok) return [];
+    places = dedupeGooglePlaces([...places, ...queryPlaces]);
 
-    const data = await res.json();
-    return Array.isArray(data.places) ? data.places : [];
+    if (hasEnoughDestinationParkingCandidates(places)) {
+      break;
+    }
   }
-
-  const placesByQuery = await Promise.all(
-    searchQueries.map((query) => fetchPlacesForQuery(query)),
-  );
-
-  const places = placesByQuery.flat();
 
   const durationMinutes = Math.max(60, args.parkingDurationMinutes ?? 4 * 60);
 
@@ -160,21 +329,7 @@ export async function getDestinationParkingOptions(args: {
   const matchedLiveParkWhizIds = new Set<string>();
 
   const mapped = places
-    .filter((place: GooglePlace) => {
-      const name = String(place.displayName?.text || '').toLowerCase();
-      const address = String(place.formattedAddress || '').toLowerCase();
-
-      const looksLikeParking =
-        name.includes('parking') ||
-        name.includes('garage') ||
-        name.includes('lot') ||
-        address.includes('parking');
-
-      if (!looksLikeParking) return false;
-      if (place.businessStatus === 'CLOSED_PERMANENTLY') return false;
-
-      return true;
-    })
+    .filter(isValidDestinationParkingPlace)
     .slice(0, maxResults)
     .map((place: GooglePlace): ParkingOption => {
       const name = place.displayName?.text || 'Parking near destination';
@@ -246,7 +401,7 @@ export async function getDestinationParkingOptions(args: {
         covered: isGarage,
         reviewScore: rating,
         reviewCount,
-        searchQuery: searchQueries.join(' | '),
+        searchQuery: executedQueries.join(' | '),
         lastUpdated: new Date().toISOString(),
         assumptions: [
           'Discovered from Google Places near your destination.',
@@ -274,6 +429,16 @@ export async function getDestinationParkingOptions(args: {
 
       return withAvailabilityScore(option);
     });
+
+  debugLog('destination_parking_search_summary', {
+    destination: args.destination,
+    searchTextCallsAttempted: metrics.searchTextCallsAttempted,
+    cacheHits: metrics.cacheHits,
+    cacheMisses: metrics.cacheMisses,
+    inFlightHits: metrics.inFlightHits,
+    fallbackQueryCount: Math.max(0, executedQueries.length - 1),
+    finalGoogleResultCount: mapped.length,
+  });
 
   const unmatchedLiveParkWhiz = liveParkWhizOptions
     .filter((live) => !matchedLiveParkWhizIds.has(live.id))

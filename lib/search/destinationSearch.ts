@@ -1,6 +1,7 @@
 import { airportLookupService } from '../airports/lookupService';
 import { detectAirportFromDestination } from '../trip/quickGo';
 import type { SavedDestination } from '../trip/savedDestinations';
+import { debugLog } from '../utils/debug';
 import type {
   DestinationSearchCategory,
   DestinationSearchDeps,
@@ -235,24 +236,42 @@ export async function searchDestinations(
   }
 
   let remoteResults: DestinationSearchResult[] = [];
+  let geocoderPredictions: GeocoderPrediction[] = [];
+  let googlePlacesCalled = false;
+  let remoteRequestCount = 0;
 
   try {
-    const geocoderPredictions = await fetchGeocoder(query, options.signal);
+    geocoderPredictions = await fetchGeocoder(query, options.signal);
+    remoteRequestCount += 1;
     remoteResults = geocoderPredictions.map(geocoderPredictionToResult);
   } catch {
+    geocoderPredictions = [];
     remoteResults = [];
   }
 
   let merged = dedupeResults([...localResults, ...remoteResults]);
 
-  if (merged.length < limit) {
+  const shouldFetchGooglePlaces = geocoderPredictions.length === 0 && merged.length < limit;
+
+  if (shouldFetchGooglePlaces) {
     try {
+      googlePlacesCalled = true;
+      remoteRequestCount += 1;
       const googleResults = await fetchGooglePlaces(query, options.signal);
       merged = dedupeResults([...merged, ...googleResults]);
     } catch {
       // Ignore Google Places failures; geocoder and local providers may still be enough.
     }
   }
+
+  debugLog('destination_search_summary', {
+    query,
+    localCount: localResults.length,
+    geocoderCount: geocoderPredictions.length,
+    mergedCount: merged.length,
+    googlePlacesCalled,
+    remoteRequestCount,
+  });
 
   return merged.slice(0, limit);
 }
