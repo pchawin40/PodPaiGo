@@ -28,6 +28,96 @@ jest.mock('@/lib/analytics/trackEvent', () => ({
 
 const searchDestinationsMock = searchDestinations as jest.MockedFunction<typeof searchDestinations>;
 
+const originalGeolocationDescriptor = Object.getOwnPropertyDescriptor(
+  window.navigator,
+  'geolocation',
+);
+const originalPermissionsDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'permissions');
+const originalFetchDescriptor = Object.getOwnPropertyDescriptor(global, 'fetch');
+
+function mockBrowserGeolocation(permissionState: PermissionState = 'prompt') {
+  const getCurrentPosition = jest.fn(
+    (success: PositionCallback) => {
+      success({
+        coords: {
+          latitude: 47.855,
+          longitude: -121.97,
+          accuracy: 25,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        },
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    },
+  );
+  const query = jest.fn(async () => ({
+    state: permissionState,
+    name: 'geolocation' as PermissionName,
+    onchange: null,
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  } as PermissionStatus));
+
+  Object.defineProperty(window.navigator, 'geolocation', {
+    configurable: true,
+    value: { getCurrentPosition },
+  });
+  Object.defineProperty(window.navigator, 'permissions', {
+    configurable: true,
+    value: { query },
+  });
+
+  return { getCurrentPosition, query };
+}
+
+function restoreBrowserGeolocation() {
+  if (originalGeolocationDescriptor) {
+    Object.defineProperty(window.navigator, 'geolocation', originalGeolocationDescriptor);
+  } else {
+    Object.defineProperty(window.navigator, 'geolocation', {
+      configurable: true,
+      value: undefined,
+    });
+  }
+
+  if (originalPermissionsDescriptor) {
+    Object.defineProperty(window.navigator, 'permissions', originalPermissionsDescriptor);
+  } else {
+    Object.defineProperty(window.navigator, 'permissions', {
+      configurable: true,
+      value: undefined,
+    });
+  }
+}
+
+function restoreFetch() {
+  if (originalFetchDescriptor) {
+    Object.defineProperty(global, 'fetch', originalFetchDescriptor);
+  } else {
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+  }
+}
+
+function mockReverseGeocodeFetch() {
+  const fetchMock = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({ formattedAddress: 'Current location near Monroe, WA' }),
+  } as Response));
+  Object.defineProperty(global, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: fetchMock,
+  });
+  return fetchMock;
+}
+
 function ensureOriginEditorOpen() {
   const changeButton = screen.queryByRole('button', { name: 'Change' });
   if (changeButton) {
@@ -49,6 +139,8 @@ describe('QuickGoPanel', () => {
   beforeEach(() => {
     pushMock.mockReset();
     searchDestinationsMock.mockReset();
+    restoreBrowserGeolocation();
+    restoreFetch();
     window.localStorage.clear();
     window.localStorage.setItem(
       'podpaigo-recent-origins',
@@ -56,7 +148,24 @@ describe('QuickGoPanel', () => {
     );
   });
 
-  test('blocks quick-go search until a starting point is provided', async () => {
+  afterEach(() => {
+    restoreBrowserGeolocation();
+    restoreFetch();
+  });
+
+  test('defaults starting point to current location when browser geolocation exists', async () => {
+    const geo = mockBrowserGeolocation('prompt');
+
+    render(<QuickGoPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Current location')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Change' })).toBeInTheDocument();
+    expect(geo.getCurrentPosition).not.toHaveBeenCalled();
+  });
+
+  test('blocks quick-go search until a starting point is provided when geolocation is unavailable', async () => {
     searchDestinationsMock.mockResolvedValue([]);
 
     render(<QuickGoPanel />);
@@ -64,9 +173,72 @@ describe('QuickGoPanel', () => {
     await typeDestination('Grocery store');
     fireEvent.click(screen.getByRole('button', { name: 'Quick Go' }));
 
-    expect(pushMock).not.toHaveBeenCalled();
-    expect(screen.getByText('Add a starting point to compare routes.')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Type an address or place')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(screen.getByText('Add a starting point to compare routes.')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Type an address or place')).toBeInTheDocument();
+    });
+  });
+
+  test('resolves current location on submit and stores geolocation origin', async () => {
+    const geo = mockBrowserGeolocation('prompt');
+    mockReverseGeocodeFetch();
+    searchDestinationsMock.mockResolvedValue([
+      {
+        id: 'google:grocery',
+        label: 'Neighborhood Grocery Store',
+        address: '100 Market Street, Example City, ST',
+        category: 'retail',
+        source: 'google',
+        confidence: 'medium',
+      },
+    ]);
+
+    render(<QuickGoPanel />);
+
+    await typeDestination('Grocery store');
+    fireEvent.click(screen.getByRole('option', { name: /Neighborhood Grocery Store/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Go' }));
+
+    await waitFor(() => {
+      expect(geo.getCurrentPosition).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
+
+    const storedKey = Object.keys(window.localStorage).find((key) =>
+      key.startsWith('podpaigo-trip-'),
+    );
+    const payload = JSON.parse(window.localStorage.getItem(storedKey!) || '{}') as {
+      tripData?: Record<string, string>;
+    };
+    expect(payload.tripData?.originSource).toBe('geolocation');
+    expect(payload.tripData?.originLabel).toBe('Current location');
+    expect(payload.tripData?.originLat).toBe('47.855');
+    expect(payload.tripData?.originLng).toBe('-121.97');
+  });
+
+  test('passes resolved current-location coordinates into generic destination search', async () => {
+    const geo = mockBrowserGeolocation('granted');
+    mockReverseGeocodeFetch();
+    searchDestinationsMock.mockResolvedValue([]);
+
+    render(<QuickGoPanel />);
+
+    await waitFor(() => {
+      expect(geo.getCurrentPosition).toHaveBeenCalledTimes(1);
+    });
+
+    await typeDestination('grocery store');
+
+    expect(searchDestinationsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: 'grocery store',
+        originLat: 47.855,
+        originLng: -121.97,
+        originSource: 'geolocation',
+      }),
+      {},
+    );
   });
 
   test('accepts typed origin and starts quick-go search with selected destination', async () => {
@@ -91,7 +263,9 @@ describe('QuickGoPanel', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Quick Go' }));
 
-    expect(pushMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
     const path = String(pushMock.mock.calls[0]?.[0]);
     expect(path).toMatch(/^\/results\//);
 
@@ -144,7 +318,9 @@ describe('QuickGoPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Use saved:/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Quick Go' }));
 
-    expect(pushMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
     const storedKey = Object.keys(window.localStorage).find((key) =>
       key.startsWith('podpaigo-trip-'),
     );

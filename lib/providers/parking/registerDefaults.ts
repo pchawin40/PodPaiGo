@@ -5,6 +5,7 @@ import { googlePlacesParkingProvider } from './providers/googlePlaces/provider';
 import { aprParkingProvider } from './providers/apr/provider';
 import { snapshotParkingProvider } from './providers/snapshot/provider';
 import { marketplaceParkingProvider } from './providers/marketplace/provider';
+import { communityFreeParkingProvider } from './providers/communityFree/provider';
 
 let defaultsRegistered = false;
 
@@ -17,6 +18,7 @@ export function registerDefaultParkingProviders(): void {
   parkingProviderRegistry.register(aprParkingProvider);
   parkingProviderRegistry.register(snapshotParkingProvider);
   parkingProviderRegistry.register(marketplaceParkingProvider);
+  parkingProviderRegistry.register(communityFreeParkingProvider);
 
   defaultsRegistered = true;
 }
@@ -29,4 +31,5 @@ export function resetDefaultParkingProvidersForTests(): void {
   parkingProviderRegistry.unregister('apr');
   parkingProviderRegistry.unregister('snapshot');
   parkingProviderRegistry.unregister('marketplace');
+  parkingProviderRegistry.unregister('community-free');
 }

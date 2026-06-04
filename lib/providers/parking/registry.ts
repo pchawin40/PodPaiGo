@@ -1,5 +1,10 @@
 import type { ParkingProviderSearchResult, ParkingSearchContext } from './types';
 import type { ParkingProvider } from './types';
+import { debugLog } from '../../utils/debug';
+
+function sanitizeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export class ProviderRegistry {
   private providers = new Map<string, ParkingProvider>();
@@ -30,6 +35,13 @@ export class ProviderRegistry {
         try {
           const health = await provider.health();
           if (health.status === 'offline') {
+            debugLog('parking_provider_failed', {
+              providerId: provider.id,
+              destinationKind: context.destinationKind,
+              airportCode: context.airportCode,
+              resultCount: 0,
+              error: health.message || 'provider_offline',
+            });
             return {
               providerId: provider.id,
               options: [],
@@ -38,14 +50,28 @@ export class ProviderRegistry {
           }
 
           const options = await provider.search(context);
+          debugLog('parking_provider_success', {
+            providerId: provider.id,
+            destinationKind: context.destinationKind,
+            airportCode: context.airportCode,
+            resultCount: options.length,
+            healthStatus: health.status,
+          });
           return {
             providerId: provider.id,
             options,
             health,
           };
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = sanitizeError(error);
           console.warn(`[parking-registry] Provider ${provider.id} search failed:`, message);
+          debugLog('parking_provider_failed', {
+            providerId: provider.id,
+            destinationKind: context.destinationKind,
+            airportCode: context.airportCode,
+            resultCount: 0,
+            error: message,
+          });
 
           return {
             providerId: provider.id,

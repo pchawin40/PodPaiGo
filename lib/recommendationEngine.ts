@@ -309,9 +309,53 @@ export class RecommendationEngine {
       transportAvailability === 'rideshare' || transportAvailability === 'all';
     const allowTransit =
       transportAvailability === 'transit' || transportAvailability === 'all';
+    const parkingRequest = shouldLoadParking
+      ? this.provider.getParkingOptions(
+        tripData.origin,
+        tripData.destination,
+        tripDateTime,
+        calculateParkingDuration(tripData),
+        {
+          destinationKind: tripData.destinationKind ?? 'airport',
+          airportCode: isAirportTrip
+            ? ((tripData as TripDataWithTransport).airportCode || undefined)
+            : undefined,
+          destinationLat: tripData.destinationLat,
+          destinationLng: tripData.destinationLng,
+          routeDepartureTime: parkingRouteDepartureIso,
+          targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+        }
+      )
+        .then((options) => ({
+          options,
+          failed: false,
+          message: null as string | null,
+        }))
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn('Parking fetch failed; continuing with non-parking recommendations', {
+            tripType: tripData.type,
+            destinationKind: tripData.destinationKind ?? 'airport',
+            airportCode: isAirportTrip
+              ? ((tripData as TripDataWithTransport).airportCode || undefined)
+              : undefined,
+            message,
+          });
+
+          return {
+            options: [] as ParkingOption[],
+            failed: true,
+            message: 'Parking data unavailable right now. Try again or open directions.',
+          };
+        })
+      : Promise.resolve({
+        options: [] as ParkingOption[],
+        failed: false,
+        message: null as string | null,
+      });
 
     const [
-      rawParking,
+      parkingResult,
       rawRideshare,
       rawTransit,
       tsaEstimate,
@@ -319,24 +363,7 @@ export class RecommendationEngine {
       flightInfo,
       locationInfo,
     ] = await Promise.all([
-      shouldLoadParking
-        ? this.provider.getParkingOptions(
-          tripData.origin,
-          tripData.destination,
-          tripDateTime,
-          calculateParkingDuration(tripData),
-          {
-            destinationKind: tripData.destinationKind ?? 'airport',
-            airportCode: isAirportTrip
-              ? ((tripData as TripDataWithTransport).airportCode || undefined)
-              : undefined,
-            destinationLat: tripData.destinationLat,
-            destinationLng: tripData.destinationLng,
-            routeDepartureTime: parkingRouteDepartureIso,
-            targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
-          }
-        )
-        : Promise.resolve([]),
+      parkingRequest,
 
       allowRideshare
         ? this.provider.getRideshareOptions(
@@ -400,7 +427,7 @@ export class RecommendationEngine {
 
     const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);
 
-    let parking = rawParking;
+    let parking = parkingResult.options;
     let rideshare = rawRideshare;
     let transit = rawTransit;
 
@@ -711,6 +738,22 @@ export class RecommendationEngine {
       allAccessOptions.length > 0
         ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
+    const parkingDataStatus =
+      !shouldLoadParking
+        ? 'not_requested'
+        : parkingResult.failed
+          ? 'unavailable'
+          : finalParking.length > 0
+            ? 'available'
+            : 'empty';
+    const parkingDataMessage =
+      parkingResult.failed
+        ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
+        : shouldLoadParking && finalParking.length === 0
+          ? isAirportTrip
+            ? 'No parking found near this airport yet.'
+            : 'No parking found near this destination yet.'
+          : undefined;
 
     return {
       parking: finalParking,
@@ -733,6 +776,8 @@ export class RecommendationEngine {
       trafficEstimate,
       flightInfo: flightInfo ?? undefined,
       locationInfo: locationInfo ?? undefined,
+      parkingDataStatus,
+      parkingDataMessage,
     };
   }
 

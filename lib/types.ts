@@ -573,4 +573,6 @@ export type Recommendation = {
   flightInfo?: FlightInfo;
   locationInfo?: LocationInfo;
   parkingDiscoveryNotice?: string;
+  parkingDataStatus?: 'not_requested' | 'available' | 'empty' | 'unavailable';
+  parkingDataMessage?: string;
 };

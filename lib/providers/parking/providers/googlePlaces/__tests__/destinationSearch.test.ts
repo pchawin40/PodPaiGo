@@ -3,6 +3,8 @@ import {
   resetDestinationParkingSearchCacheForTests,
 } from '../destinationSearch';
 import { resetPlacesRequestBudgetForTests } from '../../../../../apiUsage/placesRequestBudget';
+import { getGoogleMapsServerApiKey } from '../../../../../env/googleMapsServerKey';
+import { getParkWhizDestinationParkingOptions } from '../../../../parkWhiz';
 
 jest.mock('../../../../../env/googleMapsServerKey', () => ({
   getGoogleMapsServerApiKey: jest.fn(() => 'test-key'),
@@ -140,6 +142,43 @@ describe('Google destination parking discovery', () => {
       'parking near Pike Place Market',
       'parking garage near Pike Place Market',
     ]);
+
+    fetchMock.mockRestore();
+  });
+
+  test('still returns ParkWhiz destination parking when Google key is unavailable', async () => {
+    applyLiveGoogleParkingEnv();
+    (getGoogleMapsServerApiKey as jest.Mock).mockReturnValueOnce(null);
+    (getParkWhizDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 'parkwhiz-city-1',
+        name: 'ParkWhiz City Garage',
+        type: 'official',
+        price: 18,
+        distance: 10,
+        availability: 80,
+        trustStatus: 'live',
+        sourceName: 'ParkWhiz',
+        lastUpdated: '2026-06-01T00:00:00.000Z',
+        assumptions: [],
+      },
+    ]);
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const options = await getDestinationParkingOptions({
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      dateTime: '2026-06-01T10:00:00.000Z',
+      parkingDurationMinutes: 180,
+      destinationLat: 47.615,
+      destinationLng: -122.203,
+      checkInDate: '2026-06-01',
+      checkOutDate: '2026-06-01',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getParkWhizDestinationParkingOptions).toHaveBeenCalledTimes(1);
+    expect(options.map((option) => option.name)).toContain('ParkWhiz City Garage');
 
     fetchMock.mockRestore();
   });

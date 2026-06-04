@@ -19,7 +19,12 @@ export default function AuthForm() {
     return redirect && redirect.startsWith('/') ? redirect : '/account';
   }, [searchParams]);
 
-  const [mode, setMode] = useState<AuthMode>('sign-in');
+  const initialMode = useMemo<AuthMode>(() => {
+    const requested = searchParams.get('mode');
+    return requested === 'register' || requested === 'sign-up' ? 'sign-up' : 'sign-in';
+  }, [searchParams]);
+
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');

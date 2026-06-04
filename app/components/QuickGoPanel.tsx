@@ -52,6 +52,18 @@ function buildSavedOriginSelection(originText: string): QuickGoOriginSelection {
   };
 }
 
+function canUseGeolocationNow(): boolean {
+  return typeof navigator !== 'undefined' && !!navigator.geolocation;
+}
+
+function buildPendingGeolocationOriginSelection(): QuickGoOriginSelection {
+  return {
+    origin: 'Current location',
+    originLabel: 'Current location',
+    originSource: 'geolocation',
+  };
+}
+
 function compactOriginLabel(
   originInputText: string,
   originSelection: QuickGoOriginSelection | null,
@@ -99,18 +111,26 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [pendingAirportCode, setPendingAirportCode] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
+  const [geolocationSupported, setGeolocationSupported] = useState(false);
   const destinationInputRef = useRef<HTMLInputElement>(null);
 
   const recentOrigins = useMemo(() => getRecentOrigins(), []);
   const savedDestinations = useMemo(() => readSavedDestinations(), []);
   const recentDestinations = useMemo(() => getRecentDestinations(), []);
-  const canUseGeo = typeof navigator !== 'undefined' && !!navigator.geolocation;
+  const canUseGeo = geolocationSupported;
   const originSummary = compactOriginLabel(originInputText, originSelection);
 
   const detectedAirportCode = useMemo(
     () => resolveAirportCode(destinationSelection, destinationText),
     [destinationSelection, destinationText],
   );
+
+  useEffect(() => {
+    if (!canUseGeolocationNow()) return;
+
+    setGeolocationSupported(true);
+    setOriginSelection((current) => current ?? buildPendingGeolocationOriginSelection());
+  }, []);
 
   useEffect(() => {
     const query = destinationText.trim();
@@ -131,6 +151,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
           query,
           savedDestinations,
           recentDestinations,
+          originLat: originSelection?.originLat,
+          originLng: originSelection?.originLng,
+          originSource: originSelection?.originSource,
           signal: controller.signal,
         },
         {},
@@ -155,17 +178,98 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [destinationText, savedDestinations, recentDestinations]);
+  }, [
+    destinationText,
+    savedDestinations,
+    recentDestinations,
+    originSelection?.originLat,
+    originSelection?.originLng,
+    originSelection?.originSource,
+  ]);
 
-  const resolveOriginForSubmit = (): QuickGoOriginSelection | null => {
+  useEffect(() => {
+    if (!canUseGeo || originSelection?.originSource !== 'geolocation') return;
+    if (typeof originSelection.originLat === 'number' && typeof originSelection.originLng === 'number') {
+      return;
+    }
+
+    const permissions = navigator.permissions;
+    if (!permissions?.query) return;
+
+    let cancelled = false;
+
+    permissions
+      .query({ name: 'geolocation' as PermissionName })
+      .then((status) => {
+        if (cancelled || status.state !== 'granted') return;
+
+        setIsLocating(true);
+        setLocateError(null);
+        void resolveGeolocationOrigin()
+          .then((selection) => {
+            if (cancelled) return;
+            setOriginSelection(selection);
+            setOriginInputText('');
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setOriginSelection(buildPendingGeolocationOriginSelection());
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setIsLocating(false);
+          });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canUseGeo,
+    originSelection?.originLat,
+    originSelection?.originLng,
+    originSelection?.originSource,
+  ]);
+
+  const resolveOriginForSubmit = async (): Promise<QuickGoOriginSelection | null> => {
     const typedOrigin = originInputText.trim();
 
     if (typedOrigin) {
       return buildManualOriginSelection(typedOrigin);
     }
 
-    if (originSelection?.originSource === 'geolocation' || originSelection?.originSource === 'saved') {
+    if (originSelection?.originSource === 'saved') {
       return originSelection;
+    }
+
+    if (originSelection?.originSource === 'geolocation') {
+      if (typeof originSelection.originLat === 'number' && typeof originSelection.originLng === 'number') {
+        return originSelection;
+      }
+
+      if (!canUseGeo) {
+        setShowOriginEditor(true);
+        setLocateError('Geolocation not supported in this browser');
+        return null;
+      }
+
+      try {
+        setIsLocating(true);
+        setLocateError(null);
+        const selection = await resolveGeolocationOrigin();
+        setOriginSelection(selection);
+        setOriginInputText('');
+        return selection;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to get current location';
+        setLocateError(message);
+        setShowOriginEditor(true);
+        setError('Current location is unavailable. Type a starting point.');
+        return null;
+      } finally {
+        setIsLocating(false);
+      }
     }
 
     return null;
@@ -182,10 +286,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     rememberRecentOrigin(origin.origin);
   };
 
-  const submitQuickGo = (continueAsQuickGo = false, forcedDestination?: QuickGoDestinationSelection) => {
+  const submitQuickGo = async (continueAsQuickGo = false, forcedDestination?: QuickGoDestinationSelection) => {
     const destination = forcedDestination ?? destinationSelection;
     const trimmedText = destinationText.trim();
-    const origin = resolveOriginForSubmit();
 
     if (!trimmedText) {
       setError('Enter where you are going.');
@@ -202,15 +305,17 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
       if (destinationSuggestions.length === 1) {
         const selected = destinationSearchResultToSelection(destinationSuggestions[0]!);
         setDestinationSelection(selected);
-        submitQuickGo(continueAsQuickGo, selected);
+        void submitQuickGo(continueAsQuickGo, selected);
         return;
       }
 
       const typedFallback = destinationSearchResultToSelection(buildTypedDestinationFallback(trimmedText));
       setDestinationSelection(typedFallback);
-      submitQuickGo(continueAsQuickGo, typedFallback);
+      void submitQuickGo(continueAsQuickGo, typedFallback);
       return;
     }
+
+    const origin = await resolveOriginForSubmit();
 
     if (!origin) {
       setShowOriginEditor(true);
@@ -250,7 +355,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
       return;
     }
 
-    submitQuickGo(Boolean(pendingAirportCode));
+    void submitQuickGo(Boolean(pendingAirportCode));
   };
 
   const handleDestinationSelect = (result: DestinationSearchResult) => {
@@ -312,8 +417,8 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     setShowOriginEditor(false);
   };
 
-  const handleUseFullPlanner = () => {
-    const origin = resolveOriginForSubmit();
+  const handleUseFullPlanner = async () => {
+    const origin = await resolveOriginForSubmit();
     const airportCode = pendingAirportCode || detectedAirportCode;
 
     if (!airportCode) return;
@@ -559,7 +664,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
               <PrimaryButton
                 type="button"
                 variant="secondary"
-                onClick={() => submitQuickGo(true)}
+                onClick={() => {
+                  void submitQuickGo(true);
+                }}
               >
                 Continue Quick Go
               </PrimaryButton>

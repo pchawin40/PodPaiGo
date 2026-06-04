@@ -322,6 +322,7 @@ describe('parking safe mode', () => {
         liveGoogleOptions: [],
         snapshotOptions: [],
         marketplaceOptions: [],
+        communityOptions: [],
         latestPriceSnapshots: [],
       },
     );

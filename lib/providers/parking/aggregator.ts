@@ -10,6 +10,7 @@ import { mergeLiveParkingSourceResults } from './merge';
 import { getParkingPriceSnapshotsCached } from './shared/snapshots';
 import { withParkingSearchCache } from './searchCache';
 import type { ParkingSearchContext } from './types';
+import { debugLog } from '../../utils/debug';
 
 export type AggregateAirportParkingArgs = {
   airportCode?: string;
@@ -48,6 +49,12 @@ async function aggregateAirportParkingOptionsUncached(
   const airport = getAirportById(airportCode);
   const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;
   const context = toSearchContext(args);
+  debugLog('parking_fetch_start', {
+    tripType: 'airport',
+    destinationKind: 'airport',
+    airportCode,
+    destination: args.destination,
+  });
 
   const [results, latestPriceSnapshots] = await Promise.all([
     parkingProviderRegistry.executeSearch(context),
@@ -72,6 +79,7 @@ async function aggregateAirportParkingOptionsUncached(
       liveGoogleOptions: optionsForProvider(results, 'google'),
       snapshotOptions: optionsForProvider(results, 'snapshot'),
       marketplaceOptions: optionsForProvider(results, 'marketplace'),
+      communityOptions: optionsForProvider(results, 'community-free'),
       latestPriceSnapshots,
     },
   );
@@ -80,7 +88,30 @@ async function aggregateAirportParkingOptionsUncached(
     annotateParkingForAirport(option, airportCode, airportCoordinates),
   );
 
-  return filterParkingByAirport(annotated, airportCode, airportCoordinates);
+  const filtered = filterParkingByAirport(annotated, airportCode, airportCoordinates);
+  debugLog('airport_parking_fetch_summary', {
+    tripType: 'airport',
+    destinationKind: 'airport',
+    airportCode,
+    providerCount: results.length,
+    providerResults: results.map((result) => ({
+      providerId: result.providerId,
+      resultCount: result.options.length,
+      healthStatus: result.health.status,
+      error: result.error,
+    })),
+    mergedCount: merged.length,
+    finalResultCount: filtered.length,
+    fallbackUsed: latestPriceSnapshots.length > 0,
+  });
+  debugLog('parking_fetch_summary', {
+    tripType: 'airport',
+    destinationKind: 'airport',
+    airportCode,
+    resultCount: filtered.length,
+  });
+
+  return filtered;
 }
 
 export async function aggregateAirportParkingOptions(

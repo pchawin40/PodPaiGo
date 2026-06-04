@@ -6,6 +6,7 @@ import {
   canMakeLiveSearchTextCall,
   isGooglePlacesLiveBlocked,
 } from '@/lib/parking/googlePlacesGuard';
+import { isGenericLocalDestinationQuery } from '@/lib/search/destinationSearch';
 import type { DestinationSearchResult } from '@/lib/search/destinationSearchTypes';
 import { debugLog } from '@/lib/utils/debug';
 
@@ -24,6 +25,34 @@ type GooglePlace = {
     longitude?: number;
   };
 };
+
+function normalizedCacheInput(input: string): string {
+  return input.trim().replace(/\s+/g, ' ');
+}
+
+function parseCoordinate(value: string | null, min: number, max: number): number | null {
+  if (value == null || value.trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+
+function roundCoordinate(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function buildDestinationPlacesCacheKey(input: string, originLat: number | null, originLng: number | null): string {
+  const normalized = normalizedCacheInput(input);
+  if (
+    originLat == null ||
+    originLng == null ||
+    !isGenericLocalDestinationQuery(normalized)
+  ) {
+    return normalized;
+  }
+
+  return `${normalized}|origin:${roundCoordinate(originLat)},${roundCoordinate(originLng)}`;
+}
 
 function jsonResponse(body: Record<string, unknown>, init?: ResponseInit) {
   const headers = new Headers(init?.headers);
@@ -54,6 +83,13 @@ function placeToResult(place: GooglePlace): DestinationSearchResult | null {
 
 export async function GET(request: NextRequest) {
   const input = request.nextUrl.searchParams.get('input')?.trim() || '';
+  const originLat = parseCoordinate(request.nextUrl.searchParams.get('originLat'), -90, 90);
+  const originLng = parseCoordinate(request.nextUrl.searchParams.get('originLng'), -180, 180);
+  const cacheKey = buildDestinationPlacesCacheKey(input, originLat, originLng);
+  const useLocationBias =
+    originLat != null &&
+    originLng != null &&
+    isGenericLocalDestinationQuery(input);
 
   if (input.length < 3) {
     return jsonResponse({ results: [], status: 'INPUT_TOO_SHORT' });
@@ -69,9 +105,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const body = await dedupeDestinationPlacesRequest(input, async () => {
+    const body = await dedupeDestinationPlacesRequest(cacheKey, async () => {
       return runWithPlacesRequestBudget(
-        `destination-search:${input}`,
+        `destination-search:${cacheKey}`,
         async () => {
           if (
             !canMakeLiveSearchTextCall(
@@ -79,7 +115,7 @@ export async function GET(request: NextRequest) {
                 reason: 'destination_search',
                 route: '/api/search/destinations/places',
                 airportCode: null,
-                cacheKey: input,
+                cacheKey,
               },
               { discovery: false },
             )
@@ -90,7 +126,27 @@ export async function GET(request: NextRequest) {
           debugLog('destination_search_google_call', {
             endpoint: 'places-search-text-new',
             query: input,
+            locationBiasUsed: useLocationBias,
           });
+
+          const requestBody: Record<string, unknown> = {
+            textQuery: input,
+            regionCode: 'US',
+            languageCode: 'en',
+            maxResultCount: 5,
+          };
+
+          if (useLocationBias) {
+            requestBody.locationBias = {
+              circle: {
+                center: {
+                  latitude: originLat,
+                  longitude: originLng,
+                },
+                radius: 20000,
+              },
+            };
+          }
 
           const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
             method: 'POST',
@@ -104,12 +160,7 @@ export async function GET(request: NextRequest) {
                 'places.location',
               ].join(','),
             },
-            body: JSON.stringify({
-              textQuery: input,
-              regionCode: 'US',
-              languageCode: 'en',
-              maxResultCount: 5,
-            }),
+            body: JSON.stringify(requestBody),
             cache: 'no-store',
           });
 
@@ -124,8 +175,10 @@ export async function GET(request: NextRequest) {
 
           debugLog('destination_search_places_summary', {
             query: input,
+            cacheKey,
             googleCallCount: 1,
             resultCount: results.length,
+            locationBiasUsed: useLocationBias,
           });
 
           return {

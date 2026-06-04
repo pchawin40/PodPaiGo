@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { trackEvent } from '../../lib/analytics/trackEvent';
 import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
@@ -29,12 +30,13 @@ type ParseTripApiResponse = ParsedTripAssistantResult & {
 
 export default function TripAssistantPanel({ className = '' }: TripAssistantPanelProps) {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, user, loading: authLoading } = useAuth();
   const [userText, setUserText] = useState('');
   const [parsed, setParsed] = useState<ParsedTripAssistantResult | null>(null);
   const [liveProviderActive, setLiveProviderActive] = useState(false);
   const [configuredProvider, setConfiguredProvider] = useState<'mock' | 'openai'>('mock');
   const [confirmed, setConfirmed] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(
@@ -42,6 +44,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   );
 
   const accessToken = session?.access_token ?? null;
+  const signedIn = Boolean(user && accessToken);
   const assistantStartedTracked = useRef(false);
 
   useEffect(() => {
@@ -51,15 +54,23 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   }, [accessToken]);
 
   const assistantStatusLabel = useMemo(() => {
+    if (!signedIn) return 'Sign in to use AI Trip Planner';
     if (loading) return 'AI parse in progress…';
     if (parsed) return 'Review before running';
     return liveProviderActive ? 'Using AI assistant' : 'Mock parser';
-  }, [loading, parsed, liveProviderActive]);
+  }, [signedIn, loading, parsed, liveProviderActive]);
 
   const handleParse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setConfirmed(false);
+
+    if (!signedIn) {
+      setParsed(null);
+      setError('Sign in to use AI Trip Planner.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -151,7 +162,22 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
               AI trip planner
             </span>
+            <button
+              type="button"
+              onClick={() => setShowInfo((current) => !current)}
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-card text-xs font-bold text-muted-foreground"
+              title="AI planning is available for signed-in users."
+              aria-label="AI Trip Planner info"
+            >
+              ?
+            </button>
           </div>
+          {showInfo ? (
+            <div className="mb-2 max-w-md rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground shadow-sm">
+              AI planning is available for signed-in users. Register or sign in to use Ask
+              PodPaiGo and save your trip context.
+            </div>
+          ) : null}
           <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Use it for airport trips or quick point A to B plans.
@@ -161,10 +187,30 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <StatusPill tone="primary">{assistantStatusLabel}</StatusPill>
           <span className="text-xs text-muted-foreground">
-            {liveProviderActive ? 'Using AI assistant' : 'Mock parser in development'}
+            {signedIn
+              ? liveProviderActive
+                ? 'Using AI assistant'
+                : 'Mock parser in development'
+              : 'Register or sign in first'}
           </span>
         </div>
       </div>
+
+      {!authLoading && !signedIn ? (
+        <div className="relative mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm">
+          <p className="font-semibold text-foreground">Sign in to use AI Trip Planner</p>
+          <p className="mt-1 text-muted-foreground">
+            Ask PodPaiGo can explain routes, parking, timing, and tradeoffs using your trip
+            results.
+          </p>
+          <Link
+            href="/login?redirect=/%23assistant"
+            className="mt-3 inline-flex rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+          >
+            Register or sign in
+          </Link>
+        </div>
+      ) : null}
 
       <form onSubmit={handleParse} className="relative mt-4 space-y-3">
         <label className="block text-sm font-medium text-foreground">
@@ -172,6 +218,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           <textarea
             value={userText}
             onChange={(event) => setUserText(event.target.value)}
+            disabled={!signedIn || authLoading}
             rows={4}
             placeholder="Weekend trip to Las Vegas from SEA Nov 15 to Nov 18, leaving from Monroe. Find best parking and leave time."
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
@@ -199,7 +246,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
         <button
           type="submit"
-          disabled={!userText.trim() || loading}
+          disabled={!userText.trim() || loading || !signedIn || authLoading}
           className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-sky-900/10 transition hover:from-sky-500 hover:to-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 dark:from-sky-500 dark:to-blue-600 dark:hover:from-sky-400 dark:hover:to-blue-500"
         >
           {loading ? 'AI parse…' : 'Generate trip plan'}
