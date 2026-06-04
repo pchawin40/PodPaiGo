@@ -1,6 +1,45 @@
 import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
+import { debugLog } from './utils/debug';
+
+/**
+ * Resolve a promise, but fall back to a degraded value if it does not settle in
+ * `ms`. Used to isolate slow live provider calls so the results page renders with
+ * partial data instead of hanging on "Recalculating...". Never rejects.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(onTimeout());
+    }, ms);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(onTimeout());
+      },
+    );
+  });
+}
+
+function getParkingFetchTimeoutMs(): number {
+  const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 9000;
+}
 import {
   resolveRouteDepartureIsoForPurpose,
   resolveScheduledTripDateTime,
@@ -281,6 +320,13 @@ export class RecommendationEngine {
   static async generateRecommendations(tripData: TripData): Promise<Recommendation> {
     const isAirportTrip = !isGeneralTrip(tripData);
 
+    const generationStartedAt = Date.now();
+    debugLog('recommendation_generation_start', {
+      type: tripData.type,
+      destinationKind: tripData.destinationKind ?? 'airport',
+      isAirportTrip,
+    });
+
     const tripDateTime = buildTripDateTime(tripData);
     const routeTiming = resolveTripRouteTiming(tripData);
     const mainRouteDepartureIso = resolveRouteDepartureIsoForPurpose(
@@ -291,6 +337,11 @@ export class RecommendationEngine {
       routeTiming,
       'origin_to_parking',
     );
+    const mainDestinationLatLng =
+      typeof tripData.destinationLat === 'number' &&
+      typeof tripData.destinationLng === 'number'
+        ? { lat: tripData.destinationLat, lng: tripData.destinationLng }
+        : undefined;
     const route =
       isAirportArrivalTrip(tripData)
         ? 'airport-home'
@@ -354,6 +405,33 @@ export class RecommendationEngine {
         message: null as string | null,
       });
 
+    // Isolate the parking fetch (Google Places / ParkWhiz / APR fan-out is the most
+    // likely call to hang) so a slow provider does not block the whole results page.
+    const parkingFetchStartedAt = Date.now();
+    const timedParkingRequest = withTimeout(
+      parkingRequest.then((result) => {
+        debugLog('parking_fetch_duration', {
+          ms: Date.now() - parkingFetchStartedAt,
+          count: result.options.length,
+          failed: result.failed,
+        });
+        return result;
+      }),
+      shouldLoadParking ? getParkingFetchTimeoutMs() : 0,
+      () => {
+        debugLog('parking_fetch_timeout', {
+          ms: Date.now() - parkingFetchStartedAt,
+          timeoutMs: getParkingFetchTimeoutMs(),
+        });
+        return {
+          options: [] as ParkingOption[],
+          failed: true,
+          message:
+            'Parking is taking longer than expected. Showing other options — try again or open directions.',
+        };
+      },
+    );
+
     const [
       parkingResult,
       rawRideshare,
@@ -363,7 +441,7 @@ export class RecommendationEngine {
       flightInfo,
       locationInfo,
     ] = await Promise.all([
-      parkingRequest,
+      timedParkingRequest,
 
       allowRideshare
         ? this.provider.getRideshareOptions(
@@ -406,7 +484,7 @@ export class RecommendationEngine {
         tripData.origin,
         tripData.destination,
         mainRouteDepartureIso,
-        undefined,
+        mainDestinationLatLng,
         {
           airportCode: isAirportTrip
             ? ((tripData as TripDataWithTransport).airportCode || undefined)
@@ -754,6 +832,15 @@ export class RecommendationEngine {
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
           : undefined;
+
+    debugLog('recommendation_generation_summary', {
+      ms: Date.now() - generationStartedAt,
+      parkingCount: finalParking.length,
+      parkingDataStatus,
+      rideshareCount: finalRideshare.length,
+      transitCount: finalTransit.length,
+      routeUnavailable: Boolean(trafficEstimate.routeUnavailable),
+    });
 
     return {
       parking: finalParking,

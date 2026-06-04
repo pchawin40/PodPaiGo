@@ -193,4 +193,95 @@ describe('QuickGoResultsView', () => {
       screen.getByText('This looks like an airport trip. Want to use the full airport planner?'),
     ).toBeInTheDocument();
   });
+
+  test('does not show "0 min" when the route is unavailable', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Costco, Everett, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Costco, Everett, WA',
+          destinationName: 'Costco, Everett, WA',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: { duration: 0, routeUnavailable: true, trustStatus: 'fallback' },
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.queryByText('0 min')).not.toBeInTheDocument();
+    expect(screen.getByText('Drive time unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Open directions to confirm drive time')).toBeInTheDocument();
+  });
+
+  test('shows fallback text when a fallback estimate returns 0 duration', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Costco, Everett, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Costco, Everett, WA',
+          destinationName: 'Costco, Everett, WA',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: { duration: 0, trustStatus: 'fallback' },
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.queryByText('0 min')).not.toBeInTheDocument();
+    expect(screen.getByText('Drive time unavailable')).toBeInTheDocument();
+  });
+
+  test('shows a normal positive drive time when duration > 0', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Costco, Everett, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Costco, Everett, WA',
+          destinationName: 'Costco, Everett, WA',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: { duration: 18, trustStatus: 'estimated' },
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('18 min')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
 });
