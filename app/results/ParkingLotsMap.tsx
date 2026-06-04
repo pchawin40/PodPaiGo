@@ -59,7 +59,7 @@ async function geocodeParkingLot(
 }
 
 export default function ParkingLotsMap({
-    airportCode = 'SEA',
+    airportCode,
     originAddress,
     parkingOptions,
     selectedParkingId,
@@ -75,8 +75,14 @@ export default function ParkingLotsMap({
 
     useEffect(() => {
         async function initMap() {
-            const airport = getAirportById(airportCode) || getAirportById('SEA');
-            if (!airport || !mapRef.current) return;
+            const airport = airportCode ? getAirportById(airportCode) || getAirportById('SEA') : null;
+            const fallbackCenter =
+                parkingOptions.find((lot) => typeof lot.lat === 'number' && typeof lot.lng === 'number');
+            const mapCenter = airport?.geoLocation ??
+                (fallbackCenter && typeof fallbackCenter.lat === 'number' && typeof fallbackCenter.lng === 'number'
+                    ? { lat: fallbackCenter.lat, lng: fallbackCenter.lng }
+                    : getAirportById('SEA')?.geoLocation);
+            if (!mapCenter || !mapRef.current) return;
 
             const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
             if (!apiKey) return;
@@ -88,7 +94,7 @@ export default function ParkingLotsMap({
                 (await google.maps.importLibrary('marker')) as google.maps.MarkerLibrary;
 
             const map = new Map(mapRef.current, {
-                center: airport.geoLocation,
+                center: mapCenter,
                 zoom: 11,
                 mapId: process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID,
                 mapTypeId: 'roadmap',
@@ -96,21 +102,23 @@ export default function ParkingLotsMap({
             });
 
             const bounds = new google.maps.LatLngBounds();
-            bounds.extend(airport.geoLocation);
+            bounds.extend(mapCenter);
 
-            const airportPin = new PinElement({
-                glyphText: '✈',
-                background: '#2563eb',
-                borderColor: '#1e3a8a',
-                glyphColor: '#ffffff',
-            });
+            if (airport) {
+                const airportPin = new PinElement({
+                    glyphText: '✈',
+                    background: '#2563eb',
+                    borderColor: '#1e3a8a',
+                    glyphColor: '#ffffff',
+                });
 
-            new AdvancedMarkerElement({
-                map,
-                position: airport.geoLocation,
-                title: `${airport.id} airport`,
-                content: airportPin,
-            });
+                new AdvancedMarkerElement({
+                    map,
+                    position: airport.geoLocation,
+                    title: `${airport.id} airport`,
+                    content: airportPin,
+                });
+            }
 
             if (originAddress?.trim()) {
                 const originPosition = await geocodeAddress(originAddress.trim());
@@ -137,7 +145,7 @@ export default function ParkingLotsMap({
 
             const lotsWithPositions = await Promise.all(
                 parkingOptions.slice(0, mapLotLimit).map(async (lot) => {
-                    const position = await geocodeParkingLot(lot, airport.label);
+                    const position = await geocodeParkingLot(lot, airport?.label || 'destination');
                     return position ? { lot, position } : null;
                 })
             );
@@ -277,7 +285,7 @@ export default function ParkingLotsMap({
                     if (zoom < 9) map.setZoom(9);
                 });
             } else {
-                map.setCenter(airport.geoLocation);
+                map.setCenter(mapCenter);
                 map.setZoom(11);
             }
         }
@@ -291,7 +299,7 @@ export default function ParkingLotsMap({
         <div className="relative h-full min-h-[520px] w-full">
             <div ref={mapRef} className="h-full min-h-[520px] w-full" />
             <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-zinc-200 bg-white/95 px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm">
-                ✈ Airport · ● Origin · numbered lots
+                {airportCode ? '✈ Airport · ' : ''}● Origin · numbered lots
             </div>
         </div>
     );

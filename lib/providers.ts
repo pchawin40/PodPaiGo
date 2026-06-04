@@ -1123,23 +1123,21 @@ export class MockProvider implements DataProvider {
     const destinationKind = context?.destinationKind ?? 'airport';
     const isAirportDestination = destinationKind === 'airport';
 
-    if (!isAirportDestination) {
-      return [];
-    }
-
-    const authoritativeCode = context?.airportCode?.toUpperCase();
+    const authoritativeCode = isAirportDestination ? context?.airportCode?.toUpperCase() : undefined;
     const airport = isAirportDestination
       ? (authoritativeCode
           ? getAirportById(authoritativeCode)
           : resolveAirportFromDestination(destination, authoritativeCode))
       : null;
 
-    const airportCode = authoritativeCode || airport?.id || 'SEA';
+    const airportCode = isAirportDestination ? authoritativeCode || airport?.id || 'SEA' : null;
     const airportCoordinates =
       airport?.geoLocation ??
-      (typeof context?.destinationLat === 'number' && typeof context?.destinationLng === 'number'
-        ? { lat: context.destinationLat, lng: context.destinationLng }
-        : undefined);
+      (isAirportDestination &&
+        typeof context?.destinationLat === 'number' &&
+        typeof context?.destinationLng === 'number'
+          ? { lat: context.destinationLat, lng: context.destinationLng }
+          : undefined);
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
@@ -1155,7 +1153,7 @@ export class MockProvider implements DataProvider {
       .then(({ getLiveParkingOptions, getDestinationParkingOptions }) =>
         isAirportDestination
           ? getLiveParkingOptions({
-            airportCode,
+            airportCode: airportCode!,
             airportCoordinates,
             destination,
             checkInDate: parkingDates.checkInDate,
@@ -1196,12 +1194,13 @@ export class MockProvider implements DataProvider {
       ? resolveAirportDestinationForRouting(destination)
       : destination;
     const routeDepartureTime = context?.routeDepartureTime || dateTime;
+    const routeDestinationCoords = isAirportDestination ? null : destinationCoords ?? null;
     const destinationRouteEstimate = await this.getRouteEstimate(
       origin,
       routeDestination,
       routeDepartureTime,
       true,
-      null,
+      routeDestinationCoords,
       {
         airportCode: isAirportDestination ? airportCode : null,
         routePurpose: 'main_to_destination',

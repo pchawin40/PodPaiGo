@@ -60,13 +60,26 @@ describe('quickGo', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'Downtown shopping district',
       origin: savedOrigin,
+      destination: {
+        destination: 'Pike Place Market',
+        destinationLabel: 'Pike Place Market',
+        destinationAddress: '85 Pike St, Seattle, WA',
+        destinationSource: 'google',
+        destinationLat: 47.6097,
+        destinationLng: -122.3425,
+      },
       now: new Date('2026-06-01T09:00:00'),
     });
+    params.set('airport', 'SEA');
+    params.set('airportCode', 'SEA');
 
     const tripData = parseTripDataFromSearchParams(params);
 
     expect(tripData?.type).toBe('general-trip');
-    expect(tripData?.destination).toBe('Downtown shopping district');
+    expect(tripData?.destination).toBe('Pike Place Market');
+    expect(tripData?.destinationLat).toBe(47.6097);
+    expect(tripData?.destinationLng).toBe(-122.3425);
+    expect(tripData && 'airportCode' in tripData ? tripData.airportCode : undefined).toBeUndefined();
     expect(isQuickGoMode(params)).toBe(true);
     expect(readQuickGoOriginFromSearchParams(params)).toEqual(savedOrigin);
   });

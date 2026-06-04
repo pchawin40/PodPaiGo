@@ -25,7 +25,12 @@ export function isAirportTrip(tripData: Pick<TripData, 'type' | 'destinationKind
 export function shouldDiscoverParkingForTrip(
   tripData: Pick<TripData, 'type' | 'destinationKind'>,
 ): boolean {
-  return isAirportTrip(tripData);
+  if (isCityDestinationTrip(tripData)) {
+    return true;
+  }
+
+  const tripType = tripTypeValue(tripData as TripData);
+  return tripType === 'one-way-departure' || tripType === 'round-trip' || tripType === 'airport-departure' || tripType === 'airport-round-trip';
 }
 
 export function resolveTripParkingContext(

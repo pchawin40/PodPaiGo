@@ -165,7 +165,7 @@ describe('parking safe mode', () => {
     ).toHaveLength(0);
   });
 
-  test('non-airport trip uses zero Google Places calls', async () => {
+  test('non-airport trip can request destination parking without live Google Places calls in safe mode', async () => {
     applySafeModeEnv();
 
     const fetchMock = jest.spyOn(global, 'fetch');
@@ -173,12 +173,22 @@ describe('parking safe mode', () => {
       .spyOn(RecommendationEngine.provider, 'getParkingOptions')
       .mockResolvedValue([]);
 
-    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(false);
+    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(true);
 
     await RecommendationEngine.generateRecommendations(CITY_TRIP);
     await attachGooglePlaceToParking(baseOption(), CITY_TRIP, 'SEA');
 
-    expect(getParkingOptionsSpy).not.toHaveBeenCalled();
+    expect(getParkingOptionsSpy).toHaveBeenCalledTimes(1);
+    expect(getParkingOptionsSpy).toHaveBeenCalledWith(
+      CITY_TRIP.origin,
+      CITY_TRIP.destination,
+      expect.any(String),
+      CITY_TRIP.parkingDuration,
+      expect.objectContaining({
+        destinationKind: 'downtown',
+        airportCode: undefined,
+      }),
+    );
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
     ).toHaveLength(0);

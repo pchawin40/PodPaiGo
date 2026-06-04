@@ -3350,7 +3350,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
-    const airportCode = getTripAirportCode(tripData);
+    const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
 
     const parkingOptions = rankedOptions
       .filter((item) => item.type === "parking")
@@ -3441,6 +3441,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
+    if (isCityDestinationTrip(tripData)) return;
 
     const aprOptions = recommendation.parking.filter((p) =>
       !isParkingRouteUnavailable(p) &&
@@ -3949,15 +3950,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return t.latestSafeLeaveTime || null;
   }, [intent, tripData, viableOptions, recommendation]);
 
-  const currentAirportCode = ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
-
-  const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
-  const displayDestination = currentAirport.label;
   const isCityTrip = Boolean(tripData && isCityDestinationTrip(tripData));
   const cityDestinationText =
     tripData?.type === 'general-trip'
       ? tripData.destinationName || tripData.destination
       : tripData?.destination || '';
+  const currentAirportCode = isCityTrip
+    ? ''
+    : ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
+
+  const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
+  const displayDestination = isCityTrip
+    ? cityDestinationText || 'General trip'
+    : currentAirport.label;
+  const tripBadgeLabel = isCityTrip ? 'General trip' : searchParams.get('airport') || currentAirportCode || 'SEA';
   const scrollToParkingOptions = () => {
     document.getElementById('parking-options-section')?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -3996,8 +4002,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const extraTransitProviders = useMemo(() => {
     const origin = tripData?.origin || '';
-    const airport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
-    const destination = airport.routingAddress || `${airport.label} airport`;
+    const destination = isCityTrip
+      ? cityDestinationText || tripData?.destination || ''
+      : currentAirport.routingAddress || `${currentAirport.label} airport`;
     const transitLink = origin
       ? googleMapsDirectionsLink(origin, destination, 'transit')
       : PROVIDER_LINKS.googleMaps.url;
@@ -4029,7 +4036,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     return [googleTransit];
-  }, [currentAirportCode, tripData?.origin]);
+  }, [cityDestinationText, currentAirport, currentAirportCode, isCityTrip, tripData?.destination, tripData?.origin]);
 
   useEffect(() => {
     if (!tripData) {
@@ -4116,6 +4123,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
+    if (isCityDestinationTrip(tripData)) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
     if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;
@@ -4207,6 +4215,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   useEffect(() => {
     if (!tripData || !recommendation?.parking?.length) return;
+    if (isCityDestinationTrip(tripData)) return;
 
     const airportCode = getTripAirportCode(tripData);
 
@@ -4858,7 +4867,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             {/* Left: main decision */}
             <div>
               <div className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
-                {searchParams.get('airport') || 'SEA'}
+                {tripBadgeLabel}
               </div>
 
               <h1 className="mt-3 text-2xl font-semibold text-foreground sm:text-3xl">
@@ -4876,10 +4885,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {airportRouteUnavailable && (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
-                    We could not calculate a real route from your starting location to this airport.
+                    We could not calculate a real route from your starting location to this destination.
                   </div>
                   <div className="mt-1">
-                    Try an origin near {currentAirport.id}, rideshare/taxi, or another transportation option.
+                    Try an origin near {displayDestination}, rideshare/taxi, or another transportation option.
                   </div>
                   {airportRouteUnavailableReason && (
                     <div className="mt-2 text-xs text-muted-foreground">
@@ -4911,7 +4920,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 )}
 
               <p className="mt-2 text-sm text-muted-foreground">
-                {airportRouteUnavailable
+                {isCityTrip
+                  ? airportRouteUnavailable
+                    ? 'Route timing is unavailable; destination parking options may still be useful.'
+                    : recommendation.trafficEstimate?.trustStatus === 'live'
+                      ? 'Live traffic + destination parking analyzed'
+                      : 'Estimated route timing + destination parking analyzed'
+                  : airportRouteUnavailable
                   ? 'Airport readiness and TSA timing shown only; ground route timing is unavailable.'
                   : recommendation.trafficEstimate?.trustStatus === 'live'
                     ? 'Live traffic + airport timing + parking pricing analyzed'
@@ -4931,7 +4946,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               )}
 
-              {airlineOrFlight ? (
+              {!isCityTrip && airlineOrFlight ? (
                 <AirlineLookupPanel
                   airportCode={currentAirportCode}
                   airlineOrFlight={airlineOrFlight}
@@ -5784,7 +5799,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-bold">
                   {allParkingRoutesUnavailable
-                    ? `Parking options near ${currentAirport.id}`
+                    ? `Parking options near ${isCityTrip ? displayDestination : currentAirport.id}`
                     : 'Parking options'}
                 </h2>
               </div>
@@ -5797,7 +5812,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               {allParkingRoutesUnavailable && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                  Parking lots near {currentAirport.id} are shown for reference, but route timing is unavailable from your current origin.
+                  Parking lots near {isCityTrip ? displayDestination : currentAirport.id} are shown for reference, but route timing is unavailable from your current origin.
                 </div>
               )}
 
@@ -5828,7 +5843,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       trackEvent('map_tab_clicked', {
                         accessToken,
                         eventProperties: {
-                          airportCode: tripData?.airportCode || currentAirport.id,
+                          airportCode: isCityTrip ? undefined : tripData?.airportCode || currentAirport.id,
                         },
                       });
                       setShowMapModal(true);
@@ -5839,23 +5854,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     <span>Map</span>
                   </button>
 
-                  {/* Show Airport Indoor Map */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      trackEvent('airport_tab_clicked', {
-                        accessToken,
-                        eventProperties: {
-                          airportCode: currentAirportCode,
-                        },
-                      });
-                      setShowAirportGuideModal(true);
-                    }}
-                    className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98]"
-                  >
-                    <span className="text-base leading-none">✈️</span>
-                    <span>Airport</span>
-                  </button>
+                  {!isCityTrip ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        trackEvent('airport_tab_clicked', {
+                          accessToken,
+                          eventProperties: {
+                            airportCode: currentAirportCode,
+                          },
+                        });
+                        setShowAirportGuideModal(true);
+                      }}
+                      className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98]"
+                    >
+                      <span className="text-base leading-none">✈️</span>
+                      <span>Airport</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -5872,7 +5888,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       <div>
                         <div className="text-sm font-semibold text-zinc-900">Parking map</div>
                         <div className="text-xs text-zinc-500">
-                          You are viewing lots around {currentAirport.id}
+                          You are viewing lots around {isCityTrip ? displayDestination : currentAirport.id}
                           {tripData?.origin ? ` · from ${tripData.origin}` : ''}
                         </div>
                       </div>
@@ -5889,7 +5905,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     {/* Map */}
                     <div className="min-h-0 flex-1 overflow-hidden">
                       <ParkingLotsMap
-                        airportCode={tripData?.airportCode}
+                        airportCode={isCityTrip ? undefined : tripData?.airportCode}
                         originAddress={tripData?.origin}
                         parkingOptions={recommendation.parking}
                         selectedParkingId={selectedParkingId}

@@ -106,9 +106,21 @@ describe('googlePlacesGuard emergency safeguards', () => {
     expect(isGooglePlacesLiveBlocked()).toBe(false);
   });
 
-  test('non-airport point A to B trip does not discover parking', () => {
-    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(false);
+  test('parking discovery includes point A to B trips and airport departure parking trips', () => {
+    expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(true);
     expect(shouldDiscoverParkingForTrip(AIRPORT_TRIP)).toBe(true);
+    expect(
+      shouldDiscoverParkingForTrip({
+        type: 'one-way-arrival',
+        destinationKind: 'airport',
+      }),
+    ).toBe(false);
+    expect(
+      shouldDiscoverParkingForTrip({
+        type: 'dropoff-pickup',
+        destinationKind: 'airport',
+      }),
+    ).toBe(false);
   });
 
   test('local dev default max live Places calls is 0 unless explicitly overridden', () => {
@@ -149,7 +161,7 @@ describe('googlePlacesGuard emergency safeguards', () => {
     });
   });
 
-  test('recommendation engine does not call getParkingOptions for point A to B trips', async () => {
+  test('recommendation engine calls destination parking for point A to B trips without airport code', async () => {
     const { RecommendationEngine } = await import('../lib/recommendationEngine');
     const getParkingOptionsSpy = jest
       .spyOn(RecommendationEngine.provider, 'getParkingOptions')
@@ -157,7 +169,17 @@ describe('googlePlacesGuard emergency safeguards', () => {
 
     await RecommendationEngine.generateRecommendations(CITY_TRIP);
 
-    expect(getParkingOptionsSpy).not.toHaveBeenCalled();
+    expect(getParkingOptionsSpy).toHaveBeenCalledTimes(1);
+    expect(getParkingOptionsSpy).toHaveBeenCalledWith(
+      CITY_TRIP.origin,
+      CITY_TRIP.destination,
+      expect.any(String),
+      CITY_TRIP.parkingDuration,
+      expect.objectContaining({
+        destinationKind: 'downtown',
+        airportCode: undefined,
+      }),
+    );
 
     getParkingOptionsSpy.mockRestore();
   });

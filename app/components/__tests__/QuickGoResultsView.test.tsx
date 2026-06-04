@@ -50,6 +50,8 @@ describe('QuickGoResultsView', () => {
         originSource: 'manual',
       },
     });
+    params.set('airport', 'SEA');
+    params.set('airportCode', 'SEA');
 
     render(
       <QuickGoResultsView
@@ -83,6 +85,7 @@ describe('QuickGoResultsView', () => {
     expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
     expect(screen.queryByText(/Terminal companion/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/TSA/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('SEA')).not.toBeInTheDocument();
   });
 
   test('shows saved-origin debug label on results card', () => {

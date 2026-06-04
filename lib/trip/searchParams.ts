@@ -60,6 +60,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
   const parkingCheckInDate = searchParams.get('parkingCheckInDate') || '';
   const parkingCheckOutDate = searchParams.get('parkingCheckOutDate') || '';
+  const destinationLatRaw = searchParams.get('destinationLat');
+  const destinationLngRaw = searchParams.get('destinationLng');
+  const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
+  const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
 
   const transportRaw = searchParams.get('transport') || 'all';
   const transportAvailability: TransportAvailability = isOneOf(
@@ -262,6 +266,8 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         parkingCheckInTime,
         parkingCheckOutDate,
         parkingCheckOutTime,
+        destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
+        destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
         transportAvailability,
         transitPayment,
       };
@@ -282,8 +288,6 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
       const resolvedCode =
         ('airportCode' in data && data.airportCode) || airportCodeForAirportTrips;
       data = { ...data, airportCode: resolvedCode };
-    } else if (airportCodeParam) {
-      data = { ...data, airportCode: airportCodeParam };
     }
   }
 
@@ -347,6 +351,16 @@ export function tripDataToSearchParams(
     params.set('airportLng', String(selectedAirport.geoLocation.lng));
   } else {
     params.set('destination', data.destination);
+    if (typeof data.destinationLat === 'number' && Number.isFinite(data.destinationLat)) {
+      params.set('destinationLat', String(data.destinationLat));
+    } else {
+      params.delete('destinationLat');
+    }
+    if (typeof data.destinationLng === 'number' && Number.isFinite(data.destinationLng)) {
+      params.set('destinationLng', String(data.destinationLng));
+    } else {
+      params.delete('destinationLng');
+    }
   }
 
   if (options?.intent) {
