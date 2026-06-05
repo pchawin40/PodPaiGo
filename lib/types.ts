@@ -59,6 +59,12 @@ type BaseTripData = {
   destinationLat?: number;
   destinationLng?: number;
 
+  /**
+   * Optional flow marker. Quick Go is stored as a general trip for results, but
+   * timing should still behave like "go now" instead of a full planner target arrival.
+   */
+  tripMode?: 'quick-go';
+
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;
 

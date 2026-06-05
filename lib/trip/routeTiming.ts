@@ -19,6 +19,7 @@ export type TripRouteTiming = {
 };
 
 const DEFAULT_PRE_DRIVE_MINUTES = 75;
+const DEFAULT_GENERAL_PRE_DRIVE_MINUTES = 30;
 const SAME_DAY_NOW_WINDOW_MINUTES = 30;
 
 function pad(value: number): string {
@@ -83,6 +84,10 @@ export function resolveTargetTerminalArrivalIso(tripData: TripData): string | nu
 
   flightLocal.setMinutes(flightLocal.getMinutes() - readiness.bufferMinutes);
   return toLocalIso(flightLocal);
+}
+
+function isQuickGoTrip(tripData: TripData): boolean {
+  return tripData.type === 'general-trip' && tripData.tripMode === 'quick-go';
 }
 
 export function shouldUseNowForRouting(scheduledIso: string, now: Date = new Date()): boolean {
@@ -163,6 +168,21 @@ export function resolveTripRouteTiming(
       targetTerminalArrivalIso,
       usesNow,
       timingSource: usesNow ? 'now' : 'target_arrival_derived',
+    };
+  }
+
+  if (tripData.type === 'general-trip' && !isQuickGoTrip(tripData)) {
+    const derivedDeparture =
+      subtractMinutesFromIso(scheduledTripDateTime, DEFAULT_GENERAL_PRE_DRIVE_MINUTES) ??
+      scheduledTripDateTime;
+
+    return {
+      scheduledTripDateTime,
+      mainRouteDepartureIso: derivedDeparture,
+      parkingRouteDepartureIso: derivedDeparture,
+      targetTerminalArrivalIso,
+      usesNow: false,
+      timingSource: 'target_arrival_derived',
     };
   }
 

@@ -932,7 +932,25 @@ function buildParkingDateRange(dateTime: string, parkingDurationMinutes?: number
   checkInAt?: string;
   checkOutAt?: string;
 } {
-  const start = new Date(dateTime);
+  const parseLocalWallClock = (value: string): Date => {
+    const match = value.match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
+    );
+
+    if (!match) return new Date(value);
+
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] || 0),
+      0,
+    );
+  };
+
+  const start = parseLocalWallClock(dateTime);
   if (isNaN(start.getTime())) return {};
 
   const duration = parkingDurationMinutes ?? 24 * 60;

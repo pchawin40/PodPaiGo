@@ -18,6 +18,12 @@ import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinut
 import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
 import { resolveTripParkingContext } from '../../lib/trip/tripContext';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
+import {
+  getParkingComparableCost,
+  parkingRankEvidenceLabel,
+  sortParkingOptionsForMode,
+  type ParkingSortMode,
+} from '../../lib/parking/sortParkingOptions';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 // import ParkingBookingSources from './ParkingBookSources';
@@ -138,10 +144,111 @@ function mergeGoogleEnrichedParking(
   };
 }
 
+function isAirportTrip(tripData: TripData | null): boolean {
+  return Boolean(
+    tripData &&
+      (tripData.destinationKind === 'airport' ||
+        (tripData as TripData & { airportCode?: string }).airportCode ||
+        tripData.type !== 'general-trip'),
+  );
+}
+
+function isAirportPlausibleParking(option: ParkingOption): boolean {
+  const name = String(option.name || '').toLowerCase();
+  const source = `${option.sourceName || ''} ${option.bookingProvider || ''}`.toLowerCase();
+
+  if (option.type === 'official' || option.type === 'off-airport') return true;
+  if (option.serviceAirportCode) return true;
+  if (source.includes('airportparkingreservations') || source.includes('parkwhiz')) return true;
+  if (source.includes('airport') && source.includes('parking')) return true;
+  if (name.includes('airport') || name.includes('garage')) return true;
+  if (name.includes('masterpark') || name.includes('wally') || name.includes('jiffy')) return true;
+
+  return false;
+}
+
+function uniqueBadges(labels: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(labels.map((label) => String(label || '').trim()).filter(Boolean)));
+}
+
+function reasonBadgesForOption(
+  option: ParkingOption,
+  mode: ParkingSortMode,
+  tripData: TripData | null,
+): string[] {
+  const totalCost = getParkingComparableCost(option, tripData);
+  const walkMinutes =
+    option.walkingMinutes ??
+    option.transferToTerminalMinutes ??
+    option.shuttleMinutes ??
+    null;
+
+  return uniqueBadges([
+    mode === 'cheapest'
+      ? 'Lowest total price'
+      : mode === 'fastest'
+        ? 'Fastest door-to-destination'
+        : mode === 'easiest'
+          ? 'Best overall'
+          : 'Best overall',
+    totalCost === 0 ? 'Verified free parking' : null,
+    parkingRankEvidenceLabel(option, mode, {
+      isUnavailable: isParkingRouteUnavailable,
+      totalCost: (parking) => getParkingComparableCost(parking, tripData),
+      tripData,
+    }),
+    typeof walkMinutes === 'number' && walkMinutes > 0 && walkMinutes <= 6
+      ? 'Closest walk'
+      : null,
+    option.priceDisplay === 'live' ||
+      option.pricingConfidence === 'live' ||
+      option.bookingProvider === 'ParkWhiz' ||
+      option.bookingProvider === 'AirportParkingReservations'
+      ? 'Live bookable price'
+      : null,
+    option.priceConfidence === 'high' || option.trustStatus === 'live'
+      ? 'High confidence'
+      : null,
+  ]);
+}
+
+function explanationForOption(
+  option: ParkingOption,
+  mode: ParkingSortMode,
+  tripData: TripData | null,
+): string {
+  const price = getParkingTotalPrice(option, tripData);
+  const time = parkingTimeBreakdown(
+    option,
+    buildParkingDriveContextFromOption(option),
+    tripData ? resolveTripParkingContext(tripData) : 'airport_trip',
+  ).totalMinutes;
+  const priceText = typeof price === 'number' ? `${formatMoneyWhole(price)} total` : 'a usable price signal';
+  const timeText = formatCompactMinutes(time);
+
+  if (mode === 'cheapest') {
+    if (getParkingComparableCost(option, tripData) === 0) {
+      return 'Picked because it is verified free parking and still has a usable route.';
+    }
+    return `Picked because it has the lowest comparable total price (${priceText}) among route-available options.`;
+  }
+
+  if (mode === 'fastest') {
+    return `Picked because it has the shortest door-to-destination time (${timeText}) without using an unavailable or zero-minute route fallback.`;
+  }
+
+  if (mode === 'easiest') {
+    return `Picked because it combines low-effort access, route confidence, and a short total path (${timeText}).`;
+  }
+
+  return `Picked because it balances price, route time, availability, and confidence (${priceText}, ${timeText}).`;
+}
+
 export default function ParkingSmartPick({
   options,
   tripData,
   selectedOption,
+  sortMode = 'easiest',
   leaveByTime,
   aprLivePrices = {},
   weatherImpact,
@@ -152,6 +259,7 @@ export default function ParkingSmartPick({
   options: ParkingOption[];
   tripData: TripData | null;
   selectedOption?: ParkingOption | null;
+  sortMode?: ParkingSortMode;
   leaveByTime?: string | null;
   aprLivePrices?: Record<string, number>;
   aprLiveChecking?: boolean;
@@ -187,6 +295,7 @@ export default function ParkingSmartPick({
   }) as ParkingOption[];
 
   const routeAvailableOptions = optionsWithAprLivePrice.filter((option) => !isParkingRouteUnavailable(option));
+  const airportTrip = isAirportTrip(tripData);
 
   const selectedOptionWithAprLivePrice = selectedOption
     ? (withAprLivePrice(
@@ -196,6 +305,8 @@ export default function ParkingSmartPick({
     : undefined;
 
   const smartPickCandidates = routeAvailableOptions.filter((p) => {
+    if (airportTrip && !isAirportPlausibleParking(p)) return false;
+
     const id = String(p.id || '').toLowerCase();
     const name = String(p.name || '').toLowerCase();
 
@@ -226,6 +337,12 @@ export default function ParkingSmartPick({
     smartPickCandidates.length > 0 ? smartPickCandidates : routeAvailableOptions;
 
   if (candidateOptions.length === 0) return null;
+
+  const modeSortedCandidates = sortParkingOptionsForMode(candidateOptions, sortMode, {
+    isUnavailable: isParkingRouteUnavailable,
+    totalCost: (option) => getParkingComparableCost(option, tripData),
+    tripData,
+  });
 
   const cheapestOfficial = [...routeAvailableOptions]
     .filter((p) => p.type === 'official')
@@ -345,12 +462,15 @@ export default function ParkingSmartPick({
   })[0];
 
   const selectedSmartPick =
-    selectedOptionWithAprLivePrice && !isParkingRouteUnavailable(selectedOptionWithAprLivePrice)
+    selectedOptionWithAprLivePrice &&
+      !isParkingRouteUnavailable(selectedOptionWithAprLivePrice) &&
+      (!airportTrip || isAirportPlausibleParking(selectedOptionWithAprLivePrice))
       ? selectedOptionWithAprLivePrice
       : null;
 
   const best =
     selectedSmartPick ||
+    modeSortedCandidates[0] ||
     weatherAwareBest ||
     cheapest ||
     bestValue ||
@@ -377,6 +497,12 @@ export default function ParkingSmartPick({
   );
 
   const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
+  const modeBadges = reasonBadgesForOption(best, sortMode, tripData);
+  const pickExplanation = explanationForOption(best, sortMode, tripData);
+  const customerOnlyWarning =
+    best.accessType === 'customer_only' || best.accessType === 'validated_customer'
+      ? 'Customer-only parking may require shopping, validation, or posted-lot compliance.'
+      : null;
 
   const savings =
     officialTotal && officialTotal > bestTotal
@@ -420,9 +546,14 @@ export default function ParkingSmartPick({
           <h2 className="text-xl font-semibold leading-tight text-slate-950 sm:text-2xl">{best.name}</h2>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-100">
-              Best Overall
-            </span>
+            {modeBadges.map((badge) => (
+              <span
+                key={badge}
+                className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-100"
+              >
+                {badge}
+              </span>
+            ))}
 
             <ParkingAvailabilityBadge option={best} />
             <button
@@ -524,11 +655,23 @@ export default function ParkingSmartPick({
                 vs official parking with similar timing.
               </>
             ) : (
-              <>Recommended because it balances price, convenience, and booking confidence.</>
+              <>{pickExplanation}</>
             )}
           </div>
 
-          <div className="mt-2 text-xs font-medium text-emerald-700">Smart pick for this airport</div>
+          {savings ? (
+            <div className="mt-2 text-sm text-zinc-700">{pickExplanation}</div>
+          ) : null}
+
+          {customerOnlyWarning ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-950">
+              {customerOnlyWarning}
+            </div>
+          ) : null}
+
+          <div className="mt-2 text-xs font-medium text-emerald-700">
+            Smart pick for {airportTrip ? 'this airport' : 'this destination'}
+          </div>
 
           {/* <ParkingBookingSources option={best} tripData={tripData} /> */}
 

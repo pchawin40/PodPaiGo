@@ -77,6 +77,53 @@ describe('Google Places quota controls', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test('attachGooglePlaceToParking disables live photo resolution by default', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        place: {
+          googlePlaceId: 'place-123',
+          lat: 47.439,
+          lng: -122.294,
+          displayName: 'Jiffy Airport Parking',
+          rating: 4.4,
+          userRatingCount: 1200,
+        },
+      }),
+    } as Response);
+
+    const parking: ParkingOption = {
+      id: 'jiffy',
+      name: 'Jiffy Airport Parking',
+      type: 'off-airport',
+      price: 40,
+      distance: 0,
+      availability: 80,
+      trustStatus: 'live',
+      sourceName: 'ParkWhiz',
+      lastUpdated: '2026-01-01T00:00:00.000Z',
+      assumptions: [],
+    };
+
+    await attachGooglePlaceToParking(
+      parking,
+      {
+        type: 'one-way-departure',
+        origin: 'Monroe, WA',
+        destination: 'SEA',
+        airportCode: 'SEA',
+        destinationKind: 'airport',
+        departureDate: '2026-06-01',
+        departureTime: '09:00',
+      },
+      'SEA',
+      { force: true },
+    );
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.includePhoto).toBe(false);
+  });
+
   test('fetchGooglePlacePhotoNames does not call Google when DISABLE_GOOGLE_PLACES is true', async () => {
     process.env.DISABLE_GOOGLE_PLACES = 'true';
     const fetchMock = jest.spyOn(global, 'fetch');

@@ -46,6 +46,7 @@ function buildRequestBody(parking: ParkingOption, tripData: TripData | null, air
     provider: parking.bookingProvider || null,
     source: parking.sourceName || null,
     googlePlaceId: parking.googlePlaceId || null,
+    includePhoto: false,
   };
 }
 

@@ -37,6 +37,10 @@ function toString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function toBoolean(value: unknown): boolean {
+  return value === true || value === 'true' || value === '1';
+}
+
 function unavailableFields() {
   return {
     placeId: null,
@@ -86,8 +90,9 @@ async function resolvePlacePhotoSelection(args: {
   airport: string | null;
   provider: string | null;
   parkingLotId: string | null;
+  includeLivePhoto: boolean;
 }): Promise<Awaited<ReturnType<typeof getBestParkingPhoto>>> {
-  const placeWithPhoto = await withPhotoName(args.place);
+  const placeWithPhoto = args.includeLivePhoto ? await withPhotoName(args.place) : args.place;
 
   return getBestParkingPhoto({
     parkingLotId: args.parkingLotId,
@@ -95,7 +100,9 @@ async function resolvePlacePhotoSelection(args: {
     providerLotId: args.parkingLotId,
     googlePlaceId: placeWithPhoto.googlePlaceId,
     airportCode: args.airport,
-    googlePhotoName: placeWithPhoto.photoName || placeWithPhoto.photoNames?.[0] || null,
+    googlePhotoName: args.includeLivePhoto
+      ? placeWithPhoto.photoName || placeWithPhoto.photoNames?.[0] || null
+      : null,
     lotName: args.name,
   });
 }
@@ -119,6 +126,7 @@ async function handleRequest(input: Record<string, unknown>) {
   const resolvedAirportContext = airportParkingContext(airport, airportContext);
   const provider = toString(input.provider);
   const source = toString(input.source);
+  const includeLivePhoto = toBoolean(input.includePhoto);
   const parkingLotId = input.parkingLotId ?? input.providerLotId ?? input.parking_lot_id;
 
   if (!name) {
@@ -198,6 +206,7 @@ async function handleRequest(input: Record<string, unknown>) {
             airport: airport || null,
             provider,
             parkingLotId: parkingLotId != null ? String(parkingLotId) : null,
+            includeLivePhoto,
           });
 
           return {

@@ -15,6 +15,38 @@ function isOneOf<T extends string>(value: string, allowed: readonly T[]): value 
   return (allowed as readonly string[]).includes(value);
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function addMinutesToLocalDateTime(
+  date: string,
+  time: string,
+  minutes: number,
+): { date: string; time: string } | null {
+  const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = time.match(/^(\d{2}):(\d{2})$/);
+  if (!dateMatch || !timeMatch || !Number.isFinite(minutes)) return null;
+
+  const start = new Date(
+    Number(dateMatch[1]),
+    Number(dateMatch[2]) - 1,
+    Number(dateMatch[3]),
+    Number(timeMatch[1]),
+    Number(timeMatch[2]),
+    0,
+    0,
+  );
+
+  if (Number.isNaN(start.getTime())) return null;
+
+  const end = new Date(start.getTime() + minutes * 60_000);
+  return {
+    date: `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`,
+    time: `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
+  };
+}
+
 export function generateTripId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -47,7 +79,8 @@ export function storeTripSearchParams(params: URLSearchParams): string | null {
 }
 
 export function parseTripDataFromSearchParams(searchParams: URLSearchParams): TripData | null {
-  const type = searchParams.get('type') as TripData['type'] | null;
+  const rawType = searchParams.get('type');
+  const type = rawType as TripData['type'] | null;
   const origin = searchParams.get('origin') || '';
   const destination = searchParams.get('destination') || '';
   const airportCodeParam = (
@@ -225,9 +258,12 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         destinationKind: 'airport',
       };
     }
-  } else if (type === 'general-trip' || type === 'quick-go') {
+  } else if (type === 'general-trip' || rawType === 'quick-go') {
     const arrivalDate = searchParams.get('arrivalDate') || '';
     const arrivalTime = searchParams.get('arrivalTime') || '';
+    const tripMode = rawType === 'quick-go' || searchParams.get('tripMode') === 'quick-go'
+      ? 'quick-go'
+      : undefined;
 
     const destinationKindRaw = searchParams.get('destinationKind') || 'general';
     const destinationKind = [
@@ -251,6 +287,18 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
 
     const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
     const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
+    const resolvedParkingDuration =
+      parkingDuration ?? (tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
+    const resolvedParkingCheckInDate = parkingCheckInDate || arrivalDate;
+    const resolvedParkingCheckInTime = parkingCheckInTime || arrivalTime;
+    const derivedCheckout =
+      !parkingCheckOutDate && !parkingCheckOutTime && resolvedParkingDuration > 0
+        ? addMinutesToLocalDateTime(
+            resolvedParkingCheckInDate,
+            resolvedParkingCheckInTime,
+            resolvedParkingDuration,
+          )
+        : null;
 
     if (arrivalDate && arrivalTime && origin && destination) {
       data = {
@@ -261,11 +309,12 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         destinationName,
         arrivalDate,
         arrivalTime,
-        parkingDuration,
-        parkingCheckInDate,
-        parkingCheckInTime,
-        parkingCheckOutDate,
-        parkingCheckOutTime,
+        tripMode,
+        parkingDuration: resolvedParkingDuration,
+        parkingCheckInDate: resolvedParkingCheckInDate,
+        parkingCheckInTime: resolvedParkingCheckInTime,
+        parkingCheckOutDate: parkingCheckOutDate || derivedCheckout?.date || '',
+        parkingCheckOutTime: parkingCheckOutTime || derivedCheckout?.time || '',
         destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
         destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
         transportAvailability,
@@ -370,14 +419,24 @@ export function tripDataToSearchParams(
   }
 
   if (data.type === 'general-trip') {
+    const parkingDurationMinutes = data.parkingDuration ?? (data.tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
+    const checkInDate = data.parkingCheckInDate || data.arrivalDate;
+    const checkInTime = data.parkingCheckInTime || data.arrivalTime;
+    const derivedCheckout =
+      data.parkingCheckOutDate && data.parkingCheckOutTime
+        ? null
+        : addMinutesToLocalDateTime(checkInDate, checkInTime, parkingDurationMinutes);
+
     params.set('destinationName', data.destinationName || data.destination);
     params.set('arrivalDate', data.arrivalDate);
     params.set('arrivalTime', data.arrivalTime);
-    params.set('parkingCheckInDate', data.parkingCheckInDate || data.arrivalDate);
-    params.set('parkingCheckInTime', data.parkingCheckInTime || data.arrivalTime);
-    if (data.parkingCheckOutDate) params.set('parkingCheckOutDate', data.parkingCheckOutDate);
-    if (data.parkingCheckOutTime) params.set('parkingCheckOutTime', data.parkingCheckOutTime);
-    if (data.parkingDuration) params.set('parkingDuration', String(data.parkingDuration));
+    if (data.tripMode) params.set('tripMode', data.tripMode);
+    else params.delete('tripMode');
+    params.set('parkingCheckInDate', checkInDate);
+    params.set('parkingCheckInTime', checkInTime);
+    params.set('parkingCheckOutDate', data.parkingCheckOutDate || derivedCheckout?.date || '');
+    params.set('parkingCheckOutTime', data.parkingCheckOutTime || derivedCheckout?.time || '');
+    params.set('parkingDuration', String(parkingDurationMinutes));
     if (extras.timeAnchor) params.set('timeAnchor', extras.timeAnchor);
   } else if (data.type === 'one-way-departure') {
     params.set('departureDate', data.departureDate);

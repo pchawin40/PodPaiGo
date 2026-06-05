@@ -1,4 +1,4 @@
-import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate } from './types';
+import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate, TrafficEstimate, FlightInfo, LocationInfo } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
@@ -38,7 +38,70 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Pr
 
 function getParkingFetchTimeoutMs(): number {
   const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 9000;
+  return Number.isFinite(configured) && configured > 0 ? configured : 5000;
+}
+
+function getProviderFetchTimeoutMs(provider: string): number {
+  const envKey = `${provider.toUpperCase()}_FETCH_TIMEOUT_MS`;
+  const configured = Number(process.env[envKey]);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  if (provider === 'parking') return getParkingFetchTimeoutMs();
+  if (provider === 'traffic') return Number(process.env.ROUTE_FETCH_TIMEOUT_MS) || 4500;
+  return 3500;
+}
+
+function providerFetch<T>(
+  provider: string,
+  fetcher: () => Promise<T>,
+  fallback: (error: unknown, timedOut: boolean) => T,
+  timeoutMs = getProviderFetchTimeoutMs(provider),
+): Promise<T> {
+  const startedAt = Date.now();
+  debugLog('provider_fetch_start', { provider, timeoutMs });
+
+  const promise = fetcher()
+    .then((value) => {
+      debugLog('provider_fetch_success', {
+        provider,
+        ms: Date.now() - startedAt,
+      });
+      return value;
+    })
+    .catch((error) => {
+      debugLog('provider_fetch_failed', {
+        provider,
+        ms: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return fallback(error, false);
+    });
+
+  return withTimeout(promise, timeoutMs, () => {
+    debugLog('provider_fetch_timeout', {
+      provider,
+      ms: Date.now() - startedAt,
+      timeoutMs,
+    });
+    return fallback(new Error(`${provider} fetch timed out`), true);
+  });
+}
+
+function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): TrafficEstimate {
+  return {
+    route: `${tripData.origin}->${tripData.destination}`,
+    duration: 35,
+    congestion: 'medium',
+    trustStatus: 'fallback',
+    routeUnavailable: false,
+    sourceName: timedOut ? 'Provider timeout fallback' : 'Provider fallback',
+    lastUpdated: new Date().toISOString(),
+    assumptions: [
+      timedOut
+        ? 'Live route data is still updating; open directions to confirm current traffic.'
+        : 'Live route data unavailable; using fallback route timing.',
+    ],
+  };
 }
 import {
   resolveRouteDepartureIsoForPurpose,
@@ -360,77 +423,63 @@ export class RecommendationEngine {
       transportAvailability === 'rideshare' || transportAvailability === 'all';
     const allowTransit =
       transportAvailability === 'transit' || transportAvailability === 'all';
-    const parkingRequest = shouldLoadParking
-      ? this.provider.getParkingOptions(
-        tripData.origin,
-        tripData.destination,
-        tripDateTime,
-        calculateParkingDuration(tripData),
-        {
-          destinationKind: tripData.destinationKind ?? 'airport',
-          airportCode: isAirportTrip
-            ? ((tripData as TripDataWithTransport).airportCode || undefined)
-            : undefined,
-          destinationLat: tripData.destinationLat,
-          destinationLng: tripData.destinationLng,
-          routeDepartureTime: parkingRouteDepartureIso,
-          targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
-        }
-      )
-        .then((options) => ({
-          options,
-          failed: false,
-          message: null as string | null,
-        }))
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.warn('Parking fetch failed; continuing with non-parking recommendations', {
-            tripType: tripData.type,
-            destinationKind: tripData.destinationKind ?? 'airport',
-            airportCode: isAirportTrip
-              ? ((tripData as TripDataWithTransport).airportCode || undefined)
-              : undefined,
-            message,
-          });
+    const timedParkingRequest = shouldLoadParking
+      ? providerFetch(
+          'parking',
+          async () => {
+            const options = await this.provider.getParkingOptions(
+              tripData.origin,
+              tripData.destination,
+              tripDateTime,
+              calculateParkingDuration(tripData),
+              {
+                destinationKind: tripData.destinationKind ?? 'airport',
+                airportCode: isAirportTrip
+                  ? ((tripData as TripDataWithTransport).airportCode || undefined)
+                  : undefined,
+                destinationLat: tripData.destinationLat,
+                destinationLng: tripData.destinationLng,
+                routeDepartureTime: parkingRouteDepartureIso,
+                targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+              },
+            );
 
-          return {
-            options: [] as ParkingOption[],
-            failed: true,
-            message: 'Parking data unavailable right now. Try again or open directions.',
-          };
-        })
+            return {
+              options,
+              failed: false,
+              timedOut: false,
+              message: null as string | null,
+            };
+          },
+          (error, timedOut) => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn('Parking fetch failed; continuing with non-parking recommendations', {
+              tripType: tripData.type,
+              destinationKind: tripData.destinationKind ?? 'airport',
+              airportCode: isAirportTrip
+                ? ((tripData as TripDataWithTransport).airportCode || undefined)
+                : undefined,
+              message,
+              timedOut,
+            });
+
+            return {
+              options: [] as ParkingOption[],
+              failed: true,
+              timedOut,
+              message: timedOut
+                ? 'Live parking is still updating. Showing partial results — open directions to confirm.'
+                : 'Parking data unavailable right now. Try again or open directions.',
+            };
+          },
+          getParkingFetchTimeoutMs(),
+        )
       : Promise.resolve({
-        options: [] as ParkingOption[],
-        failed: false,
-        message: null as string | null,
-      });
-
-    // Isolate the parking fetch (Google Places / ParkWhiz / APR fan-out is the most
-    // likely call to hang) so a slow provider does not block the whole results page.
-    const parkingFetchStartedAt = Date.now();
-    const timedParkingRequest = withTimeout(
-      parkingRequest.then((result) => {
-        debugLog('parking_fetch_duration', {
-          ms: Date.now() - parkingFetchStartedAt,
-          count: result.options.length,
-          failed: result.failed,
-        });
-        return result;
-      }),
-      shouldLoadParking ? getParkingFetchTimeoutMs() : 0,
-      () => {
-        debugLog('parking_fetch_timeout', {
-          ms: Date.now() - parkingFetchStartedAt,
-          timeoutMs: getParkingFetchTimeoutMs(),
-        });
-        return {
           options: [] as ParkingOption[],
-          failed: true,
-          message:
-            'Parking is taking longer than expected. Showing other options — try again or open directions.',
-        };
-      },
-    );
+          failed: false,
+          timedOut: false,
+          message: null as string | null,
+        });
 
     const [
       parkingResult,
@@ -444,30 +493,54 @@ export class RecommendationEngine {
       timedParkingRequest,
 
       allowRideshare
-        ? this.provider.getRideshareOptions(
-          tripData.origin,
-          tripData.destination,
-          tripDateTime,
-          tripData,
-        )
+        ? providerFetch(
+            'rideshare',
+            () =>
+              this.provider.getRideshareOptions(
+                tripData.origin,
+                tripData.destination,
+                tripDateTime,
+                tripData,
+              ),
+            () => [] as RideshareOption[],
+          )
         : Promise.resolve([]),
 
       allowTransit
-        ? this.provider.getTransitOptions(
-          tripData.origin,
-          tripData.destination,
-          tripDateTime
-        )
+        ? providerFetch(
+            'transit',
+            () =>
+              this.provider.getTransitOptions(
+                tripData.origin,
+                tripData.destination,
+                tripDateTime,
+              ),
+            () => [] as TransitJourney[],
+          )
         : Promise.resolve([]),
 
       isAirportTrip
-        ? this.provider.getTsaEstimate(
-          tripData.destination,
-          isAirportDepartureTrip(tripData) && 'securityOption' in tripData
-            ? tripData.securityOption || 'standard'
-            : 'standard',
-          plannedAirportArrivalAt
-        )
+        ? providerFetch(
+            'tsa',
+            () =>
+              this.provider.getTsaEstimate(
+                tripData.destination,
+                isAirportDepartureTrip(tripData) && 'securityOption' in tripData
+                  ? tripData.securityOption || 'standard'
+                  : 'standard',
+                plannedAirportArrivalAt,
+              ),
+            () =>
+              ({
+                destination: tripData.destination,
+                waitTime: 20,
+                status: 'fallback',
+                sourceName: 'Provider fallback',
+                trustStatus: 'fallback' as const,
+                lastUpdated: new Date().toISOString(),
+                assumptions: ['Live TSA data unavailable; using fallback security timing.'],
+              } satisfies TsaEstimate),
+          )
         : Promise.resolve({
           destination: tripData.destination,
           waitTime: 0,
@@ -480,26 +553,39 @@ export class RecommendationEngine {
           ],
         } satisfies TsaEstimate),
 
-      this.provider.getTrafficEstimate(
-        tripData.origin,
-        tripData.destination,
-        mainRouteDepartureIso,
-        mainDestinationLatLng,
-        {
-          airportCode: isAirportTrip
-            ? ((tripData as TripDataWithTransport).airportCode || undefined)
-            : undefined,
-          routePurpose: 'main_to_destination',
-          targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
-        },
+      providerFetch(
+        'traffic',
+        () =>
+          this.provider.getTrafficEstimate(
+            tripData.origin,
+            tripData.destination,
+            mainRouteDepartureIso,
+            mainDestinationLatLng,
+            {
+              airportCode: isAirportTrip
+                ? ((tripData as TripDataWithTransport).airportCode || undefined)
+                : undefined,
+              routePurpose: 'main_to_destination',
+              targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+            },
+          ),
+        (_error, timedOut) => fallbackTrafficEstimate(tripData, timedOut),
       ),
 
       isAirportTrip
-        ? this.provider.getFlightInfo(tripData.destination, tripDateTime)
+        ? providerFetch(
+            'flight',
+            () => this.provider.getFlightInfo(tripData.destination, tripDateTime),
+            () => null as FlightInfo | null,
+          )
         : Promise.resolve(null),
 
       isAirportTrip
-        ? this.provider.getAirportInfo(tripData.destination)
+        ? providerFetch(
+            'airport_info',
+            () => this.provider.getAirportInfo(tripData.destination),
+            () => null as LocationInfo | null,
+          )
         : Promise.resolve(null),
     ]);
 
@@ -832,6 +918,26 @@ export class RecommendationEngine {
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
           : undefined;
+    const partialDataReasons = [
+      parkingResult.failed
+        ? parkingResult.timedOut
+          ? 'parking_timeout'
+          : 'parking_failed'
+        : null,
+      trafficEstimate.trustStatus === 'fallback' ? 'traffic_fallback' : null,
+      allowRideshare && finalRideshare.length === 0 ? 'rideshare_unavailable' : null,
+      allowTransit && finalTransit.length === 0 ? 'transit_unavailable' : null,
+      isAirportTrip && !flightInfo ? 'flight_info_unavailable' : null,
+      isAirportTrip && !locationInfo ? 'airport_info_unavailable' : null,
+    ].filter((reason): reason is string => Boolean(reason));
+
+    if (partialDataReasons.length > 0) {
+      debugLog('results_partial_data', {
+        reasons: partialDataReasons,
+        parkingDataStatus,
+        trafficTrustStatus: trafficEstimate.trustStatus,
+      });
+    }
 
     debugLog('recommendation_generation_summary', {
       ms: Date.now() - generationStartedAt,
@@ -840,6 +946,7 @@ export class RecommendationEngine {
       rideshareCount: finalRideshare.length,
       transitCount: finalTransit.length,
       routeUnavailable: Boolean(trafficEstimate.routeUnavailable),
+      partialDataReasons,
     });
 
     return {

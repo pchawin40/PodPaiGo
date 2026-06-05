@@ -43,7 +43,25 @@ describe('routeTiming', () => {
     );
   });
 
-  test('same-day immediate trip can use current/near-current time', () => {
+  test('general point A-to-B arrival derives a departure time instead of using now', () => {
+    const now = new Date('2026-06-01T10:00:00');
+    const trip: TripData = {
+      type: 'general-trip',
+      origin: 'Home, Seattle, WA',
+      destination: 'Costco Everett',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '09:00',
+    };
+
+    expect(shouldUseNowForRouting(resolveScheduledTripDateTime(trip)!, now)).toBe(true);
+
+    const timing = resolveTripRouteTiming(trip, { now });
+    expect(timing.usesNow).toBe(false);
+    expect(timing.timingSource).toBe('target_arrival_derived');
+    expect(timing.mainRouteDepartureIso).toContain('T08:30:00');
+  });
+
+  test('Quick Go keeps near-current routing behavior', () => {
     const now = new Date('2026-06-01T10:00:00');
     const trip: TripData = {
       type: 'general-trip',
@@ -51,9 +69,8 @@ describe('routeTiming', () => {
       destination: 'Costco Everett',
       arrivalDate: '2026-06-01',
       arrivalTime: '10:05',
+      tripMode: 'quick-go',
     };
-
-    expect(shouldUseNowForRouting(resolveScheduledTripDateTime(trip)!, now)).toBe(true);
 
     const timing = resolveTripRouteTiming(trip, { now });
     expect(timing.usesNow).toBe(true);

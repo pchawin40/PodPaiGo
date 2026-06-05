@@ -1,4 +1,9 @@
 import {
+  compareParkingByCheapest,
+  compareParkingByEasiest,
+  compareParkingByFastest,
+  getParkingComparableCost,
+  getParkingTotalTimeMinutes,
   parkingTotalDoorMinutes,
   sortParkingOptionsForMode,
 } from '../sortParkingOptions';
@@ -30,6 +35,28 @@ describe('sortParkingOptionsForMode', () => {
       walkingMinutes: 4,
     });
     expect(parkingTotalDoorMinutes(option)).toBe(19);
+  });
+
+  test('exported comparable helpers use trip duration and route time', () => {
+    const option = lot({
+      price: 10,
+      priceUnit: 'per-day',
+      originToParkingMinutes: 15,
+      parkingBufferMinutes: 5,
+      walkingMinutes: 5,
+    });
+
+    expect(getParkingTotalTimeMinutes(option, null)).toBe(25);
+    expect(
+      getParkingComparableCost(option, {
+        type: 'general-trip',
+        origin: 'A',
+        destination: 'B',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '09:00',
+        parkingDuration: 8 * 60,
+      }),
+    ).toBe(10);
   });
 
   test('cheapest puts free / lowest total cost first', () => {
@@ -98,5 +125,16 @@ describe('sortParkingOptionsForMode', () => {
     expect(cheapest).toEqual(['a', 'b']);
     expect(fastest).toEqual(['b', 'a']);
     expect(cheapest).not.toEqual(fastest);
+  });
+
+  test('direct comparators match mode intent', () => {
+    const easy = lot({ id: 'easy', originToParkingMinutes: 8, walkingMinutes: 2, transferType: 'walk' });
+    const shuttle = lot({ id: 'shuttle', originToParkingMinutes: 8, shuttleMinutes: 10, transferType: 'shuttle' });
+    const free = lot({ id: 'free', price: 0, validationStatus: 'free', originToParkingMinutes: 25 });
+    const paidFast = lot({ id: 'paid-fast', price: 25, originToParkingMinutes: 5, walkingMinutes: 2 });
+
+    expect(compareParkingByEasiest(easy, shuttle)).toBeLessThan(0);
+    expect(compareParkingByCheapest(free, paidFast)).toBeLessThan(0);
+    expect(compareParkingByFastest(paidFast, free)).toBeLessThan(0);
   });
 });

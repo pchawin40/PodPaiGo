@@ -11,7 +11,7 @@ import {
   readQuickGoOriginFromSearchParams,
 } from '../quickGo';
 import { classifyDestinationParking } from '../../parking/destinationParkingClassifier';
-import { parseTripDataFromSearchParams } from '../searchParams';
+import { parseTripDataFromSearchParams, tripDataToSearchParams } from '../searchParams';
 
 const manualOrigin = {
   origin: '123 Main Street, Example City, ST',
@@ -79,9 +79,35 @@ describe('quickGo', () => {
     expect(tripData?.destination).toBe('Pike Place Market');
     expect(tripData?.destinationLat).toBe(47.6097);
     expect(tripData?.destinationLng).toBe(-122.3425);
+    expect(tripData?.tripMode).toBe('quick-go');
     expect(tripData && 'airportCode' in tripData ? tripData.airportCode : undefined).toBeUndefined();
     expect(isQuickGoMode(params)).toBe(true);
     expect(readQuickGoOriginFromSearchParams(params)).toEqual(savedOrigin);
+  });
+
+  test('general trip parking window uses arrival plus selected duration', () => {
+    const params = new URLSearchParams({
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Pike Place Market',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '09:00',
+      parkingDuration: String(8 * 60),
+    });
+
+    const tripData = parseTripDataFromSearchParams(params);
+
+    expect(tripData?.type).toBe('general-trip');
+    expect(tripData?.parkingCheckInDate).toBe('2026-06-01');
+    expect(tripData?.parkingCheckInTime).toBe('09:00');
+    expect(tripData?.parkingCheckOutDate).toBe('2026-06-01');
+    expect(tripData?.parkingCheckOutTime).toBe('17:00');
+
+    const roundTripParams = tripDataToSearchParams(tripData!);
+    expect(roundTripParams.get('parkingCheckInDate')).toBe('2026-06-01');
+    expect(roundTripParams.get('parkingCheckInTime')).toBe('09:00');
+    expect(roundTripParams.get('parkingCheckOutDate')).toBe('2026-06-01');
+    expect(roundTripParams.get('parkingCheckOutTime')).toBe('17:00');
   });
 
   test('formatQuickGoOriginDisplayLabel reflects origin source', () => {

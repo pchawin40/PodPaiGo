@@ -16,7 +16,12 @@ import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
 import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
-import { sortParkingOptionsForMode } from '../../lib/parking/sortParkingOptions';
+import {
+  getParkingComparableCost,
+  getParkingTotalTimeMinutes,
+  parkingRankEvidenceLabel,
+  sortParkingOptionsForMode,
+} from '../../lib/parking/sortParkingOptions';
 import {
   businessTravelModeNeedsParking,
   readTravelPreferences,
@@ -36,13 +41,12 @@ import AirportSearchPicker from '../components/AirportSearchPicker';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
-import { buildParkingDriveContextFromOption, getParkingTerminalTimeMinutes } from '../../lib/parking/routeMinutes';
+import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
 import { getParkingRouteCoordinates } from '../../lib/parking/parkingCoordinates';
 import { getParkingTimeSummaryTitle, getParkingTransferLinkLabel } from '../../lib/parking/parkingLabels';
 import { isCityDestinationTrip, resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
 import { parseLocalDate } from '../../lib/tripTime';
 import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
-import { dedupeAndSortParkingOptions } from '../../lib/parking/googlePlacesDedupe';
 import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
 import ParkingLotVisual from './ParkingLotVisual';
@@ -53,7 +57,6 @@ import { parseFlightInput } from '../../lib/airlines/parseFlightInput';
 import {
   parkingPriceLine,
   getParkingTotalPrice,
-  getParkingDailyPrice,
 } from '../../lib/parking/priceDisplay';
 import {
   parkingRouteLinks,
@@ -2626,6 +2629,99 @@ function dedupeParkingRankedOptions(
   return Array.from(byKey.values());
 }
 
+function uniqueReasons(reasons: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      reasons
+        .map((reason) => String(reason || '').trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function findMatchingRankedParking(
+  rankedOptions: RankedRecommendation[],
+  parkingOption: ParkingOption,
+): RankedRecommendation | null {
+  const parkingKey = parkingKeySafe(parkingOption as AppOption);
+
+  return (
+    rankedOptions.find((ranked) => {
+      const rankedKey = parkingKeySafe(ranked.option as AppOption);
+      return rankedKey && parkingKey && rankedKey === parkingKey;
+    }) ?? null
+  );
+}
+
+function rankedParkingCardFromOption(input: {
+  option: ParkingOption;
+  matchedRanked?: RankedRecommendation | null;
+  tripData: TripData | null;
+  sort: SortTab;
+}): RankedRecommendation {
+  const { option, matchedRanked, tripData, sort } = input;
+  const routeUnavailable = isParkingRouteUnavailable(option);
+  const evidence = parkingRankEvidenceLabel(option, sort, {
+    isUnavailable: isParkingRouteUnavailable,
+    totalCost: (parking) => getParkingComparableCost(parking, tripData),
+    tripData,
+  });
+  const comparableCost = routeUnavailable
+    ? 999999
+    : getParkingComparableCost(option, tripData);
+  const comparableTime = routeUnavailable
+    ? 999999
+    : getParkingTotalTimeMinutes(option, tripData);
+
+  return {
+    ...(matchedRanked || {
+      type: 'parking',
+      score: 0,
+      stressScore: 0,
+      reasons: routeUnavailable
+        ? ['Route unavailable from this origin to this parking lot.']
+        : ['Available parking option'],
+      cost: comparableCost,
+      duration: comparableTime,
+    }),
+    type: 'parking',
+    option: withStableParkingRouteStatus(option),
+    cost: comparableCost,
+    duration: comparableTime,
+    reasons: uniqueReasons([
+      evidence,
+      ...(matchedRanked?.reasons || []),
+      routeUnavailable ? parkingRouteUnavailableReason(option) : null,
+      !matchedRanked && !routeUnavailable ? 'Available parking option' : null,
+    ]),
+  } as RankedRecommendation;
+}
+
+function sortRankedParkingCardsForMode(input: {
+  rankedOptions: RankedRecommendation[];
+  tripData: TripData | null;
+  sort: SortTab;
+}): RankedRecommendation[] {
+  const { rankedOptions, tripData, sort } = input;
+  const parkingOptions = rankedOptions.map((item) =>
+    withStableParkingRouteStatus(item.option as ParkingOption),
+  );
+  const sortedParking = sortParkingOptionsForMode(parkingOptions, sort, {
+    isUnavailable: isParkingRouteUnavailable,
+    totalCost: (option) => getParkingComparableCost(option, tripData),
+    tripData,
+  });
+
+  return sortedParking.map((option) =>
+    rankedParkingCardFromOption({
+      option,
+      matchedRanked: findMatchingRankedParking(rankedOptions, option),
+      tripData,
+      sort,
+    }),
+  );
+}
+
 function mergeRefreshedParkingOptions(
   existing: ParkingOption[],
   refreshed: ParkingOption[],
@@ -3005,6 +3101,13 @@ function debugRequestId(input: string): string {
   return Math.abs(hash).toString(36);
 }
 
+function localDateTimeParam(date: string | undefined, time: string | undefined): string | undefined {
+  if (!date || !time) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  if (!/^\d{2}:\d{2}$/.test(time)) return undefined;
+  return `${date}T${time}:00`;
+}
+
 function logRecommendationsFetch(
   event: 'start' | 'abort' | 'success' | 'fail' | 'finally',
   requestKey: string,
@@ -3125,63 +3228,14 @@ function computeSmartPickParkingBundles(input: {
     tripData
   );
 
-  const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
-    const aOption = a.option as ParkingOption;
-    const bOption = b.option as ParkingOption;
-
-    if (isParkingRouteUnavailable(aOption) !== isParkingRouteUnavailable(bOption)) {
-      return isParkingRouteUnavailable(aOption) ? 1 : -1;
-    }
-
-    const aTotal =
-      getParkingComparableTotal(aOption as AppOption, tripData) ??
-      getParkingTotalPrice(aOption, tripData) ??
-      costOf(a) ??
-      999999;
-    const bTotal =
-      getParkingComparableTotal(bOption as AppOption, tripData) ??
-      getParkingTotalPrice(bOption, tripData) ??
-      costOf(b) ??
-      999999;
-
-    if (sort === 'cheapest') return aTotal - bTotal || a.duration - b.duration;
-    if (sort === 'fastest') {
-      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration || 999;
-      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration || 999;
-
-      return aTime - bTime || aTotal - bTotal;
-    }
-
-    const convenienceScore = (item: RankedRecommendation) => {
-      const option = item.option as ParkingOption;
-      const name = String(option.name || '').toLowerCase();
-
-      let score = 0;
-
-      if (option.type === 'official') score += 100;
-      if (name.includes('parking garage')) score += 80;
-      if (option.transferType === 'walk' || option.transferType === 'airport-garage') score += 50;
-      if (option.covered) score += 25;
-      if (option.trustStatus === 'verified-source' || option.trustStatus === 'live') score += 25;
-      if (option.sourceLink) score += 15;
-
-      const time = parkingTimeBreakdown(option).totalMinutes || item.duration || 999;
-      score -= time * 0.5;
-
-      return score;
-    };
-
-    return convenienceScore(b) - convenienceScore(a) || a.duration - b.duration;
+  const sortedParkingForCurrentTab = sortRankedParkingCardsForMode({
+    rankedOptions: parkingOptionsWithAprPrices,
+    tripData,
+    sort,
   });
 
   const smartPickParkingOptions = (() => {
-    const options =
-      sort === 'easiest'
-        ? dedupeAndSortParkingOptions(
-            sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
-            tripData
-          )
-        : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+    const options = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
     const canonical = canonicalizeParkingOptions(options);
     const routeAvailable = canonical.filter((option) => !isParkingRouteUnavailable(option));
@@ -3197,14 +3251,7 @@ function computeSmartPickParkingBundles(input: {
     return routeAvailable.length > 0 ? routeAvailable : canonical;
   })();
 
-  const cheapestSmartPickOptions =
-    sort === 'cheapest'
-      ? [...smartPickParkingOptions].sort((a, b) => {
-          const aPrice = getParkingDailyPrice(a, tripData) ?? 999999;
-          const bPrice = getParkingDailyPrice(b, tripData) ?? 999999;
-          return aPrice - bPrice;
-        })
-      : smartPickParkingOptions;
+  const cheapestSmartPickOptions = smartPickParkingOptions;
 
   return { smartPickParkingOptions, cheapestSmartPickOptions };
 }
@@ -3421,6 +3468,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
+    if (isCityDestinationTrip(tripData)) return;
     const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
 
     const parkingOptions = rankedOptions
@@ -4201,12 +4249,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     const tripExtras = tripData as TripDataWithExtras;
     const refreshDateTime =
       tripData.type === 'general-trip'
-        ? buildLocalDateTime(tripData.arrivalDate, tripData.arrivalTime)?.toISOString()
+        ? localDateTimeParam(tripData.arrivalDate, tripData.arrivalTime)
         : tripData.type === 'one-way-departure'
-          ? buildLocalDateTime(tripData.departureDate, tripData.departureTime)?.toISOString()
+          ? localDateTimeParam(tripData.departureDate, tripData.departureTime)
           : tripData.type === 'round-trip'
-            ? buildLocalDateTime(tripData.departureDate, tripData.departureTime)?.toISOString()
+            ? localDateTimeParam(tripData.departureDate, tripData.departureTime)
             : undefined;
+    const checkInAt =
+      tripExtras.parkingCheckInDate && tripExtras.parkingCheckInTime
+        ? localDateTimeParam(tripExtras.parkingCheckInDate, tripExtras.parkingCheckInTime)
+        : refreshDateTime;
+    const checkOutAt =
+      tripExtras.parkingCheckOutDate && tripExtras.parkingCheckOutTime
+        ? localDateTimeParam(tripExtras.parkingCheckOutDate, tripExtras.parkingCheckOutTime)
+        : tripData.type === 'general-trip' && tripData.parkingDuration
+          ? localDateTimeParam(tripExtras.parkingCheckOutDate, tripExtras.parkingCheckOutTime)
+          : undefined;
     const body = {
       airportCode: isCityDestinationTrip(tripData) ? undefined : getTripAirportCode(tripData),
       origin: tripData.origin,
@@ -4218,14 +4276,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       parkingDurationMinutes: calculateParkingDuration(tripData),
       checkInDate: tripExtras.parkingCheckInDate,
       checkOutDate: tripExtras.parkingCheckOutDate,
-      checkInAt:
-        tripExtras.parkingCheckInDate && tripExtras.parkingCheckInTime
-          ? `${tripExtras.parkingCheckInDate}T${tripExtras.parkingCheckInTime}`
-          : refreshDateTime,
-      checkOutAt:
-        tripExtras.parkingCheckOutDate && tripExtras.parkingCheckOutTime
-          ? `${tripExtras.parkingCheckOutDate}T${tripExtras.parkingCheckOutTime}`
-          : undefined,
+      checkInAt,
+      checkOutAt,
     };
     const refreshKey = JSON.stringify(body);
 
@@ -4696,58 +4748,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     tripData
   );
 
-  const sortedParkingForCurrentTab = [...parkingOptionsWithAprPrices].sort((a, b) => {
-    const aOption = a.option as ParkingOption;
-    const bOption = b.option as ParkingOption;
-
-    if (isParkingRouteUnavailable(aOption) !== isParkingRouteUnavailable(bOption)) {
-      return isParkingRouteUnavailable(aOption) ? 1 : -1;
-    }
-
-    const aTotal = getParkingComparableTotal(aOption as AppOption, tripData) ?? getParkingTotalPrice(aOption, tripData) ?? costOf(a) ?? 999999;
-    const bTotal = getParkingComparableTotal(bOption as AppOption, tripData) ?? getParkingTotalPrice(bOption, tripData) ?? costOf(b) ?? 999999;
-
-    if (sort === 'cheapest') return (aTotal - bTotal) || (a.duration - b.duration);
-    if (sort === 'fastest') {
-      const aTime = parkingTimeBreakdown(aOption).totalMinutes || a.duration || 999;
-      const bTime = parkingTimeBreakdown(bOption).totalMinutes || b.duration || 999;
-
-      return (aTime - bTime) || (aTotal - bTotal);
-    }
-
-    const convenienceScore = (item: RankedRecommendation) => {
-      const option = item.option as ParkingOption;
-      const name = String(option.name || '').toLowerCase();
-
-      let score = 0;
-
-      if (option.type === 'official') score += 100;
-      if (name.includes('parking garage')) score += 80;
-      if (option.transferType === 'walk' || option.transferType === 'airport-garage') score += 50;
-      if (option.covered) score += 25;
-      if (option.trustStatus === 'verified-source' || option.trustStatus === 'live') score += 25;
-      if (option.sourceLink) score += 15;
-
-      const time = parkingTimeBreakdown(option).totalMinutes || item.duration || 999;
-      score -= time * 0.5;
-
-      return score;
-    };
-
-    return (
-      convenienceScore(b) - convenienceScore(a) ||
-      (a.duration - b.duration)
-    );
+  const sortedParkingForCurrentTab = sortRankedParkingCardsForMode({
+    rankedOptions: parkingOptionsWithAprPrices,
+    tripData,
+    sort,
   });
 
   const parkingDisplayOptions = (() => {
-    const options =
-      sort === 'easiest'
-        ? dedupeAndSortParkingOptions(
-          sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption),
-          tripData
-        )
-        : sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+    const options = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
     const filteredOptions = filterParkingOptionsByFeatures(
       options,
@@ -4780,55 +4788,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
-  const remainingParking = sortParkingOptionsForMode(
-    parkingDisplayOptions.filter((parkingOption) => parkingOption.id !== smartPickOption?.id),
-    sort,
-    {
-      isUnavailable: isParkingRouteUnavailable,
-      totalCost: (option) =>
-        getParkingTotalPrice(option, tripData) ?? option.price ?? 999999,
-    },
-  )
-    .map((parkingOption: ParkingOption) => {
-      const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
-        const rankedKey = parkingKeySafe(ranked.option as AppOption);
-        const parkingKey = parkingKeySafe(parkingOption as AppOption);
-        return rankedKey && parkingKey && rankedKey === parkingKey;
-      });
-
-      const routeUnavailable = isParkingRouteUnavailable(parkingOption);
-
-      return {
-        ...(matchedRanked || {
-          type: 'parking',
-          score: 0,
-          stressScore: 0,
-          reasons: routeUnavailable
-            ? ['Route unavailable from this origin to this parking lot.']
-            : ['Available parking option'],
-          cost: routeUnavailable
-            ? 999999
-            : getParkingTotalPrice(parkingOption, tripData) ??
-            parkingOption.price ??
-            999999,
-          duration: routeUnavailable
-            ? 999999
-            : getParkingTerminalTimeMinutes(
-                parkingOption,
-                buildParkingDriveContextFromOption(parkingOption),
-                tripData ? resolveTripParkingContext(tripData) : 'airport_trip',
-              ),
+  const remainingParking = sortRankedParkingCardsForMode({
+    rankedOptions: parkingDisplayOptions
+      .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
+      .map((parkingOption) =>
+        rankedParkingCardFromOption({
+          option: parkingOption,
+          matchedRanked: findMatchingRankedParking(sortedParkingForCurrentTab, parkingOption),
+          tripData,
+          sort,
         }),
-        type: 'parking',
-        option: parkingOption,
-        cost: routeUnavailable
-          ? 999999
-          : getParkingTotalPrice(parkingOption, tripData) ??
-          parkingOption.price ??
-          matchedRanked?.cost ??
-          999999,
-      } as RankedRecommendation;
-    });
+      ),
+    tripData,
+    sort,
+  });
 
   const displayableRemainingParking = remainingParking.filter((opt) => {
     const option = opt.option as AppOption;
@@ -5207,7 +5180,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </div>
 
               <div className="mt-1 text-xs text-zinc-600">
-                {recommendation.trafficEstimate?.congestion
+                {recommendation.trafficEstimate?.trustStatus === 'fallback'
+                  ? 'Using cached estimate. Open directions to confirm.'
+                  : recommendation.trafficEstimate?.trustStatus === 'estimated'
+                    ? 'Using cached estimate'
+                    : recommendation.trafficEstimate?.congestion
                   ? `${recommendation.trafficEstimate.congestion} congestion`
                   : 'Based on available route data'}
               </div>
@@ -5830,6 +5807,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <ParkingSmartPick
                   options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
                   tripData={tripData}
+                  sortMode={sort}
                   leaveByTime={airportRouteUnavailable ? null : recommendation.leaveByTime}
                   selectedOption={
                     smartPickOption
