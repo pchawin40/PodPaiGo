@@ -11,6 +11,10 @@ import type {
   TripData,
   TripType,
 } from '../types';
+import {
+  deriveParkingWindowFromArrival,
+  resolveParkingWindow,
+} from './parkingWindow';
 
 function isOneOf<T extends string>(value: string, allowed: readonly T[]): value is T {
   return (allowed as readonly string[]).includes(value);
@@ -329,16 +333,15 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
 
     const resolvedParkingDuration =
       parkingDuration ?? (tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
-    const resolvedParkingCheckInDate = parkingCheckInDate || arrivalDate;
-    const resolvedParkingCheckInTime = parkingCheckInTime || arrivalTime;
-    const derivedCheckout =
-      !parkingCheckOutDate && !parkingCheckOutTime && resolvedParkingDuration > 0
-        ? addMinutesToLocalDateTime(
-            resolvedParkingCheckInDate,
-            resolvedParkingCheckInTime,
-            resolvedParkingDuration,
-          )
-        : null;
+    const parkingWindow = resolveParkingWindow({
+      arrivalDate,
+      arrivalTime,
+      durationMinutes: resolvedParkingDuration,
+      parkingCheckInDate,
+      parkingCheckInTime,
+      parkingCheckOutDate,
+      parkingCheckOutTime,
+    });
 
     if (arrivalDate && arrivalTime && origin && destination) {
       data = {
@@ -350,11 +353,11 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         arrivalDate,
         arrivalTime,
         tripMode,
-        parkingDuration: resolvedParkingDuration,
-        parkingCheckInDate: resolvedParkingCheckInDate,
-        parkingCheckInTime: resolvedParkingCheckInTime,
-        parkingCheckOutDate: parkingCheckOutDate || derivedCheckout?.date || '',
-        parkingCheckOutTime: parkingCheckOutTime || derivedCheckout?.time || '',
+        parkingDuration: parkingWindow?.parkingDuration ?? resolvedParkingDuration,
+        parkingCheckInDate: parkingWindow?.parkingCheckInDate || arrivalDate,
+        parkingCheckInTime: parkingWindow?.parkingCheckInTime || arrivalTime,
+        parkingCheckOutDate: parkingWindow?.parkingCheckOutDate || '',
+        parkingCheckOutTime: parkingWindow?.parkingCheckOutTime || '',
         destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
         destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
         transportAvailability,
@@ -500,23 +503,28 @@ export function tripDataToSearchParams(
 
   if (data.type === 'general-trip') {
     const parkingDurationMinutes = data.parkingDuration ?? (data.tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
-    const checkInDate = data.parkingCheckInDate || data.arrivalDate;
-    const checkInTime = data.parkingCheckInTime || data.arrivalTime;
-    const derivedCheckout =
-      data.parkingCheckOutDate && data.parkingCheckOutTime
-        ? null
-        : addMinutesToLocalDateTime(checkInDate, checkInTime, parkingDurationMinutes);
+    const parkingWindow =
+      resolveParkingWindow({
+        arrivalDate: data.arrivalDate,
+        arrivalTime: data.arrivalTime,
+        durationMinutes: parkingDurationMinutes,
+        parkingCheckInDate: data.parkingCheckInDate,
+        parkingCheckInTime: data.parkingCheckInTime,
+        parkingCheckOutDate: data.parkingCheckOutDate,
+        parkingCheckOutTime: data.parkingCheckOutTime,
+      }) ??
+      deriveParkingWindowFromArrival(data.arrivalDate, data.arrivalTime, parkingDurationMinutes);
 
     params.set('destinationName', data.destinationName || data.destination);
     params.set('arrivalDate', data.arrivalDate);
     params.set('arrivalTime', data.arrivalTime);
     if (data.tripMode) params.set('tripMode', data.tripMode);
     else params.delete('tripMode');
-    params.set('parkingCheckInDate', checkInDate);
-    params.set('parkingCheckInTime', checkInTime);
-    params.set('parkingCheckOutDate', data.parkingCheckOutDate || derivedCheckout?.date || '');
-    params.set('parkingCheckOutTime', data.parkingCheckOutTime || derivedCheckout?.time || '');
-    params.set('parkingDuration', String(parkingDurationMinutes));
+    params.set('parkingCheckInDate', parkingWindow?.parkingCheckInDate || data.arrivalDate);
+    params.set('parkingCheckInTime', parkingWindow?.parkingCheckInTime || data.arrivalTime);
+    params.set('parkingCheckOutDate', parkingWindow?.parkingCheckOutDate || '');
+    params.set('parkingCheckOutTime', parkingWindow?.parkingCheckOutTime || '');
+    params.set('parkingDuration', String(parkingWindow?.parkingDuration ?? parkingDurationMinutes));
     if (extras.timeAnchor) params.set('timeAnchor', extras.timeAnchor);
   } else if (data.type === 'one-way-departure') {
     params.set('departureDate', data.departureDate);

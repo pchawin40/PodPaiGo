@@ -30,6 +30,7 @@ type PodPaiGoAssistantProps = {
 type ParseTripApiResponse = ParsedTripAssistantResult & {
   message?: string;
   providerUsed?: 'mock' | 'openai';
+  liveProviderActive?: boolean;
   plan?: 'anonymous' | 'free' | 'plus' | 'pro' | 'admin';
   assistantLabel?: string;
   remainingToday?: number | null;
@@ -52,17 +53,18 @@ export default function PodPaiGoAssistant({
   const [open, setOpen] = useState(false);
   const [showFeatureInfo, setShowFeatureInfo] = useState(false);
   const [disabled, setDisabled] = useState<boolean | null>(null);
-  const [assistantLabel, setAssistantLabel] = useState('Basic assistant');
+  const [assistantLabel, setAssistantLabel] = useState('Mock parser in development');
   const [messages, setMessages] = useState<ChatMessage[]>([
     createMessage(
       'assistant',
       page === 'results'
         ? 'Ask about leave time, parking, TSA, or weather on this page. I only use the recommendation data already loaded here.'
-        : 'Describe an airport trip and I will parse it for review before recommendations run.',
+        : 'Describe your trip. I’ll ask follow-up questions, then fill the planner for review before recommendations run.',
     ),
   ]);
   const [input, setInput] = useState('');
   const [parsed, setParsed] = useState<ParsedTripAssistantResult | null>(null);
+  const [awaitingClarification, setAwaitingClarification] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [redirectPath, setRedirectPath] = useState('');
@@ -91,12 +93,19 @@ export default function PodPaiGoAssistant({
 
     fetch('/api/ai/status', { headers })
       .then((response) => response.json())
-      .then((data: { disabled?: boolean; assistantLabel?: string }) => {
+      .then((data: {
+        disabled?: boolean;
+        assistantLabel?: string;
+        providerUsed?: 'mock' | 'openai';
+        liveProviderActive?: boolean;
+      }) => {
         if (cancelled) return;
         setDisabled(Boolean(data.disabled));
-        if (data.assistantLabel) {
-          setAssistantLabel(data.assistantLabel);
-        }
+        setAssistantLabel(
+          data.liveProviderActive || data.providerUsed === 'openai'
+            ? 'AI Trip Planner'
+            : 'Mock parser in development',
+        );
       })
       .catch(() => {
         if (!cancelled) setDisabled(false);
@@ -150,9 +159,14 @@ export default function PodPaiGoAssistant({
 
     setLoading(true);
     setError(null);
-    setParsed(null);
+      setParsed(null);
+      setAwaitingClarification(false);
 
     try {
+      const previousTripInputs = messages
+        .filter((message) => message.role === 'user')
+        .map((message) => message.text);
+      const combinedUserText = [...previousTripInputs, userText].filter(Boolean).join('\n');
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -163,7 +177,7 @@ export default function PodPaiGoAssistant({
       const response = await fetch('/api/ai/parse-trip', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ userText, sessionId }),
+        body: JSON.stringify({ userText: combinedUserText, sessionId }),
       });
 
       const data = (await response.json()) as ParseTripApiResponse;
@@ -171,16 +185,35 @@ export default function PodPaiGoAssistant({
         throw new Error(data.message || 'Could not parse trip.');
       }
 
-      setParsed(data);
       if (data.assistantLabel) {
-        setAssistantLabel(data.assistantLabel);
+        setAssistantLabel(
+          data.liveProviderActive || data.providerUsed === 'openai'
+            ? 'AI Trip Planner'
+            : 'Mock parser in development',
+        );
       }
-      appendMessage(
-        createMessage(
-          'assistant',
-          'I parsed your trip. Review the details below and confirm before recommendations run.',
-        ),
-      );
+      if (data.status === 'needs_clarification') {
+        setParsed(null);
+        setAwaitingClarification(true);
+        appendMessage(
+          createMessage(
+            'assistant',
+            (data.clarificationQuestions && data.clarificationQuestions.length > 0
+              ? data.clarificationQuestions
+              : ['Can you add the missing trip details?']
+            ).join(' '),
+          ),
+        );
+      } else {
+        setParsed(data);
+        setAwaitingClarification(false);
+        appendMessage(
+          createMessage(
+            'assistant',
+            'I parsed your trip. Review the details below and confirm before recommendations run.',
+          ),
+        );
+      }
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : 'Could not parse trip.');
       appendMessage(
@@ -213,6 +246,11 @@ export default function PodPaiGoAssistant({
       return;
     }
 
+    if (awaitingClarification) {
+      await handleTripParse(userText);
+      return;
+    }
+
     if (page === 'results' && resultsContext && !isTripPlanningMessage(userText)) {
       appendMessage(
         createMessage('assistant', buildResultsExplanation(userText, resultsContext)),
@@ -238,7 +276,7 @@ export default function PodPaiGoAssistant({
 
     const params = parsedTripToSearchParams(parsed, { confirmed: true });
     if (!params) {
-      setError('Please fill origin, airport, and departure date before continuing.');
+      setError('Please fill the required trip details before continuing.');
       return;
     }
 
@@ -252,7 +290,8 @@ export default function PodPaiGoAssistant({
         {showFeatureInfo ? (
           <div className="absolute bottom-full right-0 mb-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl">
             AI planning is available for signed-in users. Ask PodPaiGo can explain routes,
-            parking, timing, and tradeoffs using your trip results.
+            parking, timing, and tradeoffs using your trip results. Describe your trip. PodPaiGo
+            will ask follow-up questions, then fill the planner for review.
           </div>
         ) : null}
         <button
@@ -368,7 +407,9 @@ export default function PodPaiGoAssistant({
                 placeholder={
                   page === 'results'
                     ? 'Ask about leave time, parking, TSA, or weather…'
-                    : 'Describe your airport trip…'
+                    : awaitingClarification
+                      ? 'Answer the follow-up question…'
+                      : 'Describe your trip…'
                 }
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
@@ -393,7 +434,7 @@ export default function PodPaiGoAssistant({
 
               <p className="mt-2 text-[11px] leading-4 text-slate-500">
                 {signedIn
-                  ? 'Trip planning always shows a review step first. No Google Places, Routes, or paid speech APIs are used in this assistant.'
+                  ? 'Trip planning asks follow-up questions when details are missing, then shows a review step first. No Google Places, Routes, or paid speech APIs are used in this assistant.'
                   : 'Sign in to use AI Trip Planner and Ask PodPaiGo with your trip context.'}
               </p>
             </form>

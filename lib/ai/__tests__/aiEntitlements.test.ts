@@ -10,6 +10,7 @@ describe('aiEntitlements', () => {
   beforeEach(() => {
     delete process.env.DISABLE_AI_ASSISTANT;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_ASSISTANT_PROVIDER;
     delete process.env.ADMIN_USER_IDS;
   });
 
@@ -28,6 +29,7 @@ describe('aiEntitlements', () => {
 
   test('paid entitlement allows live only when env and API key exist', () => {
     process.env.OPENAI_API_KEY = 'test-key';
+    process.env.AI_ASSISTANT_PROVIDER = 'openai';
     process.env.ADMIN_USER_IDS = 'admin-user-1';
 
     expect(resolveUserPlan({ userId: 'admin-user-1' })).toBe('admin');
@@ -38,9 +40,19 @@ describe('aiEntitlements', () => {
 
   test('missing OpenAI key falls back to mock for paid plans', () => {
     process.env.ADMIN_USER_IDS = 'admin-user-1';
+    process.env.AI_ASSISTANT_PROVIDER = 'openai';
     delete process.env.OPENAI_API_KEY;
 
     expect(resolveAiMode('admin')).toBe('mock');
+  });
+
+  test('configured mock provider blocks live even for paid plans', () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.AI_ASSISTANT_PROVIDER = 'mock';
+    process.env.ADMIN_USER_IDS = 'admin-user-1';
+
+    expect(resolveAiMode('admin')).toBe('mock');
+    expect(resolveAiProviderForRequest('admin')).toBe('mock');
   });
 
   test('DISABLE_AI_ASSISTANT disables all live AI', () => {

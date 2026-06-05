@@ -15,8 +15,11 @@ function buildParsed(airlineText: string | null): ParsedTripAssistantResult {
     airlineText,
     departureDate: '2026-11-15',
     departureTime: '12:00',
+    timeAnchor: 'depart_at',
     returnDate: null,
     returnTime: null,
+    transportAvailability: 'all',
+    parkingPreference: 'nearby',
     tripType: 'one-way-departure',
     needsParking: true,
     needsLeaveTime: true,
@@ -38,8 +41,12 @@ function buildQuickGoParsed(): ParsedTripAssistantResult {
     airlineText: null,
     departureDate: '2026-06-02',
     departureTime: '14:30',
+    timeAnchor: 'arrive_by',
     returnDate: null,
     returnTime: null,
+    parkingDurationMinutes: 120,
+    transportAvailability: 'all',
+    parkingPreference: 'nearby',
     tripType: 'quick-go',
     needsParking: false,
     needsLeaveTime: false,
@@ -60,10 +67,11 @@ describe('TripAssistantConfirm quick go', () => {
       }),
     );
 
-    expect(html).toContain('Review Quick Go trip');
+    expect(html).toContain('Review point A-to-B trip');
     expect(html).toContain('Destination');
+    expect(html).toContain('Arrival time');
+    expect(html).toContain('Transport preference');
     expect(html).not.toContain('Airport code');
-    expect(html).not.toContain('Departure date');
   });
 });
 

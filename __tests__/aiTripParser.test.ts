@@ -127,6 +127,11 @@ describe('mock trip parser', () => {
     const confirmed = {
       ...parsed,
       originSource: 'current_location' as const,
+      departureDate: '2026-06-02',
+      departureTime: '14:30',
+      transportAvailability: 'all' as const,
+      parkingPreference: 'destination' as const,
+      parkingDurationMinutes: 60,
     };
 
     const params = parsedTripToSearchParams(confirmed, { confirmed: true });
@@ -136,6 +141,10 @@ describe('mock trip parser', () => {
     expect(params?.get('intent')).toBe('general-trip');
     expect(params?.get('assistantParsed')).toBe('1');
     expect(params?.get('destination')).toMatch(/Fred Meyer/i);
+    expect(params?.get('parkingCheckInDate')).toBe('2026-06-02');
+    expect(params?.get('parkingCheckInTime')).toBe('14:30');
+    expect(params?.get('parkingCheckOutDate')).toBe('2026-06-02');
+    expect(params?.get('parkingCheckOutTime')).toBe('15:30');
   });
 
   test('extracts optional airline text and maps it to search params after confirm', () => {

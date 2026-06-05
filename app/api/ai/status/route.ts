@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOutboundClick';
 import { resolveAiEntitlements } from '../../../../lib/ai/aiEntitlements';
-import { isAiAssistantDisabled } from '../../../../lib/ai/tripParseConfig';
+import {
+  getAiAssistantProvider,
+  isAiAssistantDisabled,
+} from '../../../../lib/ai/tripParseConfig';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +22,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     disabled: isAiAssistantDisabled(),
+    configuredProvider: getAiAssistantProvider(),
+    liveProviderActive: entitlements.providerUsed === 'openai',
     provider: entitlements.providerUsed,
     providerUsed: entitlements.providerUsed,
     plan: entitlements.plan,

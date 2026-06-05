@@ -2,6 +2,7 @@ import { resolveUserPlan, type UserPlan } from '../auth/userPlan';
 import {
   getMaxAiParseCallsPerAnonDay,
   getMaxAiParseCallsPerUserDay,
+  getAiAssistantProvider,
   getOpenAiApiKey,
   isAiAssistantDisabled,
 } from './tripParseConfig';
@@ -16,7 +17,11 @@ function utcDayStartIso(now = new Date()): string {
 export function resolveAiMode(plan: UserPlan): AiMode {
   if (isAiAssistantDisabled()) return 'mock';
   if (plan === 'anonymous' || plan === 'free') return 'mock';
-  if ((plan === 'plus' || plan === 'pro' || plan === 'admin') && getOpenAiApiKey()) {
+  if (
+    (plan === 'plus' || plan === 'pro' || plan === 'admin') &&
+    getAiAssistantProvider() === 'openai' &&
+    getOpenAiApiKey()
+  ) {
     return 'live';
   }
   return 'mock';

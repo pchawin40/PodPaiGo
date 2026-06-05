@@ -26,6 +26,10 @@ import { formatMoney } from '../utils/formatter';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
+import {
+  formatParkingWindowSummary,
+  resolveParkingWindow,
+} from '../../lib/trip/parkingWindow';
 import SavedTripsPanel from '../components/SavedTripsPanel';
 import SaveFavoriteTripButton from '../components/SaveFavoriteTripButton';
 import type { RecommendationSortMode } from '../../lib/domain';
@@ -440,6 +444,8 @@ export default function TripFlow() {
   const [errors, setErrors] = useState<string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
+  const [showAdvancedGeneralParkingTime, setShowAdvancedGeneralParkingTime] = useState(false);
+  const [generalParkingWindowOverridden, setGeneralParkingWindowOverridden] = useState(false);
 
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
@@ -480,6 +486,56 @@ export default function TripFlow() {
   const selectedAirport = useMemo(() => {
     return getAirportById(state.airportCode) || getAirportById('SEA')!;
   }, [state.airportCode]);
+
+  const generalParkingDurationMinutes = useMemo(
+    () => parkingDurationHoursToMinutes(state.parkingDurationHours, 8),
+    [state.parkingDurationHours],
+  );
+  const normalizedTripDateForParking = useMemo(
+    () => normalizeDateInputValue(state.date) || '',
+    [state.date],
+  );
+  const normalizedParkingCheckInDateForParking = useMemo(
+    () =>
+      state.parkingCheckInDate
+        ? normalizeDateInputValue(state.parkingCheckInDate) || state.parkingCheckInDate
+        : '',
+    [state.parkingCheckInDate],
+  );
+  const normalizedParkingCheckOutDateForParking = useMemo(
+    () =>
+      state.parkingCheckOutDate
+        ? normalizeDateInputValue(state.parkingCheckOutDate) || state.parkingCheckOutDate
+        : '',
+    [state.parkingCheckOutDate],
+  );
+  const generalParkingWindow = useMemo(
+    () =>
+      resolveParkingWindow({
+        arrivalDate: normalizedTripDateForParking,
+        arrivalTime: state.time || '09:00',
+        durationMinutes: generalParkingDurationMinutes,
+        parkingCheckInDate: generalParkingWindowOverridden
+          ? normalizedParkingCheckInDateForParking
+          : '',
+        parkingCheckInTime: generalParkingWindowOverridden ? state.parkingCheckInTime : '',
+        parkingCheckOutDate: generalParkingWindowOverridden
+          ? normalizedParkingCheckOutDateForParking
+          : '',
+        parkingCheckOutTime: generalParkingWindowOverridden ? state.parkingCheckOutTime : '',
+      }),
+    [
+      generalParkingDurationMinutes,
+      generalParkingWindowOverridden,
+      normalizedParkingCheckInDateForParking,
+      normalizedParkingCheckOutDateForParking,
+      normalizedTripDateForParking,
+      state.parkingCheckInTime,
+      state.parkingCheckOutTime,
+      state.time,
+    ],
+  );
+  const generalParkingSummary = formatParkingWindowSummary(generalParkingWindow);
 
   const airportGuide = useMemo(() => {
     const wantsAirline = intent ? intentCopy(intent).wantsAirline : false;
@@ -589,6 +645,15 @@ export default function TripFlow() {
           next.push('Parking duration must be a positive number of hours.');
         }
       }
+    }
+
+    if (
+      state.intent === 'general-trip' &&
+      state.parkingPreference !== 'none' &&
+      generalParkingWindowOverridden &&
+      !generalParkingWindow
+    ) {
+      next.push('Custom parking window must end after it starts.');
     }
 
     return next;
@@ -761,6 +826,15 @@ export default function TripFlow() {
       nextFieldErrors.destination = 'Enter where you are going.';
     }
 
+    if (
+      state.intent === 'general-trip' &&
+      state.parkingPreference !== 'none' &&
+      generalParkingWindowOverridden &&
+      !generalParkingWindow
+    ) {
+      nextFieldErrors.parkingCheckOutDate = 'Custom parking window must end after it starts.';
+    }
+
     setErrors(next);
     setFieldErrors(nextFieldErrors);
 
@@ -824,46 +898,30 @@ export default function TripFlow() {
 
     if (tripType === 'general-trip') {
       const arrivalTime = state.time || '09:00';
-      const parkingCheckInDate = normalizedParkingCheckInDate || normalizedDate!;
-      const parkingCheckInTime = state.parkingCheckInTime || arrivalTime;
+      const minutes = parkingDurationHoursToMinutes(state.parkingDurationHours, 8);
+      const parkingWindow = resolveParkingWindow({
+        arrivalDate: normalizedDate!,
+        arrivalTime,
+        durationMinutes: minutes,
+        parkingCheckInDate: generalParkingWindowOverridden
+          ? normalizedParkingCheckInDate || ''
+          : '',
+        parkingCheckInTime: generalParkingWindowOverridden ? state.parkingCheckInTime : '',
+        parkingCheckOutDate: generalParkingWindowOverridden
+          ? normalizedParkingCheckOutDate || ''
+          : '',
+        parkingCheckOutTime: generalParkingWindowOverridden ? state.parkingCheckOutTime : '',
+      });
 
       params.set('arrivalDate', normalizedDate!);
       params.set('arrivalTime', arrivalTime);
 
-      params.set('parkingCheckInDate', parkingCheckInDate);
-      params.set('parkingCheckInTime', parkingCheckInTime);
-
-      const explicitCheckOutDate = normalizedParkingCheckOutDate;
-      const explicitCheckOutTime = state.parkingCheckOutTime;
-
-      if (explicitCheckOutDate && explicitCheckOutTime) {
-        const minutes = calculateParkingDurationMinutes({
-          checkInDate: parkingCheckInDate,
-          checkInTime: parkingCheckInTime,
-          checkOutDate: explicitCheckOutDate,
-          checkOutTime: explicitCheckOutTime,
-        });
-
-        params.set('parkingCheckOutDate', explicitCheckOutDate);
-        params.set('parkingCheckOutTime', explicitCheckOutTime);
-        if (minutes !== null) params.set('parkingDuration', String(minutes));
-      } else {
-        const minutes = parkingDurationHoursToMinutes(state.parkingDurationHours, 8);
-
-        if (minutes !== null) {
-          params.set('parkingDuration', String(minutes));
-
-          const checkout = addMinutesToLocalDateTime(
-            parkingCheckInDate,
-            parkingCheckInTime,
-            minutes
-          );
-
-          if (checkout) {
-            params.set('parkingCheckOutDate', checkout.date);
-            params.set('parkingCheckOutTime', checkout.time);
-          }
-        }
+      if (parkingWindow) {
+        params.set('parkingCheckInDate', parkingWindow.parkingCheckInDate);
+        params.set('parkingCheckInTime', parkingWindow.parkingCheckInTime);
+        params.set('parkingCheckOutDate', parkingWindow.parkingCheckOutDate);
+        params.set('parkingCheckOutTime', parkingWindow.parkingCheckOutTime);
+        params.set('parkingDuration', String(parkingWindow.parkingDuration));
       }
     } else if (tripType === 'one-way-departure') {
       const parkingCheckIn = resolveAirportParkingCheckIn(state, normalizedDate!);
@@ -1728,91 +1786,10 @@ export default function TripFlow() {
                     </div>
 
                     {state.parkingPreference !== 'none' && (
-                      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="mt-5 space-y-4">
                         <div>
-                          <label className="block text-sm font-medium text-zinc-800">
-                            Park from date
-                            <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                          </label>
-                          <DateTextInput
-                            value={state.parkingCheckInDate}
-                            onChange={(value) =>
-                              setState((s) => ({
-                                ...s,
-                                parkingCheckInDate: value,
-                              }))
-                            }
-                            ariaLabel="Park from date"
-                            className="mt-2 w-full"
-                          />
-                          <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-zinc-800">
-                            Park from time
-                            <span className="ml-1 text-xs font-normal text-zinc-500">Defaults to arrival</span>
-                          </label>
-                          <input
-                            type="time"
-                            value={state.parkingCheckInTime}
-                            onChange={(e) =>
-                              setState((s) => ({
-                                ...s,
-                                parkingCheckInTime: e.target.value,
-                              }))
-                            }
-                            className={formInputClass({ className: 'mt-2 w-full' })}
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-zinc-800">
-                            Park until date
-                            <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                          </label>
-                          <DateTextInput
-                            value={state.parkingCheckOutDate}
-                            onChange={(value) => {
-                              setState((s) => ({
-                                ...s,
-                                parkingCheckOutDate: value,
-                              }));
-                              setFieldErrors((prev) => {
-                                const next = { ...prev };
-                                delete next.parkingCheckOutDate;
-                                return next;
-                              });
-                            }}
-                            ariaLabel="Park until date"
-                            hasError={Boolean(fieldErrors.parkingCheckOutDate)}
-                            className="mt-2 w-full"
-                          />
-                          <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-zinc-800">
-                            Park until time
-                            <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                          </label>
-                          <input
-                            type="time"
-                            value={state.parkingCheckOutTime}
-                            onChange={(e) =>
-                              setState((s) => ({
-                                ...s,
-                                parkingCheckOutTime: e.target.value,
-                              }))
-                            }
-                            className={formInputClass({ className: 'mt-2 w-full' })}
-                          />
-                        </div>
-
-                        <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-zinc-800">
                             Parking duration
-                            <span className="ml-1 text-xs font-normal text-zinc-500">Used when park until is blank</span>
                           </label>
                           <input
                             type="number"
@@ -1828,10 +1805,170 @@ export default function TripFlow() {
                             step="0.5"
                             className={formInputClass({ className: 'mt-2 w-full' })}
                           />
-                          <p className="mt-2 text-xs leading-5 text-zinc-500">
-                            Full planner default is 8 hours. Example: 9:00 AM with 8 hours becomes 5:00 PM the same day.
-                          </p>
                         </div>
+
+                        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-3">
+                          <div className="text-sm font-semibold text-slate-950">
+                            {generalParkingSummary}
+                          </div>
+                          {generalParkingWindowOverridden ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-medium text-slate-600">
+                                Using custom parking window
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGeneralParkingWindowOverridden(false);
+                                  setState((s) => ({
+                                    ...s,
+                                    parkingCheckInDate: '',
+                                    parkingCheckInTime: '',
+                                    parkingCheckOutDate: '',
+                                    parkingCheckOutTime: '',
+                                  }));
+                                  setFieldErrors((prev) => {
+                                    const next = { ...prev };
+                                    delete next.parkingCheckInDate;
+                                    delete next.parkingCheckOutDate;
+                                    return next;
+                                  });
+                                }}
+                                className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                              >
+                                Reset to arrival + duration
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="mt-1 text-xs text-slate-600">
+                              Park from defaults to your arrival time. Park until updates with duration.
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowAdvancedGeneralParkingTime((current) => !current)}
+                          className="text-sm font-semibold text-blue-700 hover:text-blue-800"
+                          aria-expanded={showAdvancedGeneralParkingTime}
+                        >
+                          {showAdvancedGeneralParkingTime
+                            ? 'Hide advanced parking time'
+                            : 'Advanced parking time'}
+                        </button>
+
+                        {showAdvancedGeneralParkingTime ? (
+                          <div className="grid grid-cols-1 gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-2">
+                            <div>
+                              <label className="block text-sm font-medium text-zinc-800">
+                                Park from date
+                              </label>
+                              <DateTextInput
+                                value={
+                                  generalParkingWindowOverridden
+                                    ? state.parkingCheckInDate
+                                    : generalParkingWindow?.parkingCheckInDate || ''
+                                }
+                                onChange={(value) => {
+                                  setGeneralParkingWindowOverridden(true);
+                                  setState((s) => ({
+                                    ...s,
+                                    parkingCheckInDate: value,
+                                  }));
+                                  setFieldErrors((prev) => {
+                                    const next = { ...prev };
+                                    delete next.parkingCheckInDate;
+                                    return next;
+                                  });
+                                }}
+                                ariaLabel="Park from date"
+                                hasError={Boolean(fieldErrors.parkingCheckInDate)}
+                                className="mt-2 w-full"
+                              />
+                              <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-zinc-800">
+                                Park from time
+                              </label>
+                              <input
+                                type="time"
+                                aria-label="Park from time"
+                                value={
+                                  generalParkingWindowOverridden
+                                    ? state.parkingCheckInTime
+                                    : generalParkingWindow?.parkingCheckInTime || ''
+                                }
+                                onChange={(e) => {
+                                  setGeneralParkingWindowOverridden(true);
+                                  setState((s) => ({
+                                    ...s,
+                                    parkingCheckInTime: e.target.value,
+                                  }));
+                                }}
+                                className={formInputClass({ className: 'mt-2 w-full' })}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-zinc-800">
+                                Park until date
+                              </label>
+                              <DateTextInput
+                                value={
+                                  generalParkingWindowOverridden
+                                    ? state.parkingCheckOutDate
+                                    : generalParkingWindow?.parkingCheckOutDate || ''
+                                }
+                                onChange={(value) => {
+                                  setGeneralParkingWindowOverridden(true);
+                                  setState((s) => ({
+                                    ...s,
+                                    parkingCheckOutDate: value,
+                                  }));
+                                  setFieldErrors((prev) => {
+                                    const next = { ...prev };
+                                    delete next.parkingCheckOutDate;
+                                    return next;
+                                  });
+                                }}
+                                ariaLabel="Park until date"
+                                hasError={Boolean(fieldErrors.parkingCheckOutDate)}
+                                className="mt-2 w-full"
+                              />
+                              <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
+                            </div>
+
+                            <div>
+                              <label className="block text-sm font-medium text-zinc-800">
+                                Park until time
+                              </label>
+                              <input
+                                type="time"
+                                aria-label="Park until time"
+                                value={
+                                  generalParkingWindowOverridden
+                                    ? state.parkingCheckOutTime
+                                    : generalParkingWindow?.parkingCheckOutTime || ''
+                                }
+                                onChange={(e) => {
+                                  setGeneralParkingWindowOverridden(true);
+                                  setState((s) => ({
+                                    ...s,
+                                    parkingCheckOutTime: e.target.value,
+                                  }));
+                                  setFieldErrors((prev) => {
+                                    const next = { ...prev };
+                                    delete next.parkingCheckOutDate;
+                                    return next;
+                                  });
+                                }}
+                                className={formInputClass({ className: 'mt-2 w-full' })}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>

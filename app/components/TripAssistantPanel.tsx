@@ -25,6 +25,8 @@ type TripAssistantPanelProps = {
 type ParseTripApiResponse = ParsedTripAssistantResult & {
   liveProviderActive?: boolean;
   configuredProvider?: 'mock' | 'openai';
+  providerUsed?: 'mock' | 'openai';
+  assistantLabel?: string;
   requiresConfirmation?: boolean;
 };
 
@@ -37,6 +39,8 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const [configuredProvider, setConfiguredProvider] = useState<'mock' | 'openai'>('mock');
   const [confirmed, setConfirmed] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [clarificationQuestions, setClarificationQuestions] = useState<string[]>([]);
+  const [parseTurns, setParseTurns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(
@@ -56,9 +60,40 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const assistantStatusLabel = useMemo(() => {
     if (!signedIn) return 'Sign in to use AI Trip Planner';
     if (loading) return 'AI parse in progress…';
+    if (clarificationQuestions.length > 0) return 'Needs a few details';
     if (parsed) return 'Review before running';
-    return liveProviderActive ? 'Using AI assistant' : 'Mock parser';
-  }, [signedIn, loading, parsed, liveProviderActive]);
+    return liveProviderActive ? 'AI Trip Planner' : 'Mock parser in development';
+  }, [signedIn, loading, clarificationQuestions.length, parsed, liveProviderActive]);
+
+  useEffect(() => {
+    if (!signedIn || !accessToken) return;
+
+    let cancelled = false;
+
+    fetch('/api/ai/status', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then((response) => response.json())
+      .then((data: {
+        configuredProvider?: 'mock' | 'openai';
+        liveProviderActive?: boolean;
+        providerUsed?: 'mock' | 'openai';
+      }) => {
+        if (cancelled) return;
+        setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
+        setLiveProviderActive(Boolean(data.liveProviderActive || data.providerUsed === 'openai'));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setConfiguredProvider('mock');
+          setLiveProviderActive(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, signedIn]);
 
   const handleParse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -67,6 +102,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     if (!signedIn) {
       setParsed(null);
+      setClarificationQuestions([]);
       setError('Sign in to use AI Trip Planner.');
       return;
     }
@@ -74,6 +110,8 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     setLoading(true);
 
     try {
+      const nextTurns = [...parseTurns, userText.trim()].filter(Boolean);
+      const combinedUserText = nextTurns.join('\n');
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -84,7 +122,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
       const response = await fetch('/api/ai/parse-trip', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ userText, sessionId }),
+        body: JSON.stringify({ userText: combinedUserText, sessionId }),
       });
 
       const data = (await response.json()) as ParseTripApiResponse & { message?: string };
@@ -92,9 +130,18 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
         throw new Error(data.message || 'Could not parse trip.');
       }
 
-      setParsed(data);
-      setLiveProviderActive(Boolean(data.liveProviderActive));
+      setLiveProviderActive(Boolean(data.liveProviderActive || data.providerUsed === 'openai'));
       setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
+      if (data.status === 'needs_clarification') {
+        setParsed(null);
+        setParseTurns(nextTurns);
+        setClarificationQuestions(data.clarificationQuestions || []);
+        setUserText('');
+      } else {
+        setParsed(data);
+        setParseTurns([]);
+        setClarificationQuestions([]);
+      }
       trackEvent('ai_assistant_submitted', {
         accessToken,
         eventProperties: {
@@ -140,6 +187,8 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const handleCancel = () => {
     setParsed(null);
     setConfirmed(false);
+    setParseTurns([]);
+    setClarificationQuestions([]);
     setError(null);
   };
 
@@ -176,6 +225,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             <div className="mb-2 max-w-md rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground shadow-sm">
               AI planning is available for signed-in users. Register or sign in to use Ask
               PodPaiGo and save your trip context.
+              Describe your trip. PodPaiGo will ask follow-up questions, then fill the planner for review.
             </div>
           ) : null}
           <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
@@ -189,7 +239,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           <span className="text-xs text-muted-foreground">
             {signedIn
               ? liveProviderActive
-                ? 'Using AI assistant'
+                ? 'AI Trip Planner'
                 : 'Mock parser in development'
               : 'Register or sign in first'}
           </span>
@@ -220,7 +270,11 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             onChange={(event) => setUserText(event.target.value)}
             disabled={!signedIn || authLoading}
             rows={4}
-            placeholder="Weekend trip to Las Vegas from SEA Nov 15 to Nov 18, leaving from Monroe. Find best parking and leave time."
+            placeholder={
+              clarificationQuestions.length > 0
+                ? 'Answer the follow-up questions here.'
+                : 'I am going to Pike Place Market tomorrow. Plan commute for me.'
+            }
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />
         </label>
@@ -244,12 +298,27 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           </div>
         ) : null}
 
+        {clarificationQuestions.length > 0 ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
+            <p className="font-semibold">A few details needed</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {clarificationQuestions.map((question) => (
+                <li key={question}>{question}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <button
           type="submit"
           disabled={!userText.trim() || loading || !signedIn || authLoading}
           className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-sky-900/10 transition hover:from-sky-500 hover:to-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 dark:from-sky-500 dark:to-blue-600 dark:hover:from-sky-400 dark:hover:to-blue-500"
         >
-          {loading ? 'AI parse…' : 'Generate trip plan'}
+          {loading
+            ? 'AI parse…'
+            : clarificationQuestions.length > 0
+              ? 'Continue'
+              : 'Generate trip plan'}
         </button>
       </form>
 

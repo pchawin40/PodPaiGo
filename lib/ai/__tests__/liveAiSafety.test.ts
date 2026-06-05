@@ -99,24 +99,35 @@ describe('parseTripText safety guards', () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => ({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                originText: 'Monroe',
-                airportCode: 'SEA',
-                destinationCity: 'Las Vegas',
-                departureDate: '2026-11-15',
-                returnDate: '2026-11-18',
-                needsParking: true,
-                needsLeaveTime: true,
-                confidence: 'high',
-                missingFields: [],
-              }),
-            },
-          },
-        ],
-        usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        output_text: JSON.stringify({
+          mode: 'airport_trip',
+          originSource: 'manual',
+          destinationText: null,
+          destinationCategory: null,
+          destinationKind: 'airport',
+          originText: 'Monroe',
+          airportCode: 'SEA',
+          destinationCity: 'Las Vegas',
+          airlineText: null,
+          departureDate: '2026-11-15',
+          departureTime: '08:00',
+          timeAnchor: 'depart_at',
+          returnDate: '2026-11-18',
+          returnTime: '18:00',
+          parkingCheckInDate: '2026-11-15',
+          parkingCheckInTime: '08:00',
+          parkingCheckOutDate: '2026-11-18',
+          parkingCheckOutTime: '18:00',
+          parkingDurationMinutes: 4920,
+          transportAvailability: 'all',
+          parkingPreference: 'nearby',
+          tripType: 'round-trip',
+          needsParking: true,
+          needsLeaveTime: true,
+          confidence: 'high',
+          missingFields: [],
+        }),
+        usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
       }),
     } as Response);
 
@@ -129,6 +140,12 @@ describe('parseTripText safety guards', () => {
       destinationCity: 'Las Vegas',
       parser: 'openai',
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/responses',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
 
     fetchMock.mockRestore();
   });

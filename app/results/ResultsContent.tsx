@@ -135,6 +135,11 @@ import {
   parseTripDataFromSearchParams,
   tripDataToSearchParams,
 } from '../../lib/trip/searchParams';
+import {
+  formatParkingWindowSummary,
+  hasCustomParkingWindow,
+  resolveParkingWindow,
+} from '../../lib/trip/parkingWindow';
 import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 import { trackEvent } from '../../lib/analytics/trackEvent';
@@ -6836,7 +6841,7 @@ function EditDateTextInput({
   );
 }
 
-function EditTripForm({
+export function EditTripForm({
   initialData,
   onSubmit,
   onCancel,
@@ -6936,31 +6941,48 @@ function EditTripForm({
   );
 
   const [errors, setErrors] = useState<string[]>([]);
+  const [showAdvancedGeneralParkingTime, setShowAdvancedGeneralParkingTime] = useState(false);
+  const [generalParkingWindowOverridden, setGeneralParkingWindowOverridden] = useState(() => {
+    if (initialData.type !== 'general-trip') return false;
+
+    const parkingDuration = initialData.parkingDuration ?? (initialData.tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
+    return hasCustomParkingWindow({
+      arrivalDate: initialData.arrivalDate,
+      arrivalTime: initialData.arrivalTime,
+      durationMinutes: parkingDuration,
+      parkingCheckInDate: initialData.parkingCheckInDate,
+      parkingCheckInTime: initialData.parkingCheckInTime,
+      parkingCheckOutDate: initialData.parkingCheckOutDate,
+      parkingCheckOutTime: initialData.parkingCheckOutTime,
+    });
+  });
 
   const isDeparture = initialData.type === 'one-way-departure';
   const isDropoffPickup = initialData.type === 'dropoff-pickup';
   const isArrival = initialData.type === 'one-way-arrival';
   const isRoundTrip = initialData.type === 'round-trip';
   const isGeneralTripEdit = initialData.type === 'general-trip';
-
-  const formatLocalHHMM = (dt: Date) =>
-    `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-
-  const addMinutesToEditDateTime = (
-    dateString: string,
-    timeString: string,
-    minutes: number,
-  ): { date: string; time: string } | null => {
-    const normalizedDate = normalizeEditableDateInputValue(dateString) || dateString;
-    const start = buildLocalDateTime(normalizedDate, timeString);
-    if (!start || !Number.isFinite(minutes)) return null;
-
-    const end = new Date(start.getTime() + minutes * 60_000);
-    return {
-      date: formatLocalYYYYMMDD(end),
-      time: formatLocalHHMM(end),
-    };
-  };
+  const normalizedArrivalDateForParking = normalizeEditableDateInputValue(arrivalDate) || arrivalDate;
+  const normalizedParkingCheckInDateForParking =
+    parkingCheckInDate ? normalizeEditableDateInputValue(parkingCheckInDate) || parkingCheckInDate : '';
+  const normalizedParkingCheckOutDateForParking =
+    parkingCheckOutDate ? normalizeEditableDateInputValue(parkingCheckOutDate) || parkingCheckOutDate : '';
+  const generalParkingDurationMinutes =
+    parkingDurationHours ? Math.round(Number(parkingDurationHours) * 60) : initialData.parkingDuration ?? (initialData.tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
+  const generalParkingWindow = resolveParkingWindow({
+    arrivalDate: normalizedArrivalDateForParking,
+    arrivalTime,
+    durationMinutes: generalParkingDurationMinutes,
+    parkingCheckInDate: generalParkingWindowOverridden
+      ? normalizedParkingCheckInDateForParking
+      : '',
+    parkingCheckInTime: generalParkingWindowOverridden ? parkingCheckInTime : '',
+    parkingCheckOutDate: generalParkingWindowOverridden
+      ? normalizedParkingCheckOutDateForParking
+      : '',
+    parkingCheckOutTime: generalParkingWindowOverridden ? parkingCheckOutTime : '',
+  });
+  const generalParkingSummary = formatParkingWindowSummary(generalParkingWindow);
 
   const durationFromEditWindow = (
     checkInDate: string,
@@ -7080,6 +7102,15 @@ function EditTripForm({
       }
     }
 
+    if (
+      isGeneralTripEdit &&
+      parkingPreference !== 'none' &&
+      generalParkingWindowOverridden &&
+      !generalParkingWindow
+    ) {
+      next.push('Custom parking window must end after it starts.');
+    }
+
     return next;
   };
 
@@ -7119,22 +7150,16 @@ function EditTripForm({
       const checkInDate = normalizedParkingCheckInDate || normalizedArrivalDate;
       const checkInTime = parkingCheckInTime || arrivalTime;
       const defaultDuration = initialData.tripMode === 'quick-go' ? 2 * 60 : 8 * 60;
-      let checkOutDate = normalizedParkingCheckOutDate;
-      let checkOutTime = parkingCheckOutTime;
-
-      if (checkOutDate && checkOutTime) {
-        parkingDuration = durationFromEditWindow(
-          checkInDate,
-          checkInTime,
-          checkOutDate,
-          checkOutTime,
-        ) ?? parkingDuration;
-      } else {
-        parkingDuration = parkingDuration ?? defaultDuration;
-        const derivedCheckout = addMinutesToEditDateTime(checkInDate, checkInTime, parkingDuration);
-        checkOutDate = derivedCheckout?.date || '';
-        checkOutTime = derivedCheckout?.time || '';
-      }
+      parkingDuration = parkingDuration ?? defaultDuration;
+      const parkingWindow = resolveParkingWindow({
+        arrivalDate: normalizedArrivalDate,
+        arrivalTime,
+        durationMinutes: parkingDuration,
+        parkingCheckInDate: generalParkingWindowOverridden ? checkInDate : '',
+        parkingCheckInTime: generalParkingWindowOverridden ? checkInTime : '',
+        parkingCheckOutDate: generalParkingWindowOverridden ? normalizedParkingCheckOutDate : '',
+        parkingCheckOutTime: generalParkingWindowOverridden ? parkingCheckOutTime : '',
+      });
 
       data = {
         type: 'general-trip',
@@ -7147,11 +7172,11 @@ function EditTripForm({
         tripMode: initialData.tripMode,
         arrivalDate: normalizedArrivalDate,
         arrivalTime,
-        parkingDuration: parkingDuration ?? initialData.parkingDuration,
-        parkingCheckInDate: checkInDate,
-        parkingCheckInTime: checkInTime,
-        parkingCheckOutDate: checkOutDate,
-        parkingCheckOutTime: checkOutTime,
+        parkingDuration: parkingWindow?.parkingDuration ?? parkingDuration ?? initialData.parkingDuration,
+        parkingCheckInDate: parkingWindow?.parkingCheckInDate ?? normalizedArrivalDate,
+        parkingCheckInTime: parkingWindow?.parkingCheckInTime ?? arrivalTime,
+        parkingCheckOutDate: parkingWindow?.parkingCheckOutDate ?? '',
+        parkingCheckOutTime: parkingWindow?.parkingCheckOutTime ?? '',
         transportAvailability,
         transitPayment,
         parkingPreference,
@@ -7505,57 +7530,10 @@ function EditTripForm({
             {parkingPreference !== 'none' ? (
               <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                 <div className="text-sm font-medium text-zinc-900">Parking time</div>
-                <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="mt-3 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Park from date
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                    </label>
-                    <EditDateTextInput
-                      value={parkingCheckInDate}
-                      onChange={setParkingCheckInDate}
-                      ariaLabel="Park from date"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Park from time
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Defaults to arrival</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={parkingCheckInTime}
-                      onChange={(e) => setParkingCheckInTime(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Park until date
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                    </label>
-                    <EditDateTextInput
-                      value={parkingCheckOutDate}
-                      onChange={setParkingCheckOutDate}
-                      ariaLabel="Park until date"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-800">
-                      Park until time
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-                    </label>
-                    <input
-                      type="time"
-                      value={parkingCheckOutTime}
-                      onChange={(e) => setParkingCheckOutTime(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
                     <label className="block text-sm font-medium text-zinc-800">
                       Duration
-                      <span className="ml-1 text-xs font-normal text-zinc-500">Used when park until is blank</span>
                     </label>
                     <input
                       type="number"
@@ -7566,6 +7544,124 @@ function EditTripForm({
                       className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     />
                   </div>
+
+                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-3">
+                    <div className="text-sm font-semibold text-slate-950">
+                      {generalParkingSummary}
+                    </div>
+                    {generalParkingWindowOverridden ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-slate-600">
+                          Using custom parking window
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGeneralParkingWindowOverridden(false);
+                            setParkingCheckInDate('');
+                            setParkingCheckInTime('');
+                            setParkingCheckOutDate('');
+                            setParkingCheckOutTime('');
+                          }}
+                          className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                        >
+                          Reset to arrival + duration
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs text-slate-600">
+                        Park from defaults to arrival. Park until updates with duration.
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedGeneralParkingTime((current) => !current)}
+                    className="text-sm font-semibold text-blue-700 hover:text-blue-800"
+                    aria-expanded={showAdvancedGeneralParkingTime}
+                  >
+                    {showAdvancedGeneralParkingTime
+                      ? 'Hide advanced parking time'
+                      : 'Advanced parking time'}
+                  </button>
+
+                  {showAdvancedGeneralParkingTime ? (
+                    <div className="grid grid-cols-1 gap-4 rounded-2xl border border-zinc-200 bg-white p-4 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-800">
+                          Park from date
+                        </label>
+                        <EditDateTextInput
+                          value={
+                            generalParkingWindowOverridden
+                              ? parkingCheckInDate
+                              : generalParkingWindow?.parkingCheckInDate || ''
+                          }
+                          onChange={(value) => {
+                            setGeneralParkingWindowOverridden(true);
+                            setParkingCheckInDate(value);
+                          }}
+                          ariaLabel="Park from date"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-800">
+                          Park from time
+                        </label>
+                        <input
+                          type="time"
+                          aria-label="Park from time"
+                          value={
+                            generalParkingWindowOverridden
+                              ? parkingCheckInTime
+                              : generalParkingWindow?.parkingCheckInTime || ''
+                          }
+                          onChange={(e) => {
+                            setGeneralParkingWindowOverridden(true);
+                            setParkingCheckInTime(e.target.value);
+                          }}
+                          className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-800">
+                          Park until date
+                        </label>
+                        <EditDateTextInput
+                          value={
+                            generalParkingWindowOverridden
+                              ? parkingCheckOutDate
+                              : generalParkingWindow?.parkingCheckOutDate || ''
+                          }
+                          onChange={(value) => {
+                            setGeneralParkingWindowOverridden(true);
+                            setParkingCheckOutDate(value);
+                          }}
+                          ariaLabel="Park until date"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-zinc-800">
+                          Park until time
+                        </label>
+                        <input
+                          type="time"
+                          aria-label="Park until time"
+                          value={
+                            generalParkingWindowOverridden
+                              ? parkingCheckOutTime
+                              : generalParkingWindow?.parkingCheckOutTime || ''
+                          }
+                          onChange={(e) => {
+                            setGeneralParkingWindowOverridden(true);
+                            setParkingCheckOutTime(e.target.value);
+                          }}
+                          className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}

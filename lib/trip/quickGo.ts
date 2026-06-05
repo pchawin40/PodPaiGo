@@ -8,6 +8,7 @@ import {
 import type { RankedRecommendation } from '../domain';
 import type { DestinationKind, TransportAvailability, TripData } from '../types';
 import { buildResultsPathFromSearchParams } from './searchParams';
+import { deriveParkingWindowFromArrival } from './parkingWindow';
 
 export const QUICK_GO_TRIP_MODE = 'quick-go';
 export const RECENT_ORIGINS_STORAGE_KEY = 'podpaigo-recent-origins';
@@ -430,9 +431,13 @@ export function buildQuickGoSearchParams(input: BuildQuickGoSearchParamsInput): 
 
   params.set('arrivalDate', arrivalDate);
   params.set('arrivalTime', arrivalTime);
-  params.set('parkingCheckInDate', arrivalDate);
-  params.set('parkingCheckInTime', arrivalTime);
-  params.set('parkingDuration', String(2 * 60));
+  const parkingWindow = deriveParkingWindowFromArrival(arrivalDate, arrivalTime, 2 * 60);
+
+  params.set('parkingCheckInDate', parkingWindow?.parkingCheckInDate || arrivalDate);
+  params.set('parkingCheckInTime', parkingWindow?.parkingCheckInTime || arrivalTime);
+  params.set('parkingCheckOutDate', parkingWindow?.parkingCheckOutDate || '');
+  params.set('parkingCheckOutTime', parkingWindow?.parkingCheckOutTime || '');
+  params.set('parkingDuration', String(parkingWindow?.parkingDuration ?? 2 * 60));
 
   if (airport) {
     params.set('detectedAirportCode', airport.id);

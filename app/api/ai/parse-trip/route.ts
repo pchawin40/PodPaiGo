@@ -8,7 +8,10 @@ import {
   resolveAiEntitlements,
 } from '../../../../lib/ai/aiEntitlements';
 import { resolveUserPlan } from '../../../../lib/auth/userPlan';
-import { isAiAssistantDisabled } from '../../../../lib/ai/tripParseConfig';
+import {
+  getAiAssistantProvider,
+  isAiAssistantDisabled,
+} from '../../../../lib/ai/tripParseConfig';
 
 export const runtime = 'nodejs';
 
@@ -73,6 +76,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ...parsed,
       assistantDisabled: isAiAssistantDisabled(),
+      configuredProvider: getAiAssistantProvider(),
+      liveProviderActive: entitlements.providerUsed === 'openai',
       providerUsed: entitlements.providerUsed,
       plan: entitlements.plan,
       mode: entitlements.mode,

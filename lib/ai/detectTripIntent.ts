@@ -5,10 +5,13 @@ const AIRPORT_WORD_PATTERN =
 
 const AIRPORT_PARKING_PATTERN = /\bparking\s+at\s+(?:the\s+)?[a-z]{3}\b/i;
 
+const PARKING_ONLY_PATTERN =
+  /\b(?:need|find|book|reserve|compare)?\s*parking\b.*\bfrom\b.+\b(?:to|until)\b/i;
+
 const FLIGHT_NUMBER_PATTERN = /\b[A-Z]{2}\s*\d{1,4}\b/;
 
 const QUICK_GO_PHRASE_PATTERN =
-  /\b(heading to|going to|take me to|commute to|drive to|directions to|get me to|navigate to)\b/i;
+  /\b(heading to|going to|take me to|commute to|drive to|directions to|get me to|navigate to|compare\b.+\bto)\b/i;
 
 const QUICK_GO_DESTINATION_HINT_PATTERN =
   /\b(fred meyer|safeway|costco|walmart|target|pike place|trailhead|restaurant|hotel|grocery|coffee shop|office)\b/i;
@@ -100,9 +103,13 @@ export function detectTripIntent(userText: string): TripParseMode {
   const text = userText.trim();
   if (!text) return 'unknown';
 
+  const parkingOnly =
+    PARKING_ONLY_PATTERN.test(text) &&
+    !/\b(?:flight|flying|fly|airline|tsa|boarding|drop\s*off|pick\s*up)\b/i.test(text);
   const airport = hasAirportTravelContext(text);
   const quickGo = hasQuickGoContext(text);
 
+  if (parkingOnly && (airport || /\b[A-Z]{3}\b/.test(text))) return 'parking_only';
   if (airport && quickGo) {
     if (/\b(?:flying|flight|parking at|terminal|airline)\b/i.test(text)) {
       return 'airport_trip';

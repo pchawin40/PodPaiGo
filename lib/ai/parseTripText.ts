@@ -6,6 +6,7 @@ import { logAiParseEvent } from './tripParseLogger';
 import {
   getAiAssistantProvider,
   getMaxAiParseInputChars,
+  getOpenAiTripParseModel,
   isAiAssistantDisabled,
 } from './tripParseConfig';
 import { resolveAiProviderForRequest } from './aiEntitlements';
@@ -130,7 +131,7 @@ export async function parseTripText(
           userId: options.userId,
           sessionId: options.sessionId,
           provider: 'openai',
-          model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+          model: getOpenAiTripParseModel(),
           inputChars: trimmed.length,
           promptTokens: openAiResult.promptTokens,
           completionTokens: openAiResult.completionTokens,
@@ -146,7 +147,7 @@ export async function parseTripText(
         userId: options.userId,
         sessionId: options.sessionId,
         provider: 'openai',
-        model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+        model: getOpenAiTripParseModel(),
         inputChars: trimmed.length,
         success: false,
         errorCode: openAiResult.errorCode || 'openai_failed',
@@ -179,7 +180,7 @@ export async function parseTripText(
       userId: options.userId,
       sessionId: options.sessionId,
       provider: getAiAssistantProvider(),
-      model: process.env.OPENAI_TRIP_PARSE_MODEL || 'gpt-4o-mini',
+      model: getOpenAiTripParseModel(),
       inputChars: trimmed.length,
       success: false,
       errorCode: message,

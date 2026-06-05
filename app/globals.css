@@ -185,6 +185,151 @@ textarea:disabled {
   opacity: 0.85;
 }
 
+.ppg-option-panel {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+}
+
+.ppg-option-heading {
+  color: var(--foreground);
+}
+
+.ppg-option-helper {
+  color: var(--muted-foreground);
+}
+
+.ppg-option-card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.ppg-option-card:hover {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.ppg-option-card-selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.ppg-option-card-title {
+  color: var(--foreground);
+}
+
+.ppg-option-card-description {
+  color: var(--muted-foreground);
+}
+
+.dark .ppg-option-panel {
+  border-color: rgba(125, 211, 252, 0.32);
+  background: linear-gradient(
+    180deg,
+    rgba(30, 41, 59, 0.94) 0%,
+    rgba(15, 23, 42, 0.92) 100%
+  );
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dark .ppg-option-heading {
+  color: #f8fafc;
+}
+
+.dark .ppg-option-helper {
+  color: #dbeafe;
+}
+
+.dark .ppg-option-card {
+  border-color: rgba(148, 163, 184, 0.46);
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+}
+
+.dark .ppg-option-card:hover {
+  border-color: rgba(125, 211, 252, 0.52);
+  background: rgba(30, 41, 59, 0.98);
+}
+
+.dark .ppg-option-card-selected {
+  border-color: #7dd3fc;
+  background: rgba(8, 47, 73, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.36),
+    0 12px 28px rgba(14, 165, 233, 0.18);
+}
+
+.dark .ppg-option-card-title {
+  color: #f8fafc;
+}
+
+.dark .ppg-option-card-description {
+  color: #cbd5e1;
+}
+
+.dark .ppg-option-card-selected .ppg-option-card-title {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.dark .ppg-option-card-selected .ppg-option-card-description {
+  color: #dbeafe;
+}
+
+.ppg-recent-chip {
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: #f8fafc;
+  color: #334155;
+}
+
+.ppg-recent-chip:hover {
+  border-color: rgba(14, 165, 233, 0.42);
+  background: #f0f9ff;
+  color: #0f172a;
+}
+
+.ppg-recent-chip:active {
+  border-color: #0284c7;
+  background: #e0f2fe;
+}
+
+.ppg-recent-chip-selected {
+  border-color: #0284c7;
+  background: #e0f2fe;
+  color: #082f49;
+}
+
+.ppg-recent-chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.dark .ppg-recent-chip {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+}
+
+.dark .ppg-recent-chip:hover {
+  border-color: rgba(125, 211, 252, 0.62);
+  background: rgba(30, 41, 59, 0.98);
+  color: #f8fafc;
+}
+
+.dark .ppg-recent-chip:active {
+  border-color: #7dd3fc;
+  background: rgba(8, 47, 73, 0.96);
+  color: #ffffff;
+}
+
+.dark .ppg-recent-chip-selected {
+  border-color: #7dd3fc;
+  background: rgba(8, 47, 73, 0.96);
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.32);
+}
+
 .dark .airport-page-bg .bg-white,
 .dark .airport-page-bg .bg-white\/80,
 .dark .airport-page-bg .bg-white\/90,

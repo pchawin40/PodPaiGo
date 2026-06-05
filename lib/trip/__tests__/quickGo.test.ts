@@ -53,6 +53,11 @@ describe('quickGo', () => {
     expect(params.get('originSource')).toBe('manual');
     expect(params.get('arrivalDate')).toBe('2026-06-01');
     expect(params.get('arrivalTime')).toBe('14:30');
+    expect(params.get('parkingCheckInDate')).toBe('2026-06-01');
+    expect(params.get('parkingCheckInTime')).toBe('14:30');
+    expect(params.get('parkingCheckOutDate')).toBe('2026-06-01');
+    expect(params.get('parkingCheckOutTime')).toBe('16:30');
+    expect(params.get('parkingDuration')).toBe('120');
     expect(params.get('intent')).toBe('general-trip');
     expect(params.get('transport')).toBe('all');
   });

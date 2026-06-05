@@ -8,7 +8,11 @@ export function getOpenAiApiKey(): string | null {
 }
 
 export function getOpenAiTripParseModel(): string {
-  return process.env.OPENAI_TRIP_PARSE_MODEL?.trim() || 'gpt-4o-mini';
+  return (
+    process.env.OPENAI_TRIP_PARSE_MODEL?.trim() ||
+    process.env.OPENAI_MODEL?.trim() ||
+    'gpt-4o-mini'
+  );
 }
 
 export function getAiAssistantProvider(): 'openai' | 'mock' {

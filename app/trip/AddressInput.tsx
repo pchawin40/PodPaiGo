@@ -345,17 +345,24 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         <div className="mt-3 rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm">
           <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Recent origins</div>
           <ul className="flex flex-wrap gap-2">
-            {recentOrigins.map((origin) => (
-              <li key={origin}>
-                <button
-                  type="button"
-                  onClick={() => onRecentClick(origin)}
-                  className="max-w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-sky-50"
-                >
-                  {origin}
-                </button>
-              </li>
-            ))}
+            {recentOrigins.map((origin) => {
+              const selected = inputValue.trim() === origin.trim();
+
+              return (
+                <li key={origin}>
+                  <button
+                    type="button"
+                    onClick={() => onRecentClick(origin)}
+                    className={
+                      'ppg-recent-chip max-w-full rounded-full px-3 py-1.5 text-xs font-semibold transition ' +
+                      (selected ? 'ppg-recent-chip-selected' : '')
+                    }
+                  >
+                    {origin}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

@@ -1,8 +1,9 @@
 import { getAirportById } from '../airports/catalog';
 import { normalizeAirlineTextForAssistant } from '../airlines/parseFlightInput';
-import { buildQuickGoSearchParams } from '../trip/quickGo';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 import type { QuickGoOriginSelection } from '../trip/quickGo';
+import type { DestinationKind, ParkingPreference, TransportAvailability } from '../types';
+import { resolveParkingWindow } from '../trip/parkingWindow';
 
 function calculateParkingDurationMinutes(args: {
   checkInDate: string;
@@ -52,20 +53,60 @@ function parsedQuickGoToSearchParams(
   const origin = buildQuickGoOriginFromParsed(parsed);
   if (!origin) return null;
 
-  const now = new Date();
-  if (parsed.departureDate && parsed.departureTime) {
-    const parsedNow = new Date(`${parsed.departureDate}T${parsed.departureTime}:00`);
-    if (!Number.isNaN(parsedNow.getTime())) {
-      now.setTime(parsedNow.getTime());
-    }
-  }
+  const arrivalDate = parsed.departureDate;
+  const arrivalTime = parsed.departureTime;
+  if (!arrivalDate || !arrivalTime) return null;
 
-  const params = buildQuickGoSearchParams({
-    destinationText,
-    origin,
-    continueAsQuickGo: true,
-    now,
+  const transportAvailability: TransportAvailability = parsed.transportAvailability || 'all';
+  const parkingPreference: ParkingPreference =
+    parsed.parkingPreference ||
+    (transportAvailability === 'rideshare' || transportAvailability === 'transit'
+      ? 'none'
+      : 'nearby');
+  const parkingDuration = parsed.parkingDurationMinutes || 8 * 60;
+  const parkingWindow = resolveParkingWindow({
+    arrivalDate,
+    arrivalTime,
+    durationMinutes: parkingDuration,
+    parkingCheckInDate: parsed.parkingCheckInDate,
+    parkingCheckInTime: parsed.parkingCheckInTime,
+    parkingCheckOutDate: parsed.parkingCheckOutDate,
+    parkingCheckOutTime: parsed.parkingCheckOutTime,
   });
+  const destinationKind: DestinationKind =
+    parsed.destinationKind ||
+    (parsed.destinationCategory === 'restaurant'
+      ? 'restaurant'
+      : parsed.destinationCategory === 'hotel'
+        ? 'hotel'
+        : 'general');
+
+  const params = new URLSearchParams();
+  params.set('type', 'general-trip');
+  if (parsed.mode === 'quick_go') {
+    params.set('tripMode', 'quick-go');
+    params.set('quickGoConfirmed', '1');
+  }
+  params.set('origin', origin.origin);
+  params.set('originLabel', origin.originLabel);
+  params.set('originSource', origin.originSource);
+  params.set('destination', destinationText);
+  params.set('destinationName', destinationText);
+  params.set('destinationLabel', destinationText);
+  params.set('destinationAddress', destinationText);
+  params.set('destinationSource', 'typed');
+  params.set('destinationKind', destinationKind);
+  params.set('intent', 'general-trip');
+  params.set('transport', transportAvailability);
+  params.set('transitPayment', 'normal');
+  params.set('parkingPreference', parkingPreference);
+  params.set('arrivalDate', arrivalDate);
+  params.set('arrivalTime', arrivalTime);
+  params.set('parkingCheckInDate', parkingWindow?.parkingCheckInDate || arrivalDate);
+  params.set('parkingCheckInTime', parkingWindow?.parkingCheckInTime || arrivalTime);
+  params.set('parkingCheckOutDate', parkingWindow?.parkingCheckOutDate || '');
+  params.set('parkingCheckOutTime', parkingWindow?.parkingCheckOutTime || '');
+  params.set('parkingDuration', String(parkingWindow?.parkingDuration ?? parkingDuration));
 
   params.set('assistantParsed', '1');
   params.set('recalc', String(Date.now()));
@@ -73,6 +114,66 @@ function parsedQuickGoToSearchParams(
   if (parsed.destinationCategory) {
     params.set('assistantDestinationCategory', parsed.destinationCategory);
   }
+
+  return params;
+}
+
+function parsedParkingOnlyToSearchParams(
+  parsed: ParsedTripAssistantResult,
+): URLSearchParams | null {
+  if (
+    !parsed.parkingCheckInDate ||
+    !parsed.parkingCheckInTime ||
+    !parsed.parkingCheckOutDate ||
+    !parsed.parkingCheckOutTime
+  ) {
+    return null;
+  }
+
+  const airport = parsed.airportCode ? getAirportById(parsed.airportCode.toUpperCase()) : null;
+  const destination = airport?.routingAddress || parsed.destinationText?.trim();
+  if (!destination) return null;
+
+  const origin = parsed.originText?.trim() || destination;
+  const params = new URLSearchParams();
+  params.set('type', 'one-way-departure');
+  params.set('intent', airport ? 'parking-trip' : 'general-trip');
+  params.set('origin', origin);
+  params.set('destination', destination);
+  params.set('transport', parsed.transportAvailability || 'car');
+  params.set('transitPayment', 'normal');
+  params.set('parkingPreference', parsed.parkingPreference || 'nearby');
+  params.set('departureDate', parsed.parkingCheckInDate);
+  params.set('departureTime', parsed.parkingCheckInTime);
+  params.set('parkingCheckInDate', parsed.parkingCheckInDate);
+  params.set('parkingCheckInTime', parsed.parkingCheckInTime);
+  params.set('parkingCheckOutDate', parsed.parkingCheckOutDate);
+  params.set('parkingCheckOutTime', parsed.parkingCheckOutTime);
+  params.set('destinationKind', airport ? 'airport' : parsed.destinationKind || 'general');
+
+  const parkingDuration =
+    parsed.parkingDurationMinutes ||
+    calculateParkingDurationMinutes({
+      checkInDate: parsed.parkingCheckInDate,
+      checkInTime: parsed.parkingCheckInTime,
+      checkOutDate: parsed.parkingCheckOutDate,
+      checkOutTime: parsed.parkingCheckOutTime,
+    });
+
+  if (parkingDuration) {
+    params.set('parkingDuration', String(parkingDuration));
+  }
+
+  if (airport) {
+    params.set('airport', airport.id);
+    params.set('airportCode', airport.id);
+    params.set('airportName', airport.label);
+    params.set('rideshareDestinationName', airport.rideshareDestinationName);
+    params.set('airportCheckinNote', airport.checkinNote || '');
+  }
+
+  params.set('assistantParsed', '1');
+  params.set('recalc', String(Date.now()));
 
   return params;
 }
@@ -85,8 +186,12 @@ export function parsedTripToSearchParams(
     return null;
   }
 
-  if (parsed.mode === 'quick_go') {
+  if (parsed.mode === 'quick_go' || parsed.mode === 'general_trip') {
     return parsedQuickGoToSearchParams(parsed);
+  }
+
+  if (parsed.mode === 'parking_only') {
+    return parsedParkingOnlyToSearchParams(parsed);
   }
 
   if (!parsed.originText?.trim() || !parsed.airportCode || !parsed.departureDate) {
@@ -107,8 +212,9 @@ export function parsedTripToSearchParams(
   params.set('origin', parsed.originText.trim());
   params.set('destination', airport.routingAddress);
   params.set('intent', intent);
-  params.set('transport', 'all');
+  params.set('transport', parsed.transportAvailability || 'all');
   params.set('transitPayment', 'normal');
+  params.set('parkingPreference', parsed.parkingPreference || 'nearby');
   params.set('destinationKind', 'airport');
   params.set('airport', airport.id);
   params.set('airportCode', airport.id);

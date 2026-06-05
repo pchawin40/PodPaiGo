@@ -28,8 +28,11 @@ const mockParsed: ParsedTripAssistantResult = {
   airlineText: null,
   departureDate: '2026-11-15',
   departureTime: '12:00',
+  timeAnchor: 'depart_at',
   returnDate: null,
   returnTime: null,
+  transportAvailability: 'all',
+  parkingPreference: 'nearby',
   tripType: 'one-way-departure',
   needsParking: true,
   needsLeaveTime: true,
@@ -94,7 +97,7 @@ describe('PodPaiGoAssistant', () => {
     await waitFor(() => {
       expect(screen.getByText('hello there')).toBeInTheDocument();
       expect(screen.getByText(/Hi!/i)).toBeInTheDocument();
-      expect(screen.getByText('Basic assistant')).toBeInTheDocument();
+      expect(screen.getByText('Mock parser in development')).toBeInTheDocument();
     });
   });
 
@@ -135,7 +138,7 @@ describe('PodPaiGoAssistant', () => {
       if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
         return {
           ok: true,
-          json: async () => mockParsed,
+          json: async () => ({ ...mockParsed, status: 'ready_for_review' }),
         } as Response;
       }
 
@@ -164,6 +167,61 @@ describe('PodPaiGoAssistant', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ai/parse-trip'))).toBe(
       true,
     );
+  });
+
+  test('trip parse asks clarification before review when required fields are missing', async () => {
+    mockSignedInAuth();
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            ...mockParsed,
+            mode: 'quick_go',
+            destinationText: 'Pike Place Market',
+            airportCode: null,
+            originText: null,
+            departureDate: '2026-06-06',
+            departureTime: null,
+            status: 'needs_clarification',
+            missingFields: ['originText', 'targetTime'],
+            clarificationQuestions: [
+              'Where are you starting from, and what time do you want to arrive at Pike Place Market?',
+            ],
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: {
+        value: 'I am going to Pike Place Market tomorrow. Plan commute for me.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Where are you starting from/i)).toBeInTheDocument();
+      expect(screen.queryByText('Review point A-to-B trip')).not.toBeInTheDocument();
+    });
   });
 
   test('results explanation uses existing recommendation data', async () => {
