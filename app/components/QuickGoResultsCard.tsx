@@ -24,6 +24,7 @@ type QuickGoResultsCardProps = {
   bestOption: RankedRecommendation | null;
   backupOption: RankedRecommendation | null;
   driveMinutes: number | null;
+  driveTimeUnavailable?: boolean;
   className?: string;
 };
 
@@ -53,6 +54,7 @@ export default function QuickGoResultsCard({
   bestOption,
   backupOption,
   driveMinutes,
+  driveTimeUnavailable = false,
   className = '',
 }: QuickGoResultsCardProps) {
   const destination = tripData.destinationName || tripData.destination;
@@ -94,9 +96,20 @@ export default function QuickGoResultsCard({
           <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Estimated drive time
           </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">
-            {formatMinutesLabel(driveMinutes)}
-          </dd>
+          {driveTimeUnavailable ? (
+            <>
+              <dd className="mt-2 text-lg font-semibold text-foreground">
+                Drive time unavailable
+              </dd>
+              <dd className="mt-1 text-sm text-muted-foreground">
+                Open directions to confirm drive time
+              </dd>
+            </>
+          ) : (
+            <dd className="mt-2 text-lg font-semibold text-foreground">
+              {formatMinutesLabel(driveMinutes)}
+            </dd>
+          )}
         </div>
 
         <div className="rounded-2xl border border-border bg-card/80 p-4">
