@@ -606,6 +606,51 @@ function formatRankedOptionLabel(option: RankedRecommendation | null): string | 
   return 'Transit';
 }
 
+export type QuickGoDriveTimeInput = {
+  duration?: number | null;
+  routeUnavailable?: boolean;
+  trustStatus?: string;
+  distanceMeters?: number;
+} | null | undefined;
+
+export type QuickGoDriveTime = {
+  /** Minutes to display, or null when no trustworthy drive time exists. */
+  minutes: number | null;
+  /** True when the UI should show a "drive time unavailable" message. */
+  unavailable: boolean;
+};
+
+/**
+ * Resolve the drive time to display for a Quick Go trip. A bare `duration === 0`
+ * is NOT a valid drive time (Google Routes returns 0 on the fallback path); it is
+ * only treated as a real "you're already there" time when there is an explicit
+ * same-place signal (zero distance on a real, non-fallback route).
+ */
+export function resolveQuickGoDriveTime(traffic: QuickGoDriveTimeInput): QuickGoDriveTime {
+  if (!traffic) return { minutes: null, unavailable: true };
+
+  if (traffic.routeUnavailable === true) {
+    return { minutes: null, unavailable: true };
+  }
+
+  const duration = typeof traffic.duration === 'number' ? traffic.duration : null;
+
+  if (duration != null && Number.isFinite(duration) && duration > 0) {
+    return { minutes: duration, unavailable: false };
+  }
+
+  const explicitSamePlace =
+    duration === 0 &&
+    traffic.distanceMeters === 0 &&
+    traffic.trustStatus !== 'fallback';
+
+  if (explicitSamePlace) {
+    return { minutes: 0, unavailable: false };
+  }
+
+  return { minutes: null, unavailable: true };
+}
+
 export function resolveQuickGoBestWay(input: {
   tripData: TripData;
   rankedOptions: RankedRecommendation[];

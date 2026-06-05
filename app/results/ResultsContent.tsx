@@ -16,6 +16,7 @@ import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
 import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
+import { sortParkingOptionsForMode } from '../../lib/parking/sortParkingOptions';
 import {
   businessTravelModeNeedsParking,
   readTravelPreferences,
@@ -4779,56 +4780,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
-  const remainingParking = parkingDisplayOptions
-    .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
-    .sort((a, b) => {
-      const aUnavailable = isParkingRouteUnavailable(a);
-      const bUnavailable = isParkingRouteUnavailable(b);
-
-      if (aUnavailable !== bUnavailable) {
-        return aUnavailable ? 1 : -1;
-      }
-
-      if (sort === 'fastest') {
-        const aDuration =
-          typeof a.distance === 'number'
-            ? a.distance +
-            (a.parkingBufferMinutes ?? 0) +
-            (a.transferToTerminalMinutes ?? 0)
-            : 999999;
-
-        const bDuration =
-          typeof b.distance === 'number'
-            ? b.distance +
-            (b.parkingBufferMinutes ?? 0) +
-            (b.transferToTerminalMinutes ?? 0)
-            : 999999;
-
-        if (aDuration !== bDuration) return aDuration - bDuration;
-
-        return parkingPriceRank(a) - parkingPriceRank(b);
-      }
-
-      if (sort === 'cheapest') {
-        const aPriceRank = parkingPriceRank(a);
-        const bPriceRank = parkingPriceRank(b);
-
-        if (aPriceRank !== bPriceRank) return aPriceRank - bPriceRank;
-
-        const aPrice = getParkingTotalPrice(a, tripData) ?? a.price ?? 999999;
-        const bPrice = getParkingTotalPrice(b, tripData) ?? b.price ?? 999999;
-
-        return aPrice - bPrice;
-      }
-
-      // easiest/default
-      const aGarageBoost =
-        a.transferType === 'walk' || a.transferType === 'airport-garage' ? -50 : 0;
-      const bGarageBoost =
-        b.transferType === 'walk' || b.transferType === 'airport-garage' ? -50 : 0;
-
-      return aGarageBoost - bGarageBoost;
-    })
+  const remainingParking = sortParkingOptionsForMode(
+    parkingDisplayOptions.filter((parkingOption) => parkingOption.id !== smartPickOption?.id),
+    sort,
+    {
+      isUnavailable: isParkingRouteUnavailable,
+      totalCost: (option) =>
+        getParkingTotalPrice(option, tripData) ?? option.price ?? 999999,
+    },
+  )
     .map((parkingOption: ParkingOption) => {
       const matchedRanked = sortedParkingForCurrentTab.find((ranked) => {
         const rankedKey = parkingKeySafe(ranked.option as AppOption);
@@ -4898,50 +4858,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     setReviewsParking(cached || parking);
-  }
-
-  function parkingHasRealPrice(option: ParkingOption): boolean {
-    const anyOption = option as ParkingOption & {
-      priceDisplay?: string;
-      priceUnit?: string;
-      trustStatus?: string;
-      bookingProvider?: string;
-      sourceName?: string;
-    };
-
-    return (
-      typeof option.price === 'number' &&
-      option.price > 0 &&
-      anyOption.priceDisplay !== 'check-live'
-    );
-  }
-
-  function parkingPriceRank(option: ParkingOption): number {
-    const anyOption = option as ParkingOption & {
-      priceDisplay?: string;
-      trustStatus?: string;
-      bookingProvider?: string;
-      sourceName?: string;
-    };
-
-    if (isParkingRouteUnavailable(option)) return 999;
-
-    if (parkingHasRealPrice(option)) {
-      if (
-        anyOption.trustStatus === 'live' ||
-        anyOption.bookingProvider === 'parkwhiz' ||
-        anyOption.bookingProvider === 'AirportParkingReservations' ||
-        anyOption.sourceName === 'AirportParkingReservations'
-      ) {
-        return 0;
-      }
-
-      return 1;
-    }
-
-    if (anyOption.priceDisplay === 'check-live') return 5;
-
-    return 9;
   }
 
   return (

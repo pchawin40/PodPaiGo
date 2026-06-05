@@ -11,6 +11,7 @@ import {
   quickGoClassificationForTrip,
   readQuickGoOriginFromSearchParams,
   resolveQuickGoBestWay,
+  resolveQuickGoDriveTime,
 } from '../../lib/trip/quickGo';
 import type { Recommendation, TripData } from '../../lib/types';
 import QuickGoResultsCard from './QuickGoResultsCard';
@@ -42,9 +43,8 @@ export default function QuickGoResultsView({
     detectedAirportCode,
   });
 
-  const driveMinutes =
-    recommendation.trafficEstimate?.duration ??
-    null;
+  const driveTime = resolveQuickGoDriveTime(recommendation.trafficEstimate ?? null);
+  const driveMinutes = driveTime.minutes;
 
   const { bestWayLabel, backupWayLabel, bestOption, backupOption } = resolveQuickGoBestWay({
     tripData,
@@ -111,6 +111,7 @@ export default function QuickGoResultsView({
           bestOption={bestOption}
           backupOption={backupOption}
           driveMinutes={driveMinutes}
+          driveTimeUnavailable={driveTime.unavailable}
         />
 
         <div className="mt-6 flex flex-wrap gap-3">
