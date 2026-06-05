@@ -11,6 +11,8 @@ import { buildSnapshotParkingOptions } from './providers/snapshot/buildOptions';
 import { inferPriceFreshness } from './types';
 import { isLiveGoogleParkingDiscoveryEnabled } from '../../parking/parkingDiscoveryMode';
 import { SHOWING_CACHED_PROVIDER_DATA_MESSAGE } from '../../parking/googlePlacesSafeMode';
+import { validateParkingInventoryOption } from '../../parking/inventoryValidation';
+import { debugLog } from '../../utils/debug';
 
 function normalizeSnapshotName(name: string): string {
   return name
@@ -112,6 +114,8 @@ export async function mergeLiveParkingSources(
     airportCode: string;
     checkInDate?: string;
     checkOutDate?: string;
+    checkInAt?: string;
+    checkOutAt?: string;
   },
   parts: LiveParkingSourceParts,
 ): Promise<ParkingOption[]> {
@@ -169,7 +173,23 @@ export async function mergeLiveParkingSources(
     .map(withStableParkingRouteStatus)
     .map(withAvailabilityScore);
 
-  return applySafeModeProviderLabels(merged);
+  const validated = merged.filter((option) => {
+    const result = validateParkingInventoryOption(option);
+    if (!result.valid) {
+      debugLog('parking_inventory_filtered', {
+        reason: result.reason,
+        airportCode,
+        name: option.name,
+        sourceName: option.sourceName,
+        bookingProvider: option.bookingProvider,
+        sourceLink: option.sourceLink,
+      });
+      return false;
+    }
+    return true;
+  });
+
+  return applySafeModeProviderLabels(validated);
 }
 
 export async function mergeLiveParkingSourceResults(
@@ -178,6 +198,8 @@ export async function mergeLiveParkingSourceResults(
     airportCoordinates?: { lat: number; lng: number };
     checkInDate?: string;
     checkOutDate?: string;
+    checkInAt?: string;
+    checkOutAt?: string;
   },
   parts: LiveParkingSourceParts,
 ): Promise<ParkingOption[]> {
@@ -186,6 +208,8 @@ export async function mergeLiveParkingSourceResults(
       airportCode: args.airportCode,
       checkInDate: args.checkInDate,
       checkOutDate: args.checkOutDate,
+      checkInAt: args.checkInAt,
+      checkOutAt: args.checkOutAt,
     },
     parts,
   );

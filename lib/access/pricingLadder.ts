@@ -40,7 +40,7 @@ export function formatPricingConfidenceLabel(
     case 'estimated':
       return 'Estimated';
     case 'final_on_provider':
-      return 'Final price on provider';
+      return 'Check provider';
   }
 }
 
@@ -219,6 +219,20 @@ export function deriveParkingTotalRange(
   const days = Math.max(1, estimateParkingDays(tripData));
   const daily = deriveParkingDailyRange(option);
 
+  if (
+    option.priceUnit === 'total' &&
+    typeof option.priceMin === 'number' &&
+    typeof option.priceMax === 'number' &&
+    option.priceMin > 0 &&
+    option.priceMax > 0
+  ) {
+    return {
+      min: Math.min(option.priceMin, option.priceMax),
+      max: Math.max(option.priceMin, option.priceMax),
+      currency: 'USD',
+    };
+  }
+
   if (option.priceUnit === 'total' && typeof option.price === 'number' && option.price > 0) {
     return {
       min: option.price,
@@ -266,11 +280,18 @@ export function formatParkingPriceLine(
   const showDailyApprox =
     !dailyIsExact || confidence === 'estimated' || !totalIsExact;
 
-  const primary = `${label} ${totalText} total`;
+  const primary =
+    confidence === 'final_on_provider' || confidence === 'estimated'
+      ? `Estimated ${totalText} total`
+      : `${label} ${totalText} total`;
   const dailyPrefix = showDailyApprox && !dailyIsExact ? '~' : '';
-  const secondary = dailyIsExact
+  const baseSecondary = dailyIsExact
     ? `${dailyPrefix}${formatMoney(daily.min)}/day for ${days} day${days === 1 ? '' : 's'}`
     : `${dailyPrefix}${dailyText}/day for ${days} day${days === 1 ? '' : 's'}`;
+  const secondary =
+    confidence === 'final_on_provider' || confidence === 'estimated'
+      ? `${baseSecondary}. Confirm at provider; provider controls final price.`
+      : baseSecondary;
 
   return {
     primary,

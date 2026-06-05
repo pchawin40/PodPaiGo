@@ -1033,10 +1033,10 @@ export default function TripFlow() {
                   <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {(
                       [
-                        { key: 'car' as const, title: 'Driving is okay', sub: 'Prioritize parking and park-and-ride options, but still compare other strong choices.' },
-                        { key: 'rideshare' as const, title: 'I need rideshare/taxi', sub: 'Shows Uber, Lyft, taxi, and non-car transit where available.' },
+                        { key: 'car' as const, title: 'I have a car', sub: 'Show parking normally and still compare strong ride or transit options.' },
+                        { key: 'rideshare' as const, title: 'No car / rideshare', sub: 'Prioritize rideshare, taxi, and non-car transit where available.' },
                         { key: 'transit' as const, title: 'Transit only', sub: 'No car or rideshare.' },
-                        { key: 'all' as const, title: 'No preference — compare everything', sub: 'Show car, rideshare, taxi, transit, parking, and park-and-ride.' },
+                        { key: 'all' as const, title: 'Compare all', sub: 'Show car, rideshare, taxi, transit, parking, and park-and-ride.' },
                       ] as Array<{ key: TransportAvailability; title: string; sub: string }>
                     ).map((opt) => {
                       const selected = state.transportAvailability === opt.key;
@@ -1073,7 +1073,7 @@ export default function TripFlow() {
                       className="mt-5"
                     />
                   )}
-                  <div className="mt-2 text-xs text-zinc-500">Default: No preference — compare everything</div>
+                  <div className="mt-2 text-xs text-zinc-500">Default: Compare all</div>
                 </div>
 
                 {intent === 'flying-out' && (

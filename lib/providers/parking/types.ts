@@ -15,6 +15,8 @@ export interface ParkingSearchContext {
   origin?: string;
   checkInDate?: string;
   checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
   destinationKind?: DestinationKind;
   destinationLat?: number;
   destinationLng?: number;

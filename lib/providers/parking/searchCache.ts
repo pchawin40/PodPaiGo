@@ -7,6 +7,8 @@ export type ParkingSearchCacheArgs = {
   destination: string;
   checkInDate?: string;
   checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
 };
 
 const SEARCH_CACHE_TTL_MS = Number(process.env.PARKING_SEARCH_CACHE_TTL_MS || 120_000);
@@ -21,6 +23,8 @@ function searchCacheKey(args: ParkingSearchCacheArgs): string {
     destination: args.destination,
     checkInDate: args.checkInDate ?? null,
     checkOutDate: args.checkOutDate ?? null,
+    checkInAt: args.checkInAt ?? null,
+    checkOutAt: args.checkOutAt ?? null,
   });
 }
 

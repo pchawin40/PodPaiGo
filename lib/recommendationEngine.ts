@@ -955,8 +955,10 @@ export class RecommendationEngine {
       transit: finalTransit,
       accessStrategies,
       parkingDiscoveryNotice:
-        isAirportTrip && shouldLoadParking
-          ? getParkingDiscoveryNotice(finalParking.length)
+        shouldLoadParking
+          ? isAirportTrip
+            ? getParkingDiscoveryNotice(finalParking.length)
+            : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
           : undefined,
       tsaEstimate: resolvedTsaEstimate,
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),

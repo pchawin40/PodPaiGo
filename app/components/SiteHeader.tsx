@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from './AuthProvider';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './UserMenu';
@@ -136,7 +136,8 @@ export default function SiteHeader({
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, loading, configured } = useAuth();
+  const { user, session, loading, configured } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const closeMobileMenu = () => setMobileOpen(false);
 
@@ -144,6 +145,32 @@ export default function SiteHeader({
     if (href === '/') return pathname === '/';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+
+  useEffect(() => {
+    if (!configured || loading || !session?.access_token) {
+      setIsAdmin(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    fetch('/api/admin/status', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, loading, session?.access_token]);
 
   return (
     <header className="sticky top-0 z-50 border-b border-border glass-panel rounded-none shadow-[0_8px_30px_rgba(14,116,144,0.08)]">
@@ -187,6 +214,11 @@ export default function SiteHeader({
               {link.label}
             </Link>
           ))}
+          {isAdmin ? (
+            <Link href="/admin/parking-submissions" className={navLinkClass(isActive('/admin'))}>
+              Admin
+            </Link>
+          ) : null}
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
@@ -269,6 +301,15 @@ export default function SiteHeader({
                     {link.label}
                   </Link>
                 ))}
+                {isAdmin ? (
+                  <Link
+                    href="/admin/parking-submissions"
+                    onClick={closeMobileMenu}
+                    className={navLinkClass(isActive('/admin'), true)}
+                  >
+                    Admin
+                  </Link>
+                ) : null}
               </div>
 
               <AuthActions

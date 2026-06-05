@@ -78,9 +78,10 @@ describe('Google destination parking discovery', () => {
     const third = await getDestinationParkingOptions(args);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(first).toHaveLength(5);
-    expect(second).toHaveLength(5);
-    expect(third).toHaveLength(5);
+    expect(first).toHaveLength(6);
+    expect(second).toHaveLength(6);
+    expect(third).toHaveLength(6);
+    expect(first.map((option) => option.id)).toContain('official-pike-place-market-parking');
     expect(requestBodies[0]?.textQuery).toBe('parking near Pike Place Market');
     expect(requestBodies[0]?.locationBias).toEqual({
       circle: {

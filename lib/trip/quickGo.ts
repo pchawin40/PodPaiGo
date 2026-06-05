@@ -400,6 +400,7 @@ export type BuildQuickGoSearchParamsInput = {
   destination?: QuickGoDestinationSelection;
   origin: QuickGoOriginSelection;
   continueAsQuickGo?: boolean;
+  transportAvailability?: TransportAvailability;
   now?: Date;
 };
 
@@ -420,7 +421,7 @@ export function buildQuickGoSearchParams(input: BuildQuickGoSearchParamsInput): 
   applyQuickGoOriginToSearchParams(params, input.origin);
   applyQuickGoDestinationToSearchParams(params, destinationSelection);
   params.set('intent', 'general-trip');
-  params.set('transport', 'all');
+  params.set('transport', input.transportAvailability || 'all');
   params.set('transitPayment', 'normal');
   params.set('destinationKind', inferQuickGoDestinationKind(destination, airport));
 

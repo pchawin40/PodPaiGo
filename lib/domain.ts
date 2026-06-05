@@ -4,6 +4,7 @@ import {
   parkingRouteUnavailableReason,
 } from './parking/routeStatus';
 import { calculateTransitCost } from './transit/transitPricing';
+import { buildLocalDateTime } from './tripTime';
 
 
 /**
@@ -188,11 +189,19 @@ export function calculateTripDuration(tripData: TripData): number {
 export function calculateParkingDuration(tripData: TripData): number {
   const fromCheckInOut = (() => {
     if (!tripData.parkingCheckInDate || !tripData.parkingCheckOutDate) return null;
-    const checkIn = new Date(`${tripData.parkingCheckInDate}T00:00:00`);
-    const checkOut = new Date(`${tripData.parkingCheckOutDate}T00:00:00`);
-    if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) return null;
+    const checkIn = buildLocalDateTime(
+      tripData.parkingCheckInDate,
+      tripData.parkingCheckInTime || '00:00',
+    );
+    const checkOut = buildLocalDateTime(
+      tripData.parkingCheckOutDate,
+      tripData.parkingCheckOutTime || '00:00',
+    );
+    const hasExplicitTimes = Boolean(tripData.parkingCheckInTime || tripData.parkingCheckOutTime);
+    if (!checkIn || !checkOut || Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) return null;
     const diffMinutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
-    return diffMinutes > 0 ? Math.max(24 * 60, diffMinutes) : null;
+    if (diffMinutes <= 0) return null;
+    return hasExplicitTimes ? diffMinutes : Math.max(24 * 60, diffMinutes);
   })();
 
   // General point A → B trips should be hourly by default.

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import SiteHeader from '@/app/components/SiteHeader';
 import { ThemeProvider } from '@/app/components/ThemeProvider';
 import { mockMatchMedia } from '@/lib/test/mockMatchMedia';
@@ -29,8 +29,14 @@ describe('SiteHeader', () => {
   beforeEach(() => {
     window.localStorage.clear();
     mockMatchMedia();
+    jest.restoreAllMocks();
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({ signedIn: false, isAdmin: false }),
+    })) as jest.Mock;
     useAuth.mockReturnValue({
       user: null,
+      session: null,
       loading: false,
       configured: true,
       signOut: jest.fn(),
@@ -57,6 +63,7 @@ describe('SiteHeader', () => {
   test('shows avatar menu when logged in on desktop path', () => {
     useAuth.mockReturnValue({
       user: { id: 'user-1', email: 'traveler@example.com' },
+      session: { access_token: 'token-1' },
       loading: false,
       configured: true,
       signOut: jest.fn(),
@@ -64,5 +71,52 @@ describe('SiteHeader', () => {
 
     renderHeader();
     expect(screen.getAllByRole('button', { name: /account menu/i }).length).toBeGreaterThan(0);
+  });
+
+  test('does not show admin nav for signed-out or non-admin users', async () => {
+    renderHeader();
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+
+    useAuth.mockReturnValue({
+      user: { id: 'user-1', email: 'traveler@example.com' },
+      session: { access_token: 'token-1' },
+      loading: false,
+      configured: true,
+      signOut: jest.fn(),
+    });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ signedIn: true, isAdmin: false, email: 'traveler@example.com' }),
+    });
+
+    renderHeader();
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/admin/status', {
+        headers: { Authorization: 'Bearer token-1' },
+      });
+    });
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  test('shows admin nav for signed-in admin', async () => {
+    useAuth.mockReturnValue({
+      user: { id: 'admin-1', email: 'admin@example.com' },
+      session: { access_token: 'admin-token' },
+      loading: false,
+      configured: true,
+      signOut: jest.fn(),
+    });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ signedIn: true, isAdmin: true, email: 'admin@example.com' }),
+    });
+
+    renderHeader();
+
+    expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute(
+      'href',
+      '/admin/parking-submissions',
+    );
   });
 });

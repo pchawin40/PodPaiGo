@@ -10,6 +10,8 @@ export async function getLiveParkingOptions(args: {
   destination: string;
   checkInDate?: string;
   checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
 }): Promise<ParkingOption[]> {
   const options = await aggregateAirportParkingOptions(args);
   return applyLegacyDisplayOrder(options);

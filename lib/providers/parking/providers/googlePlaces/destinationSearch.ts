@@ -12,8 +12,9 @@ import { getParkWhizDestinationParkingOptions } from '../../../parkWhiz';
 import { getCommunityFreeParkingOptions } from '../communityFree/provider';
 import { dedupeParkingOptions } from '../../shared/dedupe';
 import { withAvailabilityScore } from '../../shared/availability';
-import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
+import { googleMapsSearchUrl } from '../../shared/urls';
 import { debugLog } from '../../../../utils/debug';
+import { validateParkingInventoryOption } from '../../../../parking/inventoryValidation';
 
 type GooglePlace = {
   id?: string;
@@ -155,6 +156,67 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
     transferMinutes -
     estimatedPrice * 0.25
   );
+}
+
+export function buildCuratedDestinationParkingHints(args: {
+  destination: string;
+  parkingDurationMinutes: number;
+}): ParkingOption[] {
+  const normalized = args.destination.toLowerCase();
+  const isPikePlace =
+    normalized.includes('pike place') ||
+    normalized.includes('pike market');
+
+  if (!isPikePlace) return [];
+
+  const pricing = resolveCityParkingPricing({
+    name: 'Pike Place Market Parking Garage',
+    address: '1531 Western Ave, Seattle, WA 98101',
+    durationMinutes: args.parkingDurationMinutes,
+    covered: true,
+  });
+
+  return [
+    withAvailabilityScore({
+      id: 'official-pike-place-market-parking',
+      name: 'Pike Place Market Parking Garage',
+      address: '1531 Western Ave, Seattle, WA 98101',
+      normalizedAddress: '1531 Western Ave, Seattle, WA 98101',
+      routeDestination: '1531 Western Ave, Seattle, WA 98101',
+      type: 'official',
+      price: pricing.price,
+      priceMin: pricing.priceMin,
+      priceMax: pricing.priceMax,
+      priceDisplay: pricing.priceDisplay,
+      priceUnit: pricing.priceUnit,
+      pricingConfidence: pricing.pricingConfidence,
+      priceNote: `${pricing.priceNote} Provider controls final price.`,
+      priceSource: pricing.priceSource,
+      priceConfidence: pricing.priceConfidence,
+      trustStatus: pricing.trustStatus,
+      sourceName: 'Official parking info',
+      sourceLink: 'https://www.pikeplacemarket.org/parking/',
+      mapLink: googleMapsSearchUrl('Pike Place Market Parking Garage 1531 Western Ave Seattle WA'),
+      availability: 50,
+      availabilityStatus: 'unknown',
+      isAvailable: true,
+      distance: 8,
+      parkingBufferMinutes: 8,
+      transferToTerminalMinutes: 6,
+      transferType: 'walk',
+      covered: true,
+      lastUpdated: new Date().toISOString(),
+      assumptions: [
+        'Curated official destination parking hint.',
+        ...(pricing.assumptions || []),
+        'No live scraping of the official website is performed at request time.',
+      ],
+      bestFor: ['Official parking info', 'Public garage', 'Destination parking'],
+      providerSource: 'official-destination-hint',
+      fetchedAt: new Date().toISOString(),
+      priceFreshness: 'estimated',
+    }),
+  ];
 }
 
 async function fetchPlacesForDestinationQuery(args: {
@@ -392,7 +454,6 @@ export async function getDestinationParkingOptions(args: {
         covered: isGarage,
       });
 
-      const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
       const routeDestination = place.formattedAddress || name;
 
       const rating =
@@ -428,8 +489,8 @@ export async function getDestinationParkingOptions(args: {
         googleMapsUri: place.googleMapsUri,
         address: place.formattedAddress,
         normalizedAddress: place.formattedAddress,
-        imageUrl,
-        images: imageUrl ? [imageUrl] : undefined,
+        imageUrl: undefined,
+        images: undefined,
         lat: place.location?.latitude,
         lng: place.location?.longitude,
         routeDestination,
@@ -497,7 +558,28 @@ export async function getDestinationParkingOptions(args: {
       }),
     );
 
-  const finalOptions = dedupeParkingOptions([...communityOptions, ...mapped, ...unmatchedLiveParkWhiz])
+  const curatedHints = buildCuratedDestinationParkingHints({
+    destination: args.destination,
+    parkingDurationMinutes: durationMinutes,
+  });
+
+  const validatedOptions = [...communityOptions, ...curatedHints, ...mapped, ...unmatchedLiveParkWhiz].filter((option) => {
+    const result = validateParkingInventoryOption(option);
+    if (!result.valid) {
+      debugLog('parking_inventory_filtered', {
+        reason: result.reason,
+        destination: args.destination,
+        name: option.name,
+        sourceName: option.sourceName,
+        bookingProvider: option.bookingProvider,
+        sourceLink: option.sourceLink,
+      });
+      return false;
+    }
+    return true;
+  });
+
+  const finalOptions = dedupeParkingOptions(validatedOptions)
     .sort((a, b) => scoreGoogleParkingOption(b) - scoreGoogleParkingOption(a))
     .slice(0, maxResults);
 

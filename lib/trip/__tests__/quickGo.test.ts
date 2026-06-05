@@ -54,6 +54,18 @@ describe('quickGo', () => {
     expect(params.get('arrivalDate')).toBe('2026-06-01');
     expect(params.get('arrivalTime')).toBe('14:30');
     expect(params.get('intent')).toBe('general-trip');
+    expect(params.get('transport')).toBe('all');
+  });
+
+  test('buildQuickGoSearchParams preserves no-car rideshare preference', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Downtown Seattle',
+      origin: manualOrigin,
+      transportAvailability: 'rideshare',
+      now: new Date('2026-06-01T14:30:00'),
+    });
+
+    expect(params.get('transport')).toBe('rideshare');
   });
 
   test('parseTripDataFromSearchParams accepts quick-go type and origin metadata', () => {

@@ -22,18 +22,18 @@ type TravelPreferencesPanelProps = {
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
   {
     value: 'standard',
-    label: 'Standard',
-    detail: 'Compare parking, rideshare, and transit.',
+    label: 'I have a car',
+    detail: 'Show parking normally and still compare strong ride or transit options.',
   },
   {
     value: 'expense_rideshare',
-    label: 'I expense rideshare',
-    detail: 'Prioritize rideshare/taxi and hide parking picks.',
+    label: 'No car / rideshare',
+    detail: 'Prioritize rideshare or taxi when parking is not needed.',
   },
   {
     value: 'no_parking',
     label: 'No parking needed',
-    detail: 'Skip parking options for business or drop-off trips.',
+    detail: 'Hide parking cards unless you choose to show them anyway.',
   },
 ];
 
@@ -78,9 +78,9 @@ export default function TravelPreferencesPanel({
       <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         Travel preferences
       </div>
-      <h3 className="mt-1 text-lg font-semibold text-foreground">Business traveler mode</h3>
+      <h3 className="mt-1 text-lg font-semibold text-foreground">Car and parking preference</h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        Saved locally on this device. Booking integrations are not enabled yet.
+        Saved locally on this device.
       </p>
 
       <div className="mt-4 grid gap-2">

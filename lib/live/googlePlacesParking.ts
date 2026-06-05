@@ -8,17 +8,7 @@ type GooglePlaceParkingResult = {
   userRatingCount?: number;
   formattedAddress?: string;
   googleMapsUri?: string;
-  photos?: Array<{
-    name?: string;
-  }>;
 };
-
-function googlePlacePhotoImageUrl(photoName?: string | null): string | undefined {
-  const name = photoName?.trim();
-  if (!name) return undefined;
-
-  return `/api/google-place-photo?name=${encodeURIComponent(name)}&maxWidthPx=900`;
-}
 
 export async function enrichParkingWithGooglePlaces(
   parking: ParkingOption[]
@@ -40,7 +30,7 @@ export async function enrichParkingWithGooglePlaces(
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': apiKey,
             'X-Goog-FieldMask':
-              'places.id,places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri,places.photos',
+              'places.id,places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.googleMapsUri',
           },
           body: JSON.stringify({
             textQuery: query,
@@ -55,8 +45,6 @@ export async function enrichParkingWithGooglePlaces(
 
         if (!place) return p;
 
-        const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
-
         return {
           ...p,
           reviewScore: place.rating ?? p.reviewScore,
@@ -68,8 +56,8 @@ export async function enrichParkingWithGooglePlaces(
           address: place.formattedAddress ?? p.address,
           normalizedAddress: place.formattedAddress ?? p.normalizedAddress,
           mapLink: place.googleMapsUri ?? p.mapLink,
-          imageUrl: imageUrl ?? p.imageUrl,
-          images: imageUrl ? [imageUrl] : p.images,
+          imageUrl: p.imageUrl,
+          images: p.images,
           sourceName: p.sourceName || 'Google Places',
           assumptions: [
             ...(p.assumptions || []),

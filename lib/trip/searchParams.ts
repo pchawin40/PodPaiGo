@@ -92,7 +92,9 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const parkingDurationStr = searchParams.get('parkingDuration');
   const parkingDuration = parkingDurationStr ? parseInt(parkingDurationStr, 10) : undefined;
   const parkingCheckInDate = searchParams.get('parkingCheckInDate') || '';
+  const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
   const parkingCheckOutDate = searchParams.get('parkingCheckOutDate') || '';
+  const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
   const destinationLatRaw = searchParams.get('destinationLat');
   const destinationLngRaw = searchParams.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
@@ -155,13 +157,20 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
     const departureTime = searchParams.get('departureTime') || '';
 
     let computedParkingDuration = parkingDuration;
-    if (!computedParkingDuration && parkingCheckInDate && parkingCheckOutDate) {
-      const checkIn = new Date(`${parkingCheckInDate}T00:00:00`);
-      const checkOut = new Date(`${parkingCheckOutDate}T00:00:00`);
+    const resolvedParkingCheckInDate = parkingCheckInDate || departureDate;
+    const resolvedParkingCheckInTime = parkingCheckInTime || departureTime;
+    const resolvedParkingCheckOutDate = parkingCheckOutDate;
+    const resolvedParkingCheckOutTime = parkingCheckOutTime || departureTime;
+
+    if (!computedParkingDuration && resolvedParkingCheckInDate && resolvedParkingCheckOutDate) {
+      const checkIn = new Date(`${resolvedParkingCheckInDate}T${resolvedParkingCheckInTime || '00:00'}`);
+      const checkOut = new Date(`${resolvedParkingCheckOutDate}T${resolvedParkingCheckOutTime || '00:00'}`);
       if (!Number.isNaN(checkIn.getTime()) && !Number.isNaN(checkOut.getTime())) {
         const diffMinutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
         if (diffMinutes > 0) {
-          computedParkingDuration = Math.max(24 * 60, diffMinutes);
+          computedParkingDuration = parkingCheckInTime || parkingCheckOutTime
+            ? diffMinutes
+            : Math.max(24 * 60, diffMinutes);
         }
       }
     }
@@ -177,8 +186,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               departureTime,
               timeAnchor,
               parkingDuration: computedParkingDuration,
-              parkingCheckInDate,
-              parkingCheckOutDate,
+              parkingCheckInDate: resolvedParkingCheckInDate,
+              parkingCheckInTime: resolvedParkingCheckInTime,
+              parkingCheckOutDate: resolvedParkingCheckOutDate,
+              parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
               transitPayment,
               checkingBags,
@@ -198,8 +209,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               departureTime,
               timeAnchor,
               parkingDuration: computedParkingDuration,
-              parkingCheckInDate,
-              parkingCheckOutDate,
+              parkingCheckInDate: resolvedParkingCheckInDate,
+              parkingCheckInTime: resolvedParkingCheckInTime,
+              parkingCheckOutDate: resolvedParkingCheckOutDate,
+              parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
               transitPayment,
               checkedInAtAirport,
@@ -226,6 +239,18 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
     const departureTime = searchParams.get('departureTime') || '';
     const returnDate = searchParams.get('returnDate') || '';
     const returnTime = searchParams.get('returnTime') || '';
+    const resolvedParkingCheckInDate = parkingCheckInDate || departureDate;
+    const resolvedParkingCheckInTime = parkingCheckInTime || departureTime;
+    const resolvedParkingCheckOutDate = parkingCheckOutDate || returnDate;
+    const resolvedParkingCheckOutTime = parkingCheckOutTime || returnTime;
+    const computedParkingDuration = parkingDuration ?? (() => {
+      const checkIn = new Date(`${resolvedParkingCheckInDate}T${resolvedParkingCheckInTime}`);
+      const checkOut = new Date(`${resolvedParkingCheckOutDate}T${resolvedParkingCheckOutTime}`);
+      if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) return undefined;
+      const diffMinutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
+      return diffMinutes > 0 ? diffMinutes : undefined;
+    })();
+
     if (departureDate && departureTime && returnDate && returnTime && origin && destination) {
       data = {
         type,
@@ -235,7 +260,11 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         departureTime,
         returnDate,
         returnTime,
-        parkingDuration,
+        parkingDuration: computedParkingDuration,
+        parkingCheckInDate: resolvedParkingCheckInDate,
+        parkingCheckInTime: resolvedParkingCheckInTime,
+        parkingCheckOutDate: resolvedParkingCheckOutDate,
+        parkingCheckOutTime: resolvedParkingCheckOutTime,
         transportAvailability,
         transitPayment,
         airportCode: airportCodeForAirportTrips,
@@ -285,8 +314,6 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
       searchParams.get('destination') ||
       destination;
 
-    const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
-    const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
     const resolvedParkingDuration =
       parkingDuration ?? (tripMode === 'quick-go' ? 2 * 60 : 8 * 60);
     const resolvedParkingCheckInDate = parkingCheckInDate || arrivalDate;
@@ -351,6 +378,7 @@ type TripDataWithExtras = TripData & {
   flightType?: FlightType;
   cabin?: CabinClass;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
+  parkingCheckInTime?: string;
   parkingCheckOutDate?: string;
   parkingCheckOutTime?: string;
   checkedInAtAirport?: boolean;
@@ -442,6 +470,7 @@ export function tripDataToSearchParams(
     params.set('departureDate', data.departureDate);
     params.set('departureTime', data.departureTime);
     params.set('parkingCheckInDate', data.parkingCheckInDate || data.departureDate);
+    params.set('parkingCheckInTime', data.parkingCheckInTime || data.departureTime);
     if (data.parkingCheckOutDate) params.set('parkingCheckOutDate', data.parkingCheckOutDate);
     if (extras.parkingCheckOutTime) params.set('parkingCheckOutTime', extras.parkingCheckOutTime);
     if (data.parkingDuration) params.set('parkingDuration', String(data.parkingDuration));
@@ -472,6 +501,10 @@ export function tripDataToSearchParams(
     params.set('departureTime', data.departureTime);
     params.set('returnDate', data.returnDate);
     params.set('returnTime', data.returnTime);
+    params.set('parkingCheckInDate', data.parkingCheckInDate || data.departureDate);
+    params.set('parkingCheckInTime', data.parkingCheckInTime || data.departureTime);
+    params.set('parkingCheckOutDate', data.parkingCheckOutDate || data.returnDate);
+    params.set('parkingCheckOutTime', data.parkingCheckOutTime || data.returnTime);
     if (data.parkingDuration) params.set('parkingDuration', String(data.parkingDuration));
   } else if (data.type === 'dropoff-pickup') {
     params.set('airportTripDate', data.airportTripDate);

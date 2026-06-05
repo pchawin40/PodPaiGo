@@ -24,6 +24,11 @@ import {
   sortParkingOptionsForMode,
   type ParkingSortMode,
 } from '../../lib/parking/sortParkingOptions';
+import { resolveParkingPriceTrust } from '../../lib/parking/priceTrust';
+import {
+  buildParkingProviderHandoff,
+  formatParkingHandoffDuration,
+} from '../../lib/parking/providerHandoff';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 // import ParkingBookingSources from './ParkingBookSources';
@@ -120,6 +125,22 @@ function weatherParkingBadge(
   return { label, className };
 }
 
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+}
+
 function mergeGoogleEnrichedParking(
   option: ParkingOption,
   googleEnrichedParking: Record<string, Partial<ParkingOption>>
@@ -200,10 +221,8 @@ function reasonBadgesForOption(
     typeof walkMinutes === 'number' && walkMinutes > 0 && walkMinutes <= 6
       ? 'Closest walk'
       : null,
-    option.priceDisplay === 'live' ||
-      option.pricingConfidence === 'live' ||
-      option.bookingProvider === 'ParkWhiz' ||
-      option.bookingProvider === 'AirportParkingReservations'
+    option.priceDisplay === 'live' &&
+      option.pricingConfidence === 'live'
       ? 'Live bookable price'
       : null,
     option.priceConfidence === 'high' || option.trustStatus === 'live'
@@ -485,6 +504,7 @@ export default function ParkingSmartPick({
     : null;
 
   const bestPriceDisplay = parkingPriceLine(best, tripData);
+  const priceTrust = resolveParkingPriceTrust(best, tripData);
 
   const parkingTripContext = tripData
     ? resolveTripParkingContext(tripData)
@@ -522,6 +542,7 @@ export default function ParkingSmartPick({
         : 'Check price';
 
   const bestRouteLinks = parkingRouteLinks(best, tripData);
+  const handoff = buildParkingProviderHandoff(best, tripData, best.sourceLink);
 
   const bestWithMeta = best as ParkingOption & {
     updatedAt?: string;
@@ -623,6 +644,15 @@ export default function ParkingSmartPick({
             </div>
           )}
 
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${priceTrust.badgeClassName}`}>
+              {priceTrust.label}
+            </span>
+            <span className="text-xs font-medium text-zinc-600">
+              Provider controls final price.
+            </span>
+          </div>
+
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-700">
             <span className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
               {formatCompactMinutes(bestTime.totalMinutes)} total
@@ -668,6 +698,48 @@ export default function ParkingSmartPick({
               {customerOnlyWarning}
             </div>
           ) : null}
+
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="font-semibold text-slate-950">Booking helper</div>
+              <button
+                type="button"
+                onClick={() => void copyText(handoff.copySummary)}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+              >
+                Copy times
+              </button>
+            </div>
+            {handoff.window ? (
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Check-in</div>
+                  <div className="font-semibold text-slate-900">
+                    {handoff.window.checkInDate} {handoff.window.checkInTime}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Check-out</div>
+                  <div className="font-semibold text-slate-900">
+                    {handoff.window.checkOutDate} {handoff.window.checkOutTime}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Duration</div>
+                  <div className="font-semibold text-slate-900">
+                    {formatParkingHandoffDuration(handoff.window.durationMinutes)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 font-medium text-slate-900">Check selected trip dates/times</div>
+            )}
+            <div className="mt-2 text-xs text-slate-600">
+              {handoff.providerUrlSupportsPrefill
+                ? 'Verify these times at provider checkout.'
+                : 'Open provider and enter these times.'}
+            </div>
+          </div>
 
           <div className="mt-2 text-xs font-medium text-emerald-700">
             Smart pick for {airportTrip ? 'this airport' : 'this destination'}
@@ -760,9 +832,9 @@ export default function ParkingSmartPick({
         </div>
 
         <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:min-w-40">
-          {best.sourceLink && (
+          {handoff.providerUrl && (
             <a
-              href={best.sourceLink}
+              href={handoff.providerUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"

@@ -29,8 +29,8 @@ export class ParkWhizParkingProvider implements ParkingProvider {
     const options = await getParkWhizParkingOptions({
       airportCode,
       airportCoordinates: context.airportCoordinates,
-      checkInDate: context.checkInDate,
-      checkOutDate: context.checkOutDate,
+      checkInDate: context.checkInAt || context.checkInDate,
+      checkOutDate: context.checkOutAt || context.checkOutDate,
     });
 
     if (options.length > 0 && context.checkInDate && context.checkOutDate) {

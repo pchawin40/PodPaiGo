@@ -1,6 +1,8 @@
 function cleanText(value: string | null | undefined): string {
   return String(value || '')
     .toLowerCase()
+    .replace(/([a-z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([a-z])/g, '$1 $2')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

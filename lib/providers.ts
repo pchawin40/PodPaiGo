@@ -1175,6 +1175,8 @@ export class MockProvider implements DataProvider {
         destination,
         checkInDate: parkingDates.checkInDate,
         checkOutDate: parkingDates.checkOutDate,
+        checkInAt: parkingDates.checkInAt,
+        checkOutAt: parkingDates.checkOutAt,
       })
       : await getDestinationParkingOptions({
         origin,

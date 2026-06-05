@@ -127,8 +127,8 @@ export default function ParkingBookingComparison({
         ? 'Live selected-date'
         : isAwaitingApr
           ? 'Updating provider price…'
-          : directPrice.includes('Final price on provider')
-            ? 'Final price on provider'
+          : directPrice.includes('Check provider')
+            ? 'Check provider'
             : 'Estimated range',
       trustedLink(p),
       hasLivePrice ? 0 : 2,

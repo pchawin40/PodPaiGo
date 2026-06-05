@@ -9,6 +9,7 @@ import {
 } from '../lib/parking/parkingLabels';
 import { parkingRouteLinks, parkingTimeBreakdown } from '../lib/parking/routeDisplay';
 import { resolveTripParkingContext } from '../lib/trip/tripContext';
+import { buildCuratedDestinationParkingHints } from '../lib/providers/parking/providers/googlePlaces/destinationSearch';
 import type { ParkingOption, TripData } from '../lib/types';
 
 const PIKE_PLACE_GARAGE: ParkingOption = {
@@ -139,5 +140,18 @@ describe('city destination parking context', () => {
     expect(links.parkingToAirportUrl).toContain('google.com/maps/dir');
     expect(links.parkingToDestinationUrl).toBeNull();
     expect(getParkingTransferLinkLabel('airport_trip')).toBe('Parking to terminal');
+  });
+
+  test('Pike Place destination has curated official non-ParkWhiz parking hint', () => {
+    const hints = buildCuratedDestinationParkingHints({
+      destination: 'Pike Place Market, Seattle, WA',
+      parkingDurationMinutes: 8 * 60,
+    });
+
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.sourceName).toBe('Official parking info');
+    expect(hints[0]?.sourceLink).toMatch(/pikeplacemarket\.org\/parking/);
+    expect(hints[0]?.bookingProvider).toBeUndefined();
+    expect(hints[0]?.priceNote).toMatch(/Provider controls final price/);
   });
 });

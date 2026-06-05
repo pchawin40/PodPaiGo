@@ -15,6 +15,9 @@ import {
   GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
   SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
 } from '../../../lib/parking/googlePlacesSafeMode';
+import { debugLog } from '../../../lib/utils/debug';
+
+const MISSING_GOOGLE_REVIEW_INPUT_MESSAGE = 'Missing Google place id or lot name.';
 
 function getString(value: FormDataEntryValue | string | null): string | null {
   if (typeof value !== 'string') return null;
@@ -61,12 +64,30 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
     googlePlaceId: args.placeId,
   };
 
+  debugLog('review_match_attempt', {
+    airportCode: args.airport,
+    hasPlaceId: Boolean(args.placeId),
+    lotName: args.name,
+    hasAddress: Boolean(args.address),
+  });
+
   return runWithPlacesRequestBudget(
     `parking-reviews:${args.placeId || args.name || 'unknown'}`,
     async () => {
       if (isGooglePlaceReviewsLiveBlocked()) {
+        debugLog('review_live_blocked', {
+          airportCode: args.airport,
+          lotName: args.name,
+          hasPlaceId: Boolean(args.placeId),
+        });
         const cached = await getCachedParkingGoogleReviews(lookupArgs);
         if (cached?.reviews?.length) {
+          debugLog('review_cache_hit', {
+            airportCode: args.airport,
+            lotName: args.name,
+            googlePlaceId: cached.googlePlaceId,
+            reviewCount: cached.reviews.length,
+          });
           return buildReviewResponse(
             cached,
             'supabase-cache',
@@ -81,6 +102,13 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
       const budget = getActivePlacesRequestBudget();
 
       if (place?.reviews?.length) {
+        debugLog('review_match_success', {
+          airportCode: args.airport,
+          lotName: args.name,
+          googlePlaceId: place.googlePlaceId,
+          source: place.source,
+          reviewCount: place.reviews.length,
+        });
         return buildReviewResponse(
           place,
           place.source === 'supabase-cache' || place.source === 'stale-fallback'
@@ -93,13 +121,30 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
       }
 
       if (!place?.googlePlaceId) {
+        debugLog('review_match_failed', {
+          airportCode: args.airport,
+          lotName: args.name,
+          reason: 'no_listing_matched',
+        });
         return buildReviewResponse(place, 'no-listing', GOOGLE_LISTING_NOT_FOUND_MESSAGE);
       }
 
       if (budget && budget.blocked > 0) {
+        debugLog('review_match_failed', {
+          airportCode: args.airport,
+          lotName: args.name,
+          googlePlaceId: place.googlePlaceId,
+          reason: 'cap_exceeded',
+        });
         return buildReviewResponse(place, 'cap-exceeded', GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE);
       }
 
+      debugLog('review_match_failed', {
+        airportCode: args.airport,
+        lotName: args.name,
+        googlePlaceId: place.googlePlaceId,
+        reason: 'no_reviews_available',
+      });
       return buildReviewResponse(place, 'no-reviews', GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE);
     },
     { route: '/api/parking-reviews' },
@@ -116,6 +161,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       reviews: [],
       source: 'missing-input',
+      message: MISSING_GOOGLE_REVIEW_INPUT_MESSAGE,
       liveReviewsEnabled: getEffectiveGooglePlacesConfig().liveReviewsEnabled,
     });
   }
@@ -135,6 +181,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       reviews: [],
       source: 'missing-input',
+      message: MISSING_GOOGLE_REVIEW_INPUT_MESSAGE,
       liveReviewsEnabled: getEffectiveGooglePlacesConfig().liveReviewsEnabled,
     });
   }

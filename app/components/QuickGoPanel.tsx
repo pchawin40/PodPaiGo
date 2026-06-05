@@ -27,6 +27,7 @@ import {
   rememberRecentDestination,
 } from '../../lib/trip/savedDestinations';
 import { trackEvent } from '../../lib/analytics/trackEvent';
+import type { TransportAvailability } from '../../lib/types';
 import PrimaryButton from './ui/PrimaryButton';
 import StatusPill from './ui/StatusPill';
 
@@ -109,6 +110,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [showOriginEditor, setShowOriginEditor] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAirportCode, setPendingAirportCode] = useState<string | null>(null);
+  const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>('all');
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
   const [geolocationSupported, setGeolocationSupported] = useState(false);
@@ -342,6 +344,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
         destination,
         origin,
         continueAsQuickGo,
+        transportAvailability,
       }),
     );
   };
@@ -565,6 +568,35 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
             {destinationSelection.destinationConfidence === 'low' ? ' · lower confidence' : ''}
           </p>
         ) : null}
+
+        <div className="rounded-xl border border-border/80 bg-muted/20 p-2">
+          <div className="grid grid-cols-3 gap-1">
+            {(
+              [
+                { key: 'car' as const, label: 'I have a car' },
+                { key: 'rideshare' as const, label: 'No car' },
+                { key: 'all' as const, label: 'Compare all' },
+              ] as Array<{ key: TransportAvailability; label: string }>
+            ).map((option) => {
+              const selected = transportAvailability === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setTransportAvailability(option.key)}
+                  className={
+                    'rounded-lg px-2 py-2 text-xs font-semibold transition ' +
+                    (selected
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-card text-muted-foreground hover:bg-muted')
+                  }
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="text-muted-foreground">Starting from:</span>

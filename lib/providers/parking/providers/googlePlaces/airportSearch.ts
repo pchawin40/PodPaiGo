@@ -7,7 +7,7 @@ import { resolveParkingPricing } from '../../../pricingResolver';
 import { resolveDynamicParkingPrice } from '../../../dynamicParkingPricing';
 import { withAvailabilityScore } from '../../shared/availability';
 import { milesBetween } from '../../shared/geo';
-import { googleMapsSearchUrl, googlePlacePhotoImageUrl } from '../../shared/urls';
+import { googleMapsSearchUrl } from '../../shared/urls';
 import { debugLog } from '../../../../utils/debug';
 
 type GooglePlace = {
@@ -488,7 +488,6 @@ export async function getGoogleParkingPlaces(args: {
         const name = place.displayName?.text || `${airportCode} Parking`;
         const lowerName = name.toLowerCase();
         const isParkAndRide = looksLikeParkAndRideTransitName(name);
-        const imageUrl = googlePlacePhotoImageUrl(place.photos?.[0]?.name);
 
         const lotKey = resolveLotKeyFromName(name);
 
@@ -551,8 +550,8 @@ export async function getGoogleParkingPlaces(args: {
           googlePlaceId: place.id,
           googleMapsUri: place.googleMapsUri,
           address: place.formattedAddress,
-          imageUrl,
-          images: imageUrl ? [imageUrl] : undefined,
+          imageUrl: undefined,
+          images: undefined,
           lat: place.location?.latitude,
           lng: place.location?.longitude,
           normalizedAddress: place.formattedAddress,

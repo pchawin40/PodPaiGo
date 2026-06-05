@@ -18,6 +18,8 @@ export type AggregateAirportParkingArgs = {
   destination: string;
   checkInDate?: string;
   checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
 };
 
 function toSearchContext(args: AggregateAirportParkingArgs): ParkingSearchContext {
@@ -30,6 +32,8 @@ function toSearchContext(args: AggregateAirportParkingArgs): ParkingSearchContex
     destination: args.destination,
     checkInDate: args.checkInDate,
     checkOutDate: args.checkOutDate,
+    checkInAt: args.checkInAt,
+    checkOutAt: args.checkOutAt,
   };
 }
 
@@ -71,6 +75,8 @@ async function aggregateAirportParkingOptionsUncached(
       airportCoordinates,
       checkInDate: args.checkInDate,
       checkOutDate: args.checkOutDate,
+      checkInAt: args.checkInAt,
+      checkOutAt: args.checkOutAt,
     },
     {
       inventoryOptions: optionsForProvider(results, 'inventory'),
