@@ -7,6 +7,7 @@ import type {
   SecurityOption,
   TransportAvailability,
   TransitPaymentOption,
+  ParkingPreference,
   TripData,
   TripType,
 } from '../types';
@@ -111,6 +112,13 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const transitPaymentRaw = searchParams.get('transitPayment') || 'normal';
   const transitPayment: TransitPaymentOption =
     transitPaymentRaw === 'orca-pass' ? 'orca-pass' : 'normal';
+  const parkingPreferenceRaw = searchParams.get('parkingPreference') || '';
+  const parkingPreference: ParkingPreference | undefined = isOneOf(
+    parkingPreferenceRaw,
+    ['none', 'destination', 'nearby'] as const,
+  )
+    ? parkingPreferenceRaw
+    : undefined;
 
   const intentParam = searchParams.get('intent') || '';
 
@@ -192,6 +200,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
               transitPayment,
+              parkingPreference,
               checkingBags,
               bagPlan,
               securityOption,
@@ -215,6 +224,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
               transitPayment,
+              parkingPreference,
               checkedInAtAirport,
             };
     }
@@ -230,6 +240,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         arrivalTime,
         transportAvailability,
         transitPayment,
+        parkingPreference,
         airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
@@ -267,6 +278,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         parkingCheckOutTime: resolvedParkingCheckOutTime,
         transportAvailability,
         transitPayment,
+        parkingPreference,
         airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
@@ -283,6 +295,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         airportTripTime,
         transportAvailability,
         transitPayment,
+        parkingPreference,
         airportCode: airportCodeForAirportTrips,
         destinationKind: 'airport',
       };
@@ -346,6 +359,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
         transportAvailability,
         transitPayment,
+        parkingPreference,
       };
     }
   }
@@ -398,6 +412,11 @@ export function tripDataToSearchParams(
   params.set('origin', data.origin);
   params.set('transport', data.transportAvailability || 'all');
   params.set('transitPayment', data.transitPayment || 'normal');
+  if (data.parkingPreference) {
+    params.set('parkingPreference', data.parkingPreference);
+  } else {
+    params.delete('parkingPreference');
+  }
 
   if (data.destinationKind) {
     params.set('destinationKind', data.destinationKind);

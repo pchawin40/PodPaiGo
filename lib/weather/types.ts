@@ -19,6 +19,7 @@ export type WeatherImpact = {
 export type WeatherContext =
   | 'travel-time-forecast'
   | 'current-airport-weather'
+  | 'current-destination-weather'
   | 'forecast-unavailable'
   | 'invalid-travel-time'
   | 'unavailable';

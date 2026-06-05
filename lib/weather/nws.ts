@@ -217,6 +217,143 @@ export async function getWeatherForAirport(args: {
   }
 }
 
+export async function getWeatherForPoint(args: {
+  lat: number;
+  lng: number;
+  targetDateTime?: string;
+  currentContext?: WeatherLookupResult['context'];
+}): Promise<WeatherLookupResult> {
+  if (!Number.isFinite(args.lat) || !Number.isFinite(args.lng)) {
+    return {
+      weatherImpact: null,
+      context: 'unavailable',
+      targetDateTime: args.targetDateTime,
+    };
+  }
+
+  const headers = {
+    Accept: 'application/geo+json',
+    UserAgent: 'PodPaiGo/1.0',
+  };
+
+  try {
+    const pointRes = await fetch(`https://api.weather.gov/points/${args.lat},${args.lng}`, {
+      headers,
+    });
+
+    if (!pointRes.ok) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
+
+    const pointData = await pointRes.json();
+    const hourlyUrl = pointData.properties?.forecastHourly;
+
+    if (!hourlyUrl) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
+
+    const hourlyRes = await fetch(hourlyUrl, { headers });
+
+    if (!hourlyRes.ok) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
+
+    const hourlyData = await hourlyRes.json();
+    const periods: NwsHourlyPeriod[] = hourlyData.properties?.periods ?? [];
+
+    if (periods.length === 0) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
+
+    const firstPeriod = periods[0];
+    const lastPeriod = periods[periods.length - 1];
+    const firstTime = new Date(firstPeriod.startTime).getTime();
+    const lastTime = new Date(lastPeriod.startTime).getTime();
+
+    if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        targetDateTime: args.targetDateTime,
+      };
+    }
+
+    if (args.targetDateTime) {
+      const targetTime = new Date(args.targetDateTime).getTime();
+      if (!Number.isFinite(targetTime)) {
+        return {
+          weatherImpact: null,
+          context: 'invalid-travel-time',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      if (targetTime < firstTime || targetTime > lastTime) {
+        return {
+          weatherImpact: null,
+          context: 'forecast-unavailable',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
+      if (!targetPeriod) {
+        return {
+          weatherImpact: null,
+          context: 'unavailable',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      return {
+        weatherImpact: buildWeatherImpact(targetPeriod),
+        context: 'travel-time-forecast',
+        targetDateTime: args.targetDateTime,
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    const now = Date.now();
+    const currentPeriod = findFirstPeriodAtOrAfter(periods, now) || periods[0];
+
+    return {
+      weatherImpact: currentPeriod ? buildWeatherImpact(currentPeriod) : null,
+      context: currentPeriod ? args.currentContext || 'current-destination-weather' : 'unavailable',
+      forecastRangeStart: firstPeriod.startTime,
+      forecastRangeEnd: lastPeriod.startTime,
+    };
+  } catch {
+    return {
+      weatherImpact: null,
+      context: 'unavailable',
+      targetDateTime: args.targetDateTime,
+    };
+  }
+}
+
 export async function getWeatherImpactForAirport(args: {
   airportCode: string;
   targetDateTime?: string;

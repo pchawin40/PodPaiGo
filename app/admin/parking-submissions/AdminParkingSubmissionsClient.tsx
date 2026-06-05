@@ -5,7 +5,6 @@ import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import TravelCard from '../../components/ui/TravelCard';
 import { useAuth } from '../../components/AuthProvider';
-import { isAdminEmail } from '../../../lib/admin/adminAuth';
 import {
   USER_PARKING_STATUS_LABELS,
   type UserParkingSpaceRecord,
@@ -20,22 +19,46 @@ const FILTERS: Array<UserParkingStatus | 'all'> = [
   'all',
 ];
 
-type AdminParkingSubmissionsClientProps = {
-  adminEmails: string[];
-};
-
-export default function AdminParkingSubmissionsClient({
-  adminEmails,
-}: AdminParkingSubmissionsClientProps) {
+export default function AdminParkingSubmissionsClient() {
   const { user, session, loading, configured } = useAuth();
   const [status, setStatus] = useState<UserParkingStatus | 'all'>('pending');
   const [parking, setParking] = useState<UserParkingSpaceRecord[]>([]);
   const [reason, setReason] = useState('');
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminStatusLoading, setAdminStatusLoading] = useState(false);
 
-  const isAdmin = isAdminEmail(user?.email, adminEmails);
   const accessToken = session?.access_token ?? null;
+
+  useEffect(() => {
+    if (!configured || loading || !accessToken) {
+      setIsAdmin(false);
+      setAdminStatusLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAdminStatusLoading(true);
+
+    fetch('/api/admin/status', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      })
+      .finally(() => {
+        if (!cancelled) setAdminStatusLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, configured, loading]);
 
   const load = useCallback(async () => {
     if (!accessToken || !isAdmin) return;
@@ -127,7 +150,7 @@ export default function AdminParkingSubmissionsClient({
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Supabase auth is not configured.</p>
           </TravelCard>
-        ) : loading ? (
+        ) : loading || adminStatusLoading ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Loading session...</p>
           </TravelCard>

@@ -62,11 +62,12 @@ describe('destinationParkingClassifier', () => {
     expect(result.mode).toBe('paid_likely');
   });
 
-  test('restaurant maps to validated_possible', () => {
+  test('restaurant maps to likely on-site or street parking expectation', () => {
     const result = classifyDestinationParking({ destination: 'Waterfront restaurant' });
 
-    expect(result.mode).toBe('validated_possible');
-    expect(result.accessType).toBe('validated_customer');
+    expect(result.mode).toBe('free_likely');
+    expect(result.accessType).toBe('customer_only');
+    expect(result.reason).toMatch(/on-site or nearby street parking/i);
   });
 
   test('office or corporate building maps to restricted_possible', () => {
@@ -84,7 +85,7 @@ describe('destinationParkingClassifier', () => {
     expect(result.mode).toBe('free_likely');
     expect(result.confidence).toBe('high');
     expect(inferDestinationCategory({ destination })).toBe('grocery_or_retail');
-    expect(result.reason).toMatch(/free customer parking/i);
+    expect(result.reason).toMatch(/Customer parking likely available/i);
   });
 
   test('pharmacy chains map to free_likely', () => {

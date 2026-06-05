@@ -1,7 +1,7 @@
 import type { RecommendationSortMode } from '../domain';
 import type { DestinationKind, TransportAvailability } from '../types';
 
-export type BusinessTravelMode = 'standard' | 'expense_rideshare' | 'no_parking';
+export type BusinessTravelMode = 'standard' | 'expense_rideshare' | 'no_parking' | 'compare_all';
 
 export type ParkingFeatureFilters = {
   covered?: boolean;
@@ -37,11 +37,16 @@ export const TRAVEL_PREFERENCES_STORAGE_KEY = 'podpaigo-travel-preferences';
 export const MAX_FAVORITE_LOCATIONS = 12;
 
 export function isBusinessTravelMode(value: string | null | undefined): value is BusinessTravelMode {
-  return value === 'standard' || value === 'expense_rideshare' || value === 'no_parking';
+  return (
+    value === 'standard' ||
+    value === 'expense_rideshare' ||
+    value === 'no_parking' ||
+    value === 'compare_all'
+  );
 }
 
 export function businessTravelModeNeedsParking(mode: BusinessTravelMode): boolean {
-  return mode === 'standard';
+  return mode === 'standard' || mode === 'compare_all';
 }
 
 export function parseParkingFiltersFromParam(value: string | null | undefined): ParkingFeatureFilters {

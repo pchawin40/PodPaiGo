@@ -1,5 +1,6 @@
 import type { ParkingOption } from '../types';
 import type { ParkingFeatureFilters } from '../trip/travelPreferences';
+import { getParkingFeatureMeta } from './featureConfidence';
 
 function haystack(option: ParkingOption): string {
   return [
@@ -26,31 +27,23 @@ export function matchesParkingFeatureFilters(
   const text = haystack(option);
 
   if (filters.covered) {
-    const covered =
-      option.covered === true ||
-      text.includes('covered') ||
-      text.includes('garage') ||
-      text.includes('indoor');
-    if (!covered) return false;
+    if (!getParkingFeatureMeta(option, 'covered').passesStrictFilter) return false;
   }
 
   if (filters.shuttle) {
-    const shuttle = option.transferType === 'shuttle' || text.includes('shuttle');
-    if (!shuttle) return false;
+    if (!getParkingFeatureMeta(option, 'shuttle').passesStrictFilter) return false;
   }
 
   if (filters.secured) {
-    const secured = text.includes('secured') || text.includes('secure') || text.includes('gated');
-    if (!secured) return false;
+    if (!getParkingFeatureMeta(option, 'secured').passesStrictFilter) return false;
   }
 
   if (filters.evCharging) {
-    const ev = text.includes('ev') || text.includes('charging') || text.includes('electric');
-    if (!ev) return false;
+    if (!getParkingFeatureMeta(option, 'evCharging').passesStrictFilter) return false;
   }
 
   if (filters.valet) {
-    if (!text.includes('valet')) return false;
+    if (!getParkingFeatureMeta(option, 'valet').passesStrictFilter) return false;
   }
 
   if (filters.selfPark) {

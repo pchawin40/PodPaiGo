@@ -23,8 +23,12 @@ export function isAirportTrip(tripData: Pick<TripData, 'type' | 'destinationKind
 }
 
 export function shouldDiscoverParkingForTrip(
-  tripData: Pick<TripData, 'type' | 'destinationKind'>,
+  tripData: Pick<TripData, 'type' | 'destinationKind' | 'parkingPreference'>,
 ): boolean {
+  if (tripData.parkingPreference === 'none') {
+    return false;
+  }
+
   if (isCityDestinationTrip(tripData)) {
     return true;
   }

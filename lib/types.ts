@@ -32,6 +32,15 @@ export type CabinClass = 'economy' | 'premium';
 export type BagPlan = 'none' | 'checked' | 'oversized';
 
 export type TransitPaymentOption = 'normal' | 'orca-pass';
+export type ParkingPreference = 'none' | 'destination' | 'nearby';
+export type ParkingFeatureConfidence = 'verified' | 'provider_claimed' | 'inferred' | 'unknown';
+export type ParkingFeatureKey =
+  | 'covered'
+  | 'secured'
+  | 'shuttle'
+  | 'evCharging'
+  | 'valet'
+  | 'selfPark';
 
 type BaseTripData = {
   origin: string;
@@ -67,6 +76,7 @@ type BaseTripData = {
 
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;
+  parkingPreference?: ParkingPreference;
 
   /**
    * Parking is always stored in minutes internally.
@@ -236,6 +246,7 @@ export type ParkingOption = {
   walkingMinutes?: number; // optional override for walking time to terminal, if transferType is 'walk'
   shuttleMinutes?: number; // optional override for shuttle time to terminal, if transferType is 'shuttle'
   covered?: boolean;
+  featureConfidence?: Partial<Record<ParkingFeatureKey, ParkingFeatureConfidence>>;
   reviewScore?: number; // e.g. from Google reviews, 0-5
   reviewCount?: number; // number of reviews, for context with reviewScore
   googleReviews?: ParkingGoogleReview[];

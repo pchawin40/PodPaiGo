@@ -123,7 +123,7 @@ import {
   isDepartureLeg,
   rankRecommendations
 } from './domain';
-import { getWeatherForAirport } from './weather/nws';
+import { getWeatherForAirport, getWeatherForPoint } from './weather/nws';
 import type { WeatherLookupResult } from './weather/types';
 import {
   getTransitPassAssumption,
@@ -284,6 +284,26 @@ function buildTripDateTime(tripData: TripData): string {
   return resolveScheduledTripDateTime(tripData) ?? new Date().toISOString();
 }
 
+function buildParkingCheckInDateTime(tripData: TripData): string {
+  if (tripData.parkingCheckInDate && tripData.parkingCheckInTime) {
+    return `${tripData.parkingCheckInDate}T${tripData.parkingCheckInTime}`;
+  }
+
+  if (tripData.type === 'general-trip') {
+    return `${tripData.parkingCheckInDate || tripData.arrivalDate}T${tripData.parkingCheckInTime || tripData.arrivalTime}`;
+  }
+
+  if (tripData.type === 'one-way-departure') {
+    return `${tripData.parkingCheckInDate || tripData.departureDate}T${tripData.parkingCheckInTime || tripData.departureTime}`;
+  }
+
+  if (tripData.type === 'round-trip') {
+    return `${tripData.parkingCheckInDate || tripData.departureDate}T${tripData.parkingCheckInTime || tripData.departureTime}`;
+  }
+
+  return buildTripDateTime(tripData);
+}
+
 function plannedAirportArrivalDateTime(tripData: TripData): string | undefined {
   return resolveTargetTerminalArrivalIso(tripData) ?? undefined;
 }
@@ -430,7 +450,7 @@ export class RecommendationEngine {
             const options = await this.provider.getParkingOptions(
               tripData.origin,
               tripData.destination,
-              tripDateTime,
+              buildParkingCheckInDateTime(tripData),
               calculateParkingDuration(tripData),
               {
                 destinationKind: tripData.destinationKind ?? 'airport',
@@ -624,10 +644,20 @@ export class RecommendationEngine {
         weatherImpact: null,
         context: 'unavailable' as const,
       }))
-      : {
-        weatherImpact: null,
-        context: 'unavailable' as const,
-      };
+      : typeof tripData.destinationLat === 'number' && typeof tripData.destinationLng === 'number'
+        ? await getWeatherForPoint({
+          lat: tripData.destinationLat,
+          lng: tripData.destinationLng,
+          targetDateTime: tripDateTime,
+          currentContext: 'current-destination-weather',
+        }).catch((): WeatherLookupResult => ({
+          weatherImpact: null,
+          context: 'unavailable' as const,
+        }))
+        : {
+          weatherImpact: null,
+          context: 'forecast-unavailable' as const,
+        };
 
     const weatherImpact = weatherResult.weatherImpact;
 

@@ -118,6 +118,50 @@ body {
   transition: color 0.2s ease, background-color 0.2s ease;
 }
 
+input,
+select,
+textarea {
+  color: var(--foreground);
+  background-color: var(--card);
+  border-color: var(--border);
+  color-scheme: light;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.82;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline-color: var(--ring);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--muted-foreground);
+  background-color: var(--muted);
+  cursor: not-allowed;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  color: var(--foreground);
+  background-color: #111827;
+  border-color: var(--border);
+  color-scheme: dark;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.9;
+}
+
 * {
   min-width: 0;
 }

@@ -47,9 +47,7 @@ export function isWashingtonTransitRegion(context: TransitPaymentRegionContext =
 }
 
 export function getTransitPassOptionLabel(context: TransitPaymentRegionContext = {}): string {
-  return isWashingtonTransitRegion(context)
-    ? 'ORCA / employer pass'
-    : 'Transit pass / employer pass';
+  return 'Transit pass / employer pass';
 }
 
 export function getTransitPassPickerPrompt(context: TransitPaymentRegionContext = {}): string {
@@ -61,23 +59,17 @@ export function getTransitPassOptionButtonLabel(context: TransitPaymentRegionCon
 }
 
 export function getTransitPassCoveredLabel(context: TransitPaymentRegionContext = {}): string {
-  return isWashingtonTransitRegion(context)
-    ? 'Covered by ORCA pass'
-    : 'Covered by transit pass';
+  return 'Covered by transit pass';
 }
 
 export function getTransitPassPriceNote(context: TransitPaymentRegionContext = {}): string {
-  return isWashingtonTransitRegion(context)
-    ? '$0 with ORCA / employer transit pass'
-    : '$0 with transit pass / employer pass';
+  return '$0 with transit pass / employer pass';
 }
 
 export function getTransitPassAssumption(context: TransitPaymentRegionContext = {}): string {
-  return isWashingtonTransitRegion(context)
-    ? 'Transit fare shown as $0 because ORCA / employer pass was selected.'
-    : 'Transit fare shown as $0 because transit pass / employer pass was selected.';
+  return 'Transit fare shown as $0 because transit pass / employer pass was selected.';
 }
 
 export function getTransitPassAppliedBadge(context: TransitPaymentRegionContext = {}): string {
-  return isWashingtonTransitRegion(context) ? 'ORCA pass applied' : 'Transit pass applied';
+  return 'Transit pass applied';
 }

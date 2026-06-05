@@ -21,7 +21,7 @@ export const NORTHGATE_HUB: SeaCuratedHubDefinition = {
     min: 3,
     max: 3,
     mode: 'link',
-    sourceNotes: 'ORCA adult Link fare one-way; pass holders may pay $0',
+    sourceNotes: 'Adult Link fare one-way; transit pass holders may pay $0',
   },
   timing: {
     linkRideMinutes: 45,

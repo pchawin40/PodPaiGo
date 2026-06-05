@@ -23,10 +23,6 @@ import AccountSectionsNav from './AccountSectionsNav';
 import TravelCard from '../components/ui/TravelCard';
 import { trackEvent } from '../../lib/analytics/trackEvent';
 
-type AccountDashboardProps = {
-  adminEmails: string[];
-};
-
 function formatWhen(value: string | null): string {
   if (!value) return 'No date set';
 
@@ -66,8 +62,8 @@ function AccountSection({
   );
 }
 
-export default function AccountDashboard({ adminEmails }: AccountDashboardProps) {
-  const { user, loading, configured, signOut } = useAuth();
+export default function AccountDashboard() {
+  const { user, session, loading, configured, signOut } = useAuth();
   const [savedTrips, setSavedTrips] = useState<SavedTripRecord[]>([]);
   const [tripsLoading, setTripsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +73,33 @@ export default function AccountDashboard({ adminEmails }: AccountDashboardProps)
   const [travelPreferences, setTravelPreferences] = useState<TripTravelPreferences>(() =>
     readTravelPreferences(),
   );
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  const isAdmin = useMemo(() => {
-    if (!user?.email?.trim()) return false;
-    return adminEmails.includes(user.email.trim().toLowerCase());
-  }, [adminEmails, user?.email]);
+  useEffect(() => {
+    if (!configured || loading || !session?.access_token) {
+      setIsAdmin(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    fetch('/api/admin/status', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, loading, session?.access_token]);
 
   useEffect(() => {
     trackEvent('account_viewed');

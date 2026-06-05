@@ -74,8 +74,8 @@ function freeRetailClassification(name: string): DestinationParkingClassificatio
     accessType: 'customer_only',
     confidence: 'high',
     reason:
-      'Most grocery and retail locations have free customer parking, but check posted signs.',
-    recommendedAction: 'Park in the store lot first. Paid parking search is skipped unless you ask for nearby options.',
+      'Customer parking likely available. Do not use for unrelated or overnight parking.',
+    recommendedAction: 'Use the store lot for the visit and check posted signs, time limits, and towing rules.',
     shouldSearchPaidParking: false,
   };
 }
@@ -105,11 +105,11 @@ export function inferDestinationCategory(
   if (classification.mode === 'free_likely' && isRetailOrGroceryDestination(destination)) {
     return 'grocery_or_retail';
   }
-  if (classification.mode === 'restricted_possible') return 'office_or_workplace';
-  if (classification.mode === 'permit_possible') return 'hiking_or_park';
-  if (classification.mode === 'validated_possible' && RESTAURANT_PATTERN.test(lower)) {
+  if (RESTAURANT_PATTERN.test(lower)) {
     return 'restaurant';
   }
+  if (classification.mode === 'restricted_possible') return 'office_or_workplace';
+  if (classification.mode === 'permit_possible') return 'hiking_or_park';
   if (/\bhotel|motel|inn\b/i.test(lower)) return 'hotel';
   return 'general';
 }
@@ -137,19 +137,19 @@ export function classifyDestinationParking(
       mode: validatedHint ? 'validated_possible' : 'free_likely',
       accessType: validatedHint ? 'validated_customer' : 'customer_only',
       confidence: 'medium',
-      reason: 'Shopping centers often include customer parking, but validation rules vary by store.',
-      recommendedAction: 'Start with mall or store parking. Confirm validation with the business if needed.',
+      reason: 'Mall parking likely available on site. Check signs and garage rules.',
+      recommendedAction: 'Start with mall parking and confirm any posted validation, time-limit, or garage rules.',
       shouldSearchPaidParking: false,
     };
   }
 
   if (RESTAURANT_PATTERN.test(lower)) {
     return {
-      mode: 'validated_possible',
-      accessType: 'validated_customer',
+      mode: 'free_likely',
+      accessType: 'customer_only',
       confidence: /\b(bar|brewpub)\b/i.test(lower) ? 'low' : 'medium',
-      reason: 'Restaurants and cafes sometimes validate parking, but rules vary by location and time.',
-      recommendedAction: 'Confirm with the business before relying on validation.',
+      reason: 'Parking likely free/on-site or nearby street parking.',
+      recommendedAction: 'Check restaurant lot signs first, then nearby street parking and posted limits.',
       shouldSearchPaidParking: false,
     };
   }
@@ -239,7 +239,7 @@ export function destinationParkingHeadline(mode: DestinationParkingMode): string
 export function destinationParkingSubcopy(mode: DestinationParkingMode): string {
   switch (mode) {
     case 'free_likely':
-      return 'Destination appears to have customer parking. Paid parking search skipped.';
+      return 'Destination parking is an expectation, not live bookable inventory. Check signs and posted rules.';
     case 'validated_possible':
       return 'Confirm with the business before relying on validation.';
     case 'permit_possible':

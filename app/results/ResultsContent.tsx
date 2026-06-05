@@ -16,6 +16,7 @@ import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
 import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
+import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
   getParkingComparableCost,
   getParkingTotalTimeMinutes,
@@ -98,6 +99,7 @@ import {
   ParkingOption,
   RideshareEstimateConfidence,
   TransitPaymentOption,
+  ParkingPreference,
   TransitOption,
   RideshareOption
 } from '../../lib/types';
@@ -192,6 +194,7 @@ type TripDataWithExtras = TripData & {
   parkingCheckOutTime?: string;
   timeAnchor?: 'flight-departure' | 'airport-arrival';
   transitPayment?: TransitPaymentOption;
+  parkingPreference?: ParkingPreference;
   checkingBags?: boolean;
   bagPlan?: BagPlan;
   securityOption?: SecurityOption;
@@ -508,6 +511,7 @@ function weatherRiskClass(weather: WeatherImpact): string {
 function weatherSectionTitle(context?: WeatherContext): string {
   if (context === 'travel-time-forecast') return 'Weather for your travel time';
   if (context === 'current-airport-weather') return 'Current airport weather';
+  if (context === 'current-destination-weather') return 'Current destination weather';
   if (context === 'forecast-unavailable') return 'Forecast not available yet';
   return 'Weather unavailable';
 }
@@ -519,6 +523,10 @@ function weatherSectionDetail(context?: WeatherContext): string {
 
   if (context === 'current-airport-weather') {
     return 'Showing current conditions because a valid travel time was not provided.';
+  }
+
+  if (context === 'current-destination-weather') {
+    return 'Showing current destination conditions because a valid travel time was not provided.';
   }
 
   if (context === 'invalid-travel-time') {
@@ -755,6 +763,138 @@ function ParkingBookingHelperPanel({
           <dd className="font-semibold text-slate-900">Standard passenger vehicle unless provider asks otherwise</dd>
         </div>
       </dl>
+    </div>
+  );
+}
+
+function ParkingBookingHelperModal({
+  option,
+  tripData,
+  providerUrl,
+  directionsUrl,
+  onClose,
+}: {
+  option: ParkingOption;
+  tripData: TripData | null;
+  providerUrl?: string | null;
+  directionsUrl?: string | null;
+  onClose: () => void;
+}) {
+  const handoff = buildParkingProviderHandoff(option, tripData, providerUrl);
+  const handoffWindow = handoff.window;
+  const priceTrust = resolveParkingPriceTrust(option, tripData);
+  const openUrl = handoff.providerUrl || providerUrl || null;
+
+  const openProvider = () => {
+    if (!openUrl) return;
+    globalThis.window.open(openUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const openDirections = () => {
+    if (!directionsUrl) return;
+    globalThis.window.open(directionsUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-xl rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-lg font-bold text-slate-950">Booking helper</div>
+            <div className="mt-1 text-sm text-slate-600">
+              Provider controls final price. Confirm exact times at checkout.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+
+        <dl className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs font-medium text-slate-500">Lot</dt>
+            <dd className="font-semibold text-slate-950">{handoff.lotName}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-slate-500">Provider</dt>
+            <dd className="font-semibold text-slate-950">{handoff.providerName}</dd>
+          </div>
+          {handoffWindow ? (
+            <>
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Check-in</dt>
+                <dd className="font-semibold text-slate-950">
+                  {handoffWindow.checkInDate} {handoffWindow.checkInTime}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Check-out</dt>
+                <dd className="font-semibold text-slate-950">
+                  {handoffWindow.checkOutDate} {handoffWindow.checkOutTime}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Parking duration</dt>
+                <dd className="font-semibold text-slate-950">
+                  {formatParkingHandoffDuration(handoffWindow.durationMinutes)}
+                </dd>
+              </div>
+            </>
+          ) : (
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-medium text-slate-500">Parking window</dt>
+              <dd className="font-semibold text-slate-950">Check selected trip dates/times</dd>
+            </div>
+          )}
+          <div>
+            <dt className="text-xs font-medium text-slate-500">Vehicle assumption</dt>
+            <dd className="font-semibold text-slate-950">Standard passenger vehicle</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-xs font-medium text-slate-500">Price trust</dt>
+            <dd className="mt-1 flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${priceTrust.badgeClassName}`}>
+                {priceTrust.label}
+              </span>
+              <span className="text-sm text-slate-700">{priceTrust.disclosure}</span>
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          Final price may change based on exact check-in/check-out time, vehicle size, taxes, fees, and provider availability.
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => void copyText(handoff.copySummary)}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+          >
+            Copy parking times
+          </button>
+          <button
+            type="button"
+            onClick={openDirections}
+            disabled={!directionsUrl}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Open directions
+          </button>
+          <button
+            type="button"
+            onClick={openProvider}
+            disabled={!openUrl}
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Open provider
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1624,6 +1764,7 @@ function computeTimingStatus(args: {
   }
 
   const todayLocal = formatLocalYYYYMMDD(now);
+  const isSameLocalDate = tripData.departureDate === todayLocal;
   const isFutureDate = tripData.departureDate !== todayLocal;
 
   const computeCushionMinutes = (leaveDt: Date): number => {
@@ -1671,6 +1812,28 @@ function computeTimingStatus(args: {
   const latestSafeLeaveDt = new Date(recommendedInsideArrivalByDt.getTime() - optionTotalMinutes * 60000);
   const minutesUntilLeaveBy = computeCushionMinutes(latestSafeLeaveDt);
 
+  if (!isSameLocalDate && latestSafeLeaveDt.getTime() < now.getTime()) {
+    return {
+      status: 'n/a',
+      flightDeparts: isAirportArrivalAnchor ? undefined : tripData.departureTime,
+      recommendedInsideArrivalBy: formatHHMMFromDate(recommendedInsideArrivalByDt),
+      optionTravelMinutes: optionTotalMinutes,
+      assumptions: ['Open directions to confirm timing.'],
+      debug: {
+        departureDate: tripData.departureDate,
+        departureTime: tripData.departureTime,
+        departureLocal: depDt.toString(),
+        recommendedInsideArrivalByLocal: recommendedInsideArrivalByDt.toString(),
+        latestSafeLeaveISO: latestSafeLeaveDt.toISOString(),
+        latestSafeLeaveLocal: latestSafeLeaveDt.toString(),
+        nowISO: now.toISOString(),
+        nowLocal: now.toString(),
+        cushionMinutes: null,
+        isFutureDate,
+      },
+    };
+  }
+
   if (depDt.getTime() > now.getTime() && latestSafeLeaveDt.getTime() < now.getTime()) {
     return {
       status: 'n/a',
@@ -1702,7 +1865,10 @@ function computeTimingStatus(args: {
         ? 'tight'
         : 'good';
 
-  const youReachTerminalAroundDt = new Date(now.getTime() + optionTotalMinutes * 60000);
+  const youReachTerminalAroundDt =
+    missedBy > 0
+      ? new Date(now.getTime() + optionTotalMinutes * 60000)
+      : new Date(latestSafeLeaveDt.getTime() + optionTotalMinutes * 60000);
 
   return {
     status,
@@ -1811,6 +1977,7 @@ function OptionCard({
   accessToken?: string | null;
   tripId?: string | null;
 }) {
+  const [bookingHelperOpen, setBookingHelperOpen] = useState(false);
   const opt =
     item.type === 'parking'
       ? (withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption)
@@ -1978,6 +2145,7 @@ function OptionCard({
         : visiblePrice.primary;
 
   return (
+    <>
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
@@ -2147,6 +2315,25 @@ function OptionCard({
                     {formatTag(tag)}
                   </div>
                 ))}
+
+              {item.type === 'parking' && displayParkingOption
+                ? getVisibleParkingFeatureBadges(displayParkingOption).slice(0, 3).map((meta) => (
+                    <div
+                      key={`${displayParkingOption.id}-${meta.key}-${meta.confidence}`}
+                      title={`Source: ${meta.sourceLabel}. Confidence: ${meta.confidence.replace('_', ' ')}.`}
+                      className={
+                        'rounded-full border px-2.5 py-1 text-xs font-medium ' +
+                        (meta.confidence === 'verified'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                          : meta.confidence === 'provider_claimed'
+                            ? 'border-blue-200 bg-blue-50 text-blue-800'
+                            : 'border-amber-200 bg-amber-50 text-amber-900')
+                      }
+                    >
+                      {meta.label}
+                    </div>
+                  ))
+                : null}
 
               {aprLiveChecking &&
                 item.type === 'parking' &&
@@ -2425,6 +2612,7 @@ function OptionCard({
               parkingLotId={opt.id || null}
               tripId={tripId || null}
               accessToken={accessToken}
+              onReserve={() => setBookingHelperOpen(true)}
             />
           ) : compact ? (
             <div className="flex flex-col gap-2">
@@ -2613,6 +2801,16 @@ function OptionCard({
         </details>
       )}
     </div>
+    {bookingHelperOpen && item.type === 'parking' && displayParkingOption ? (
+      <ParkingBookingHelperModal
+        option={(displayParkingOption || (opt as ParkingOption)) as ParkingOption}
+        tripData={tripData}
+        providerUrl={parkingProviderUrl}
+        directionsUrl={parkingLotRouteLink || opt.mapLink || null}
+        onClose={() => setBookingHelperOpen(false)}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -3276,6 +3474,15 @@ function localDateTimeParam(date: string | undefined, time: string | undefined):
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
   if (!/^\d{2}:\d{2}$/.test(time)) return undefined;
   return `${date}T${time}:00`;
+}
+
+function addMinutesToLocalDateTimeParam(value: string | undefined, minutes: number | undefined): string | undefined {
+  if (!value || !Number.isFinite(minutes)) return undefined;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  parsed.setMinutes(parsed.getMinutes() + Number(minutes));
+  const time = `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+  return `${formatLocalYYYYMMDD(parsed)}T${time}:00`;
 }
 
 function logRecommendationsFetch(
@@ -4266,6 +4473,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const airportRouteUnavailable =
     Boolean(recommendation?.airportRouteUnavailable) ||
     Boolean(recommendation?.trafficEstimate?.routeUnavailable);
+  const routeUnavailableBlocksParking = airportRouteUnavailable && !isCityTrip;
 
   const airportRouteUnavailableReason =
     recommendation?.airportRouteUnavailableReason ||
@@ -4383,9 +4591,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     Promise.all(
       requests.map(async (item) => {
         const params = new URLSearchParams({
-          airport: airportCode,
           targetDateTime: buildWeatherTargetDateTime(item.date, item.time),
         });
+        if (
+          tripData.type === 'general-trip' &&
+          typeof tripData.destinationLat === 'number' &&
+          typeof tripData.destinationLng === 'number'
+        ) {
+          params.set('lat', String(tripData.destinationLat));
+          params.set('lng', String(tripData.destinationLng));
+        } else {
+          params.set('airport', airportCode);
+        }
 
         const response = await fetch(`/api/weather?${params.toString()}`, {
           signal: controller.signal,
@@ -4440,7 +4657,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       tripExtras.parkingCheckOutDate && tripExtras.parkingCheckOutTime
         ? localDateTimeParam(tripExtras.parkingCheckOutDate, tripExtras.parkingCheckOutTime)
         : tripData.type === 'general-trip' && tripData.parkingDuration
-          ? localDateTimeParam(tripExtras.parkingCheckOutDate, tripExtras.parkingCheckOutTime)
+          ? addMinutesToLocalDateTimeParam(checkInAt, tripData.parkingDuration)
           : undefined;
     const body = {
       airportCode: isCityDestinationTrip(tripData) ? undefined : getTripAirportCode(tripData),
@@ -4794,9 +5011,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const transportAvailability = (tripData as TripDataWithExtras).transportAvailability || 'all';
   const businessMode = travelPreferences.businessTravelMode;
-  const noParkingPreferred = businessMode === 'expense_rideshare' || businessMode === 'no_parking';
+  const tripParkingPreference = (tripData as TripDataWithExtras).parkingPreference;
+  const noParkingPreferred =
+    tripParkingPreference === 'none' ||
+    businessMode === 'expense_rideshare' ||
+    businessMode === 'no_parking';
   const showParkingProviders =
-    (businessTravelModeNeedsParking(businessMode) || showParkingAnyway) &&
+    ((!noParkingPreferred && businessTravelModeNeedsParking(businessMode)) || showParkingAnyway) &&
     (transportAvailability === 'car' || transportAvailability === 'all');
   const showRideProviders =
     noParkingPreferred ||
@@ -4950,6 +5171,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     return [...available, ...unavailable];
   })();
+  const visibleSmartPickOption = parkingDisplayOptions[0] || smartPickOption || null;
   const allParkingRoutesUnavailable =
     parkingDisplayOptions.length > 0 &&
     parkingDisplayOptions.every((option) => isParkingRouteUnavailable(option));
@@ -4972,7 +5194,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const remainingParking = sortRankedParkingCardsForMode({
     rankedOptions: parkingDisplayOptions
-      .filter((parkingOption) => parkingOption.id !== smartPickOption?.id)
+      .filter((parkingOption) => parkingOption.id !== visibleSmartPickOption?.id)
       .map((parkingOption) =>
         rankedParkingCardFromOption({
           option: parkingOption,
@@ -5036,8 +5258,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </div>
 
               <h1 className="mt-3 text-2xl font-semibold text-foreground sm:text-3xl">
-                {airportRouteUnavailable
+                {routeUnavailableBlocksParking
                   ? 'Route unavailable from this origin'
+                  : airportRouteUnavailable && isCityTrip
+                    ? 'Drive time unavailable'
                   : noViableFlyingOut
                     ? 'No reliable option gets you airport-ready on time'
                     : intent === 'flying-out' && tripData.type === 'one-way-departure' && bestViableLeaveByTime
@@ -5050,10 +5274,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {airportRouteUnavailable && (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
-                    We could not calculate a real route from your starting location to this destination.
+                    {isCityTrip
+                      ? 'Drive time is unavailable for this result.'
+                      : 'We could not calculate a real route from your starting location to this destination.'}
                   </div>
                   <div className="mt-1">
-                    Try an origin near {displayDestination}, rideshare/taxi, or another transportation option.
+                    {isCityTrip
+                      ? 'Parking expectations are still shown. Open directions to confirm timing.'
+                      : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
                   {airportRouteUnavailableReason && (
                     <div className="mt-2 text-xs text-muted-foreground">
@@ -5988,7 +6216,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         ) : null}
 
         {
-          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !airportRouteUnavailable && (
+          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !routeUnavailableBlocksParking && (
             <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
               {parkingEmptyStateMessage}
             </div>
@@ -5996,7 +6224,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         }
 
         {
-          showParkingProviders && parkingDisplayOptions.length > 0 && !airportRouteUnavailable && (
+          showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
             <div id="parking-options-section" className="mt-6 scroll-mt-6">
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-xl font-bold">
@@ -6018,16 +6246,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               )}
 
-              {smartPickParkingOptions.length > 0 && (
+              {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
                 <ParkingSmartPick
-                  options={cheapestSmartPickOptions.map((p) => googleEnrichedParking[p.id] || p)}
+                  options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
                   tripData={tripData}
                   sortMode={sort}
-                  leaveByTime={airportRouteUnavailable ? null : recommendation.leaveByTime}
+                  leaveByTime={routeUnavailableBlocksParking ? null : recommendation.leaveByTime}
                   selectedOption={
-                    smartPickOption
-                      ? googleEnrichedParking[smartPickOption.id] || smartPickOption
-                      : smartPickOption
+                    googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
                   }
                   aprLivePrices={aprLivePrices}
                   aprLiveChecking={aprLiveChecking}
@@ -6110,6 +6336,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       <ParkingLotsMap
                         airportCode={isCityTrip ? undefined : tripData?.airportCode}
                         originAddress={tripData?.origin}
+                        destinationLatLng={
+                          isCityTrip &&
+                          typeof tripData?.destinationLat === 'number' &&
+                          typeof tripData?.destinationLng === 'number'
+                            ? {
+                                lat: tripData.destinationLat,
+                                lng: tripData.destinationLng,
+                              }
+                            : null
+                        }
+                        destinationLabel={isCityTrip ? displayDestination : null}
                         parkingOptions={parkingDisplayOptions}
                         selectedParkingId={selectedParkingId}
                         onSelectParking={setSelectedParkingId}
@@ -6274,7 +6511,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
           ) : (
             <>
-              {displayableRemainingParking.length > 0 && !airportRouteUnavailable && (
+              {displayableRemainingParking.length > 0 && !routeUnavailableBlocksParking && (
                 <section id="more-parking-options-section" className="mt-8 scroll-mt-6">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -6286,7 +6523,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       </p>
                     </div>
 
-                    {!airportRouteUnavailable && canShowMoreParking && (
+                    {!routeUnavailableBlocksParking && canShowMoreParking && (
                       <button
                         type="button"
                         onClick={() =>
@@ -6306,7 +6543,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     )}
                   </div>
 
-                  {airportRouteUnavailable ? (
+                  {routeUnavailableBlocksParking ? (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
                       <div className="font-semibold">
                         Parking options are not usable from this origin
@@ -6341,7 +6578,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </section>
               )}
 
-              {airportRouteUnavailable && (
+              {routeUnavailableBlocksParking && (
                 <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
                   <h2 className="text-lg font-semibold text-amber-950">
                     Parking options are unavailable from this origin
@@ -6429,7 +6666,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         </div>
 
         {/* Pricing links */}
-        {!airportRouteUnavailable &&
+        {!routeUnavailableBlocksParking &&
           <div id="provider-links-section" className="mt-8 grid scroll-mt-6 grid-cols-1 items-start gap-4 lg:grid-cols-2">
             {showRideProviders && (
               <ProviderDropdownSection
@@ -6530,6 +6767,9 @@ function EditTripForm({
   const [transitPayment, setTransitPayment] = useState<'normal' | 'orca-pass'>(
     (initialData as TripDataWithExtras).transitPayment || 'normal'
   );
+  const [parkingPreference, setParkingPreference] = useState<ParkingPreference>(
+    (initialData as TripDataWithExtras).parkingPreference || 'nearby'
+  );
 
   const showAirportTimingControls = intent === 'flying-out' && initialData.type === 'one-way-departure';
 
@@ -6543,7 +6783,7 @@ function EditTripForm({
   const [flightType, setFlightType] = useState<FlightType>(((initialData as TripDataWithExtras).flightType || 'domestic') as FlightType);
   const [cabin, setCabin] = useState<CabinClass>(((initialData as TripDataWithExtras).cabin || 'economy') as CabinClass);
 
-  const [parkingDurationHours] = useState(
+  const [parkingDurationHours, setParkingDurationHours] = useState(
     'parkingDuration' in initialData && initialData.parkingDuration
       ? String(Math.round((initialData.parkingDuration / 60) * 10) / 10)
       : ''
@@ -6556,11 +6796,19 @@ function EditTripForm({
     'departureTime' in initialData ? initialData.departureTime : ''
   );
 
+  const [parkingCheckInDate, setParkingCheckInDate] = useState(
+    (initialData as TripDataWithExtras).parkingCheckInDate || ''
+  );
+
+  const [parkingCheckInTime, setParkingCheckInTime] = useState(
+    (initialData as TripDataWithExtras).parkingCheckInTime || ''
+  );
+
   const [parkingCheckOutDate, setParkingCheckOutDate] = useState(
     (initialData as TripDataWithExtras).parkingCheckOutDate || ''
   );
 
-  const [parkingCheckOutTime] = useState(
+  const [parkingCheckOutTime, setParkingCheckOutTime] = useState(
     (initialData as TripDataWithExtras).parkingCheckOutTime || ''
   );
 
@@ -6591,6 +6839,39 @@ function EditTripForm({
   const isDropoffPickup = initialData.type === 'dropoff-pickup';
   const isArrival = initialData.type === 'one-way-arrival';
   const isRoundTrip = initialData.type === 'round-trip';
+  const isGeneralTripEdit = initialData.type === 'general-trip';
+
+  const formatLocalHHMM = (dt: Date) =>
+    `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+
+  const addMinutesToEditDateTime = (
+    dateString: string,
+    timeString: string,
+    minutes: number,
+  ): { date: string; time: string } | null => {
+    const start = buildLocalDateTime(dateString, timeString);
+    if (!start || !Number.isFinite(minutes)) return null;
+
+    const end = new Date(start.getTime() + minutes * 60_000);
+    return {
+      date: formatLocalYYYYMMDD(end),
+      time: formatLocalHHMM(end),
+    };
+  };
+
+  const durationFromEditWindow = (
+    checkInDate: string,
+    checkInTime: string,
+    checkOutDate: string,
+    checkOutTime: string,
+  ): number | null => {
+    const checkIn = buildLocalDateTime(checkInDate, checkInTime);
+    const checkOut = buildLocalDateTime(checkOutDate, checkOutTime);
+    if (!checkIn || !checkOut) return null;
+
+    const minutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
+    return minutes > 0 ? minutes : null;
+  };
 
   const validate = (): string[] => {
     const next: string[] = [];
@@ -6632,6 +6913,10 @@ function EditTripForm({
       validateCombinedDateTime(arrivalDate, arrivalTime, 'Trip');
     }
 
+    if (initialData.type === 'general-trip') {
+      validateCombinedDateTime(arrivalDate, arrivalTime, 'Arrival');
+    }
+
     if (initialData.type === 'round-trip') {
       // Validate both legs relative to now.
       validateCombinedDateTime(departureDate, departureTime, 'Departure');
@@ -6647,18 +6932,20 @@ function EditTripForm({
       }
     }
 
-    if ((isDeparture || isRoundTrip) && parkingCheckOutDate) {
-      const checkInDate = departureDate;
-      const checkInTime = departureTime || '12:00';
-      const checkOutTime = parkingCheckOutTime || departureTime || '12:00';
+    if (parkingCheckOutDate) {
+      const checkInDate = parkingCheckInDate || (isGeneralTripEdit ? arrivalDate : departureDate);
+      const checkInTime = parkingCheckInTime || (isGeneralTripEdit ? arrivalTime : departureTime) || '12:00';
+      const checkOutTime = parkingCheckOutTime || checkInTime;
 
-      const checkIn = new Date(`${checkInDate}T${checkInTime}`);
-      const checkOut = new Date(`${parkingCheckOutDate}T${checkOutTime}`);
+      const minutes = durationFromEditWindow(
+        checkInDate,
+        checkInTime,
+        parkingCheckOutDate,
+        checkOutTime,
+      );
 
-      if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
-        if (checkOut.getTime() < checkIn.getTime()) {
-          next.push('Parking check-out must be after parking check-in.');
-        }
+      if (minutes === null) {
+        next.push('Parking check-out must be after parking check-in.');
       }
     }
 
@@ -6685,55 +6972,83 @@ function EditTripForm({
       ? Math.round(Number(parkingDurationHours) * 60)
       : undefined;
 
-    if ((isDeparture || isRoundTrip) && parkingCheckOutDate) {
-      const checkInDate = departureDate;
-      const checkInTime = departureTime || '12:00';
-      const checkOutTime = parkingCheckOutTime || departureTime || '12:00';
-
-      const checkIn = new Date(`${checkInDate}T${checkInTime}`);
-      const checkOut = new Date(`${parkingCheckOutDate}T${checkOutTime}`);
-
-      if (!isNaN(checkIn.getTime()) && !isNaN(checkOut.getTime())) {
-        parkingDuration = Math.max(
-          24 * 60,
-          Math.round((checkOut.getTime() - checkIn.getTime()) / 60000)
-        );
-      }
-    }
-
-    const selectedAirport = getAirportById(selectedAirportCode) || getAirportById('SEA')!;
-    const destination = selectedAirport.routingAddress || selectedAirport.destinationName;
+    const selectedAirport = isGeneralTripEdit
+      ? null
+      : getAirportById(selectedAirportCode) || getAirportById('SEA')!;
+    const destination = isGeneralTripEdit
+      ? initialData.destination
+      : selectedAirport!.routingAddress || selectedAirport!.destinationName;
 
     let data: TripData;
 
     if (initialData.type === 'general-trip') {
+      const checkInDate = parkingCheckInDate || arrivalDate;
+      const checkInTime = parkingCheckInTime || arrivalTime;
+      const defaultDuration = initialData.tripMode === 'quick-go' ? 2 * 60 : 8 * 60;
+      let checkOutDate = parkingCheckOutDate;
+      let checkOutTime = parkingCheckOutTime;
+
+      if (checkOutDate && checkOutTime) {
+        parkingDuration = durationFromEditWindow(
+          checkInDate,
+          checkInTime,
+          checkOutDate,
+          checkOutTime,
+        ) ?? parkingDuration;
+      } else {
+        parkingDuration = parkingDuration ?? defaultDuration;
+        const derivedCheckout = addMinutesToEditDateTime(checkInDate, checkInTime, parkingDuration);
+        checkOutDate = derivedCheckout?.date || '';
+        checkOutTime = derivedCheckout?.time || '';
+      }
+
       data = {
         type: 'general-trip',
         origin,
-        destination: destination || initialData.destination,
+        destination,
         destinationKind: initialData.destinationKind || 'general',
-        destinationName: initialData.destinationName || destination || initialData.destination,
+        destinationName: initialData.destinationName || destination,
+        destinationLat: initialData.destinationLat,
+        destinationLng: initialData.destinationLng,
+        tripMode: initialData.tripMode,
         arrivalDate,
         arrivalTime,
         parkingDuration: parkingDuration ?? initialData.parkingDuration,
-        parkingCheckInDate: arrivalDate,
-        parkingCheckInTime: arrivalTime,
+        parkingCheckInDate: checkInDate,
+        parkingCheckInTime: checkInTime,
+        parkingCheckOutDate: checkOutDate,
+        parkingCheckOutTime: checkOutTime,
         transportAvailability,
         transitPayment,
+        parkingPreference,
       };
     } else if (initialData.type === 'one-way-departure') {
+      const checkInDate = parkingCheckInDate || departureDate;
+      const checkInTime = parkingCheckInTime || departureTime || '12:00';
+      const checkOutTime = parkingCheckOutTime || checkInTime;
+      if (parkingCheckOutDate) {
+        parkingDuration = durationFromEditWindow(
+          checkInDate,
+          checkInTime,
+          parkingCheckOutDate,
+          checkOutTime,
+        ) ?? parkingDuration;
+      }
+
       data = {
         type: initialData.type,
         origin,
         destination,
-        airportCode: selectedAirport.id,
+        airportCode: selectedAirport!.id,
         destinationKind: 'airport',
         departureDate,
         departureTime,
         timeAnchor: (initialData as TripDataWithExtras).timeAnchor || 'flight-departure',
         parkingDuration,
-        parkingCheckInDate: departureDate,
+        parkingCheckInDate: checkInDate,
+        parkingCheckInTime: checkInTime,
         parkingCheckOutDate: parkingCheckOutDate || undefined,
+        parkingCheckOutTime: parkingCheckOutDate ? checkOutTime : undefined,
         transportAvailability,
         bagPlan: showAirportTimingControls ? bagPlan : (initialData as TripDataWithExtras).bagPlan,
         checkingBags: showAirportTimingControls ? bagPlan !== 'none' : (initialData as TripDataWithExtras).checkingBags,
@@ -6742,6 +7057,7 @@ function EditTripForm({
         cabin: showAirportTimingControls ? cabin : (initialData as TripDataWithExtras).cabin,
         checkedInAtAirport: (initialData as TripDataWithExtras).checkedInAtAirport,
         transitPayment,
+        parkingPreference,
       };
     } else if (initialData.type === 'dropoff-pickup') {
       data = {
@@ -6751,9 +7067,10 @@ function EditTripForm({
         airportTripDate,
         airportTripTime,
         transportAvailability,
-        airportCode: selectedAirport.id,
+        airportCode: selectedAirport!.id,
         destinationKind: 'airport',
         transitPayment,
+        parkingPreference,
       };
     } else if (initialData.type === 'one-way-arrival') {
       data = {
@@ -6763,24 +7080,41 @@ function EditTripForm({
         arrivalDate,
         arrivalTime,
         transportAvailability,
-        airportCode: selectedAirport.id,
+        airportCode: selectedAirport!.id,
         destinationKind: 'airport',
         transitPayment,
+        parkingPreference,
       };
     } else {
+      const checkInDate = parkingCheckInDate || departureDate;
+      const checkInTime = parkingCheckInTime || departureTime;
+      const checkOutDate = parkingCheckOutDate || returnDate;
+      const checkOutTime = parkingCheckOutTime || returnTime;
+      parkingDuration = durationFromEditWindow(
+        checkInDate,
+        checkInTime,
+        checkOutDate,
+        checkOutTime,
+      ) ?? parkingDuration;
+
       data = {
         type: 'round-trip',
         origin,
         destination,
-        airportCode: selectedAirport.id,
+        airportCode: selectedAirport!.id,
         destinationKind: 'airport',
         departureDate,
         departureTime,
         returnDate,
         returnTime,
         parkingDuration,
+        parkingCheckInDate: checkInDate,
+        parkingCheckInTime: checkInTime,
+        parkingCheckOutDate: checkOutDate,
+        parkingCheckOutTime: checkOutTime,
         transportAvailability,
         transitPayment,
+        parkingPreference,
       };
     }
 
@@ -6802,14 +7136,14 @@ function EditTripForm({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
-          <div className="sm:col-span-2">
+          {!isGeneralTripEdit ? (
             <AirportSearchPicker
               value={selectedAirportCode}
               onChange={(airportCode) => {
                 setSelectedAirportCode(airportCode.toUpperCase());
               }}
             />
-          </div>
+          ) : null}
           <div className="text-sm font-medium text-zinc-900">What can you use today?</div>
           <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(
@@ -6847,6 +7181,34 @@ function EditTripForm({
               className="mt-4"
             />
           )}
+
+          <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-3">
+            <div className="text-sm font-medium text-zinc-900">Parking preference</div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {[
+                { key: 'nearby' as const, label: 'I’m driving / need parking' },
+                { key: 'none' as const, label: 'No parking needed' },
+                { key: 'destination' as const, label: 'Compare all' },
+              ].map((opt) => {
+                const selected = parkingPreference === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setParkingPreference(opt.key)}
+                    className={
+                      'rounded-xl border px-3 py-2 text-left text-sm font-medium transition ' +
+                      (selected
+                        ? 'border-blue-500 bg-blue-50 text-blue-950'
+                        : 'border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {showAirportTimingControls && (
@@ -6986,6 +7348,99 @@ function EditTripForm({
           />
         </div>
 
+        {isGeneralTripEdit && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Arrival date</label>
+              <input
+                type="date"
+                value={arrivalDate}
+                onChange={(e) => setArrivalDate(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-800">Arrival time</label>
+              <input
+                type="time"
+                value={arrivalTime}
+                onChange={(e) => setArrivalTime(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+
+            {parkingPreference !== 'none' ? (
+              <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="text-sm font-medium text-zinc-900">Parking time</div>
+                <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-800">
+                      Park from date
+                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={parkingCheckInDate}
+                      onChange={(e) => setParkingCheckInDate(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-800">
+                      Park from time
+                      <span className="ml-1 text-xs font-normal text-zinc-500">Defaults to arrival</span>
+                    </label>
+                    <input
+                      type="time"
+                      value={parkingCheckInTime}
+                      onChange={(e) => setParkingCheckInTime(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-800">
+                      Park until date
+                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={parkingCheckOutDate}
+                      onChange={(e) => setParkingCheckOutDate(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-800">
+                      Park until time
+                      <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                    </label>
+                    <input
+                      type="time"
+                      value={parkingCheckOutTime}
+                      onChange={(e) => setParkingCheckOutTime(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-zinc-800">
+                      Duration
+                      <span className="ml-1 text-xs font-normal text-zinc-500">Used when park until is blank</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={parkingDurationHours}
+                      onChange={(e) => setParkingDurationHours(e.target.value)}
+                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+
         {isDeparture && (
           <>
             <div>
@@ -6998,18 +7453,6 @@ function EditTripForm({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-800">
-                Return / parking check-out date
-                <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
-              </label>
-              <input
-                type="date"
-                value={parkingCheckOutDate}
-                onChange={(e) => setParkingCheckOutDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-zinc-800">Time</label>
               <input
                 type="time"
@@ -7017,6 +7460,77 @@ function EditTripForm({
                 onChange={(e) => setDepartureTime(e.target.value)}
                 className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
+            </div>
+
+            <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+              <div className="text-sm font-medium text-zinc-900">Parking time</div>
+              <p className="mt-1 text-xs text-zinc-500">
+                Optional. Exact check-in/check-out times can change provider checkout prices.
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-800">
+                    Parking check-in date
+                    <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={parkingCheckInDate}
+                    onChange={(e) => setParkingCheckInDate(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-800">
+                    Parking check-in time
+                    <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={parkingCheckInTime}
+                    onChange={(e) => setParkingCheckInTime(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-800">
+                    Parking check-out date
+                    <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={parkingCheckOutDate}
+                    onChange={(e) => setParkingCheckOutDate(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-800">
+                    Parking check-out time
+                    <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={parkingCheckOutTime}
+                    onChange={(e) => setParkingCheckOutTime(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-zinc-800">
+                    Parking duration
+                    <span className="ml-1 text-xs font-normal text-zinc-500">Fallback when check-out is blank</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={parkingDurationHours}
+                    onChange={(e) => setParkingDurationHours(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+              </div>
             </div>
 
           </>

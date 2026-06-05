@@ -1,4 +1,4 @@
-import type { ParkingOption } from '../types';
+import type { ParkingOption } from '../../types';
 import { filterParkingOptionsByFeatures, matchesParkingFeatureFilters } from '../parkingFilters';
 
 const SAMPLE: ParkingOption = {
@@ -40,5 +40,46 @@ describe('parkingFilters', () => {
     const filtered = filterParkingOptionsByFeatures([SAMPLE, shuttleLot], { shuttle: true });
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.id).toBe('shuttle');
+  });
+
+  test('unverified EV charging does not pass strict EV filter', () => {
+    const inferredEv: ParkingOption = {
+      ...SAMPLE,
+      id: 'inferred-ev',
+      name: 'Electric Avenue Parking',
+      sourceName: 'Google Places',
+      providerSource: 'google-places',
+      bestFor: [],
+      assumptions: ['May have electric charging nearby'],
+    };
+
+    expect(matchesParkingFeatureFilters(inferredEv, { evCharging: true })).toBe(false);
+  });
+
+  test('provider-claimed shuttle passes strict shuttle filter', () => {
+    const shuttleLot: ParkingOption = {
+      ...SAMPLE,
+      id: 'provider-shuttle',
+      name: 'Airport Shuttle Lot',
+      sourceName: 'AirportParkingReservations',
+      bookingProvider: 'AirportParkingReservations',
+      providerSource: 'airportparkingreservations',
+      transferType: 'shuttle',
+    };
+
+    expect(matchesParkingFeatureFilters(shuttleLot, { shuttle: true })).toBe(true);
+  });
+
+  test('explicit unknown feature confidence does not pass strict filter', () => {
+    const unknownCovered: ParkingOption = {
+      ...SAMPLE,
+      id: 'unknown-covered',
+      covered: true,
+      featureConfidence: {
+        covered: 'unknown',
+      },
+    };
+
+    expect(matchesParkingFeatureFilters(unknownCovered, { covered: true })).toBe(false);
   });
 });

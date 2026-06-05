@@ -22,18 +22,18 @@ type TravelPreferencesPanelProps = {
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
   {
     value: 'standard',
-    label: 'I have a car',
-    detail: 'Show parking normally and still compare strong ride or transit options.',
-  },
-  {
-    value: 'expense_rideshare',
-    label: 'No car / rideshare',
-    detail: 'Prioritize rideshare or taxi when parking is not needed.',
+    label: 'I’m driving / need parking',
+    detail: 'Show parking normally and let Smart Pick choose parking when it is best.',
   },
   {
     value: 'no_parking',
     label: 'No parking needed',
-    detail: 'Hide parking cards unless you choose to show them anyway.',
+    detail: 'Hide parking cards by default and prioritize rideshare, transit, or directions.',
+  },
+  {
+    value: 'compare_all',
+    label: 'Compare all',
+    detail: 'Show parking, rideshare, transit, and park-and-ride where available.',
   },
 ];
 
@@ -113,7 +113,7 @@ export default function TravelPreferencesPanel({
       <div className="mt-6">
         <div className="text-sm font-medium text-foreground">Parking filters</div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Filter parking cards when lot data includes these features.
+          Filters use verified or provider-claimed features. Inferred claims stay visible but do not pass strict filters.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {FILTER_KEYS.map((key) => {

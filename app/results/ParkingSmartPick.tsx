@@ -25,6 +25,7 @@ import {
   type ParkingSortMode,
 } from '../../lib/parking/sortParkingOptions';
 import { resolveParkingPriceTrust } from '../../lib/parking/priceTrust';
+import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
   buildParkingProviderHandoff,
   formatParkingHandoffDuration,
@@ -617,11 +618,22 @@ export default function ParkingSmartPick({
               {best.trustStatus === 'live' ? 'Live Price' : 'Verified Link'}
             </span>
 
-            {best.covered && (
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-700">
-                Covered
+            {getVisibleParkingFeatureBadges(best).slice(0, 3).map((meta) => (
+              <span
+                key={`${meta.key}-${meta.confidence}`}
+                title={`Source: ${meta.sourceLabel}. Confidence: ${meta.confidence.replace('_', ' ')}.`}
+                className={
+                  'rounded-full px-2.5 py-1 ring-1 ' +
+                  (meta.confidence === 'verified'
+                    ? 'bg-emerald-50 text-emerald-800 ring-emerald-100'
+                    : meta.confidence === 'provider_claimed'
+                      ? 'bg-blue-50 text-blue-800 ring-blue-100'
+                      : 'bg-amber-50 text-amber-900 ring-amber-100')
+                }
+              >
+                {meta.label}
               </span>
-            )}
+            ))}
 
             <span className={`rounded-full px-2.5 py-1 font-medium ${weatherBadge.className}`}>
               {weatherBadge.label}

@@ -64,7 +64,7 @@ describe('DestinationParkingSummary', () => {
 
     expect(screen.getByText('Parking likely free at destination')).toBeInTheDocument();
     expect(
-      screen.getByText(/Destination appears to have customer parking/),
+      screen.getByText(/Destination parking is an expectation/),
     ).toBeInTheDocument();
   });
 });

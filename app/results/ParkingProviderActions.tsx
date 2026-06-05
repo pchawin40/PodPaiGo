@@ -22,6 +22,7 @@ type ParkingProviderActionsProps = {
   tripId?: string | null;
   accessToken?: string | null;
   compact?: boolean;
+  onReserve?: () => void;
 };
 
 function buildTracking(
@@ -68,6 +69,10 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
                 ctaType: 'reserve_parking',
               },
             });
+            if (props.onReserve) {
+              props.onReserve();
+              return;
+            }
             void copyTextThenOpenWithTracking(
               props.searchQuery,
               ctas.reserveUrl!,

@@ -1003,6 +1003,15 @@ export class MockProvider implements DataProvider {
     return `https://www.google.com/maps/dir/${encodeURIComponent(origin)}/${encodeURIComponent(destination)}`;
   }
 
+  private buildGoogleTransitDirectionsLink(origin: string, destination: string): string {
+    return `https://www.google.com/maps/dir/?${new URLSearchParams({
+      api: '1',
+      origin,
+      destination,
+      travelmode: 'transit',
+    }).toString()}`;
+  }
+
   private buildGoogleMapsSearchLink(query: string): string {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   }
@@ -1599,6 +1608,54 @@ export class MockProvider implements DataProvider {
 
   async getTransitOptions(origin: string, destination: string, dateTime: string): Promise<TransitJourney[]> {
     const routeDestinationAirport = resolveAirportDestinationForRouting(destination);
+    const isAirportTransitDestination =
+      routeDestinationAirport !== destination ||
+      /airport|terminal|sea-tac|seatac|jfk|lax/i.test(destination);
+
+    if (!isAirportTransitDestination) {
+      const routeEstimate = await this.getRouteEstimate(origin, destination, dateTime, false);
+      const estimatedTransitMinutes =
+        routeEstimate.routeUnavailable || !Number.isFinite(routeEstimate.duration)
+          ? 55
+          : Math.max(20, Math.round(routeEstimate.duration * 1.45 + 12));
+
+      return [
+        {
+          id: 'regional-transit-to-destination',
+          name: 'Transit route to destination',
+          price: 3.25,
+          duration: estimatedTransitMinutes,
+          frequency: 15,
+          totalDuration: estimatedTransitMinutes,
+          totalCost: 3.25,
+          segments: [
+            {
+              mode: 'bus',
+              name: 'Open transit directions for exact route',
+              duration: estimatedTransitMinutes,
+              cost: 3.25,
+              frequency: 15,
+            },
+          ],
+          transfers: 1,
+          availability: routeEstimate.routeUnavailable ? 50 : 70,
+          trustStatus: 'estimated',
+          routeTrustStatus: routeEstimate.routeUnavailable ? 'fallback' : routeEstimate.trustStatus,
+          routeOrigin: origin,
+          routeDestination: destination,
+          assumptions: [
+            'Regional transit fare estimate based on origin and destination.',
+            routeEstimate.routeUnavailable
+              ? 'Drive time unavailable; open transit directions to confirm route.'
+              : 'Transit time estimated from entered origin and destination.',
+          ],
+          sourceName: 'Google Maps transit directions',
+          sourceLink: this.buildGoogleTransitDirectionsLink(origin, destination),
+          mapLink: this.buildGoogleTransitDirectionsLink(origin, destination),
+          lastUpdated: new Date().toISOString(),
+        },
+      ];
+    }
 
     const hubRoutes = transitHubs.map(hub => {
       const routeDestinationHub = `${hub.name}, Seattle, WA`;

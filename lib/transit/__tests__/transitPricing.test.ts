@@ -116,7 +116,7 @@ describe('calculateTransitCost', () => {
     expect(calculateTransitCost(transit, tripData)).toBe(3);
   });
 
-  test('returns zero with ORCA pass', () => {
+  test('returns zero with transit pass', () => {
     const tripData: TripData = {
       type: 'round-trip',
       origin: 'Monroe, WA',

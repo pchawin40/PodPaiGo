@@ -1,7 +1,7 @@
 /// <reference types="google.maps" />
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ParkingOption } from '../../lib/types';
 import { getAirportById } from '../../lib/airports/catalog';
 import { loadGoogleMaps } from '../../lib/googleMapsLoader';
@@ -61,31 +61,44 @@ async function geocodeParkingLot(
 export default function ParkingLotsMap({
     airportCode,
     originAddress,
+    destinationLatLng,
+    destinationLabel,
     parkingOptions,
     selectedParkingId,
     onSelectParking,
 }: {
     airportCode?: string;
     originAddress?: string | null;
+    destinationLatLng?: google.maps.LatLngLiteral | null;
+    destinationLabel?: string | null;
     parkingOptions: ParkingOption[];
     selectedParkingId?: string | null;
     onSelectParking?: (id: string) => void;
 }) {
     const mapRef = useRef<HTMLDivElement | null>(null);
+    const [mapError, setMapError] = useState<string | null>(null);
 
     useEffect(() => {
         async function initMap() {
+            setMapError(null);
             const airport = airportCode ? getAirportById(airportCode) || getAirportById('SEA') : null;
             const fallbackCenter =
                 parkingOptions.find((lot) => typeof lot.lat === 'number' && typeof lot.lng === 'number');
             const mapCenter = airport?.geoLocation ??
+                destinationLatLng ??
                 (fallbackCenter && typeof fallbackCenter.lat === 'number' && typeof fallbackCenter.lng === 'number'
                     ? { lat: fallbackCenter.lat, lng: fallbackCenter.lng }
-                    : getAirportById('SEA')?.geoLocation);
-            if (!mapCenter || !mapRef.current) return;
+                    : null);
+            if (!mapCenter || !mapRef.current) {
+                setMapError('Map unavailable. Parking list still works.');
+                return;
+            }
 
             const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-            if (!apiKey) return;
+            if (!apiKey) {
+                setMapError('Map unavailable. Parking list still works.');
+                return;
+            }
 
             await loadGoogleMaps(apiKey);
 
@@ -106,7 +119,7 @@ export default function ParkingLotsMap({
 
             if (airport) {
                 const airportPin = new PinElement({
-                    glyphText: '✈',
+                    glyphText: 'A',
                     background: '#2563eb',
                     borderColor: '#1e3a8a',
                     glyphColor: '#ffffff',
@@ -117,6 +130,20 @@ export default function ParkingLotsMap({
                     position: airport.geoLocation,
                     title: `${airport.id} airport`,
                     content: airportPin,
+                });
+            } else if (destinationLatLng) {
+                const destinationPin = new PinElement({
+                    glyphText: 'D',
+                    background: '#2563eb',
+                    borderColor: '#1e3a8a',
+                    glyphColor: '#ffffff',
+                });
+
+                new AdvancedMarkerElement({
+                    map,
+                    position: destinationLatLng,
+                    title: destinationLabel || 'Destination',
+                    content: destinationPin,
                 });
             }
 
@@ -292,14 +319,43 @@ export default function ParkingLotsMap({
 
         initMap().catch((error) => {
             console.warn('Failed to initialize parking map:', error);
+            setMapError('Map unavailable. Parking list still works.');
         });
-    }, [airportCode, originAddress, parkingOptions, onSelectParking, selectedParkingId]);
+    }, [airportCode, destinationLatLng, destinationLabel, originAddress, parkingOptions, onSelectParking, selectedParkingId]);
+
+    if (mapError) {
+        return (
+            <div className="flex h-full min-h-[520px] flex-col bg-zinc-50 p-5">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                    <div className="font-semibold">{mapError}</div>
+                    <div className="mt-1">Use the parking list below or open directions for any lot.</div>
+                </div>
+                <div className="mt-4 flex-1 overflow-auto">
+                    <div className="space-y-2">
+                        {parkingOptions.slice(0, 20).map((lot, index) => (
+                            <button
+                                key={lot.id || `${lot.name}-${index}`}
+                                type="button"
+                                onClick={() => onSelectParking?.(lot.id)}
+                                className="w-full rounded-xl border border-zinc-200 bg-white p-3 text-left text-sm hover:bg-zinc-50"
+                            >
+                                <div className="font-semibold text-zinc-900">{index + 1}. {lot.name}</div>
+                                <div className="mt-1 text-xs text-zinc-600">
+                                    {lot.address || lot.normalizedAddress || lot.routeDestination || 'Address unavailable'}
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="relative h-full min-h-[520px] w-full">
             <div ref={mapRef} className="h-full min-h-[520px] w-full" />
             <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-zinc-200 bg-white/95 px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm">
-                {airportCode ? '✈ Airport · ' : ''}● Origin · numbered lots
+                {airportCode ? 'Airport · ' : destinationLatLng ? 'Destination · ' : ''}Origin · numbered lots
             </div>
         </div>
     );
