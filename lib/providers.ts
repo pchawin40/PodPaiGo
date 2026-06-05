@@ -18,7 +18,9 @@ import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
 import {
   applyParkingOriginDriveMinutes,
+  estimateDriveMinutesFromStraightLineMiles,
   estimateParkingDriveMinutesFallback,
+  haversineMiles,
   logMissingParkingDriveDiagnostic,
 } from './parking/routeMinutes';
 import {
@@ -240,6 +242,69 @@ function unavailableTrafficEstimate(
   };
 }
 
+function resolveRouteLatLng(value?: RouteLatLng | null): RouteLatLng | null {
+  if (
+    typeof value?.lat === 'number' &&
+    Number.isFinite(value.lat) &&
+    typeof value.lng === 'number' &&
+    Number.isFinite(value.lng)
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function routeLatLngKey(value: RouteLatLng): string {
+  return `${value.lat},${value.lng}`;
+}
+
+function routeUnavailableReasonForContext(routeContext?: RouteRequestContext): string {
+  if (routeContext?.routePurpose === 'origin_to_parking') {
+    return DEFAULT_ROUTE_UNAVAILABLE_REASON;
+  }
+
+  return routeContext?.airportCode
+    ? 'Route unavailable from this origin to the airport area.'
+    : 'Route unavailable from this origin to this destination.';
+}
+
+function coordinateFallbackTrafficEstimate(
+  route: string,
+  originLatLng?: RouteLatLng | null,
+  destinationLatLng?: RouteLatLng | null,
+): TrafficEstimate | null {
+  const originCoords = resolveRouteLatLng(originLatLng);
+  const destinationCoords = resolveRouteLatLng(destinationLatLng);
+
+  if (!originCoords || !destinationCoords) return null;
+
+  const samePlace = originCoords.lat === destinationCoords.lat && originCoords.lng === destinationCoords.lng;
+  const straightLineMiles = samePlace
+    ? 0
+    : haversineMiles(
+        originCoords.lat,
+        originCoords.lng,
+        destinationCoords.lat,
+        destinationCoords.lng,
+      );
+  const duration = samePlace
+    ? 0
+    : estimateDriveMinutesFromStraightLineMiles(straightLineMiles);
+
+  return {
+    route,
+    duration,
+    distanceMeters: samePlace ? 0 : Math.max(1, Math.round(straightLineMiles * 1609.34)),
+    congestion: 'medium',
+    trustStatus: 'estimated',
+    routeUnavailable: false,
+    sourceName: 'Estimated from coordinates',
+    lastUpdated: new Date().toISOString(),
+    assumptions: ['Estimated from straight-line distance; open directions to confirm.'],
+  };
+}
+
 function resolveParkingTransferMeta(option: ParkingOption): {
   parkingBufferMinutes: number;
   transferToTerminalMinutes: number;
@@ -285,18 +350,23 @@ type ParkingOptionsRequestContext = {
   targetTerminalArrivalTime?: string;
 };
 
+type RouteLatLng = { lat: number; lng: number };
+
+type RouteRequestContext = {
+  airportCode?: string | null;
+  lotId?: string | null;
+  routePurpose?: 'main_to_destination' | 'origin_to_parking';
+  originLatLng?: RouteLatLng | null;
+  targetTerminalArrivalTime?: string;
+};
+
 export interface TrafficProvider {
   getTrafficEstimate(
     origin: string,
     destination: string,
     dateTime: string,
-    destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: {
-      airportCode?: string | null;
-      lotId?: string | null;
-      routePurpose?: 'main_to_destination' | 'origin_to_parking';
-      targetTerminalArrivalTime?: string;
-    },
+    destinationLatLng?: RouteLatLng | null,
+    routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate>;
 }
 
@@ -348,15 +418,15 @@ export class MockTrafficProvider implements TrafficProvider {
     origin: string,
     destination: string,
     dateTime: string,
-    _destinationLatLng?: { lat: number; lng: number } | null,
-    _routeContext?: { airportCode?: string | null; lotId?: string | null },
+    _destinationLatLng?: RouteLatLng | null,
+    routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate> {
     const route = normalizeTrafficRoute(origin, destination);
     if (isClearlyNonDrivableRoute(origin, destination)) {
       return unavailableTrafficEstimate(
         route,
         'Route validation',
-        'Route unavailable from this origin to the airport area.'
+        routeUnavailableReasonForContext(routeContext),
       );
     }
 
@@ -487,21 +557,21 @@ export class LiveTrafficProvider implements TrafficProvider {
     origin: string,
     destination: string,
     dateTime: string,
-    destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: {
-      airportCode?: string | null;
-      lotId?: string | null;
-      routePurpose?: 'main_to_destination' | 'origin_to_parking';
-      targetTerminalArrivalTime?: string;
-    },
+    destinationLatLng?: RouteLatLng | null,
+    routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate> {
     // dateTime can be undefined at runtime (e.g., tests). Default to "now" to keep routing functional.
     const resolvedDateTime = (dateTime ?? new Date().toISOString());
-    const destinationKey = destinationLatLng
-      ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+    const providedOriginLatLng = resolveRouteLatLng(routeContext?.originLatLng);
+    const providedDestinationLatLng = resolveRouteLatLng(destinationLatLng);
+    let resolvedOriginLatLngForFallback = providedOriginLatLng;
+    let resolvedDestinationLatLngForFallback = providedDestinationLatLng;
+    const originKey = providedOriginLatLng ? routeLatLngKey(providedOriginLatLng) : origin;
+    const destinationKey = providedDestinationLatLng
+      ? routeLatLngKey(providedDestinationLatLng)
       : destination;
     const cacheKey = buildRouteEstimateCacheKey({
-      origin,
+      origin: originKey,
       destination: destinationKey,
       dateTime: resolvedDateTime,
       mode: 'DRIVE',
@@ -513,17 +583,17 @@ export class LiveTrafficProvider implements TrafficProvider {
     const requestKey = shortRequestKey(cacheKey);
 
     try {
-      if (isClearlyNonDrivableRoute(origin, destination)) {
+      if (!providedOriginLatLng && isClearlyNonDrivableRoute(origin, destination)) {
         return unavailableTrafficEstimate(
           routeKey,
           'Route validation',
-          'Route unavailable from this origin to the airport area.'
+          routeUnavailableReasonForContext(routeContext),
         );
       }
 
       if (isProviderKillSwitchEnabled('google_routes')) {
         const snapshotEstimate = await routeSnapshotToTrafficEstimate({
-          origin,
+          origin: originKey,
           destination: destinationKey,
           dateTime: resolvedDateTime,
           airportCode: routeContext?.airportCode,
@@ -545,6 +615,15 @@ export class LiveTrafficProvider implements TrafficProvider {
           requestKey,
           blockedByKillSwitch: true,
         });
+        const coordinateFallback = coordinateFallbackTrafficEstimate(
+          routeKey,
+          providedOriginLatLng,
+          providedDestinationLatLng,
+        );
+        if (coordinateFallback) {
+          return cacheRouteEstimate(cacheKey, coordinateFallback);
+        }
+
         return unavailableTrafficEstimate(
           routeKey,
           'Google Routes API',
@@ -568,7 +647,7 @@ export class LiveTrafficProvider implements TrafficProvider {
       }
 
       const snapshotEstimate = await routeSnapshotToTrafficEstimate({
-        origin,
+        origin: originKey,
         destination: destinationKey,
         dateTime: resolvedDateTime,
         airportCode: routeContext?.airportCode,
@@ -609,7 +688,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           });
 
           const staleSnapshot = await getCachedRouteQuoteSnapshot({
-            origin,
+            origin: originKey,
             destination: destinationKey,
             dateTime: resolvedDateTime,
             airportCode: routeContext?.airportCode,
@@ -625,6 +704,15 @@ export class LiveTrafficProvider implements TrafficProvider {
               note: 'stale-fallback',
             });
             return cacheRouteEstimate(cacheKey, snapshotToEstimate(staleSnapshot, routeKey));
+          }
+
+          const coordinateFallback = coordinateFallbackTrafficEstimate(
+            routeKey,
+            providedOriginLatLng,
+            providedDestinationLatLng,
+          );
+          if (coordinateFallback) {
+            return cacheRouteEstimate(cacheKey, coordinateFallback);
           }
 
           return cacheRouteEstimate(
@@ -647,11 +735,15 @@ export class LiveTrafficProvider implements TrafficProvider {
 
         // Geocode origin and destination where possible
         const [originLatLng, destLatLng] = await Promise.all([
-          this.geocodeAddress(origin),
-          destinationLatLng
-            ? Promise.resolve(destinationLatLng)
+          providedOriginLatLng
+            ? Promise.resolve(providedOriginLatLng)
+            : this.geocodeAddress(origin),
+          providedDestinationLatLng
+            ? Promise.resolve(providedDestinationLatLng)
             : this.geocodeAddress(destination),
         ]);
+        resolvedOriginLatLngForFallback = originLatLng;
+        resolvedDestinationLatLngForFallback = destLatLng;
 
         // Prepare computeRouteMatrix request body
         const departureTimeSeconds = Math.max(0, Math.floor(new Date(resolvedDateTime).getTime() / 1000));
@@ -790,6 +882,15 @@ export class LiveTrafficProvider implements TrafficProvider {
         else if (element?.staticDuration) hasDuration = true;
 
         if (res.status === 200 && condition && condition !== 'ROUTE_EXISTS') {
+          const coordinateFallback = coordinateFallbackTrafficEstimate(
+            routeKey,
+            originLatLng,
+            destLatLng,
+          );
+          if (coordinateFallback) {
+            return cacheRouteEstimate(cacheKey, coordinateFallback);
+          }
+
           return cacheRouteEstimate(
             cacheKey,
             unavailableTrafficEstimate(
@@ -886,7 +987,7 @@ export class LiveTrafficProvider implements TrafficProvider {
 
         void saveRouteQuoteSnapshot({
           provider: 'google_routes',
-          origin,
+          origin: originKey,
           destination: destinationKey,
           dateTime: resolvedDateTime,
           airportCode: routeContext?.airportCode,
@@ -916,10 +1017,19 @@ export class LiveTrafficProvider implements TrafficProvider {
         console.error('Live traffic API failed, falling back to mock:', safeMsg);
       }
 
+      const coordinateFallback = coordinateFallbackTrafficEstimate(
+        routeKey,
+        resolvedOriginLatLngForFallback,
+        resolvedDestinationLatLngForFallback,
+      );
+      if (coordinateFallback) {
+        return cacheRouteEstimate(cacheKey, coordinateFallback);
+      }
+
       const fallback = unavailableTrafficEstimate(
         routeKey,
         'Google Routes API',
-        'Route unavailable from this origin to the airport area.'
+        routeUnavailableReasonForContext(routeContext),
       );
       return cacheRouteEstimate(cacheKey, fallback);
     }
@@ -1047,19 +1157,15 @@ export class MockProvider implements DataProvider {
     destination: string,
     dateTime: string,
     allowLive: boolean,
-    destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: {
-      airportCode?: string | null;
-      lotId?: string | null;
-      routePurpose?: 'main_to_destination' | 'origin_to_parking';
-      targetTerminalArrivalTime?: string;
-    },
+    destinationLatLng?: RouteLatLng | null,
+    routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate> {
+    const routeOriginLatLng = resolveRouteLatLng(routeContext?.originLatLng);
     const destinationKey = destinationLatLng
-      ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+      ? routeLatLngKey(destinationLatLng)
       : destination;
     const cacheKey = buildRouteEstimateCacheKey({
-      origin,
+      origin: routeOriginLatLng ? routeLatLngKey(routeOriginLatLng) : origin,
       destination: destinationKey,
       dateTime,
       mode: allowLive ? 'DRIVE_LIVE' : 'DRIVE_ESTIMATED',
@@ -1089,7 +1195,7 @@ export class MockProvider implements DataProvider {
         estimate = unavailableTrafficEstimate(
           normalizeTrafficRoute(origin, destination),
           'Route validation',
-          'Route unavailable from this origin to the airport area.'
+          routeUnavailableReasonForContext(routeContext),
         );
       } else if (allowLive) {
         estimate = await this.trafficProvider.getTrafficEstimate(
@@ -1120,13 +1226,8 @@ export class MockProvider implements DataProvider {
     origin: string,
     destination: string,
     dateTime: string,
-    destinationLatLng?: { lat: number; lng: number } | null,
-    routeContext?: {
-      airportCode?: string | null;
-      lotId?: string | null;
-      routePurpose?: 'main_to_destination' | 'origin_to_parking';
-      targetTerminalArrivalTime?: string;
-    },
+    destinationLatLng?: RouteLatLng | null,
+    routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate> {
     const routeDestination = resolveAirportDestinationForRouting(destination);
     return this.trafficProvider.getTrafficEstimate(

@@ -10,7 +10,7 @@ import {
   quickGoParkingHeadline,
   quickGoStressLabel,
 } from '../../lib/trip/quickGo';
-import type { TripData } from '../../lib/types';
+import type { TripData, TrustStatus } from '../../lib/types';
 import PrimaryButton from './ui/PrimaryButton';
 import StatusPill from './ui/StatusPill';
 import TravelCard from './ui/TravelCard';
@@ -24,6 +24,8 @@ type QuickGoResultsCardProps = {
   bestOption: RankedRecommendation | null;
   backupOption: RankedRecommendation | null;
   driveMinutes: number | null;
+  driveTimeTrustStatus?: TrustStatus | string | null;
+  driveTimeSourceName?: string | null;
   driveTimeUnavailable?: boolean;
   className?: string;
 };
@@ -45,6 +47,16 @@ function formatMinutesLabel(minutes: number | null): string {
   return remainder > 0 ? `${hours} hr ${remainder} min` : `${hours} hr`;
 }
 
+function formatDriveTimeLabel(
+  minutes: number | null,
+  trustStatus?: TrustStatus | string | null,
+  sourceName?: string | null,
+): string {
+  const formatted = formatMinutesLabel(minutes);
+  const isLive = trustStatus === 'live' && sourceName !== 'Estimated from coordinates';
+  return isLive ? `Live drive time: ${formatted}` : `Estimated drive time: ~${formatted}`;
+}
+
 export default function QuickGoResultsCard({
   tripData,
   originDisplayLabel,
@@ -54,6 +66,8 @@ export default function QuickGoResultsCard({
   bestOption,
   backupOption,
   driveMinutes,
+  driveTimeTrustStatus,
+  driveTimeSourceName,
   driveTimeUnavailable = false,
   className = '',
 }: QuickGoResultsCardProps) {
@@ -107,7 +121,7 @@ export default function QuickGoResultsCard({
             </>
           ) : (
             <dd className="mt-2 text-lg font-semibold text-foreground">
-              {formatMinutesLabel(driveMinutes)}
+              {formatDriveTimeLabel(driveMinutes, driveTimeTrustStatus, driveTimeSourceName)}
             </dd>
           )}
         </div>

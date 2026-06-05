@@ -45,7 +45,7 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     }
   });
 
-  test('general Quick Go trip forwards destinationLat/destinationLng', async () => {
+  test('general Quick Go trip forwards origin and destination coordinates', async () => {
     const trafficSpy = jest.fn(async () => okTraffic);
 
     const mockProvider: DataProvider = {
@@ -63,6 +63,8 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     const tripData: TripData = {
       type: 'general-trip',
       origin: '123 Main Street, Example City, ST',
+      originLat: 47.855,
+      originLng: -121.97,
       destination: 'Costco, Everett, WA',
       destinationName: 'Costco, Everett, WA',
       destinationKind: 'general',
@@ -76,11 +78,18 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     await RecommendationEngine.generateRecommendations(tripData);
 
     expect(trafficSpy).toHaveBeenCalled();
-    const mainCall = trafficSpy.mock.calls.find(
+    const trafficCalls = trafficSpy.mock.calls as Array<Parameters<DataProvider['getTrafficEstimate']>>;
+    const mainCall = trafficCalls.find(
       (call) => (call[4] as { routePurpose?: string } | undefined)?.routePurpose === 'main_to_destination',
     );
     expect(mainCall).toBeDefined();
     expect(mainCall?.[3]).toEqual({ lat: 47.9, lng: -122.2 });
+    expect(mainCall?.[4]).toEqual(
+      expect.objectContaining({
+        routePurpose: 'main_to_destination',
+        originLatLng: { lat: 47.855, lng: -121.97 },
+      }),
+    );
   });
 
   test('general arrival-time trip sends an arrival-aware route departure', async () => {
@@ -114,7 +123,8 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
 
     await RecommendationEngine.generateRecommendations(tripData);
 
-    const mainCall = trafficSpy.mock.calls.find(
+    const trafficCalls = trafficSpy.mock.calls as Array<Parameters<DataProvider['getTrafficEstimate']>>;
+    const mainCall = trafficCalls.find(
       (call) => (call[4] as { routePurpose?: string } | undefined)?.routePurpose === 'main_to_destination',
     );
     expect(mainCall).toBeDefined();

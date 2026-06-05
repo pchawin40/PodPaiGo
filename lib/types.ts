@@ -63,7 +63,13 @@ type BaseTripData = {
   destinationName?: string;
 
   /**
-   * Optional coordinates from autocomplete/geocoding later.
+   * Optional origin coordinates from geolocation/autocomplete.
+   */
+  originLat?: number;
+  originLng?: number;
+
+  /**
+   * Optional destination coordinates from autocomplete/geocoding later.
    */
   destinationLat?: number;
   destinationLng?: number;

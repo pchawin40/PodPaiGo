@@ -76,7 +76,7 @@ describe('quickGo', () => {
   test('parseTripDataFromSearchParams accepts quick-go type and origin metadata', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'Downtown shopping district',
-      origin: savedOrigin,
+      origin: geolocationOrigin,
       destination: {
         destination: 'Pike Place Market',
         destinationLabel: 'Pike Place Market',
@@ -93,13 +93,15 @@ describe('quickGo', () => {
     const tripData = parseTripDataFromSearchParams(params);
 
     expect(tripData?.type).toBe('general-trip');
+    expect(tripData?.originLat).toBe(47.6101);
+    expect(tripData?.originLng).toBe(-122.2015);
     expect(tripData?.destination).toBe('Pike Place Market');
     expect(tripData?.destinationLat).toBe(47.6097);
     expect(tripData?.destinationLng).toBe(-122.3425);
     expect(tripData?.tripMode).toBe('quick-go');
     expect(tripData && 'airportCode' in tripData ? tripData.airportCode : undefined).toBeUndefined();
     expect(isQuickGoMode(params)).toBe(true);
-    expect(readQuickGoOriginFromSearchParams(params)).toEqual(savedOrigin);
+    expect(readQuickGoOriginFromSearchParams(params)).toEqual(geolocationOrigin);
   });
 
   test('general trip parking window uses arrival plus selected duration', () => {

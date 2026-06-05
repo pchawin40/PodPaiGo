@@ -111,6 +111,8 @@ export default function QuickGoResultsView({
           bestOption={bestOption}
           backupOption={backupOption}
           driveMinutes={driveMinutes}
+          driveTimeTrustStatus={recommendation.trafficEstimate?.trustStatus}
+          driveTimeSourceName={recommendation.trafficEstimate?.sourceName}
           driveTimeUnavailable={driveTime.unavailable}
         />
 

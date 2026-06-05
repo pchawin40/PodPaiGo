@@ -4483,7 +4483,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const airportRouteUnavailableReason =
     recommendation?.airportRouteUnavailableReason ||
     recommendation?.trafficEstimate?.routeUnavailableReason ||
-    'We could not calculate a ground route from this origin to the airport.';
+    (isCityTrip
+      ? 'Drive time unavailable; open directions to confirm.'
+      : 'We could not calculate a ground route from this origin to the airport.');
 
   const extraRideProviders = useMemo(
     () => [
@@ -5285,7 +5287,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   </div>
                   <div className="mt-1">
                     {isCityTrip
-                      ? 'Parking expectations are still shown. Open directions to confirm timing.'
+                      ? 'Open directions to confirm drive time.'
                       : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
                   {airportRouteUnavailableReason && (

@@ -426,6 +426,11 @@ export class RecommendationEngine {
       typeof tripData.destinationLng === 'number'
         ? { lat: tripData.destinationLat, lng: tripData.destinationLng }
         : undefined;
+    const mainOriginLatLng =
+      typeof tripData.originLat === 'number' &&
+      typeof tripData.originLng === 'number'
+        ? { lat: tripData.originLat, lng: tripData.originLng }
+        : undefined;
     const route =
       isAirportArrivalTrip(tripData)
         ? 'airport-home'
@@ -460,6 +465,7 @@ export class RecommendationEngine {
       shouldLoadParking,
       allowRideshare,
       allowTransit,
+      hasOriginCoords: Boolean(mainOriginLatLng),
       hasDestinationCoords: Boolean(mainDestinationLatLng),
     });
     const timedParkingRequest = shouldLoadParking
@@ -605,6 +611,7 @@ export class RecommendationEngine {
                 ? ((tripData as TripDataWithTransport).airportCode || undefined)
                 : undefined,
               routePurpose: 'main_to_destination',
+              originLatLng: mainOriginLatLng,
               targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
             },
           ),

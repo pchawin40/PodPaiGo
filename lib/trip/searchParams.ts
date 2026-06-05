@@ -100,6 +100,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
   const parkingCheckOutDate = searchParams.get('parkingCheckOutDate') || '';
   const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
+  const originLatRaw = searchParams.get('originLat');
+  const originLngRaw = searchParams.get('originLng');
+  const originLat = originLatRaw ? Number(originLatRaw) : undefined;
+  const originLng = originLngRaw ? Number(originLngRaw) : undefined;
   const destinationLatRaw = searchParams.get('destinationLat');
   const destinationLngRaw = searchParams.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
@@ -370,6 +374,15 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   if (data) {
     data = { ...data, transitPayment } as TripData;
 
+    if (
+      typeof originLat === 'number' &&
+      Number.isFinite(originLat) &&
+      typeof originLng === 'number' &&
+      Number.isFinite(originLng)
+    ) {
+      data = { ...data, originLat, originLng };
+    }
+
     const isAirportStyleTrip =
       data.destinationKind === 'airport' ||
       data.type === 'one-way-departure' ||
@@ -411,6 +424,8 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         parkingCheckOutDate: parsed.parkingCheckOutDate,
         parkingCheckOutTime: parsed.parkingCheckOutTime,
         parkingDuration: parsed.parkingDuration,
+        hasOriginCoords:
+          typeof parsed.originLat === 'number' && typeof parsed.originLng === 'number',
         hasDestinationCoords:
           typeof parsed.destinationLat === 'number' && typeof parsed.destinationLng === 'number',
       });
@@ -446,6 +461,16 @@ export function tripDataToSearchParams(
 
   params.set('type', data.type);
   params.set('origin', data.origin);
+  if (typeof data.originLat === 'number' && Number.isFinite(data.originLat)) {
+    params.set('originLat', String(data.originLat));
+  } else {
+    params.delete('originLat');
+  }
+  if (typeof data.originLng === 'number' && Number.isFinite(data.originLng)) {
+    params.set('originLng', String(data.originLng));
+  } else {
+    params.delete('originLng');
+  }
   params.set('transport', data.transportAvailability || 'all');
   params.set('transitPayment', data.transitPayment || 'normal');
   if (data.parkingPreference) {

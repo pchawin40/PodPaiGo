@@ -255,7 +255,56 @@ describe('QuickGoResultsView', () => {
     expect(screen.getByText('Drive time unavailable')).toBeInTheDocument();
   });
 
-  test('shows a normal positive drive time when duration > 0', () => {
+  test('shows estimated drive time for coordinate fallback', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+      origin: {
+        origin: '47.855,-121.97',
+        originLabel: 'Current location',
+        originSource: 'geolocation',
+        originLat: 47.855,
+        originLng: -121.97,
+      },
+      destination: {
+        destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+        destinationLabel: 'Brighton Jones',
+        destinationAddress: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+        destinationSource: 'google',
+        destinationLat: 47.6062,
+        destinationLng: -122.3377,
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          origin: '47.855,-121.97',
+          originLat: 47.855,
+          originLng: -121.97,
+          destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+          destinationName: 'Brighton Jones',
+          destinationLat: 47.6062,
+          destinationLng: -122.3377,
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: {
+            duration: 34,
+            trustStatus: 'estimated',
+            sourceName: 'Estimated from coordinates',
+          },
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Estimated drive time: ~34 min')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('shows live drive time for Google Routes estimates', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'Costco, Everett, WA',
       origin: {
@@ -274,14 +323,18 @@ describe('QuickGoResultsView', () => {
         }}
         recommendation={{
           ...recommendation,
-          trafficEstimate: { duration: 18, trustStatus: 'estimated' },
+          trafficEstimate: {
+            duration: 18,
+            trustStatus: 'live',
+            sourceName: 'Google Routes API',
+          },
         }}
         rankedOptions={[]}
         searchParams={params}
       />,
     );
 
-    expect(screen.getByText('18 min')).toBeInTheDocument();
+    expect(screen.getByText('Live drive time: 18 min')).toBeInTheDocument();
     expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
   });
 });
