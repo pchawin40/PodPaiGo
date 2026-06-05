@@ -6394,9 +6394,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         <div className="mt-4 grid grid-cols-1 gap-4">
           {sortedOptions.length === 0 ? (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="text-base font-semibold text-zinc-900">Transit-only route not reliable yet from this origin</div>
+              <div className="text-base font-semibold text-zinc-900">
+                {noParkingPreferred
+                  ? 'No-parking strategy is available below'
+                  : transportAvailability === 'rideshare'
+                    ? 'Ride provider links are available below'
+                    : transportAvailability === 'transit'
+                      ? 'Transit-only route not reliable yet from this origin'
+                      : 'No ranked route cards yet'}
+              </div>
               <div className="mt-2 text-sm text-zinc-600">
-                Live transit routing is not connected yet, so we can’t reliably generate a transit-only route here.
+                {noParkingPreferred
+                  ? 'Parking cards are hidden for this trip. Use ride providers, transit links, or open directions to confirm timing.'
+                  : transportAvailability === 'rideshare'
+                    ? 'Live ride estimates may be unavailable, but Uber and Lyft links are still shown so you can open the provider app.'
+                    : transportAvailability === 'transit'
+                      ? 'Live transit routing is not connected yet, so we can’t reliably generate a transit-only route here.'
+                      : 'Try adjusting your trip details and recalculating, or open directions to confirm timing.'}
               </div>
               <div className="mt-4 text-sm text-zinc-700">
                 {transportAvailability === 'transit' ? (
@@ -6405,10 +6419,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     <li>If driving is okay, switch to “I have a car” to see parking options.</li>
                     <li>Or choose “Compare all” to compare all available modes.</li>
                   </ul>
+                ) : noParkingPreferred || transportAvailability === 'rideshare' ? (
+                  <div>
+                    Open a ride provider link below. If you want parking anyway, change the trip preference and recalculate.
+                  </div>
                 ) : (
                   <div>Try adjusting your trip details and recalculating.</div>
                 )}
               </div>
+              {tripData ? (
+                <a
+                  href={googleMapsDirectionsLink(
+                    tripData.origin,
+                    isCityTrip ? displayDestination : currentAirport.routingAddress,
+                    transportAvailability === 'transit' ? 'transit' : 'driving',
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                >
+                  {transportAvailability === 'transit' ? 'Open transit directions' : 'Open directions'}
+                </a>
+              ) : null}
             </div>
           ) : noViableFlyingOut ? (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -6734,6 +6766,76 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   );
 }
 
+const editableDateHelperText = 'Format: MM/DD/YYYY or YYYY-MM-DD.';
+
+function normalizeEditableDateInputValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  const us = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+
+  const parts = iso
+    ? { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) }
+    : us
+      ? { year: Number(us[3]), month: Number(us[1]), day: Number(us[2]) }
+      : null;
+
+  if (!parts) return null;
+
+  const { year, month, day } = parts;
+  if (![year, month, day].every(Number.isFinite)) return null;
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return formatLocalYYYYMMDD(parsed);
+}
+
+function readableEditInputClass(className = ''): string {
+  return [
+    'ppg-readable-input mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function EditDateTextInput({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="MM/DD/YYYY or YYYY-MM-DD"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={ariaLabel}
+        className={readableEditInputClass()}
+      />
+      <p className="mt-2 text-xs text-zinc-500">{editableDateHelperText}</p>
+    </>
+  );
+}
+
 function EditTripForm({
   initialData,
   onSubmit,
@@ -6849,7 +6951,8 @@ function EditTripForm({
     timeString: string,
     minutes: number,
   ): { date: string; time: string } | null => {
-    const start = buildLocalDateTime(dateString, timeString);
+    const normalizedDate = normalizeEditableDateInputValue(dateString) || dateString;
+    const start = buildLocalDateTime(normalizedDate, timeString);
     if (!start || !Number.isFinite(minutes)) return null;
 
     const end = new Date(start.getTime() + minutes * 60_000);
@@ -6865,8 +6968,10 @@ function EditTripForm({
     checkOutDate: string,
     checkOutTime: string,
   ): number | null => {
-    const checkIn = buildLocalDateTime(checkInDate, checkInTime);
-    const checkOut = buildLocalDateTime(checkOutDate, checkOutTime);
+    const normalizedCheckInDate = normalizeEditableDateInputValue(checkInDate) || checkInDate;
+    const normalizedCheckOutDate = normalizeEditableDateInputValue(checkOutDate) || checkOutDate;
+    const checkIn = buildLocalDateTime(normalizedCheckInDate, checkInTime);
+    const checkOut = buildLocalDateTime(normalizedCheckOutDate, checkOutTime);
     if (!checkIn || !checkOut) return null;
 
     const minutes = Math.round((checkOut.getTime() - checkIn.getTime()) / 60000);
@@ -6889,8 +6994,14 @@ function EditTripForm({
         return;
       }
 
-      const combined = new Date(`${dateString}T${timeString}`);
-      if (isNaN(combined.getTime())) {
+      const normalizedDate = normalizeEditableDateInputValue(dateString);
+      if (!normalizedDate) {
+        next.push(`Enter the ${label.toLowerCase()} date as MM/DD/YYYY or YYYY-MM-DD.`);
+        return;
+      }
+
+      const combined = buildLocalDateTime(normalizedDate, timeString);
+      if (!combined) {
         next.push(`Invalid ${label.toLowerCase()} date or time.`);
         return;
       }
@@ -6924,15 +7035,28 @@ function EditTripForm({
 
       // Validate ordering if both parse.
       if (departureDate && departureTime && returnDate && returnTime) {
-        const dep = new Date(`${departureDate}T${departureTime}`);
-        const ret = new Date(`${returnDate}T${returnTime}`);
-        if (!isNaN(dep.getTime()) && !isNaN(ret.getTime()) && ret.getTime() < dep.getTime()) {
+        const normalizedDepartureDate = normalizeEditableDateInputValue(departureDate);
+        const normalizedReturnDate = normalizeEditableDateInputValue(returnDate);
+        const dep =
+          normalizedDepartureDate ? buildLocalDateTime(normalizedDepartureDate, departureTime) : null;
+        const ret =
+          normalizedReturnDate ? buildLocalDateTime(normalizedReturnDate, returnTime) : null;
+        if (dep && ret && ret.getTime() < dep.getTime()) {
           next.push('Return date must be after departure date.');
         }
       }
     }
 
+    if (parkingCheckInDate && !normalizeEditableDateInputValue(parkingCheckInDate)) {
+      next.push('Enter the parking check-in date as MM/DD/YYYY or YYYY-MM-DD.');
+    }
+
     if (parkingCheckOutDate) {
+      if (!normalizeEditableDateInputValue(parkingCheckOutDate)) {
+        next.push('Enter the parking check-out date as MM/DD/YYYY or YYYY-MM-DD.');
+        return next;
+      }
+
       const checkInDate = parkingCheckInDate || (isGeneralTripEdit ? arrivalDate : departureDate);
       const checkInTime = parkingCheckInTime || (isGeneralTripEdit ? arrivalTime : departureTime) || '12:00';
       const checkOutTime = parkingCheckOutTime || checkInTime;
@@ -6979,13 +7103,23 @@ function EditTripForm({
       ? initialData.destination
       : selectedAirport!.routingAddress || selectedAirport!.destinationName;
 
+    const normalizedDepartureDate = normalizeEditableDateInputValue(departureDate) || departureDate;
+    const normalizedArrivalDate = normalizeEditableDateInputValue(arrivalDate) || arrivalDate;
+    const normalizedReturnDate = normalizeEditableDateInputValue(returnDate) || returnDate;
+    const normalizedAirportTripDate =
+      normalizeEditableDateInputValue(airportTripDate) || airportTripDate;
+    const normalizedParkingCheckInDate =
+      parkingCheckInDate ? normalizeEditableDateInputValue(parkingCheckInDate) || parkingCheckInDate : '';
+    const normalizedParkingCheckOutDate =
+      parkingCheckOutDate ? normalizeEditableDateInputValue(parkingCheckOutDate) || parkingCheckOutDate : '';
+
     let data: TripData;
 
     if (initialData.type === 'general-trip') {
-      const checkInDate = parkingCheckInDate || arrivalDate;
+      const checkInDate = normalizedParkingCheckInDate || normalizedArrivalDate;
       const checkInTime = parkingCheckInTime || arrivalTime;
       const defaultDuration = initialData.tripMode === 'quick-go' ? 2 * 60 : 8 * 60;
-      let checkOutDate = parkingCheckOutDate;
+      let checkOutDate = normalizedParkingCheckOutDate;
       let checkOutTime = parkingCheckOutTime;
 
       if (checkOutDate && checkOutTime) {
@@ -7011,7 +7145,7 @@ function EditTripForm({
         destinationLat: initialData.destinationLat,
         destinationLng: initialData.destinationLng,
         tripMode: initialData.tripMode,
-        arrivalDate,
+        arrivalDate: normalizedArrivalDate,
         arrivalTime,
         parkingDuration: parkingDuration ?? initialData.parkingDuration,
         parkingCheckInDate: checkInDate,
@@ -7023,14 +7157,14 @@ function EditTripForm({
         parkingPreference,
       };
     } else if (initialData.type === 'one-way-departure') {
-      const checkInDate = parkingCheckInDate || departureDate;
+      const checkInDate = normalizedParkingCheckInDate || normalizedDepartureDate;
       const checkInTime = parkingCheckInTime || departureTime || '12:00';
       const checkOutTime = parkingCheckOutTime || checkInTime;
-      if (parkingCheckOutDate) {
+      if (normalizedParkingCheckOutDate) {
         parkingDuration = durationFromEditWindow(
           checkInDate,
           checkInTime,
-          parkingCheckOutDate,
+          normalizedParkingCheckOutDate,
           checkOutTime,
         ) ?? parkingDuration;
       }
@@ -7041,14 +7175,14 @@ function EditTripForm({
         destination,
         airportCode: selectedAirport!.id,
         destinationKind: 'airport',
-        departureDate,
+        departureDate: normalizedDepartureDate,
         departureTime,
         timeAnchor: (initialData as TripDataWithExtras).timeAnchor || 'flight-departure',
         parkingDuration,
         parkingCheckInDate: checkInDate,
         parkingCheckInTime: checkInTime,
-        parkingCheckOutDate: parkingCheckOutDate || undefined,
-        parkingCheckOutTime: parkingCheckOutDate ? checkOutTime : undefined,
+        parkingCheckOutDate: normalizedParkingCheckOutDate || undefined,
+        parkingCheckOutTime: normalizedParkingCheckOutDate ? checkOutTime : undefined,
         transportAvailability,
         bagPlan: showAirportTimingControls ? bagPlan : (initialData as TripDataWithExtras).bagPlan,
         checkingBags: showAirportTimingControls ? bagPlan !== 'none' : (initialData as TripDataWithExtras).checkingBags,
@@ -7064,7 +7198,7 @@ function EditTripForm({
         type: initialData.type,
         origin,
         destination,
-        airportTripDate,
+        airportTripDate: normalizedAirportTripDate,
         airportTripTime,
         transportAvailability,
         airportCode: selectedAirport!.id,
@@ -7077,7 +7211,7 @@ function EditTripForm({
         type: initialData.type,
         origin,
         destination,
-        arrivalDate,
+        arrivalDate: normalizedArrivalDate,
         arrivalTime,
         transportAvailability,
         airportCode: selectedAirport!.id,
@@ -7086,9 +7220,9 @@ function EditTripForm({
         parkingPreference,
       };
     } else {
-      const checkInDate = parkingCheckInDate || departureDate;
+      const checkInDate = normalizedParkingCheckInDate || normalizedDepartureDate;
       const checkInTime = parkingCheckInTime || departureTime;
-      const checkOutDate = parkingCheckOutDate || returnDate;
+      const checkOutDate = normalizedParkingCheckOutDate || normalizedReturnDate;
       const checkOutTime = parkingCheckOutTime || returnTime;
       parkingDuration = durationFromEditWindow(
         checkInDate,
@@ -7103,9 +7237,9 @@ function EditTripForm({
         destination,
         airportCode: selectedAirport!.id,
         destinationKind: 'airport',
-        departureDate,
+        departureDate: normalizedDepartureDate,
         departureTime,
-        returnDate,
+        returnDate: normalizedReturnDate,
         returnTime,
         parkingDuration,
         parkingCheckInDate: checkInDate,
@@ -7352,11 +7486,10 @@ function EditTripForm({
           <>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Arrival date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={arrivalDate}
-                onChange={(e) => setArrivalDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setArrivalDate}
+                ariaLabel="Arrival date"
               />
             </div>
             <div>
@@ -7378,11 +7511,10 @@ function EditTripForm({
                       Park from date
                       <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                     </label>
-                    <input
-                      type="date"
+                    <EditDateTextInput
                       value={parkingCheckInDate}
-                      onChange={(e) => setParkingCheckInDate(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      onChange={setParkingCheckInDate}
+                      ariaLabel="Park from date"
                     />
                   </div>
                   <div>
@@ -7402,11 +7534,10 @@ function EditTripForm({
                       Park until date
                       <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                     </label>
-                    <input
-                      type="date"
+                    <EditDateTextInput
                       value={parkingCheckOutDate}
-                      onChange={(e) => setParkingCheckOutDate(e.target.value)}
-                      className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      onChange={setParkingCheckOutDate}
+                      ariaLabel="Park until date"
                     />
                   </div>
                   <div>
@@ -7445,11 +7576,10 @@ function EditTripForm({
           <>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={departureDate}
-                onChange={(e) => setDepartureDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setDepartureDate}
+                ariaLabel="Departure date"
               />
             </div>
             <div>
@@ -7473,11 +7603,10 @@ function EditTripForm({
                     Parking check-in date
                     <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                   </label>
-                  <input
-                    type="date"
+                  <EditDateTextInput
                     value={parkingCheckInDate}
-                    onChange={(e) => setParkingCheckInDate(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    onChange={setParkingCheckInDate}
+                    ariaLabel="Parking check-in date"
                   />
                 </div>
                 <div>
@@ -7497,11 +7626,10 @@ function EditTripForm({
                     Parking check-out date
                     <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                   </label>
-                  <input
-                    type="date"
+                  <EditDateTextInput
                     value={parkingCheckOutDate}
-                    onChange={(e) => setParkingCheckOutDate(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    onChange={setParkingCheckOutDate}
+                    ariaLabel="Parking check-out date"
                   />
                 </div>
                 <div>
@@ -7540,11 +7668,10 @@ function EditTripForm({
           <>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={airportTripDate}
-                onChange={(e) => setAirportTripDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setAirportTripDate}
+                ariaLabel="Airport trip date"
               />
             </div>
             <div>
@@ -7563,11 +7690,10 @@ function EditTripForm({
           <>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={arrivalDate}
-                onChange={(e) => setArrivalDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setArrivalDate}
+                ariaLabel="Arrival date"
               />
             </div>
             <div>
@@ -7586,11 +7712,10 @@ function EditTripForm({
           <>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Departure date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={departureDate}
-                onChange={(e) => setDepartureDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setDepartureDate}
+                ariaLabel="Departure date"
               />
             </div>
             <div>
@@ -7604,11 +7729,10 @@ function EditTripForm({
             </div>
             <div>
               <label className="block text-sm font-medium text-zinc-800">Return date</label>
-              <input
-                type="date"
+              <EditDateTextInput
                 value={returnDate}
-                onChange={(e) => setReturnDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                onChange={setReturnDate}
+                ariaLabel="Return date"
               />
             </div>
             <div>

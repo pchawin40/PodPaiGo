@@ -122,6 +122,35 @@ describe('quickGo', () => {
     expect(roundTripParams.get('parkingCheckOutTime')).toBe('17:00');
   });
 
+  test('general trip params preserve no-parking preference and parking time window', () => {
+    const params = new URLSearchParams({
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      arrivalDate: '2026-11-13',
+      arrivalTime: '09:00',
+      parkingCheckInDate: '2026-11-13',
+      parkingCheckInTime: '09:00',
+      parkingCheckOutDate: '2026-11-13',
+      parkingCheckOutTime: '17:00',
+      parkingDuration: String(8 * 60),
+      transport: 'car',
+      parkingPreference: 'none',
+      destinationKind: 'general',
+    });
+
+    const tripData = parseTripDataFromSearchParams(params);
+
+    expect(tripData?.type).toBe('general-trip');
+    expect(tripData?.transportAvailability).toBe('car');
+    expect(tripData?.parkingPreference).toBe('none');
+    expect(tripData?.parkingCheckInDate).toBe('2026-11-13');
+    expect(tripData?.parkingCheckInTime).toBe('09:00');
+    expect(tripData?.parkingCheckOutDate).toBe('2026-11-13');
+    expect(tripData?.parkingCheckOutTime).toBe('17:00');
+    expect(tripData?.parkingDuration).toBe(8 * 60);
+  });
+
   test('formatQuickGoOriginDisplayLabel reflects origin source', () => {
     const manualParams = buildQuickGoSearchParams({
       destinationText: 'Coffee shop',

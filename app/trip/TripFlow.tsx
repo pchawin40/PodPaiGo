@@ -101,10 +101,6 @@ export function parkingTripTotalText(
   return `Est. total: ${formatMoney(total)} for ${days} days`;
 }
 
-function isFullDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
 function normalizeDateInputValue(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -138,8 +134,57 @@ function normalizeDateInputValue(value: string): string | null {
   return formatLocalDateInputValue(parsed);
 }
 
-function calendarDateValue(value: string): string {
-  return normalizeDateInputValue(value) ?? '';
+const DATE_INPUT_HELPER_TEXT = 'Format: MM/DD/YYYY or YYYY-MM-DD.';
+
+const readableInputClass =
+  'ppg-readable-input rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100';
+
+function formInputClass({
+  hasError = false,
+  highlighted = false,
+  className = '',
+}: {
+  hasError?: boolean;
+  highlighted?: boolean;
+  className?: string;
+} = {}): string {
+  return [
+    readableInputClass,
+    hasError ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200',
+    highlighted ? 'animate-pulse' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function DateTextInput({
+  value,
+  onChange,
+  ariaLabel,
+  hasError = false,
+  highlighted = false,
+  className = '',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel?: string;
+  hasError?: boolean;
+  highlighted?: boolean;
+  className?: string;
+}) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      placeholder="MM/DD/YYYY or YYYY-MM-DD"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={ariaLabel}
+      className={formInputClass({ hasError, highlighted, className })}
+    />
+  );
 }
 
 function buildLocalDateTime(date: string, time: string): Date | null {
@@ -878,6 +923,28 @@ export default function TripFlow() {
       },
     });
 
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('trip_form_submit_params', {
+        type: params.get('type'),
+        intent: params.get('intent'),
+        hasOrigin: Boolean(params.get('origin')),
+        hasDestination: Boolean(params.get('destination')),
+        destinationKind: params.get('destinationKind'),
+        transport: params.get('transport'),
+        transitPayment: params.get('transitPayment'),
+        parkingPreference: params.get('parkingPreference'),
+        arrivalDate: params.get('arrivalDate'),
+        arrivalTime: params.get('arrivalTime'),
+        departureDate: params.get('departureDate'),
+        departureTime: params.get('departureTime'),
+        parkingCheckInDate: params.get('parkingCheckInDate'),
+        parkingCheckInTime: params.get('parkingCheckInTime'),
+        parkingCheckOutDate: params.get('parkingCheckOutDate'),
+        parkingCheckOutTime: params.get('parkingCheckOutTime'),
+        parkingDuration: params.get('parkingDuration'),
+      });
+    }
+
     router.push(buildResultsPathFromSearchParams(params));
   };
 
@@ -1378,11 +1445,11 @@ export default function TripFlow() {
                           return next;
                         });
                       }}
-                      className={
-                        'mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
-                        (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
-                        (highlightedField === 'time' ? 'animate-pulse' : '')
-                      }
+                      className={formInputClass({
+                        hasError: Boolean(fieldErrors.time),
+                        highlighted: highlightedField === 'time',
+                        className: 'mt-2 w-full',
+                      })}
                     />
 
                     {fieldErrors.time && (
@@ -1400,12 +1467,9 @@ export default function TripFlow() {
                         : 'Date'}
                   </label>
                   <div className="mt-2">
-                    <input
-                      type="date"
-                      value={isFullDate(state.date) ? state.date : ''}
-                      onChange={(e) => {
-                        const nextDate = e.target.value;
-
+                    <DateTextInput
+                      value={state.date}
+                      onChange={(nextDate) => {
                         setState((s) => ({
                           ...s,
                           date: nextDate,
@@ -1417,13 +1481,12 @@ export default function TripFlow() {
                           return next;
                         });
                       }}
-                      aria-label="Choose parking start date from calendar"
-                      className={
-                        'w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
-                        (fieldErrors.date ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
-                        (highlightedField === 'date' ? 'animate-pulse' : '')
-                      }
+                      ariaLabel="Trip date"
+                      hasError={Boolean(fieldErrors.date)}
+                      highlighted={highlightedField === 'date'}
+                      className="w-full"
                     />
+                    <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
                     {fieldErrors.date && (
                       <p className="mt-2 text-sm font-medium text-red-600">
                         {fieldErrors.date}
@@ -1452,11 +1515,11 @@ export default function TripFlow() {
                             return next;
                           });
                         }}
-                        className={
-                          'mt-2 w-full rounded-xl border bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ' +
-                          (fieldErrors.time ? 'border-red-400 ring-4 ring-red-100 ' : 'border-zinc-200 ') +
-                          (highlightedField === 'time' ? 'animate-pulse' : '')
-                        }
+                        className={formInputClass({
+                          hasError: Boolean(fieldErrors.time),
+                          highlighted: highlightedField === 'time',
+                          className: 'mt-2 w-full rounded-xl focus:ring-2',
+                        })}
                         aria-label="Trip time"
                       />
                       {fieldErrors.time && (
@@ -1480,13 +1543,12 @@ export default function TripFlow() {
                           Parking check-in date
                           <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                         </label>
-                        <input
-                          type="date"
-                          value={calendarDateValue(state.parkingCheckInDate)}
-                          onChange={(e) => {
+                        <DateTextInput
+                          value={state.parkingCheckInDate}
+                          onChange={(value) => {
                             setState((s) => ({
                               ...s,
-                              parkingCheckInDate: e.target.value,
+                              parkingCheckInDate: value,
                             }));
                             setFieldErrors((prev) => {
                               const next = { ...prev };
@@ -1494,11 +1556,11 @@ export default function TripFlow() {
                               return next;
                             });
                           }}
-                          className={
-                            'mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
-                            (fieldErrors.parkingCheckInDate ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200')
-                          }
+                          ariaLabel="Parking check-in date"
+                          hasError={Boolean(fieldErrors.parkingCheckInDate)}
+                          className="mt-2 w-full"
                         />
+                        <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
                         {fieldErrors.parkingCheckInDate && (
                           <div className="mt-2 text-sm text-red-700">{fieldErrors.parkingCheckInDate}</div>
                         )}
@@ -1518,7 +1580,7 @@ export default function TripFlow() {
                               parkingCheckInTime: e.target.value,
                             }))
                           }
-                          className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                          className={formInputClass({ className: 'mt-2 w-full' })}
                         />
                       </div>
 
@@ -1527,13 +1589,12 @@ export default function TripFlow() {
                           Parking check-out date
                           <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                         </label>
-                        <input
-                          type="date"
-                          value={calendarDateValue(state.parkingCheckOutDate)}
-                          onChange={(e) => {
+                        <DateTextInput
+                          value={state.parkingCheckOutDate}
+                          onChange={(value) => {
                             setState((s) => ({
                               ...s,
-                              parkingCheckOutDate: e.target.value,
+                              parkingCheckOutDate: value,
                             }));
                             setFieldErrors((prev) => {
                               const next = { ...prev };
@@ -1541,11 +1602,11 @@ export default function TripFlow() {
                               return next;
                             });
                           }}
-                          className={
-                            'mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
-                            (fieldErrors.parkingCheckOutDate ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200')
-                          }
+                          ariaLabel="Parking check-out date"
+                          hasError={Boolean(fieldErrors.parkingCheckOutDate)}
+                          className="mt-2 w-full"
                         />
+                        <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
                         {fieldErrors.parkingCheckOutDate && (
                           <div className="mt-2 text-sm text-red-700">{fieldErrors.parkingCheckOutDate}</div>
                         )}
@@ -1565,7 +1626,7 @@ export default function TripFlow() {
                               parkingCheckOutTime: e.target.value,
                             }))
                           }
-                          className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                          className={formInputClass({ className: 'mt-2 w-full' })}
                         />
                       </div>
                     </div>
@@ -1673,17 +1734,18 @@ export default function TripFlow() {
                             Park from date
                             <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                           </label>
-                          <input
-                            type="date"
-                            value={calendarDateValue(state.parkingCheckInDate)}
-                            onChange={(e) =>
+                          <DateTextInput
+                            value={state.parkingCheckInDate}
+                            onChange={(value) =>
                               setState((s) => ({
                                 ...s,
-                                parkingCheckInDate: e.target.value,
+                                parkingCheckInDate: value,
                               }))
                             }
-                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                            ariaLabel="Park from date"
+                            className="mt-2 w-full"
                           />
+                          <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
                         </div>
 
                         <div>
@@ -1700,7 +1762,7 @@ export default function TripFlow() {
                                 parkingCheckInTime: e.target.value,
                               }))
                             }
-                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                            className={formInputClass({ className: 'mt-2 w-full' })}
                           />
                         </div>
 
@@ -1709,13 +1771,12 @@ export default function TripFlow() {
                             Park until date
                             <span className="ml-1 text-xs font-normal text-zinc-500">Optional</span>
                           </label>
-                          <input
-                            type="date"
-                            value={calendarDateValue(state.parkingCheckOutDate)}
-                            onChange={(e) => {
+                          <DateTextInput
+                            value={state.parkingCheckOutDate}
+                            onChange={(value) => {
                               setState((s) => ({
                                 ...s,
-                                parkingCheckOutDate: e.target.value,
+                                parkingCheckOutDate: value,
                               }));
                               setFieldErrors((prev) => {
                                 const next = { ...prev };
@@ -1723,11 +1784,11 @@ export default function TripFlow() {
                                 return next;
                               });
                             }}
-                            className={
-                              'mt-2 w-full rounded-2xl border bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ' +
-                              (fieldErrors.parkingCheckOutDate ? 'border-red-400 ring-4 ring-red-100' : 'border-zinc-200')
-                            }
+                            ariaLabel="Park until date"
+                            hasError={Boolean(fieldErrors.parkingCheckOutDate)}
+                            className="mt-2 w-full"
                           />
+                          <p className="mt-2 text-xs text-zinc-500">{DATE_INPUT_HELPER_TEXT}</p>
                         </div>
 
                         <div>
@@ -1744,7 +1805,7 @@ export default function TripFlow() {
                                 parkingCheckOutTime: e.target.value,
                               }))
                             }
-                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                            className={formInputClass({ className: 'mt-2 w-full' })}
                           />
                         </div>
 
@@ -1765,7 +1826,7 @@ export default function TripFlow() {
                             placeholder="8"
                             min="0.5"
                             step="0.5"
-                            className="mt-2 w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                            className={formInputClass({ className: 'mt-2 w-full' })}
                           />
                           <p className="mt-2 text-xs leading-5 text-zinc-500">
                             Full planner default is 8 hours. Example: 9:00 AM with 8 hours becomes 5:00 PM the same day.

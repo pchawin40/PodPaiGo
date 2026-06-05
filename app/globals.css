@@ -162,6 +162,124 @@ textarea:disabled {
   opacity: 0.9;
 }
 
+.ppg-readable-input {
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.ppg-readable-input::placeholder {
+  color: #64748b;
+  opacity: 0.9;
+}
+
+.dark .ppg-readable-input {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+  color-scheme: dark;
+}
+
+.dark .ppg-readable-input::placeholder {
+  color: #cbd5e1 !important;
+  opacity: 0.85;
+}
+
+.dark .airport-page-bg .bg-white,
+.dark .airport-page-bg .bg-white\/80,
+.dark .airport-page-bg .bg-white\/90,
+.dark .airport-page-bg .bg-white\/95,
+.dark .travel-page-bg .bg-white,
+.dark .travel-page-bg .bg-white\/80,
+.dark .travel-page-bg .bg-white\/90,
+.dark .travel-page-bg .bg-white\/95 {
+  background-color: rgba(15, 23, 42, 0.9) !important;
+}
+
+.dark .airport-page-bg .bg-zinc-50,
+.dark .airport-page-bg .bg-sky-50,
+.dark .airport-page-bg .bg-sky-50\/40,
+.dark .airport-page-bg .bg-sky-50\/70,
+.dark .travel-page-bg .bg-zinc-50,
+.dark .travel-page-bg .bg-sky-50,
+.dark .travel-page-bg .bg-sky-50\/40,
+.dark .travel-page-bg .bg-sky-50\/70 {
+  background-color: rgba(30, 41, 59, 0.86) !important;
+}
+
+.dark .airport-page-bg .bg-blue-50,
+.dark .airport-page-bg .bg-blue-50\/80,
+.dark .travel-page-bg .bg-blue-50,
+.dark .travel-page-bg .bg-blue-50\/80 {
+  background-color: rgba(8, 47, 73, 0.9) !important;
+}
+
+.dark .airport-page-bg .border-zinc-200,
+.dark .airport-page-bg .border-slate-200,
+.dark .travel-page-bg .border-zinc-200,
+.dark .travel-page-bg .border-slate-200 {
+  border-color: rgba(148, 163, 184, 0.34) !important;
+}
+
+.dark .airport-page-bg .border-blue-500,
+.dark .travel-page-bg .border-blue-500 {
+  border-color: #7dd3fc !important;
+}
+
+.dark .airport-page-bg .text-zinc-900,
+.dark .airport-page-bg .text-zinc-950,
+.dark .airport-page-bg .text-slate-900,
+.dark .airport-page-bg .text-slate-950,
+.dark .airport-page-bg .text-blue-950,
+.dark .travel-page-bg .text-zinc-900,
+.dark .travel-page-bg .text-zinc-950,
+.dark .travel-page-bg .text-slate-900,
+.dark .travel-page-bg .text-slate-950,
+.dark .travel-page-bg .text-blue-950 {
+  color: #f8fafc !important;
+}
+
+.dark .airport-page-bg .text-zinc-800,
+.dark .airport-page-bg .text-slate-800,
+.dark .airport-page-bg .text-blue-900,
+.dark .travel-page-bg .text-zinc-800,
+.dark .travel-page-bg .text-slate-800,
+.dark .travel-page-bg .text-blue-900 {
+  color: #e2e8f0 !important;
+}
+
+.dark .airport-page-bg .text-zinc-700,
+.dark .airport-page-bg .text-zinc-600,
+.dark .airport-page-bg .text-zinc-500,
+.dark .airport-page-bg .text-slate-700,
+.dark .airport-page-bg .text-slate-600,
+.dark .travel-page-bg .text-zinc-700,
+.dark .travel-page-bg .text-zinc-600,
+.dark .travel-page-bg .text-zinc-500,
+.dark .travel-page-bg .text-slate-700,
+.dark .travel-page-bg .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .airport-page-bg input,
+.dark .airport-page-bg select,
+.dark .airport-page-bg textarea,
+.dark .travel-page-bg input,
+.dark .travel-page-bg select,
+.dark .travel-page-bg textarea {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+}
+
+.dark .airport-page-bg input::placeholder,
+.dark .airport-page-bg textarea::placeholder,
+.dark .travel-page-bg input::placeholder,
+.dark .travel-page-bg textarea::placeholder {
+  color: #cbd5e1 !important;
+  opacity: 0.84;
+}
+
 * {
   min-width: 0;
 }

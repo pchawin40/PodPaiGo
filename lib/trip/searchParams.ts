@@ -379,6 +379,39 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         ('airportCode' in data && data.airportCode) || airportCodeForAirportTrips;
       data = { ...data, airportCode: resolvedCode };
     }
+
+    if (process.env.NODE_ENV !== 'production') {
+      const parsed = data as TripDataWithExtras;
+      console.debug('parsed_trip_data_summary', {
+        type: parsed.type,
+        hasOrigin: Boolean(parsed.origin),
+        hasDestination: Boolean(parsed.destination),
+        destinationKind: parsed.destinationKind,
+        transportAvailability: parsed.transportAvailability,
+        transitPayment: parsed.transitPayment,
+        parkingPreference: parsed.parkingPreference,
+        airportCode: parsed.airportCode,
+        arrivalDate: parsed.type === 'general-trip' || parsed.type === 'one-way-arrival'
+          ? parsed.arrivalDate
+          : undefined,
+        arrivalTime: parsed.type === 'general-trip' || parsed.type === 'one-way-arrival'
+          ? parsed.arrivalTime
+          : undefined,
+        departureDate: parsed.type === 'one-way-departure' || parsed.type === 'round-trip'
+          ? parsed.departureDate
+          : undefined,
+        departureTime: parsed.type === 'one-way-departure' || parsed.type === 'round-trip'
+          ? parsed.departureTime
+          : undefined,
+        parkingCheckInDate: parsed.parkingCheckInDate,
+        parkingCheckInTime: parsed.parkingCheckInTime,
+        parkingCheckOutDate: parsed.parkingCheckOutDate,
+        parkingCheckOutTime: parsed.parkingCheckOutTime,
+        parkingDuration: parsed.parkingDuration,
+        hasDestinationCoords:
+          typeof parsed.destinationLat === 'number' && typeof parsed.destinationLng === 'number',
+      });
+    }
   }
 
   return data;

@@ -154,4 +154,39 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(recommendation.parkingDataMessage).toMatch(/Live parking is still updating/);
     expect(recommendation.trafficEstimate?.duration).toBe(18);
   });
+
+  test('no-parking preference still requests ride and transit fallbacks for legacy car URLs', async () => {
+    const parkingSpy = jest.fn(async () => []);
+    const rideshareSpy = jest.fn(async () => [] as RideshareOption[]);
+    const transitSpy = jest.fn(async () => [] as TransitJourney[]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: parkingSpy,
+      getRideshareOptions: rideshareSpy,
+      getTransitOptions: transitSpy,
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const tripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      destinationKind: 'general',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '09:00',
+      transportAvailability: 'car',
+      parkingPreference: 'none',
+    };
+
+    await RecommendationEngine.generateRecommendations(tripData);
+
+    expect(parkingSpy).not.toHaveBeenCalled();
+    expect(rideshareSpy).toHaveBeenCalled();
+    expect(transitSpy).toHaveBeenCalled();
+  });
 });

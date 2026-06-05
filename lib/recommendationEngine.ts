@@ -150,6 +150,7 @@ import { rankAccessOptions } from './access/rankAccessOptions';
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
   airportCode?: string;
+  parkingPreference?: 'none' | 'destination' | 'nearby';
 };
 
 type TransitOptionWithFrequency = TransitOption & {
@@ -437,12 +438,30 @@ export class RecommendationEngine {
       ? plannedAirportArrivalDateTime(tripData)
       : undefined;
 
+    const noParkingNeeded = (tripData as TripDataWithTransport).parkingPreference === 'none';
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
     const shouldLoadParking = allowCarOptions && shouldDiscoverParkingForTrip(tripData);
     const allowRideshare =
-      transportAvailability === 'rideshare' || transportAvailability === 'all';
+      noParkingNeeded ||
+      transportAvailability === 'rideshare' ||
+      transportAvailability === 'all';
     const allowTransit =
-      transportAvailability === 'transit' || transportAvailability === 'all';
+      noParkingNeeded ||
+      transportAvailability === 'transit' ||
+      transportAvailability === 'all';
+
+    debugLog('recommendation_provider_flags', {
+      type: tripData.type,
+      destinationKind: tripData.destinationKind ?? 'airport',
+      transportAvailability,
+      parkingPreference: (tripData as TripDataWithTransport).parkingPreference,
+      noParkingNeeded,
+      allowCarOptions,
+      shouldLoadParking,
+      allowRideshare,
+      allowTransit,
+      hasDestinationCoords: Boolean(mainDestinationLatLng),
+    });
     const timedParkingRequest = shouldLoadParking
       ? providerFetch(
           'parking',
