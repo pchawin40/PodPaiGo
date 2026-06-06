@@ -60,6 +60,34 @@ describe('ParkingLotVisual attribution', () => {
     });
   });
 
+  test('uses supplied provider image before illustration without selector request', async () => {
+    render(
+      <ParkingLotVisual
+        option={{
+          id: 'quality-provider-photo',
+          name: 'Quality Inn SEA Airport Parking',
+          type: 'off-airport',
+          imageUrl: 'https://d2uqqhmijd5j2z.cloudfront.net/files/quality/gallery/Quality_Inn_SEA.png',
+          images: [
+            'https://d2uqqhmijd5j2z.cloudfront.net/files/quality/gallery/Quality_Inn_SEA.png',
+            '/assets/parking/hotel-parking.svg',
+          ],
+          photoSource: 'provider',
+          photoAttribution: 'ParkWhiz',
+          bookingProvider: 'ParkWhiz',
+        }}
+        airportCode="SEA"
+        photoPriority="visible"
+      />,
+    );
+
+    const img = screen.getByAltText('Quality Inn SEA Airport Parking photo') as HTMLImageElement;
+    expect(img.src).toContain('Quality_Inn_SEA.png');
+    expect(screen.getByText('Lot photo')).toBeInTheDocument();
+    expect(screen.getByText('ParkWhiz')).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   test('does not call google photo proxy when disabled response returns placeholder', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
@@ -219,6 +247,50 @@ describe('ParkingLotVisual attribution', () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
     expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toContain('priority=top');
+  });
+
+  test('visible visuals request through selector and dedupe same-lot requests', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        imageUrl: '/api/google-place-photo?name=places%2Fvisible%2Fphotos%2F1',
+        source: 'google_live',
+        attribution: 'Photo © Google',
+        attributionUrl: 'https://maps.google.com',
+        requiresGoogleAttribution: true,
+      }),
+    });
+
+    render(
+      <>
+        <ParkingLotVisual
+          option={{
+            id: 'visible-session-a',
+            name: 'Visible Airport Parking Lot SEA - Self Uncovered',
+            type: 'off-airport',
+            bookingProvider: 'ParkWhiz',
+          }}
+          airportCode="SEA"
+          photoPriority="visible"
+        />
+        <ParkingLotVisual
+          option={{
+            id: 'visible-session-b',
+            name: 'Visible Airport Parking Lot SEA - Self Uncovered',
+            type: 'off-airport',
+            bookingProvider: 'ParkWhiz',
+          }}
+          airportCode="SEA"
+          photoPriority="visible"
+        />
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+    expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toContain('priority=visible');
+    expect(screen.getAllByText('Google photo').length).toBeGreaterThan(0);
   });
 
   test('background visuals use local placeholder without selector request', async () => {

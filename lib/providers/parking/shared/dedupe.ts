@@ -1,6 +1,7 @@
 import type { ParkingOption } from '../../../types';
 import { isLiveParkWhizOption } from '../../../parking/parkWhizMatch';
 import { logParkingPhotoReviewTrace } from '../../../parking/photoReviewDebug';
+import { selectBestParkingPhotoFields } from '../../../parking/parkingLotPhotoShared';
 
 export function normalizeLotName(name: string): string {
   return name
@@ -42,6 +43,7 @@ function mergeParkingDuplicates(primary: ParkingOption, secondary: ParkingOption
           : secondary.coordinateSource === 'geocoded_address'
             ? secondary
             : primary;
+  const photoFields = selectBestParkingPhotoFields(primary, secondary);
 
   return {
     ...secondary,
@@ -74,10 +76,15 @@ function mergeParkingDuplicates(primary: ParkingOption, secondary: ParkingOption
     googlePlaceName: primary.googlePlaceName ?? secondary.googlePlaceName,
     googlePlaceAddress: primary.googlePlaceAddress ?? secondary.googlePlaceAddress,
     parkingRouteDebug: primary.parkingRouteDebug ?? secondary.parkingRouteDebug,
-    imageUrl: secondary.imageUrl ?? primary.imageUrl,
-    images: secondary.images ?? primary.images,
+    ...photoFields,
     reviewScore: secondary.reviewScore ?? primary.reviewScore,
     reviewCount: secondary.reviewCount ?? primary.reviewCount,
+    bookingProvider: isLiveParkWhizOption(primary)
+      ? primary.bookingProvider
+      : primary.bookingProvider ?? secondary.bookingProvider,
+    sourceName: isLiveParkWhizOption(primary)
+      ? primary.sourceName
+      : primary.sourceName ?? secondary.sourceName,
     sourceLink: isLiveParkWhizOption(primary)
       ? primary.sourceLink
       : primary.sourceLink ?? secondary.sourceLink,

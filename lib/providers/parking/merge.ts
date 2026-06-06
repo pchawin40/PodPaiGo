@@ -30,6 +30,15 @@ function normalizeSnapshotName(name: string): string {
     .trim();
 }
 
+function providerDisplayName(source: string | null | undefined): string | undefined {
+  const normalized = String(source || '').toLowerCase();
+  if (normalized.includes('parkwhiz')) return 'ParkWhiz';
+  if (normalized.includes('airportparkingreservations') || normalized === 'apr') {
+    return 'AirportParkingReservations';
+  }
+  return source || undefined;
+}
+
 function applySafeModeProviderLabels(options: ParkingOption[]): ParkingOption[] {
   if (isLiveGoogleParkingDiscoveryEnabled()) return options;
 
@@ -64,6 +73,8 @@ export function applyPriceSnapshotsToOptions(
     if (!match || typeof match.priceDaily !== 'number') return option;
     if (isLiveParkWhizOption(option)) return option;
 
+    const providerName = providerDisplayName(match.source);
+
     return {
       ...option,
       price: match.priceDaily,
@@ -80,13 +91,14 @@ export function applyPriceSnapshotsToOptions(
         match.availabilityStatus === 'unavailable'
           ? 'unavailable'
           : 'available',
-      sourceName: match.source || option.sourceName,
+      bookingProvider: providerName || option.bookingProvider,
+      sourceName: providerName || option.sourceName,
       sourceLink: match.bookingUrl || option.sourceLink,
       lastUpdated: match.fetchedAt || option.lastUpdated,
       bestFor: [
         ...(option.bestFor || []),
         'Live Price',
-        match.source === 'parkwhiz' ? 'ParkWhiz' : '',
+        providerName === 'ParkWhiz' ? 'ParkWhiz' : '',
       ].filter(Boolean),
     };
   });

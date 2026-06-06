@@ -57,6 +57,31 @@ export function normalizeParkingLotName(name: string): string {
   return cleanText(cleanGoogleParkingSearchName(name));
 }
 
+export function deriveBusinessPhotoSearchName(name: string): string {
+  let cleaned = cleanParkingProviderInventoryName(name)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  const suffixPatterns = [
+    /\s+(?:airport\s+)?parking(?:\s+lot)?$/i,
+    /\s+(?:parking\s+)?lot$/i,
+    /\s+self\s*(?:-| )?park$/i,
+    /\s+self\s+(?:uncovered|covered|parking)$/i,
+  ];
+
+  let previous = '';
+  while (cleaned && cleaned !== previous) {
+    previous = cleaned;
+    for (const pattern of suffixPatterns) {
+      cleaned = cleaned.replace(pattern, '').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  return cleaned;
+}
+
 function hasParkingSignal(text: string): boolean {
   return /\b(parking|garage|lot|valet|shuttle|park|self covered|self uncovered|covered|uncovered)\b/.test(text);
 }

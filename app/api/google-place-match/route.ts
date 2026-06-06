@@ -14,6 +14,7 @@ import {
   buildParkingGoogleCacheKey,
   shouldAttemptGooglePlaceMatch,
 } from '../../../lib/parking/googlePlaceMatchUtils';
+import { isPlaceholderParkingPhotoUrl } from '../../../lib/parking/parkingLotPhotoShared';
 import { TimeoutError, withTimeout } from '../../../lib/utils/asyncTimeout';
 
 const GOOGLE_PLACE_MATCH_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_MATCH_TIMEOUT_MS || 5000);
@@ -253,7 +254,11 @@ async function handleRequest(input: Record<string, unknown>) {
     const placeWithPhoto = matchResult?.place ?? null;
     const photoSelection = matchResult?.photoSelection ?? null;
 
-    const imageUrl = photoSelection?.imageUrl ?? null;
+    const imageUrl =
+      photoSelection?.source !== 'placeholder' &&
+      !isPlaceholderParkingPhotoUrl(photoSelection?.imageUrl)
+        ? photoSelection?.imageUrl ?? null
+        : null;
     const photoUrl = imageUrl;
     const photoAttributions = photoSelection?.attribution ? [photoSelection.attribution] : [];
     const placeId = placeWithPhoto?.googlePlaceId || null;

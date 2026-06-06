@@ -53,20 +53,35 @@ type ParkWhizQuote = {
     };
     purchase_options?: ParkWhizPurchaseOption[];
     _embedded?: {
-        'pw:location'?: {
-            id?: string;
-            name?: string;
-            address1?: string;
-            city?: string;
-            state?: string;
-            postal_code?: string;
-            country?: string;
-            currency?: string;
-            entrances?: Array<{
-                coordinates?: [number, number];
-            }>;
-        };
+        'pw:location'?: ParkWhizLocation;
     };
+};
+
+type ParkWhizPhotoSize = {
+    URL?: string;
+    width?: number;
+    height?: number;
+};
+
+type ParkWhizLocationPhoto = {
+    position?: number;
+    alt?: string;
+    sizes?: Record<string, ParkWhizPhotoSize | undefined>;
+};
+
+type ParkWhizLocation = {
+    id?: string;
+    name?: string;
+    address1?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    country?: string;
+    currency?: string;
+    entrances?: Array<{
+        coordinates?: [number, number];
+    }>;
+    photos?: ParkWhizLocationPhoto[];
 };
 
 function moneyToNumber(value?: string): number | null {
@@ -89,6 +104,41 @@ function buildParkWhizUrl(path?: string): string | undefined {
     if (path.startsWith('http')) return path;
 
     return `https://www.parkwhiz.com${path}`;
+}
+
+export function parkWhizLocationIdFromProviderLotId(value?: string | null): string | null {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+
+    if (/^\d+$/.test(trimmed)) return trimmed;
+
+    const match = trimmed.match(/^parkwhiz-(\d+)(?:-|$)/i);
+    return match?.[1] || null;
+}
+
+export function parkWhizPhotoUrlFromLocation(
+    location?: Pick<ParkWhizLocation, 'photos'> | null,
+): string | null {
+    const photos = [...(location?.photos || [])].sort(
+        (a, b) => (a.position ?? 999) - (b.position ?? 999),
+    );
+
+    for (const photo of photos) {
+        const sizes = photo.sizes || {};
+        const url =
+            sizes.gallery?.URL ||
+            sizes.original?.URL ||
+            sizes.venue_gallery?.URL ||
+            sizes.hub_frontpage?.URL ||
+            sizes.res_ticket?.URL ||
+            sizes.search_thumb?.URL;
+
+        if (url?.trim() && /^https:\/\//i.test(url)) {
+            return url.trim();
+        }
+    }
+
+    return null;
 }
 
 function googleMapsSearchUrl(query: string): string {
@@ -184,6 +234,7 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
     const distanceMiles =
         typeof distanceFeet === 'number' ? Number((distanceFeet / 5280).toFixed(1)) : null;
     const lotCoordinates = extractLocationCoordinates(location);
+    const providerPhotoUrl = parkWhizPhotoUrlFromLocation(location);
 
     return (quote.purchase_options ?? []).map((option) => {
         const totalPrice = moneyToNumber(option.price?.USD);
@@ -247,6 +298,12 @@ function normalizeParkWhizQuoteToParkingOptions(args: {
             sourceName: 'ParkWhiz',
             sourceLink: bookingUrl,
             mapLink: googleMapsSearchUrl(mapQuery),
+            imageUrl: providerPhotoUrl || undefined,
+            images: providerPhotoUrl ? [providerPhotoUrl] : undefined,
+            photoSource: providerPhotoUrl ? 'provider' : undefined,
+            photoAttribution: providerPhotoUrl ? 'ParkWhiz' : undefined,
+            photoAttributionUrl: providerPhotoUrl ? bookingUrl || 'https://www.parkwhiz.com' : undefined,
+            photoAttributions: providerPhotoUrl ? ['ParkWhiz'] : undefined,
             address: address || undefined,
             normalizedAddress: address || undefined,
             routeDestination: address || locationName,

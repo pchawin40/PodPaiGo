@@ -65,7 +65,12 @@ function normalizeClientText(value?: string | null): string {
 }
 
 function isLivePhotoPriority(priority: ParkingPhotoPriority): boolean {
-  return priority === 'smart-pick' || priority === 'top' || priority === 'manual';
+  return (
+    priority === 'smart-pick' ||
+    priority === 'top' ||
+    priority === 'visible' ||
+    priority === 'manual'
+  );
 }
 
 function canUseCachedPhotoSelection(
@@ -116,7 +121,7 @@ function googleSelectionFromOption(option: ParkingLike): ParkingPhotoSelection |
 
   return {
     imageUrl,
-    source: 'google_live',
+    source: option.photoSource === 'google_business' ? 'google_business' : 'google_live',
     attribution: option.photoAttribution ?? option.photoAttributions?.[0] ?? 'Photo © Google',
     attributionUrl: option.photoAttributionUrl ?? 'https://maps.google.com',
     requiresGoogleAttribution: true,
@@ -127,13 +132,21 @@ function providerSelectionFromOption(option: ParkingLike): ParkingPhotoSelection
   const imageUrl = option.images?.[0] || option.imageUrl || null;
   if (!imageUrl) return null;
 
-  if (isGooglePhotoProxyUrl(imageUrl) && option.photoSource !== 'google_live') {
+  if (
+    isGooglePhotoProxyUrl(imageUrl) &&
+    option.photoSource !== 'google_live' &&
+    option.photoSource !== 'google_business'
+  ) {
     return null;
   }
 
+  const source =
+    option.photoSource ??
+    (isGooglePhotoProxyUrl(imageUrl) ? 'google_live' : 'provider');
+
   return {
     imageUrl,
-    source: option.photoSource ?? (isGooglePhotoProxyUrl(imageUrl) ? 'google_live' : 'provider'),
+    source,
     attribution: option.photoAttribution ?? option.photoAttributions?.[0] ?? null,
     attributionUrl: option.photoAttributionUrl ?? null,
     requiresGoogleAttribution:
@@ -435,7 +448,9 @@ export default function ParkingLotVisual({
     const src = resolved.imageUrl;
     const showAttribution = Boolean(resolved.attribution);
     const showGoogleMapsAttribution =
-      resolved.requiresGoogleAttribution || resolved.source === 'google_live';
+      resolved.requiresGoogleAttribution ||
+      resolved.source === 'google_live' ||
+      resolved.source === 'google_business';
     const googlePhotoName = googlePhotoNameFromOption(option);
     const googleProxyUrl = googlePlacePhotoImageUrl(googlePhotoName);
     const providerPhotoAvailable = Boolean(providerFallbackSelection?.imageUrl);
@@ -446,6 +461,7 @@ export default function ParkingLotVisual({
     );
     const selectedVisualSource =
       resolved.source === 'google_live'
+        || resolved.source === 'google_business'
         ? 'google photo'
         : resolved.source === 'provider'
           ? 'provider image'
@@ -519,7 +535,7 @@ export default function ParkingLotVisual({
                       <span className="max-w-[60%] truncate rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-zinc-900 shadow-sm">
                         {resolved.source === 'placeholder'
                           ? 'Illustration'
-                          : resolved.source === 'google_live'
+                          : resolved.source === 'google_live' || resolved.source === 'google_business'
                             ? 'Google photo'
                             : 'Lot photo'}
                       </span>

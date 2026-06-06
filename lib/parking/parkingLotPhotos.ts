@@ -47,7 +47,10 @@ function rowToSelection(row: ParkingLotPhotoRow): ParkingPhotoSelection {
   };
 }
 
-export function buildGoogleLiveParkingPhoto(googlePhotoName: string | null | undefined): ParkingPhotoSelection | null {
+export function buildGoogleLiveParkingPhoto(
+  googlePhotoName: string | null | undefined,
+  source: 'google_live' | 'google_business' = 'google_live',
+): ParkingPhotoSelection | null {
   if (isGooglePlacePhotosLiveBlocked()) return null;
 
   const imageUrl = googlePlacePhotoImageUrl(googlePhotoName);
@@ -55,7 +58,7 @@ export function buildGoogleLiveParkingPhoto(googlePhotoName: string | null | und
 
   return {
     imageUrl,
-    source: 'google_live',
+    source,
     attribution: 'Photo © Google',
     attributionUrl: 'https://maps.google.com',
     requiresGoogleAttribution: true,

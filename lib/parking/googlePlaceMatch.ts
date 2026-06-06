@@ -6,6 +6,7 @@ import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeSt
 import { shouldDiscoverParkingForTrip } from '../trip/tripContext';
 import { isGooglePlacesLiveBlocked } from './googlePlacesGuard';
 import { logParkingPhotoReviewTrace } from './photoReviewDebug';
+import { selectBestParkingPhotoFields } from './parkingLotPhotoShared';
 
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
@@ -159,20 +160,36 @@ export async function attachGooglePlaceToParking(
         data.placeId ||
         data.id;
 
-      const responseImages = uniqueStrings([
-        place?.imageUrl ||
-        place?.photoUrl ||
-        data.imageUrl ||
-        data.photoUrl ||
-        data.photo ||
-        null,
-        ...stringArray(place?.images),
-        ...stringArray(data.images),
-        parking.imageUrl,
-        ...(parking.images || []),
-      ]);
-
-      const imageUrl = responseImages[0];
+      const responsePhotoFields = selectBestParkingPhotoFields(
+        {
+          imageUrl:
+            place?.imageUrl ||
+            place?.photoUrl ||
+            data.imageUrl ||
+            data.photoUrl ||
+            data.photo ||
+            null,
+          images: [
+            ...stringArray(place?.images),
+            ...stringArray(data.images),
+          ],
+          photoSource: place?.photoSource ?? data.photoSource,
+          photoAttribution: place?.photoAttribution ?? data.photoAttribution,
+          photoAttributionUrl: place?.photoAttributionUrl ?? data.photoAttributionUrl,
+          photoAttributions: stringArray(place?.photoAttributions).length
+            ? stringArray(place?.photoAttributions)
+            : stringArray(data.photoAttributions),
+          requiresGoogleAttribution:
+            typeof place?.requiresGoogleAttribution === 'boolean'
+              ? place.requiresGoogleAttribution
+              : typeof data.requiresGoogleAttribution === 'boolean'
+                ? data.requiresGoogleAttribution
+                : undefined,
+        },
+        parking,
+      );
+      const imageUrl = responsePhotoFields.imageUrl;
+      const responseImages = responsePhotoFields.images ?? [];
       const googlePhotoNames = uniqueStrings([
         place.googlePhotoName,
         place.photoName,
@@ -190,8 +207,7 @@ export async function attachGooglePlaceToParking(
         const fallbackWithImage = imageUrl
           ? ({
             ...parking,
-            imageUrl,
-            images: responseImages.length ? responseImages : [imageUrl],
+            ...responsePhotoFields,
           } as ParkingOption)
           : withStableParkingRouteStatus(parking);
 
@@ -239,21 +255,13 @@ export async function attachGooglePlaceToParking(
         googleMapsUri: place.googleMapsUri ?? parking.googleMapsUri,
         googlePhotoName: googlePhotoNames[0] ?? parking.googlePhotoName,
         googlePhotoNames: googlePhotoNames.length ? googlePhotoNames : parking.googlePhotoNames,
-        photoSource: place.photoSource ?? data.photoSource ?? parking.photoSource,
-        photoAttribution: place.photoAttribution ?? data.photoAttribution ?? parking.photoAttribution,
+        photoSource: responsePhotoFields.photoSource ?? parking.photoSource,
+        photoAttribution: responsePhotoFields.photoAttribution ?? parking.photoAttribution,
         photoAttributionUrl:
-          place.photoAttributionUrl ?? data.photoAttributionUrl ?? parking.photoAttributionUrl,
-        photoAttributions: stringArray(place.photoAttributions).length
-          ? stringArray(place.photoAttributions)
-          : stringArray(data.photoAttributions).length
-            ? stringArray(data.photoAttributions)
-            : parking.photoAttributions,
+          responsePhotoFields.photoAttributionUrl ?? parking.photoAttributionUrl,
+        photoAttributions: responsePhotoFields.photoAttributions ?? parking.photoAttributions,
         requiresGoogleAttribution:
-          typeof place.requiresGoogleAttribution === 'boolean'
-            ? place.requiresGoogleAttribution
-            : typeof data.requiresGoogleAttribution === 'boolean'
-              ? data.requiresGoogleAttribution
-              : parking.requiresGoogleAttribution,
+          responsePhotoFields.requiresGoogleAttribution ?? parking.requiresGoogleAttribution,
         reviewScore: typeof place.rating === 'number' ? place.rating : parking.reviewScore,
         reviewCount:
           typeof place.userRatingCount === 'number'
@@ -263,8 +271,7 @@ export async function attachGooglePlaceToParking(
               : parking.reviewCount,
         normalizedAddress: place.formattedAddress ?? place.address ?? parking.normalizedAddress,
         address: place.formattedAddress ?? place.address ?? parking.address,
-        imageUrl: imageUrl || undefined,
-        images: imageUrl ? responseImages : parking.images,
+        ...responsePhotoFields,
       }) as ParkingOption;
 
       logParkingPhotoReviewTrace('after_client_google_place_attach', enriched, {

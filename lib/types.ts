@@ -315,7 +315,7 @@ export type ParkingOption = {
   imageUrl?: string;
   images?: string[];
   photoAttributions?: string[];
-  photoSource?: 'first_party' | 'partner' | 'provider' | 'google_live' | 'placeholder';
+  photoSource?: 'first_party' | 'partner' | 'provider' | 'google_live' | 'google_business' | 'placeholder';
   photoAttribution?: string | null;
   photoAttributionUrl?: string | null;
   requiresGoogleAttribution?: boolean;

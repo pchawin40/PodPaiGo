@@ -1,5 +1,6 @@
 import type { ParkingOption, ParkingRateRule } from '../types';
 import { resolveDestinationParkingRate } from './destinationParkingRates';
+import { selectBestParkingPhotoFields } from './parkingLotPhotoShared';
 
 export type CityParkingPricing = Pick<
   ParkingOption,
@@ -236,6 +237,7 @@ export function mergeLiveCityParkWhizPricing(
   if (liveOption.priceDisplay !== 'live' || !(liveOption.price > 0)) {
     return option;
   }
+  const photoFields = selectBestParkingPhotoFields(option, liveOption);
 
   return {
     ...option,
@@ -249,8 +251,7 @@ export function mergeLiveCityParkWhizPricing(
     priceFreshness: 'live',
     googlePlaceId: option.googlePlaceId ?? liveOption.googlePlaceId,
     googleMapsUri: option.googleMapsUri ?? liveOption.googleMapsUri,
-    imageUrl: option.imageUrl ?? liveOption.imageUrl,
-    images: option.images ?? liveOption.images,
+    ...photoFields,
     reviewScore: option.reviewScore ?? liveOption.reviewScore,
     reviewCount: option.reviewCount ?? liveOption.reviewCount,
     lat: option.lat ?? liveOption.lat,

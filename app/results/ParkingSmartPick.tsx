@@ -35,6 +35,7 @@ import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 // import ParkingBookingSources from './ParkingBookSources';
 import ParkingLotVisual from './ParkingLotVisual';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
+import { selectBestParkingPhotoFields } from '../../lib/parking/parkingLotPhotoShared';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -183,16 +184,18 @@ function mergeGoogleEnrichedParking(
 
   if (!enriched) return option;
 
-  const imageUrl = enriched.imageUrl ?? enriched.images?.[0] ?? option.imageUrl;
-  const images = enriched.imageUrl
-    ? [enriched.imageUrl]
-    : enriched.images ?? option.images;
+  const photoFields = selectBestParkingPhotoFields(enriched, option);
 
   return {
     ...option,
     ...enriched,
-    imageUrl: imageUrl || undefined,
-    images: images?.length ? images : undefined,
+    bookingProvider: option.bookingProvider ?? enriched.bookingProvider,
+    sourceName:
+      option.bookingProvider || option.sourceName === 'ParkWhiz'
+        ? option.sourceName ?? enriched.sourceName
+        : enriched.sourceName ?? option.sourceName,
+    sourceLink: option.sourceLink ?? enriched.sourceLink,
+    ...photoFields,
   };
 }
 

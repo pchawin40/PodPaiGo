@@ -1,10 +1,18 @@
 import { ParkingOption } from '../types';
 import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
+import { selectBestParkingPhotoFields } from './parkingLotPhotoShared';
 
 function normalize(text: string): string {
   return text
     .toLowerCase()
+    .replace(/self uncovered/g, '')
+    .replace(/self covered/g, '')
+    .replace(/self park/g, '')
+    .replace(/uncovered/g, '')
+    .replace(/covered/g, '')
     .replace(/airport parking/g, '')
+    .replace(/\bparking\b/g, '')
+    .replace(/\blot\b/g, '')
     .replace(/seatac/g, '')
     .replace(/sea tac/g, '')
     .replace(/sea/g, '')
@@ -63,6 +71,7 @@ export function enrichInventoryOptionsWithPrices(args: {
     const match = findBestPriceMatch(inventory, args.pricedOptions);
 
     if (!match) return withStableParkingRouteStatus(inventory);
+    const photoFields = selectBestParkingPhotoFields(inventory, match);
 
     return mergeParkingRouteStatus(inventory, {
       ...inventory,
@@ -82,6 +91,7 @@ export function enrichInventoryOptionsWithPrices(args: {
       availabilityStatus: match.availabilityStatus,
       isAvailable: match.isAvailable,
       availabilityScore: match.availabilityScore ?? inventory.availabilityScore,
+      ...photoFields,
 
       bestFor: [
         ...(inventory.bestFor ?? []),

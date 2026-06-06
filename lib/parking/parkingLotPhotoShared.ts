@@ -6,6 +6,7 @@ export type ParkingPhotoSource =
   | 'partner'
   | 'provider'
   | 'google_live'
+  | 'google_business'
   | 'placeholder';
 
 export type ParkingPhotoSelection = {
@@ -27,6 +28,15 @@ export type ParkingPhotoPriority =
   | 'background'
   | 'manual';
 
+export function parkingPhotoPriorityForMoreParkingRank(
+  rank: number,
+  collapsedParkingDisplayCount: number,
+): ParkingPhotoPriority {
+  if (rank <= 3) return 'top';
+  if (rank <= collapsedParkingDisplayCount) return 'background';
+  return 'visible';
+}
+
 export type ParkingLotPhotoLookup = {
   parkingLotId?: string | null;
   provider?: string | null;
@@ -43,9 +53,93 @@ export type ParkingLotPhotoLookup = {
   tripContext?: TripParkingContext;
 };
 
+export type ParkingPhotoFieldCarrier = {
+  imageUrl?: string | null;
+  images?: string[] | null;
+  photoSource?: ParkingPhotoSource | string | null;
+  photoAttribution?: string | null;
+  photoAttributionUrl?: string | null;
+  photoAttributions?: string[] | null;
+  requiresGoogleAttribution?: boolean | null;
+};
+
 export function isGooglePhotoProxyUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   return url.includes('/api/google-place-photo');
+}
+
+export function isPlaceholderParkingPhotoUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return String(url).includes('/assets/parking/');
+}
+
+function photoUrlsFromCarrier(candidate: ParkingPhotoFieldCarrier): string[] {
+  return Array.from(
+    new Set(
+      [candidate.imageUrl, ...(candidate.images || [])]
+        .filter((url): url is string => typeof url === 'string')
+        .map((url) => url.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function imageFieldsFromCandidate(
+  candidate: ParkingPhotoFieldCarrier,
+  imageUrl: string,
+  realOnly: boolean,
+) {
+  const urls = photoUrlsFromCarrier(candidate).filter((url) =>
+    realOnly ? !isPlaceholderParkingPhotoUrl(url) : isPlaceholderParkingPhotoUrl(url),
+  );
+  const images = Array.from(new Set([imageUrl, ...urls]));
+
+  return {
+    imageUrl,
+    images,
+    photoSource: candidate.photoSource as ParkingPhotoSource | undefined,
+    photoAttribution: candidate.photoAttribution ?? candidate.photoAttributions?.[0] ?? undefined,
+    photoAttributionUrl: candidate.photoAttributionUrl ?? undefined,
+    photoAttributions: candidate.photoAttributions?.length
+      ? candidate.photoAttributions
+      : candidate.photoAttribution
+        ? [candidate.photoAttribution]
+        : undefined,
+    requiresGoogleAttribution: candidate.requiresGoogleAttribution ?? undefined,
+  };
+}
+
+export function selectBestParkingPhotoFields(
+  ...candidates: ParkingPhotoFieldCarrier[]
+): {
+  imageUrl?: string;
+  images?: string[];
+  photoSource?: ParkingPhotoSource;
+  photoAttribution?: string;
+  photoAttributionUrl?: string;
+  photoAttributions?: string[];
+  requiresGoogleAttribution?: boolean;
+} {
+  for (const candidate of candidates) {
+    if (candidate.photoSource === 'placeholder') continue;
+
+    const imageUrl = photoUrlsFromCarrier(candidate).find(
+      (url) => !isPlaceholderParkingPhotoUrl(url),
+    );
+    if (imageUrl) return imageFieldsFromCandidate(candidate, imageUrl, true);
+  }
+
+  for (const candidate of candidates) {
+    const imageUrl = photoUrlsFromCarrier(candidate).find(isPlaceholderParkingPhotoUrl);
+    if (imageUrl) return imageFieldsFromCandidate(candidate, imageUrl, false);
+  }
+
+  return {};
+}
+
+export function hasRealParkingPhoto(candidate: ParkingPhotoFieldCarrier | null | undefined): boolean {
+  if (!candidate || candidate.photoSource === 'placeholder') return false;
+  return photoUrlsFromCarrier(candidate).some((url) => !isPlaceholderParkingPhotoUrl(url));
 }
 
 function fallbackKind(option: ParkingLotPhotoLookup, context: TripParkingContext): string {

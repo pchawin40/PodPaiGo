@@ -55,6 +55,11 @@ import { googleMapsSearchLink, googleMapsDirectionsLink } from '../../lib/maps';
 import ParkingLotsMap from './ParkingLotsMap';
 import AirportTerminalMap from './AirportTerminalMap';
 import ParkingLotVisual from './ParkingLotVisual';
+import {
+  parkingPhotoPriorityForMoreParkingRank,
+  selectBestParkingPhotoFields,
+  type ParkingPhotoPriority,
+} from '../../lib/parking/parkingLotPhotoShared';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import { resolveBagPlan } from '../../lib/airports/bagPlan';
 import type { AirportDayTransportMode } from '../../lib/airports/airportDayTimeline';
@@ -2111,6 +2116,7 @@ function OptionCard({
   googleEnrichedParking,
   accessToken,
   tripId,
+  parkingPhotoPriority = 'background',
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -2124,6 +2130,7 @@ function OptionCard({
   googleEnrichedParking?: Record<string, ParkingOption>;
   accessToken?: string | null;
   tripId?: string | null;
+  parkingPhotoPriority?: ParkingPhotoPriority;
 }) {
   const [bookingHelperOpen, setBookingHelperOpen] = useState(false);
   const opt =
@@ -2311,7 +2318,7 @@ function OptionCard({
             option={displayParkingOption}
             tripContext={parkingTripContext}
             airportCode={airportCode}
-            photoPriority={rank <= 3 ? 'top' : 'background'}
+            photoPriority={parkingPhotoPriority}
           />
         </div>
       )}
@@ -3889,10 +3896,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     enriched: ParkingOption
   ): ParkingOption {
     const merged = mergeParkingRouteStatus(base, enriched) as ParkingOption;
-    const imageUrl = enriched.imageUrl ?? enriched.images?.[0] ?? base.imageUrl;
-    const images = enriched.imageUrl
-      ? [enriched.imageUrl]
-      : enriched.images ?? base.images;
+    const photoFields = selectBestParkingPhotoFields(enriched, base);
 
     const canonicalLat = enriched.canonicalLat ?? enriched.lat ?? merged.canonicalLat ?? base.canonicalLat;
     const canonicalLng = enriched.canonicalLng ?? enriched.lng ?? merged.canonicalLng ?? base.canonicalLng;
@@ -3955,13 +3959,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       reviewScore: enriched.reviewScore ?? merged.reviewScore ?? base.reviewScore,
       reviewCount: enriched.reviewCount ?? merged.reviewCount ?? base.reviewCount,
       parkingRouteDebug: enriched.parkingRouteDebug ?? merged.parkingRouteDebug ?? base.parkingRouteDebug,
+      bookingProvider: base.bookingProvider ?? merged.bookingProvider ?? enriched.bookingProvider,
+      sourceName:
+        base.bookingProvider || base.sourceName === 'ParkWhiz'
+          ? base.sourceName ?? merged.sourceName ?? enriched.sourceName
+          : merged.sourceName ?? enriched.sourceName ?? base.sourceName,
+      sourceLink: base.sourceLink ?? merged.sourceLink ?? enriched.sourceLink,
       routesUsedCanonicalCoords: staleDriveMinutes
         ? undefined
         : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
       routeTargetLat: staleDriveMinutes ? undefined : routeTargetLat,
       routeTargetLng: staleDriveMinutes ? undefined : routeTargetLng,
-      imageUrl: imageUrl || undefined,
-      images: images?.length ? images : undefined,
+      ...photoFields,
     };
   }
 
@@ -6948,13 +6957,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
-                      {displayedParking.map((opt, idx) => (
+                      {displayedParking.map((opt, idx) => {
+                        const rank = idx + 1;
+                        const parkingPhotoPriority = parkingPhotoPriorityForMoreParkingRank(
+                          rank,
+                          COLLAPSED_PARKING_DISPLAY_COUNT,
+                        );
+
+                        return (
                         <OptionCard
                           aprLivePrices={aprLivePrices}
                           aprLiveChecking={aprLiveChecking}
                           key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
                           item={opt}
-                          rank={idx + 1}
+                          rank={rank}
                           tripData={tripData}
                           intent={intent}
                           sort={sort}
@@ -6962,8 +6978,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           googleEnrichedParking={googleEnrichedParking}
                           accessToken={accessToken}
                           tripId={searchParams.get('tripId')}
+                          parkingPhotoPriority={parkingPhotoPriority}
                         />
-                      ))}
+                      );
+                      })}
                     </div>
                   )}
                 </section>

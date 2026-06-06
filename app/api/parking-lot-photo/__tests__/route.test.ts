@@ -4,6 +4,7 @@ import { resolveParkingGooglePlace } from '../../../../lib/parking/googlePlacesC
 import { runWithPlacesRequestBudget } from '../../../../lib/apiUsage/placesRequestBudget';
 
 const mockQuery = jest.fn(async () => ({ rows: [] }));
+const originalFetch = global.fetch;
 
 jest.mock('../../../../lib/db/client', () => ({
   getDb: jest.fn(() => ({
@@ -52,12 +53,30 @@ function jiffyPlace(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function residencePlace(overrides: Record<string, unknown> = {}) {
+  return {
+    cacheKey: 'SEA|name:residence inn seatac',
+    airportCode: 'SEA',
+    lotName: 'Residence Inn SeaTac Lot - Self Uncovered',
+    normalizedLotName: 'residence inn seatac',
+    googlePlaceId: 'places/residence-parking',
+    googlePlaceName: 'Residence Inn SeaTac Lot',
+    source: 'google-places',
+    ...overrides,
+  };
+}
+
 describe('/api/parking-lot-photo', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockQuery.mockResolvedValue({ rows: [] });
     resetParkingLotPhotoRouteCacheForTests();
     enableGooglePhotos();
+    global.fetch = originalFetch;
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
   });
 
   test('Jiffy-style ParkWhiz lot name resolves to Google photo source', async () => {
@@ -196,7 +215,7 @@ describe('/api/parking-lot-photo', () => {
         providerLotId: 'parkwhiz-no-photo-a',
         provider: 'ParkWhiz',
         airportCode: 'SEA',
-        lotName: 'No Photo Airport Parking Lot SEA - Self Uncovered',
+        lotName: 'No Photo Parking',
         lotType: 'off-airport',
         tripContext: 'airport_trip',
         priority: 'smart-pick',
@@ -207,7 +226,7 @@ describe('/api/parking-lot-photo', () => {
         providerLotId: 'parkwhiz-no-photo-b',
         provider: 'ParkWhiz',
         airportCode: 'SEA',
-        lotName: 'No Photo Airport Parking Lot SEA - Self Uncovered',
+        lotName: 'No Photo Parking',
         lotType: 'off-airport',
         tripContext: 'airport_trip',
         priority: 'smart-pick',
@@ -216,11 +235,137 @@ describe('/api/parking-lot-photo', () => {
     const firstJson = await first.json();
     const secondJson = await second.json();
 
-    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(1);
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(2);
     expect(firstJson.source).toBe('placeholder');
-    expect(firstJson.fallbackReason).toBe('google_place_match_without_photo');
+    expect(firstJson.fallbackReason).toBe('hotel_business_no_photo');
     expect(secondJson.source).toBe('placeholder');
-    expect(secondJson.fallbackReason).toBe('google_place_match_without_photo');
+    expect(secondJson.fallbackReason).toBe('hotel_business_no_photo');
+  });
+
+  test('hotel lot with parking Google match no photo falls back to ParkWhiz provider photo', async () => {
+    (resolveParkingGooglePlace as jest.Mock).mockResolvedValueOnce(
+      residencePlace({ photoName: undefined, photoNames: undefined }),
+    );
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        id: '52086',
+        name: 'Residence Inn SeaTac Lot',
+        photos: [
+          {
+            position: 1,
+            sizes: {
+              gallery: {
+                URL: 'https://d2uqqhmijd5j2z.cloudfront.net/files/760385/gallery/Residence_Inn_Sea-Tac_1.png',
+              },
+            },
+          },
+        ],
+      }),
+    })) as jest.Mock;
+
+    const response = await GET(
+      request({
+        providerLotId: 'parkwhiz-52086-session-option',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Residence Inn SeaTac Lot - Self Uncovered',
+        lotAddress: '19608 International Blvd, SeaTac, WA 98188',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const json = await response.json();
+
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.parkwhiz.com/v4/locations/52086',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+    expect(json.source).toBe('provider');
+    expect(json.imageUrl).toContain('Residence_Inn_Sea-Tac_1.png');
+    expect(json.fallbackReason ?? null).toBeNull();
+  });
+
+  test('hotel lot with no provider image falls back to hotel business Google photo', async () => {
+    (resolveParkingGooglePlace as jest.Mock)
+      .mockResolvedValueOnce(residencePlace({ photoName: undefined, photoNames: undefined }))
+      .mockResolvedValueOnce(
+        residencePlace({
+          cacheKey: 'SEA|name:residence inn seatac|business',
+          lotName: 'Residence Inn SeaTac',
+          googlePlaceId: 'places/residence-business',
+          googlePlaceName: 'Residence Inn by Marriott Seattle Sea-Tac Airport',
+          photoName: 'places/residence-business/photos/primary',
+          photoNames: ['places/residence-business/photos/primary'],
+        }),
+      );
+
+    const response = await GET(
+      request({
+        providerLotId: 'parkwhiz-no-location-id',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Residence Inn SeaTac Lot - Self Uncovered',
+        lotAddress: '19608 International Blvd, SeaTac, WA 98188',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const json = await response.json();
+
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(2);
+    expect(resolveParkingGooglePlace).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        lotName: 'Residence Inn SeaTac',
+        lotAddress: '19608 International Blvd, SeaTac, WA 98188',
+      }),
+    );
+    expect(json.source).toBe('google_business');
+    expect(json.imageUrl).toContain('/api/google-place-photo?name=');
+    expect(json.imageUrl).toContain(encodeURIComponent('places/residence-business/photos/primary'));
+  });
+
+  test('secondary hotel business no-photo result is cached', async () => {
+    (resolveParkingGooglePlace as jest.Mock).mockResolvedValue(
+      residencePlace({ photoName: undefined, photoNames: undefined }),
+    );
+
+    const first = await GET(
+      request({
+        providerLotId: 'parkwhiz-no-location-a',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Residence Inn SeaTac Lot - Self Uncovered',
+        lotAddress: '19608 International Blvd, SeaTac, WA 98188',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const second = await GET(
+      request({
+        providerLotId: 'parkwhiz-no-location-b',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Residence Inn SeaTac Lot - Self Uncovered',
+        lotAddress: '19608 International Blvd, SeaTac, WA 98188',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(2);
+    expect(firstJson.source).toBe('placeholder');
+    expect(firstJson.fallbackReason).toBe('hotel_business_no_photo');
+    expect(secondJson.source).toBe('placeholder');
+    expect(secondJson.fallbackReason).toBe('hotel_business_no_photo');
   });
 
   test('low-priority request skips live Google lookup', async () => {
@@ -260,6 +405,63 @@ describe('/api/parking-lot-photo', () => {
 
     expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(1);
     expect(json.source).toBe('google_live');
+  });
+
+  test('visible priority allows live Google lookup', async () => {
+    (resolveParkingGooglePlace as jest.Mock).mockResolvedValueOnce(jiffyPlace());
+
+    const response = await GET(
+      request({
+        providerLotId: 'parkwhiz-visible',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Jiffy Airport Parking Lot SEA - Self Uncovered',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const json = await response.json();
+
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(1);
+    expect(json.source).toBe('google_live');
+  });
+
+  test('negative visible no-photo result is cached and prevents repeated Google calls', async () => {
+    (resolveParkingGooglePlace as jest.Mock).mockResolvedValue(
+      jiffyPlace({ photoName: undefined, photoNames: undefined }),
+    );
+
+    const first = await GET(
+      request({
+        providerLotId: 'parkwhiz-visible-no-photo-a',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Visible No Photo Parking',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const second = await GET(
+      request({
+        providerLotId: 'parkwhiz-visible-no-photo-b',
+        provider: 'ParkWhiz',
+        airportCode: 'SEA',
+        lotName: 'Visible No Photo Parking',
+        lotType: 'off-airport',
+        tripContext: 'airport_trip',
+        priority: 'visible',
+      }),
+    );
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+
+    expect(resolveParkingGooglePlace).toHaveBeenCalledTimes(2);
+    expect(firstJson.source).toBe('placeholder');
+    expect(firstJson.fallbackReason).toBe('hotel_business_no_photo');
+    expect(secondJson.source).toBe('placeholder');
+    expect(secondJson.fallbackReason).toBe('hotel_business_no_photo');
   });
 
   test('provider image wins without Google call', async () => {

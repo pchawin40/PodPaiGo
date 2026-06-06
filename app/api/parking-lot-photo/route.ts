@@ -10,6 +10,7 @@ import {
 } from '../../../lib/parking/googlePlacesCache';
 import {
   buildParkingGoogleCacheKey,
+  deriveBusinessPhotoSearchName,
   normalizeParkingLotName,
   shouldAttemptGooglePlaceMatch,
 } from '../../../lib/parking/googlePlaceMatchUtils';
@@ -31,6 +32,10 @@ import type {
 import type { TripParkingContext } from '../../../lib/trip/tripContext';
 import { TimeoutError, withTimeout } from '../../../lib/utils/asyncTimeout';
 import { debugLog } from '../../../lib/utils/debug';
+import {
+  parkWhizLocationIdFromProviderLotId,
+  parkWhizPhotoUrlFromLocation,
+} from '../../../lib/providers/parkWhiz';
 
 const PHOTO_GOOGLE_MATCH_TIMEOUT_MS = Number(
   process.env.PARKING_LOT_PHOTO_GOOGLE_MATCH_TIMEOUT_MS || 5000,
@@ -44,6 +49,9 @@ const PHOTO_NEGATIVE_CACHE_TTL_MS = Number(
 const PHOTO_LIVE_LOOKUP_DAILY_LIMIT = Number(
   process.env.PARKING_LOT_PHOTO_LIVE_LOOKUP_DAILY_LIMIT || 10,
 );
+const PARKWHIZ_LOCATION_PHOTO_TIMEOUT_MS = Number(
+  process.env.PARKWHIZ_LOCATION_PHOTO_TIMEOUT_MS || 2500,
+);
 
 type PhotoCacheEntry = {
   selection: ParkingPhotoSelection;
@@ -53,6 +61,8 @@ type PhotoCacheEntry = {
 
 const photoSelectionCache = new Map<string, PhotoCacheEntry>();
 const photoLookupInFlight = new Map<string, Promise<ParkingPhotoSelection>>();
+const parkWhizProviderPhotoCache = new Map<string, PhotoCacheEntry>();
+const parkWhizProviderPhotoInFlight = new Map<string, Promise<ParkingPhotoSelection | null>>();
 let photoLiveLookupDayKey = '';
 let photoLiveLookupDailyCount = 0;
 
@@ -99,7 +109,12 @@ function normalizePriority(value: string | null): ParkingPhotoPriority {
 }
 
 function isLiveLookupPriority(priority: ParkingPhotoPriority): boolean {
-  return priority === 'smart-pick' || priority === 'top' || priority === 'manual';
+  return (
+    priority === 'smart-pick' ||
+    priority === 'top' ||
+    priority === 'visible' ||
+    priority === 'manual'
+  );
 }
 
 function liveGoogleQuotaGuardAllows(args: {
@@ -135,21 +150,29 @@ function canConsumePhotoLiveLookupQuota(): boolean {
   return true;
 }
 
-function getCachedSelection(stableKey: string | null): PhotoCacheEntry | null {
+function getCachedSelectionFromMap(
+  cache: Map<string, PhotoCacheEntry>,
+  stableKey: string | null,
+): PhotoCacheEntry | null {
   if (!stableKey) return null;
 
-  const cached = photoSelectionCache.get(stableKey);
+  const cached = cache.get(stableKey);
   if (!cached) return null;
 
   if (cached.expiresAt <= Date.now()) {
-    photoSelectionCache.delete(stableKey);
+    cache.delete(stableKey);
     return null;
   }
 
   return cached;
 }
 
-function cacheSelection(
+function getCachedSelection(stableKey: string | null): PhotoCacheEntry | null {
+  return getCachedSelectionFromMap(photoSelectionCache, stableKey);
+}
+
+function cacheSelectionInMap(
+  cache: Map<string, PhotoCacheEntry>,
   stableKey: string | null,
   selection: ParkingPhotoSelection,
   options?: { negative?: boolean },
@@ -160,11 +183,19 @@ function cacheSelection(
   const ttl = negative ? PHOTO_NEGATIVE_CACHE_TTL_MS : PHOTO_POSITIVE_CACHE_TTL_MS;
   if (!Number.isFinite(ttl) || ttl <= 0) return;
 
-  photoSelectionCache.set(stableKey, {
+  cache.set(stableKey, {
     selection,
     negative,
     expiresAt: Date.now() + ttl,
   });
+}
+
+function cacheSelection(
+  stableKey: string | null,
+  selection: ParkingPhotoSelection,
+  options?: { negative?: boolean },
+): void {
+  cacheSelectionInMap(photoSelectionCache, stableKey, selection, options);
 }
 
 function logParkingPhotoEvent(
@@ -185,8 +216,167 @@ function logParkingPhotoEvent(
 export function resetParkingLotPhotoRouteCacheForTests(): void {
   photoSelectionCache.clear();
   photoLookupInFlight.clear();
+  parkWhizProviderPhotoCache.clear();
+  parkWhizProviderPhotoInFlight.clear();
   photoLiveLookupDayKey = '';
   photoLiveLookupDailyCount = 0;
+}
+
+function providerIsParkWhiz(provider: string | null): boolean {
+  return String(provider || '').toLowerCase().includes('parkwhiz');
+}
+
+function providerImageSelection(imageUrl: string, attributionUrl?: string | null): ParkingPhotoSelection {
+  return {
+    imageUrl,
+    source: 'provider',
+    attribution: 'ParkWhiz',
+    attributionUrl: attributionUrl || 'https://www.parkwhiz.com',
+    requiresGoogleAttribution: false,
+  };
+}
+
+function routeCleanText(value?: string | null): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasHotelBusinessSignal(value?: string | null): boolean {
+  const text = routeCleanText(value);
+  return /\b(hotel|inn|motel|marriott|hilton|hyatt|doubletree|quality|comfort|courtyard|residence|hampton|holiday|la quinta|radisson|ramada|days inn|best western|embassy|homewood|red roof)\b/.test(text);
+}
+
+function shouldTryBusinessPhotoMatch(args: {
+  lotName: string | null;
+  lotAddress: string | null;
+  lotType: string | null;
+  businessName: string | null;
+}): boolean {
+  if (!args.lotName || !args.businessName) return false;
+  if (routeCleanText(args.businessName) === routeCleanText(args.lotName)) return false;
+
+  return (
+    routeCleanText(args.lotType).includes('off airport') ||
+    routeCleanText(args.lotType).includes('offairport') ||
+    args.lotType === 'off-airport' ||
+    hasHotelBusinessSignal(args.lotName) ||
+    hasHotelBusinessSignal(args.businessName) ||
+    hasHotelBusinessSignal(args.lotAddress)
+  );
+}
+
+function googlePhotoSelectionFromPlace(
+  place: ParkingGooglePlaceCacheRecord | null,
+  source: 'google_live' | 'google_business',
+): ParkingPhotoSelection | null {
+  const resolvedPhotoName = place?.photoName || place?.photoNames?.[0] || null;
+  if (!resolvedPhotoName) return null;
+
+  const selection = buildGoogleLiveParkingPhoto(resolvedPhotoName, source);
+  if (!selection?.imageUrl) return null;
+
+  return {
+    ...selection,
+    fallbackReason: null,
+  };
+}
+
+async function resolveParkWhizProviderPhoto(args: {
+  provider: string | null;
+  providerLotId: string | null;
+}): Promise<ParkingPhotoSelection | null> {
+  if (!providerIsParkWhiz(args.provider)) return null;
+
+  const locationId = parkWhizLocationIdFromProviderLotId(args.providerLotId);
+  if (!locationId) return null;
+
+  const cacheKey = `parkwhiz-location:${locationId}`;
+  const cached = getCachedSelectionFromMap(parkWhizProviderPhotoCache, cacheKey);
+  if (cached) return cached.selection.source === 'placeholder' ? null : cached.selection;
+
+  const inFlight = parkWhizProviderPhotoInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const lookup = (async () => {
+    try {
+      const response = await withTimeout(
+        fetch(`https://api.parkwhiz.com/v4/locations/${encodeURIComponent(locationId)}`, {
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        }),
+        PARKWHIZ_LOCATION_PHOTO_TIMEOUT_MS,
+        'ParkWhiz location photo lookup',
+      );
+
+      if (!response.ok) {
+        cacheSelectionInMap(
+          parkWhizProviderPhotoCache,
+          cacheKey,
+          {
+            imageUrl: null,
+            source: 'placeholder',
+            attribution: null,
+            attributionUrl: null,
+            requiresGoogleAttribution: false,
+            fallbackReason: 'provider_image_missing',
+          },
+          { negative: true },
+        );
+        return null;
+      }
+
+      const location = (await response.json()) as Parameters<typeof parkWhizPhotoUrlFromLocation>[0];
+      const imageUrl = parkWhizPhotoUrlFromLocation(location);
+      if (!imageUrl) {
+        cacheSelectionInMap(
+          parkWhizProviderPhotoCache,
+          cacheKey,
+          {
+            imageUrl: null,
+            source: 'placeholder',
+            attribution: null,
+            attributionUrl: null,
+            requiresGoogleAttribution: false,
+            fallbackReason: 'provider_image_missing',
+          },
+          { negative: true },
+        );
+        return null;
+      }
+
+      const selection = providerImageSelection(imageUrl, 'https://www.parkwhiz.com');
+      cacheSelectionInMap(parkWhizProviderPhotoCache, cacheKey, selection, { negative: false });
+      return selection;
+    } catch {
+      cacheSelectionInMap(
+        parkWhizProviderPhotoCache,
+        cacheKey,
+        {
+          imageUrl: null,
+          source: 'placeholder',
+          attribution: null,
+          attributionUrl: null,
+          requiresGoogleAttribution: false,
+          fallbackReason: 'provider_image_missing',
+        },
+        { negative: true },
+      );
+      return null;
+    }
+  })();
+
+  parkWhizProviderPhotoInFlight.set(cacheKey, lookup);
+
+  try {
+    return await lookup;
+  } finally {
+    if (parkWhizProviderPhotoInFlight.get(cacheKey) === lookup) {
+      parkWhizProviderPhotoInFlight.delete(cacheKey);
+    }
+  }
 }
 
 function shouldTryGooglePhotoMatch(args: {
@@ -489,24 +679,118 @@ export async function GET(req: NextRequest) {
         place = resolved.place;
         fallbackReason = resolved.fallbackReason || fallbackReason;
 
-        const resolvedPhotoName = place?.photoName || place?.photoNames?.[0] || null;
-        if (resolvedPhotoName) {
-          const googleSelection = buildGoogleLiveParkingPhoto(resolvedPhotoName);
-          if (googleSelection?.imageUrl) {
-            const response = {
-              ...googleSelection,
-              fallbackReason: null,
-            };
-            cacheSelection(googleMatchCacheKey, response, { negative: false });
+        const parkingGoogleSelection = googlePhotoSelectionFromPlace(place, 'google_live');
+        if (parkingGoogleSelection?.imageUrl) {
+          cacheSelection(googleMatchCacheKey, parkingGoogleSelection, { negative: false });
+          logParkingPhotoEvent('parking_photo_live_lookup_success', {
+            stableKey: googleMatchCacheKey,
+            lotName,
+            priority,
+            source: parkingGoogleSelection.source,
+            fallbackReason: null,
+            matchedGooglePlaceId: place?.googlePlaceId || null,
+            googlePhotoNamesCount: googlePhotoNameCount(place),
+            liveGoogleCalled: true,
+            matchType: 'parking_place',
+          });
+          logParkingLotPhotoLookup({
+            rawLotName: lotName,
+            normalizedLotName,
+            provider,
+            providerLotId,
+            airportCode,
+            cacheKey: googleMatchCacheKey,
+            triedProviderImage,
+            triedCachedGoogleMatch: true,
+            triedLiveGoogleMatch: true,
+            matchedGooglePlaceId: place?.googlePlaceId || null,
+            googlePhotoNamesCount: googlePhotoNameCount(place),
+            finalSource: parkingGoogleSelection.source,
+            fallbackReason: null,
+            elapsedMs: Date.now() - startedAt,
+          });
+          return parkingGoogleSelection;
+        }
+
+        fallbackReason = place ? 'parking_place_no_photo' : fallbackReason;
+
+        const providerSelection = await resolveParkWhizProviderPhoto({
+          provider,
+          providerLotId,
+        });
+        if (providerSelection?.imageUrl) {
+          cacheSelection(googleMatchCacheKey, providerSelection, { negative: false });
+          logParkingPhotoEvent('parking_photo_live_lookup_success', {
+            stableKey: googleMatchCacheKey,
+            lotName,
+            priority,
+            source: providerSelection.source,
+            fallbackReason: null,
+            matchedGooglePlaceId: place?.googlePlaceId || null,
+            googlePhotoNamesCount: googlePhotoNameCount(place),
+            liveGoogleCalled: true,
+            matchType: 'provider_location_photo',
+          });
+          logParkingLotPhotoLookup({
+            rawLotName: lotName,
+            normalizedLotName,
+            provider,
+            providerLotId,
+            airportCode,
+            cacheKey: googleMatchCacheKey,
+            triedProviderImage: true,
+            triedCachedGoogleMatch: true,
+            triedLiveGoogleMatch: true,
+            matchedGooglePlaceId: place?.googlePlaceId || null,
+            googlePhotoNamesCount: googlePhotoNameCount(place),
+            finalSource: providerSelection.source,
+            fallbackReason: null,
+            elapsedMs: Date.now() - startedAt,
+          });
+          return providerSelection;
+        }
+
+        const businessName = lotName ? deriveBusinessPhotoSearchName(lotName) : '';
+        const shouldTryBusiness = shouldTryBusinessPhotoMatch({
+          lotName,
+          lotAddress,
+          lotType,
+          businessName,
+        });
+
+        if (shouldTryBusiness && businessName && canConsumePhotoLiveLookupQuota()) {
+          const businessCacheKey = buildParkingGoogleCacheKey({
+            airportCode,
+            parkingLotId: null,
+            lotName: businessName,
+            lotAddress,
+          });
+          const businessResolved = await resolveGooglePhotoMatch({
+            parkingLotId: null,
+            googlePlaceId: null,
+            provider,
+            lotName: businessName,
+            lotAddress,
+            airportCode,
+            airportContext: airportParkingContext(airportCode, params.get('airportContext')),
+            cacheKey: businessCacheKey,
+          });
+          const businessPlace = businessResolved.place;
+          const businessSelection = googlePhotoSelectionFromPlace(businessPlace, 'google_business');
+
+          if (businessSelection?.imageUrl) {
+            cacheSelection(googleMatchCacheKey, businessSelection, { negative: false });
             logParkingPhotoEvent('parking_photo_live_lookup_success', {
               stableKey: googleMatchCacheKey,
               lotName,
               priority,
-              source: response.source,
+              source: businessSelection.source,
               fallbackReason: null,
-              matchedGooglePlaceId: place?.googlePlaceId || null,
-              googlePhotoNamesCount: googlePhotoNameCount(place),
+              matchedGooglePlaceId: businessPlace?.googlePlaceId || null,
+              googlePhotoNamesCount: googlePhotoNameCount(businessPlace),
               liveGoogleCalled: true,
+              businessName,
+              matchType: 'hotel_business_place',
             });
             logParkingLotPhotoLookup({
               rawLotName: lotName,
@@ -515,23 +799,29 @@ export async function GET(req: NextRequest) {
               providerLotId,
               airportCode,
               cacheKey: googleMatchCacheKey,
-              triedProviderImage,
+              triedProviderImage: true,
               triedCachedGoogleMatch: true,
               triedLiveGoogleMatch: true,
-              matchedGooglePlaceId: place?.googlePlaceId || null,
-              googlePhotoNamesCount: googlePhotoNameCount(place),
-              finalSource: response.source,
+              triedBusinessGoogleMatch: true,
+              businessName,
+              matchedGooglePlaceId: businessPlace?.googlePlaceId || null,
+              googlePhotoNamesCount: googlePhotoNameCount(businessPlace),
+              finalSource: businessSelection.source,
               fallbackReason: null,
               elapsedMs: Date.now() - startedAt,
             });
-            return response;
+            return businessSelection;
           }
 
-          fallbackReason = isGooglePlacePhotosLiveBlocked()
-            ? 'google_photo_proxy_blocked'
-            : 'google_photo_proxy_url_unavailable';
-        } else if (place) {
-          fallbackReason = 'google_place_match_without_photo';
+          fallbackReason = businessPlace
+            ? 'hotel_business_no_photo'
+            : businessResolved.fallbackReason || 'hotel_business_match_unavailable';
+        } else if (shouldTryBusiness && businessName) {
+          fallbackReason = 'photo_lookup_skipped_quota_guard';
+        } else if (fallbackReason === 'parking_place_no_photo') {
+          fallbackReason = providerIsParkWhiz(provider)
+            ? 'provider_image_missing'
+            : 'parking_place_no_photo';
         }
 
         const response = {

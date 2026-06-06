@@ -1,6 +1,7 @@
 import { resolvePricingConfidence } from '../lib/access/pricingLadder';
 import { parkingDbCacheDisabledByConfig } from '../lib/db/client';
 import { mergeLiveCityParkWhizPricing, resolveCityParkingPricing } from '../lib/parking/cityParkingPricing';
+import { enrichInventoryOptionsWithPrices } from '../lib/parking/priceMatcher';
 import { findMatchingParkWhizOption } from '../lib/parking/parkWhizMatch';
 import {
   estimateDriveMinutesFromStraightLineMiles,
@@ -201,6 +202,82 @@ describe('ParkWhiz live pricing', () => {
     expect(deduped[0].reviewScore).toBe(4.6);
     expect(deduped[0].reviewCount).toBe(1248);
     expect(deduped[0].googleReviews?.[0]?.text).toMatch(/Fast shuttle/);
+  });
+
+  test('ParkWhiz provider image survives merge with Google Places no-photo candidate', () => {
+    const qualityInnProviderPhoto =
+      'https://d2uqqhmijd5j2z.cloudfront.net/files/quality/gallery/Quality_Inn_SEA.png';
+    const deduped = dedupeParkingOptions([
+      {
+        ...liveParkWhiz,
+        id: 'parkwhiz-quality-inn',
+        name: 'Quality Inn SEA Airport Parking - Self Uncovered',
+        address: '2900 S 192nd St, SeaTac, WA 98188',
+        imageUrl: qualityInnProviderPhoto,
+        images: [qualityInnProviderPhoto],
+        photoSource: 'provider',
+        photoAttribution: 'ParkWhiz',
+      },
+      {
+        ...CITY_GARAGE,
+        id: 'google-quality-inn',
+        name: 'Quality Inn SEA Airport Parking - Self Uncovered',
+        address: '2900 S 192nd St, SeaTac, WA 98188',
+        sourceName: 'Google Places',
+        bookingProvider: 'google-places',
+        googlePlaceId: 'places/quality-inn',
+        imageUrl: '/assets/parking/hotel-parking.svg',
+        images: ['/assets/parking/hotel-parking.svg'],
+        photoSource: 'placeholder',
+        reviewScore: 3.8,
+        reviewCount: 430,
+      },
+    ]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].id).toBe('parkwhiz-quality-inn');
+    expect(deduped[0].bookingProvider).toBe('ParkWhiz');
+    expect(deduped[0].sourceName).toBe('ParkWhiz');
+    expect(deduped[0].sourceLink).toBe('https://www.parkwhiz.com/p/checkout');
+    expect(deduped[0].imageUrl).toBe(qualityInnProviderPhoto);
+    expect(deduped[0].photoSource).toBe('provider');
+    expect(deduped[0].googlePlaceId).toBe('places/quality-inn');
+    expect(deduped[0].reviewCount).toBe(430);
+  });
+
+  test('price match keeps ParkWhiz provider identity and image on Google Places lot', () => {
+    const qualityInnProviderPhoto =
+      'https://d2uqqhmijd5j2z.cloudfront.net/files/quality/gallery/Quality_Inn_SEA.png';
+    const [merged] = enrichInventoryOptionsWithPrices({
+      inventoryOptions: [
+        {
+          ...CITY_GARAGE,
+          id: 'google-quality-inn',
+          name: 'Quality Inn SEA Airport Parking',
+          sourceName: 'Google Places',
+          bookingProvider: 'google-places',
+          imageUrl: '/assets/parking/hotel-parking.svg',
+          images: ['/assets/parking/hotel-parking.svg'],
+          photoSource: 'placeholder',
+        },
+      ],
+      pricedOptions: [
+        {
+          ...liveParkWhiz,
+          id: 'parkwhiz-quality-inn',
+          name: 'Quality Inn SEA Airport Parking - Self Uncovered',
+          imageUrl: qualityInnProviderPhoto,
+          images: [qualityInnProviderPhoto],
+          photoSource: 'provider',
+        },
+      ],
+    });
+
+    expect(merged.bookingProvider).toBe('ParkWhiz');
+    expect(merged.sourceName).toBe('ParkWhiz');
+    expect(merged.priceDisplay).toBe('live');
+    expect(merged.imageUrl).toBe(qualityInnProviderPhoto);
+    expect(merged.photoSource).toBe('provider');
   });
 
   test('ParkWhiz matcher links LAZ/Pike Place google place to live quote', () => {
