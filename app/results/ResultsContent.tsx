@@ -2098,6 +2098,10 @@ function OptionCard({
     item.type === 'parking' && normalizedParkingOption
       ? resolveParkingPriceTrust(normalizedParkingOption, tripData)
       : null;
+  const activeParkingRate =
+    item.type === 'parking'
+      ? ((displayParkingOption || opt) as ParkingOption).activeRate
+      : null;
 
   const parkingDailyText =
     item.type === 'parking' && parkingPrice?.secondary
@@ -2395,6 +2399,22 @@ function OptionCard({
             </div>
           ) : null}
 
+          {item.type === 'parking' && activeParkingRate ? (
+            <div className="mt-3 rounded-xl border border-border bg-muted/40 p-3 text-sm text-foreground">
+              <div className="font-semibold">{activeParkingRate.label}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {activeParkingRate.sourceName || 'Parking source'} · {activeParkingRate.confidence} confidence
+              </div>
+              {activeParkingRate.warnings.length > 0 ? (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                  {activeParkingRate.warnings.slice(0, 3).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
           {item.type === 'parking' && !compact ? (
             <ParkingBookingHelperPanel
               option={(displayParkingOption || (opt as ParkingOption)) as ParkingOption}
@@ -2604,12 +2624,10 @@ function OptionCard({
           {item.type === 'parking' ? (
             <ParkingProviderActions
               compact={compact}
-              bookingUrl={routeUnavailable ? null : parkingProviderUrl}
-              providerUrl={routeUnavailable ? null : parkingProviderUrl}
+              bookingUrl={parkingProviderUrl}
+              providerUrl={parkingProviderUrl}
               directionsUrl={
-                routeUnavailable
-                  ? null
-                  : parkingLotRouteLink || opt.mapLink || null
+                parkingLotRouteLink || opt.mapLink || null
               }
               searchQuery={opt.searchQuery || safeParkingSearchQuery}
               provider={opt.bookingProvider || opt.sourceName || opt.name}
@@ -2742,7 +2760,9 @@ function OptionCard({
                   <div>
                     <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      From your origin to being inside the airport terminal.
+                      {parkingTripContext === 'city_destination_trip'
+                        ? 'From your origin to destination arrival.'
+                        : 'From your origin to being inside the airport terminal.'}
                     </div>
                   </div>
 
@@ -2767,7 +2787,9 @@ function OptionCard({
 
                 <div className="mt-3 border-t border-zinc-100 pt-3">
                   <div className="flex items-center justify-between text-sm">
-                    <div className="font-semibold text-zinc-900">Total to terminal</div>
+                    <div className="font-semibold text-zinc-900">
+                      {parkingTripContext === 'city_destination_trip' ? 'Total to destination' : 'Total to terminal'}
+                    </div>
                     <div className="font-semibold text-zinc-900">
                       {formatMinutes(parkingBreakdown.totalMinutes)}
                     </div>
@@ -2853,12 +2875,16 @@ function isOfficialLikeParking(option: ParkingOption): boolean {
 
 function canonicalizeParkingOptions(options: ParkingOption[]): ParkingOption[] {
   const seenBrands = new Set<string>();
-  let officialSeen = false;
+  const seenOfficialProducts = new Set<string>();
 
   return options.filter((option) => {
     if (isOfficialLikeParking(option)) {
-      if (officialSeen) return false;
-      officialSeen = true;
+      const officialKey =
+        String(option.id || '').toLowerCase() ||
+        normalizeParkingNameForDedupe(option.name || '') ||
+        parkingKeySafe(option as AppOption);
+      if (officialKey && seenOfficialProducts.has(officialKey)) return false;
+      if (officialKey) seenOfficialProducts.add(officialKey);
       return true;
     }
 
@@ -4241,7 +4267,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             rec.parking,
             rec.rideshare,
             rec.transit,
-            rec.tsaEstimate
+            rec.tsaEstimate,
+            {
+              weatherImpact: rec.weatherImpact,
+              familyFriendly:
+                searchParams.get('familyLuggageFriendly') === '1' ||
+                searchParams.get('bagPlan') === 'checked' ||
+                searchParams.get('bags') === 'yes',
+              preference: ((): RecommendationSortMode => {
+                const raw = searchParams.get('quickGoPreference') || searchParams.get('sort') || 'easiest';
+                return raw === 'cheapest' || raw === 'fastest' ? raw : 'easiest';
+              })(),
+            },
           );
           setRankedOptions(ranked);
           logRecommendationsFetch('success', requestKey, {
@@ -5572,31 +5609,31 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
-            <div className="text-xs font-medium text-zinc-500">Origin</div>
-            <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{tripData.origin}</div>
+          <div className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
+            <div className="text-xs font-medium text-muted-foreground">Origin</div>
+            <div className="mt-1 truncate text-sm font-semibold text-foreground">{tripData.origin}</div>
           </div>
 
-          <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
-            <div className="text-xs font-medium text-zinc-500">Destination</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-900">
+          <div className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
+            <div className="text-xs font-medium text-muted-foreground">Destination</div>
+            <div className="mt-1 text-sm font-semibold text-foreground">
               {displayDestination}
             </div>
           </div>
 
           {!airportRouteUnavailable && (
-            <div className="rounded-2xl border border-sky-100 bg-white/75 p-4 shadow-sm">
-              <div className="text-xs font-medium text-zinc-500">
+            <div className="rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
+              <div className="text-xs font-medium text-muted-foreground">
                 Traffic estimate
               </div>
 
-              <div className="mt-1 text-sm font-semibold text-zinc-900">
+              <div className="mt-1 text-sm font-semibold text-foreground">
                 {recommendation.trafficEstimate
                   ? formatMinutes(recommendation.trafficEstimate.duration)
                   : '—'}
               </div>
 
-              <div className="mt-1 text-xs text-zinc-600">
+              <div className="mt-1 text-xs text-muted-foreground">
                 {recommendation.trafficEstimate?.trustStatus === 'fallback'
                   ? 'Using cached estimate. Open directions to confirm.'
                   : recommendation.trafficEstimate?.trustStatus === 'estimated'
@@ -5633,8 +5670,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const bestParking = smartPickOption || parkingDisplayOptions[0] || null;
 
+            const tripParkingContext = resolveTripParkingContext(tripData);
+
             const parkingBreakdown = bestParking
-              ? parkingTimeBreakdown(bestParking)
+              ? parkingTimeBreakdown(
+                  bestParking,
+                  buildParkingDriveContextFromOption(bestParking),
+                  tripParkingContext,
+                )
               : null;
 
             const parkingTotal =
@@ -5679,6 +5722,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               bestTransitOption && tripData
                 ? formatTransitCostDisplay(bestTransitOption, tripData)
                 : null;
+            const bestParkRideAccess =
+              recommendation.accessStrategies?.options?.find(
+                (option) => option.strategyType === 'park_and_ride_transit',
+              ) || null;
+            const parkRideCost = bestParkRideAccess
+              ? (bestParkRideAccess.pricing.total.min + bestParkRideAccess.pricing.total.max) / 2
+              : null;
+            const parkRideDuration = bestParkRideAccess?.timing.terminalReadyMinutes ?? null;
+            const parkRideReliable =
+              Boolean(bestParkRideAccess) &&
+              bestParkRideAccess?.recommendedForTrip !== false &&
+              !isOvernightTrip;
 
             const cheapestMode = (() => {
               const candidates = [
@@ -5690,6 +5745,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   : null,
                 transitCost !== null && hasReliableTransit
                   ? { key: 'transit', label: 'Transit', cost: transitCost }
+                  : null,
+                parkRideCost !== null && parkRideReliable
+                  ? { key: 'park-ride', label: 'Park & Ride', cost: parkRideCost }
                   : null,
               ].filter(Boolean) as Array<{ key: string; label: string; cost: number }>;
 
@@ -5706,6 +5764,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   : null,
                 transitDuration !== null && hasReliableTransit
                   ? { key: 'transit', label: 'Transit', minutes: transitDuration }
+                  : null,
+                parkRideDuration !== null && parkRideReliable
+                  ? { key: 'park-ride', label: 'Park & Ride', minutes: parkRideDuration }
                   : null,
               ].filter(Boolean) as Array<{ key: string; label: string; minutes: number }>;
 
@@ -5743,6 +5804,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   baseScore: -12,
                 }
                 : null,
+              bestParkRideAccess
+                ? {
+                  key: 'park-ride',
+                  label: 'Park & Ride',
+                  cost: parkRideCost ?? 999999,
+                  minutes: parkRideDuration ?? 999999,
+                  reliable: parkRideReliable,
+                  baseScore: bestParkRideAccess.recommendedForTrip === false ? -60 : -8,
+                }
+                : null,
             ].filter(Boolean) as Array<{
               key: string;
               label: string;
@@ -5771,11 +5842,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 if (mode.key === 'rideshare') score += 12;
                 if (mode.key === 'parking') score += isOvernightTrip ? 14 : 4;
                 if (mode.key === 'transit') score -= isOvernightTrip ? 20 : 8;
+                if (mode.key === 'park-ride') score -= isOvernightTrip ? 80 : 4;
               }
 
               // Overnight airport trip safety:
               // Park & Ride is avoided, but normal airport/off-airport parking is still allowed.
               if (isOvernightTrip && mode.key === 'parking') score += 8;
+              if (isOvernightTrip && mode.key === 'park-ride') score -= 120;
 
               if (noParkingPreferred) {
                 if (mode.key === 'rideshare') score += 180;
@@ -5812,7 +5885,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const recommendedReason =
               recommendationMode === 'parking'
-                ? isOvernightTrip
+                ? isCityTrip
+                  ? 'Best fit if you want to drive and use parking near your destination.'
+                  : isOvernightTrip
                   ? 'Best fit for this overnight airport trip because Park & Ride is not treated as airport parking.'
                   : 'Best fit if you want control, luggage space, and a predictable airport arrival.'
                 : recommendationMode === 'rideshare'
@@ -5826,13 +5901,37 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             const modeRows = [
               {
                 key: 'parking',
-                icon: '🅿️',
-                label: 'Parking',
+                label: isCityTrip
+                  ? 'Destination parking'
+                  : bestParking?.type === 'official'
+                    ? 'Airport parking'
+                    : 'Off-site parking',
                 name: bestParking?.name || 'No parking option found',
                 cost: parkingTotal !== null ? `$${Math.round(parkingTotal)}` : 'Estimated range',
                 time: parkingBreakdown?.totalMinutes
                   ? formatMinutes(parkingBreakdown.totalMinutes)
                   : 'Check route',
+                confidence: bestParking ? (bestParking.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
+                pros: bestParking
+                  ? [
+                    isCityTrip
+                      ? 'Parking near destination'
+                      : bestParking.type === 'official'
+                        ? 'Closest terminal access'
+                        : 'Often cheaper than airport garage',
+                    bestParking.covered ? 'Covered garage/lot' : 'You keep your car with you',
+                  ]
+                  : ['No parking result available'],
+                cons: bestParking
+                  ? [
+                    bestParking.transferType === 'shuttle'
+                      ? 'Requires shuttle transfer'
+                      : isCityTrip
+                        ? 'May cost more than transit or rideshare'
+                        : 'Can cost more than transit',
+                    isParkingRouteUnavailable(bestParking) ? 'Route timing unavailable' : '',
+                  ].filter(Boolean)
+                  : ['Open map or provider to verify'],
                 verdict: bestParking
                   ? noParkingPreferred
                     ? 'Hidden by preference'
@@ -5843,11 +5942,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               },
               {
                 key: 'rideshare',
-                icon: '🚗',
                 label: 'Rideshare',
                 name: bestRideOption?.name || 'Uber / Lyft',
                 cost: ridePrice !== null ? `$${Math.round(ridePrice)}` : 'Check app',
                 time: rideDuration !== null ? formatMinutes(rideDuration) : 'Check app',
+                confidence: bestRide ? (bestRideOption?.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
+                pros: ['No parking required', 'Lowest walking burden'],
+                cons: [
+                  'Surge pricing can change',
+                  tripData.type === 'round-trip' ? 'Two paid rides for round trip' : '',
+                ].filter(Boolean),
                 verdict: bestRide
                   ? recommendationMode === 'rideshare'
                     ? 'Best pick'
@@ -5856,13 +5960,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               },
               {
                 key: 'transit',
-                icon: '🚆',
                 label: 'Transit',
                 name: bestTransitOption?.name || 'Google Maps / Sound Transit',
                 cost: transitCostDisplay && hasReliableTransit
                   ? transitCostDisplay.primary
                   : 'Check route',
                 time: transitDuration !== null && hasReliableTransit ? formatMinutes(transitDuration) : 'Check route',
+                confidence: hasReliableTransit ? 'Medium' : 'Low',
+                pros: ['Usually low cost', 'Avoids parking search'],
+                cons: [
+                  'More walking and waiting',
+                  recommendation.weatherImpact?.riskLevel !== 'low' ? 'Weather exposure' : '',
+                ].filter(Boolean),
                 verdict: hasReliableTransit
                   ? recommendationMode === 'transit'
                     ? 'Best pick'
@@ -5871,15 +5980,44 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               },
               {
                 key: 'park-ride',
-                icon: '🚌',
                 label: 'Park & Ride',
-                name: isOvernightTrip
-                  ? 'Not available for overnight airport parking'
-                  : 'Only if lot rules allow it',
-                cost: isOvernightTrip ? 'Varies by lot' : 'Varies',
-                time: isOvernightTrip ? 'Varies by mode' : 'Depends',
-                verdict: isOvernightTrip ? 'Unavailable' : 'Verify rules',
-                unavailable: isOvernightTrip,
+                name: bestParkRideAccess
+                  ? bestParkRideAccess.displayName
+                  : isOvernightTrip
+                    ? 'Not available for overnight airport parking'
+                    : 'Only if lot rules allow it',
+                cost: bestParkRideAccess
+                  ? bestParkRideAccess.pricing.displayPrimary
+                  : isOvernightTrip
+                    ? 'Varies by lot'
+                    : 'Varies',
+                time: parkRideDuration !== null
+                  ? formatMinutes(parkRideDuration)
+                  : isOvernightTrip
+                    ? 'Varies by mode'
+                    : 'Depends',
+                confidence: bestParkRideAccess
+                  ? bestParkRideAccess.confidenceScore >= 70
+                    ? 'High'
+                    : bestParkRideAccess.confidenceScore >= 50
+                      ? 'Medium'
+                      : 'Low'
+                  : 'Low',
+                pros: bestParkRideAccess?.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
+                cons: [
+                  bestParkRideAccess?.overnightCaveat || (isOvernightTrip ? PARK_AND_RIDE_UI_COPY.notRecommendedOvernight : PARK_AND_RIDE_UI_COPY.verifyRules),
+                  recommendation.weatherImpact?.riskLevel !== 'low' ? 'Weather exposure' : '',
+                ].filter(Boolean),
+                verdict: bestParkRideAccess
+                  ? recommendationMode === 'park-ride'
+                    ? 'Best pick'
+                    : bestParkRideAccess.recommendedForTrip === false
+                      ? 'Not recommended'
+                      : 'Best backup'
+                  : isOvernightTrip
+                    ? 'Unavailable'
+                    : 'Verify rules',
+                unavailable: !bestParkRideAccess || bestParkRideAccess.recommendedForTrip === false || isOvernightTrip,
               },
             ];
 
@@ -5943,28 +6081,30 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800">
+                    <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
                       Smart recommendation
                     </div>
-                    <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-slate-950">
+                    <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-foreground">
                       {recommendedTitle}
                     </h2>
-                    <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
                       {recommendedReason}
                     </p>
                   </div>
 
-                  <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-3 text-sm text-slate-700 sm:min-w-52">
-                    <div className="text-xs font-semibold uppercase text-sky-800">
+                  <div className="rounded-2xl border border-border bg-muted/40 p-3 text-sm text-foreground sm:min-w-52">
+                    <div className="text-xs font-semibold uppercase text-muted-foreground">
                       Leave-by
                     </div>
-                    <div className="mt-1 text-lg font-bold text-slate-950">
+                    <div className="mt-1 text-lg font-bold text-foreground">
                       {recommendation.leaveByTime
                         ? formatTimeFriendly(recommendation.leaveByTime)
                         : 'Check timing'}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      Includes airport timing when available
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {isCityTrip
+                        ? 'Includes route and parking timing when available'
+                        : 'Includes airport timing when available'}
                     </div>
                   </div>
                 </div>
@@ -5981,70 +6121,84 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         type="button"
                         onClick={action.onClick}
                         className={
-                          'cursor-pointer rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ' +
+                          'cursor-pointer rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
                           (row.unavailable
-                            ? 'border-zinc-200 bg-zinc-100/80 opacity-75'
+                            ? 'border-border bg-muted/60 opacity-80'
                             : selected
-                              ? 'border-blue-300 bg-blue-50/80'
-                              : 'border-zinc-200 bg-white')
+                              ? 'border-primary/50 bg-primary/10'
+                              : 'border-border bg-card')
                         }
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="text-2xl">{row.icon}</div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {row.confidence} confidence
+                          </div>
                           <span
                             className={
                               'rounded-full px-2.5 py-1 text-xs font-semibold ' +
                               (row.unavailable
-                                ? 'bg-zinc-200 text-zinc-600'
+                                ? 'bg-muted text-muted-foreground'
                                 : selected
-                                  ? 'bg-blue-600 text-white'
+                                  ? 'bg-primary text-primary-foreground'
                                   : row.verdict === 'Avoid' || row.verdict === 'Unavailable'
-                                    ? 'bg-red-50 text-red-700'
-                                    : 'bg-zinc-100 text-zinc-700')
+                                    ? 'bg-danger/10 text-danger'
+                                    : 'bg-muted text-foreground')
                             }
                           >
                             {row.verdict}
                           </span>
                         </div>
 
-                        <div className="mt-3 text-sm font-bold text-zinc-950">
+                        <div className="mt-3 text-sm font-bold text-foreground">
                           {row.label}
                         </div>
 
-                        <div className="mt-1 line-clamp-2 text-sm text-zinc-700">
+                        <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                           {row.name}
                         </div>
 
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                          <div className="rounded-xl bg-white/80 p-2">
-                            <div className="text-zinc-500">Cost</div>
-                            <div className="mt-0.5 font-semibold text-zinc-950">
+                          <div className="rounded-xl border border-border bg-card/80 p-2">
+                            <div className="text-muted-foreground">Cost</div>
+                            <div className="mt-0.5 font-semibold text-foreground">
                               {row.cost}
                             </div>
                           </div>
-                          <div className="rounded-xl bg-white/80 p-2">
-                            <div className="text-zinc-500">Time</div>
-                            <div className="mt-0.5 font-semibold text-zinc-950">
+                          <div className="rounded-xl border border-border bg-card/80 p-2">
+                            <div className="text-muted-foreground">Time</div>
+                            <div className="mt-0.5 font-semibold text-foreground">
                               {row.time}
                             </div>
                           </div>
                         </div>
-                        <div className="mt-3 inline-flex text-xs font-semibold text-blue-700">
-                          {action.label} →
+
+                        <div className="mt-3 space-y-2 text-xs leading-5">
+                          <div>
+                            <span className="font-semibold text-foreground">Pros: </span>
+                            <span className="text-muted-foreground">{row.pros.join(', ')}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-foreground">Cons: </span>
+                            <span className="text-muted-foreground">{row.cons.join(', ')}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 inline-flex text-xs font-semibold text-primary">
+                          {action.label}
                         </div>
                       </button>
                     );
                   })}
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+                <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                   {isOvernightTrip ? (
                     <div className="space-y-2">
                       <div>
-                        <span className="font-semibold text-zinc-950">
+                        <span className="font-semibold text-foreground">
                           Overnight trip detected
                         </span>
-                        <span className="text-zinc-800">
+                        <span className="text-foreground">
                           {' '}
                           ({Math.max(1, Math.round(calculateParkingDuration(tripData) / (24 * 60)))}{' '}
                           {Math.round(calculateParkingDuration(tripData) / (24 * 60)) === 1
@@ -6077,7 +6231,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     </div>
                   ) : cheapestMode && fastestMode ? (
                     <>
-                      <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
+                      <span className="font-semibold text-foreground">Quick read:</span>{' '}
                       Cheapest is {cheapestMode.label}{' '}
                       {cheapestMode.key === 'transit' && transitCostDisplay
                         ? `at ${transitCostDisplay.primary}`
@@ -6090,7 +6244,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     </>
                   ) : (
                     <>
-                      <span className="font-semibold text-zinc-950">Quick read:</span>{' '}
+                      <span className="font-semibold text-foreground">Quick read:</span>{' '}
                       Some live route or price data is missing, so confirm final pricing before booking.
                     </>
                   )}
@@ -6404,6 +6558,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <div className="text-base font-semibold text-zinc-900">
                 {noParkingPreferred
                   ? 'No-parking strategy is available below'
+                  : smartPickOption
+                    ? 'Showing best available parking estimate'
                   : transportAvailability === 'rideshare'
                     ? 'Ride provider links are available below'
                     : transportAvailability === 'transit'
@@ -6413,6 +6569,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <div className="mt-2 text-sm text-zinc-600">
                 {noParkingPreferred
                   ? 'Parking cards are hidden for this trip. Use ride providers, transit links, or open directions to confirm timing.'
+                  : smartPickOption
+                    ? 'Open directions to confirm route timing. Parking price, provider, and access details are still shown above when available.'
                   : transportAvailability === 'rideshare'
                     ? 'Live ride estimates may be unavailable, but Uber and Lyft links are still shown so you can open the provider app.'
                     : transportAvailability === 'transit'
@@ -6430,6 +6588,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   <div>
                     Open a ride provider link below. If you want parking anyway, change the trip preference and recalculate.
                   </div>
+                ) : smartPickOption ? (
+                  <div>Showing best available parking estimate. Open directions to confirm route timing.</div>
                 ) : (
                   <div>Try adjusting your trip details and recalculating.</div>
                 )}

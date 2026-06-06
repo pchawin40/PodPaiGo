@@ -73,6 +73,26 @@ describe('quickGo', () => {
     expect(params.get('transport')).toBe('rideshare');
   });
 
+  test('buildQuickGoSearchParams stores purpose, preference, leave time, and duration controls', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'SEA Airport',
+      origin: manualOrigin,
+      purpose: 'flying-out',
+      preference: 'cheapest',
+      calculateLeaveTime: false,
+      familyLuggageFriendly: true,
+      parkingDurationMinutes: 6 * 60,
+      now: new Date('2026-06-01T05:15:00'),
+    });
+
+    expect(params.get('quickGoPurpose')).toBe('flying-out');
+    expect(params.get('quickGoPreference')).toBe('cheapest');
+    expect(params.get('calculateLeaveTime')).toBe('0');
+    expect(params.get('familyLuggageFriendly')).toBe('1');
+    expect(params.get('parkingDuration')).toBe('360');
+    expect(params.get('parkingCheckOutTime')).toBe('11:15');
+  });
+
   test('parseTripDataFromSearchParams accepts quick-go type and origin metadata', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'Downtown shopping district',

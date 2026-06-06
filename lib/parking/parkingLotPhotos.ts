@@ -139,14 +139,14 @@ export async function getBestParkingPhoto(
 ): Promise<ParkingPhotoSelection> {
   const tripContext = lot.tripContext ?? 'airport_trip';
 
-  const dbPhoto = await lookupParkingLotPhotoFromDb(lot);
-  if (dbPhoto?.imageUrl) {
-    return dbPhoto;
-  }
-
   const googlePhoto = buildGoogleLiveParkingPhoto(lot.googlePhotoName);
   if (googlePhoto?.imageUrl) {
     return googlePhoto;
+  }
+
+  const dbPhoto = await lookupParkingLotPhotoFromDb(lot);
+  if (dbPhoto?.imageUrl) {
+    return dbPhoto;
   }
 
   const placeholder = buildPlaceholderParkingPhoto(lot, tripContext);

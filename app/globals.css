@@ -331,10 +331,14 @@ textarea:disabled {
 }
 
 .dark .airport-page-bg .bg-white,
+.dark .airport-page-bg .bg-white\/70,
+.dark .airport-page-bg .bg-white\/75,
 .dark .airport-page-bg .bg-white\/80,
 .dark .airport-page-bg .bg-white\/90,
 .dark .airport-page-bg .bg-white\/95,
 .dark .travel-page-bg .bg-white,
+.dark .travel-page-bg .bg-white\/70,
+.dark .travel-page-bg .bg-white\/75,
 .dark .travel-page-bg .bg-white\/80,
 .dark .travel-page-bg .bg-white\/90,
 .dark .travel-page-bg .bg-white\/95 {
@@ -423,6 +427,164 @@ textarea:disabled {
 .dark .travel-page-bg textarea::placeholder {
   color: #cbd5e1 !important;
   opacity: 0.84;
+}
+
+/* Dark-mode contrast guardrails for legacy hardcoded Tailwind color pairs. */
+.dark .bg-white,
+.dark .bg-white\/70,
+.dark .bg-white\/75,
+.dark .bg-white\/80,
+.dark .bg-white\/90,
+.dark .bg-white\/95 {
+  background-color: rgba(15, 23, 42, 0.94) !important;
+}
+
+.dark .bg-zinc-50,
+.dark .bg-slate-50,
+.dark .bg-gray-50,
+.dark .bg-zinc-50\/80,
+.dark .bg-slate-50\/80,
+.dark .bg-sky-50,
+.dark .bg-sky-50\/70,
+.dark .bg-sky-50\/80 {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+.dark .bg-zinc-100,
+.dark .bg-slate-100,
+.dark .bg-gray-100,
+.dark .bg-zinc-100\/80,
+.dark .bg-slate-100\/80 {
+  background-color: rgba(51, 65, 85, 0.84) !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-50\/80,
+.dark .bg-sky-50,
+.dark .bg-sky-50\/80 {
+  background-color: rgba(8, 47, 73, 0.92) !important;
+}
+
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/70,
+.dark .bg-emerald-50\/80,
+.dark .bg-green-50 {
+  background-color: rgba(6, 78, 59, 0.86) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-50\/70,
+.dark .bg-amber-50\/80,
+.dark .bg-yellow-50 {
+  background-color: rgba(69, 26, 3, 0.88) !important;
+}
+
+.dark .bg-red-50,
+.dark .bg-rose-50 {
+  background-color: rgba(69, 10, 10, 0.88) !important;
+}
+
+.dark .text-zinc-950,
+.dark .text-zinc-900,
+.dark .text-slate-950,
+.dark .text-slate-900,
+.dark .text-gray-950,
+.dark .text-gray-900,
+.dark .text-blue-950,
+.dark .text-sky-950 {
+  color: #f8fafc !important;
+}
+
+.dark .text-zinc-800,
+.dark .text-slate-800,
+.dark .text-gray-800,
+.dark .text-blue-900,
+.dark .text-sky-900 {
+  color: #e2e8f0 !important;
+}
+
+.dark .text-zinc-700,
+.dark .text-zinc-600,
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark .text-gray-700,
+.dark .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-zinc-500,
+.dark .text-slate-500,
+.dark .text-gray-500,
+.dark .text-zinc-400,
+.dark .text-slate-400 {
+  color: #aab8cc !important;
+}
+
+.dark .text-blue-800,
+.dark .text-blue-700,
+.dark .text-sky-800,
+.dark .text-sky-700 {
+  color: #bae6fd !important;
+}
+
+.dark .text-emerald-900,
+.dark .text-emerald-800,
+.dark .text-emerald-700,
+.dark .text-green-800 {
+  color: #bbf7d0 !important;
+}
+
+.dark .text-amber-950,
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700,
+.dark .text-yellow-800 {
+  color: #fde68a !important;
+}
+
+.dark .text-red-900,
+.dark .text-red-800,
+.dark .text-red-700,
+.dark .text-rose-800 {
+  color: #fecaca !important;
+}
+
+.dark .border-zinc-300,
+.dark .border-zinc-200,
+.dark .border-slate-300,
+.dark .border-slate-200,
+.dark .border-gray-300,
+.dark .border-gray-200,
+.dark .border-sky-100,
+.dark .border-sky-200,
+.dark .border-blue-100,
+.dark .border-blue-200 {
+  border-color: rgba(148, 163, 184, 0.36) !important;
+}
+
+.dark .border-amber-200,
+.dark .border-yellow-200 {
+  border-color: rgba(251, 191, 36, 0.42) !important;
+}
+
+.dark .border-red-200,
+.dark .border-rose-200 {
+  border-color: rgba(248, 113, 113, 0.42) !important;
+}
+
+.dark .border-emerald-100,
+.dark .border-emerald-200,
+.dark .border-green-200 {
+  border-color: rgba(52, 211, 153, 0.38) !important;
+}
+
+.dark .ring-zinc-100,
+.dark .ring-slate-100,
+.dark .ring-blue-100,
+.dark .ring-sky-100,
+.dark .ring-emerald-100,
+.dark .ring-amber-100 {
+  --tw-ring-color: rgba(148, 163, 184, 0.28) !important;
 }
 
 * {

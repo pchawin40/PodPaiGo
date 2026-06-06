@@ -72,6 +72,33 @@ function buildDestinationSearchQueryPlan(destination: string): string[] {
   ];
 }
 
+function resolveParkingRateTiming(args: {
+  dateTime: string;
+  checkInDate?: string;
+  checkInAt?: string;
+}): { arrivalDate?: string; arrivalTime?: string } {
+  const checkInAtMatch = args.checkInAt?.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (checkInAtMatch) {
+    return {
+      arrivalDate: checkInAtMatch[1],
+      arrivalTime: checkInAtMatch[2],
+    };
+  }
+
+  const dateTimeMatch = args.dateTime.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (dateTimeMatch) {
+    return {
+      arrivalDate: args.checkInDate || dateTimeMatch[1],
+      arrivalTime: dateTimeMatch[2],
+    };
+  }
+
+  return {
+    arrivalDate: args.checkInDate,
+    arrivalTime: undefined,
+  };
+}
+
 export function buildDestinationParkingSearchCacheKey(args: {
   destinationLat?: number;
   destinationLng?: number;
@@ -161,6 +188,8 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
 export function buildCuratedDestinationParkingHints(args: {
   destination: string;
   parkingDurationMinutes: number;
+  arrivalDate?: string;
+  arrivalTime?: string;
 }): ParkingOption[] {
   const normalized = args.destination.toLowerCase();
   const isPikePlace =
@@ -174,6 +203,8 @@ export function buildCuratedDestinationParkingHints(args: {
     address: '1531 Western Ave, Seattle, WA 98101',
     durationMinutes: args.parkingDurationMinutes,
     covered: true,
+    arrivalDate: args.arrivalDate,
+    arrivalTime: args.arrivalTime,
   });
 
   return [
@@ -190,6 +221,8 @@ export function buildCuratedDestinationParkingHints(args: {
       priceDisplay: pricing.priceDisplay,
       priceUnit: pricing.priceUnit,
       pricingConfidence: pricing.pricingConfidence,
+      rateRules: pricing.rateRules,
+      activeRate: pricing.activeRate,
       priceNote: `${pricing.priceNote} Provider controls final price.`,
       priceSource: pricing.priceSource,
       priceConfidence: pricing.priceConfidence,
@@ -387,6 +420,7 @@ export async function getDestinationParkingOptions(args: {
   }
 
   const durationMinutes = Math.max(60, args.parkingDurationMinutes ?? 4 * 60);
+  const rateTiming = resolveParkingRateTiming(args);
 
   const liveParkWhizOptions =
     typeof args.destinationLat === 'number' &&
@@ -452,6 +486,8 @@ export async function getDestinationParkingOptions(args: {
         address: place.formattedAddress,
         durationMinutes,
         covered: isGarage,
+        arrivalDate: rateTiming.arrivalDate,
+        arrivalTime: rateTiming.arrivalTime,
       });
 
       const routeDestination = place.formattedAddress || name;
@@ -474,6 +510,8 @@ export async function getDestinationParkingOptions(args: {
         priceDisplay: pricing.priceDisplay,
         priceUnit: pricing.priceUnit,
         pricingConfidence: pricing.pricingConfidence,
+        rateRules: pricing.rateRules,
+        activeRate: pricing.activeRate,
         priceNote: pricing.priceNote,
         priceSource: pricing.priceSource,
         priceConfidence: pricing.priceConfidence,
@@ -561,6 +599,8 @@ export async function getDestinationParkingOptions(args: {
   const curatedHints = buildCuratedDestinationParkingHints({
     destination: args.destination,
     parkingDurationMinutes: durationMinutes,
+    arrivalDate: rateTiming.arrivalDate,
+    arrivalTime: rateTiming.arrivalTime,
   });
 
   const validatedOptions = [...communityOptions, ...curatedHints, ...mapped, ...unmatchedLiveParkWhiz].filter((option) => {

@@ -29,6 +29,8 @@ export function buildRouteEstimateCacheKey(args: {
   destination: string;
   dateTime: string;
   mode?: string;
+  routePurpose?: string | null;
+  tripType?: string | null;
   airportCode?: string | null;
   lotId?: string | null;
 }): string {
@@ -39,6 +41,8 @@ export function buildRouteEstimateCacheKey(args: {
     normalizeRouteCachePart(args.origin),
     normalizeRouteCachePart(args.destination),
     departureBucket,
+    args.routePurpose?.trim() || '',
+    args.tripType?.trim() || '',
     args.airportCode?.trim().toUpperCase() || '',
     args.lotId?.trim() || '',
   ].join('|');

@@ -1,4 +1,5 @@
-import type { ParkingOption } from '../types';
+import type { ParkingOption, ParkingRateRule } from '../types';
+import { resolveDestinationParkingRate } from './destinationParkingRates';
 
 export type CityParkingPricing = Pick<
   ParkingOption,
@@ -13,6 +14,8 @@ export type CityParkingPricing = Pick<
   | 'pricingConfidence'
   | 'trustStatus'
   | 'assumptions'
+  | 'rateRules'
+  | 'activeRate'
 >;
 
 const URBAN_HOURLY_MIN = 6;
@@ -51,6 +54,82 @@ export function estimatePikePlaceMarketPrice(durationMinutes: number): number {
   return PIKE_PLACE_TIERS[PIKE_PLACE_TIERS.length - 1].price;
 }
 
+export function buildPikePlaceMarketRateRules(): ParkingRateRule[] {
+  const tierRules: ParkingRateRule[] = PIKE_PLACE_TIERS.map((tier, index) => ({
+      id: `pike-place-tier-${tier.maxHours}`,
+      label:
+        index === 0
+          ? 'Published 0-1 hour garage rate'
+          : `Published ${PIKE_PLACE_TIERS[index - 1]!.maxHours}-${tier.maxHours} hour garage rate`,
+      kind: 'flat',
+      amount: tier.price,
+      minDurationMinutes: index === 0 ? undefined : PIKE_PLACE_TIERS[index - 1]!.maxHours * 60 + 1,
+      maxDurationMinutes: tier.maxHours * 60,
+      priority: 30,
+      sourceName: 'Pike Place Market Parking Garage',
+      sourceUrl: 'https://www.pikeplacemarket.org/parking-directions/',
+      confidence: 'high',
+      notes: [
+        'Published Pike Place garage rate card tier for the selected duration.',
+      ],
+    }));
+
+  return [
+    ...tierRules,
+    {
+      id: 'pike-place-early-bird',
+      label: 'Early bird rate',
+      kind: 'early_bird',
+      amount: 17,
+      entryWindow: { start: '05:00', end: '08:59' },
+      exitBy: '21:00',
+      priority: 70,
+      sourceName: 'Pike Place Market Parking Garage',
+      sourceUrl: 'https://www.pikeplacemarket.org/parking-directions/',
+      confidence: 'high',
+      notes: ['Requires entry before 9 a.m. and exit by 9 p.m.'],
+    },
+    {
+      id: 'pike-place-evening',
+      label: 'Flat evening rate',
+      kind: 'evening',
+      amount: 10,
+      startTime: '17:00',
+      exitBy: '02:00',
+      priority: 65,
+      sourceName: 'Pike Place Market Parking Garage',
+      sourceUrl: 'https://www.pikeplacemarket.org/parking-directions/',
+      confidence: 'high',
+      notes: ['Applies after 5 p.m.; cars left past 2 a.m. are subject to daily hourly rates.'],
+    },
+    {
+      id: 'pike-place-weekend-special-possible',
+      label: 'Weekend/special rate possible',
+      kind: 'weekend',
+      amount: 40,
+      appliesOnDays: [0, 6],
+      priority: 20,
+      sourceName: 'Pike Place Market Parking Garage',
+      sourceUrl: 'https://www.pikeplacemarket.org/parking-directions/',
+      confidence: 'medium',
+      estimated: true,
+      notes: ['Weekend parking still uses posted garage rules unless a special is published.'],
+    },
+    {
+      id: 'pike-place-event-override',
+      label: 'Event rate estimate',
+      kind: 'event',
+      amount: 45,
+      priority: 100,
+      sourceName: 'Estimated event parking override',
+      sourceUrl: 'https://www.pikeplacemarket.org/parking-directions/',
+      confidence: 'low',
+      estimated: true,
+      notes: ['Nearby events may override normal parking rates.'],
+    },
+  ];
+}
+
 export function estimateUrbanCoreParkingRange(args: {
   durationMinutes: number;
   covered?: boolean;
@@ -83,11 +162,23 @@ export function resolveCityParkingPricing(args: {
   address?: string | null;
   durationMinutes: number;
   covered?: boolean;
+  arrivalDate?: string | null;
+  arrivalTime?: string | null;
+  eventLikely?: boolean;
 }): CityParkingPricing {
   const { name, address, durationMinutes, covered } = args;
 
   if (isPikePlaceMarketGarage(name, address)) {
-    const total = estimatePikePlaceMarketPrice(durationMinutes);
+    const rateRules = buildPikePlaceMarketRateRules();
+    const resolved = resolveDestinationParkingRate({
+      rateRules,
+      fallbackPrice: estimatePikePlaceMarketPrice(durationMinutes),
+      arrivalDate: args.arrivalDate,
+      arrivalTime: args.arrivalTime,
+      durationMinutes,
+      eventLikely: args.eventLikely,
+    });
+    const total = resolved.total ?? estimatePikePlaceMarketPrice(durationMinutes);
 
     return {
       price: total,
@@ -99,11 +190,16 @@ export function resolveCityParkingPricing(args: {
       priceSource: 'official-rate',
       priceConfidence: 'high',
       trustStatus: 'verified-source',
+      rateRules,
+      activeRate: resolved,
       priceNote:
-        'Official Pike Place Market Parking Garage rate card estimate for your selected duration. Early bird $17 may apply with qualifying entry/exit times.',
+        `${resolved.label}. Official Pike Place Market Parking Garage rate card estimate for your selected duration. Special rates may apply only when posted entry/exit rules match.`,
       assumptions: [
         'Estimated from the official Pike Place Market Parking Garage rate card.',
-        'Early bird pricing ($17) applies only when entry/exit conditions match the published rules.',
+        'Early bird pricing applies only when entry/exit conditions match the published rules.',
+        'Flat evening pricing may apply after 5 p.m. if the car exits before the posted overnight cutoff.',
+        'Event rates may override normal pricing near major venues or waterfront events.',
+        ...resolved.warnings,
         'Confirm current rates and hours on the official garage page before booking.',
       ],
     };

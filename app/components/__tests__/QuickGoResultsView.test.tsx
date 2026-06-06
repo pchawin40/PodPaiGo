@@ -5,7 +5,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import QuickGoResultsView from '@/app/components/QuickGoResultsView';
 import { buildQuickGoSearchParams } from '@/lib/trip/quickGo';
-import type { Recommendation } from '@/lib/types';
+import type { Recommendation, RideshareOption, TrafficEstimate } from '@/lib/types';
 import type { TripData } from '@/lib/types';
 
 const pushMock = jest.fn();
@@ -30,11 +30,47 @@ const recommendation = {
   parking: [],
   rideshare: [],
   transit: [],
-  trafficEstimate: {
+  tsaEstimate: {
+    destination: 'General',
+    waitTime: 0,
+    status: 'estimated',
+    trustStatus: 'estimated',
+    sourceName: 'Test',
+    assumptions: [],
+  },
+  trafficEstimate: trafficEstimate({
     duration: 24,
     trustStatus: 'estimated',
-  },
-} as Recommendation;
+  }),
+} satisfies Recommendation;
+
+function trafficEstimate(overrides: Partial<TrafficEstimate>): TrafficEstimate {
+  return {
+    route: 'origin-to-destination',
+    duration: 24,
+    congestion: 'low',
+    trustStatus: 'estimated',
+    sourceName: 'Test traffic',
+    lastUpdated: '2026-06-01T00:00:00.000Z',
+    assumptions: [],
+    ...overrides,
+  };
+}
+
+function rideshareOption(overrides: Partial<RideshareOption> = {}): RideshareOption {
+  return {
+    id: 'rideshare',
+    name: 'Rideshare',
+    duration: 24,
+    price: 20,
+    availability: 80,
+    trustStatus: 'estimated',
+    sourceName: 'Test rideshare',
+    lastUpdated: '2026-06-01T00:00:00.000Z',
+    assumptions: [],
+    ...overrides,
+  };
+}
 
 describe('QuickGoResultsView', () => {
   beforeEach(() => {
@@ -60,17 +96,12 @@ describe('QuickGoResultsView', () => {
         rankedOptions={[
           {
             type: 'rideshare',
-            option: {
-              id: 'rideshare',
-              name: 'Rideshare',
-              duration: 24,
-              price: 20,
-              trustStatus: 'estimated',
-            },
+            option: rideshareOption(),
             score: 80,
             cost: 20,
             duration: 24,
             stressScore: 72,
+            reasons: [],
           },
         ]}
         searchParams={params}
@@ -136,22 +167,17 @@ describe('QuickGoResultsView', () => {
         }}
         recommendation={{
           ...recommendation,
-          trafficEstimate: { duration: 12, trustStatus: 'estimated' },
+          trafficEstimate: trafficEstimate({ duration: 12, trustStatus: 'estimated' }),
         }}
         rankedOptions={[
           {
             type: 'rideshare',
-            option: {
-              id: 'rideshare',
-              name: 'Rideshare',
-              duration: 14,
-              price: 18,
-              trustStatus: 'estimated',
-            },
+            option: rideshareOption({ duration: 14, price: 18 }),
             score: 85,
             cost: 18,
             duration: 14,
             stressScore: 68,
+            reasons: [],
           },
         ]}
         searchParams={params}
@@ -213,7 +239,11 @@ describe('QuickGoResultsView', () => {
         }}
         recommendation={{
           ...recommendation,
-          trafficEstimate: { duration: 0, routeUnavailable: true, trustStatus: 'fallback' },
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            trustStatus: 'fallback',
+          }),
         }}
         rankedOptions={[]}
         searchParams={params}
@@ -244,7 +274,7 @@ describe('QuickGoResultsView', () => {
         }}
         recommendation={{
           ...recommendation,
-          trafficEstimate: { duration: 0, trustStatus: 'fallback' },
+          trafficEstimate: trafficEstimate({ duration: 0, trustStatus: 'fallback' }),
         }}
         rankedOptions={[]}
         searchParams={params}
@@ -290,9 +320,11 @@ describe('QuickGoResultsView', () => {
         recommendation={{
           ...recommendation,
           trafficEstimate: {
-            duration: 34,
-            trustStatus: 'estimated',
-            sourceName: 'Estimated from coordinates',
+            ...trafficEstimate({
+              duration: 34,
+              trustStatus: 'estimated',
+              sourceName: 'Estimated from coordinates',
+            }),
           },
         }}
         rankedOptions={[]}
@@ -300,7 +332,8 @@ describe('QuickGoResultsView', () => {
       />,
     );
 
-    expect(screen.getByText('Estimated drive time: ~34 min')).toBeInTheDocument();
+    expect(screen.getByText('Straight-line fallback estimate: ~34 min')).toBeInTheDocument();
+    expect(screen.getByText('Open directions to confirm.')).toBeInTheDocument();
     expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
   });
 
@@ -324,9 +357,11 @@ describe('QuickGoResultsView', () => {
         recommendation={{
           ...recommendation,
           trafficEstimate: {
-            duration: 18,
-            trustStatus: 'live',
-            sourceName: 'Google Routes API',
+            ...trafficEstimate({
+              duration: 18,
+              trustStatus: 'live',
+              sourceName: 'Google Routes API',
+            }),
           },
         }}
         rankedOptions={[]}
@@ -336,5 +371,113 @@ describe('QuickGoResultsView', () => {
 
     expect(screen.getByText('Live drive time: 18 min')).toBeInTheDocument();
     expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('keeps route drive time separate from explicit parking buffer total', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Pike Place Market, Seattle, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Pike Place Market, Seattle, WA',
+          destinationName: 'Pike Place Market',
+          destinationKind: 'downtown',
+          parkingDuration: 3 * 60,
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: {
+            ...trafficEstimate({
+              duration: 4,
+              trustStatus: 'live',
+              sourceName: 'Google Routes API',
+            }),
+          },
+        }}
+        rankedOptions={[
+          {
+            type: 'parking',
+            option: {
+              id: 'destination-parking',
+              name: 'Destination Garage',
+              type: 'official',
+              price: 18,
+              distance: 1,
+              availability: 80,
+              trustStatus: 'live',
+              sourceName: 'Test parking',
+              lastUpdated: '2026-06-01T00:00:00.000Z',
+              assumptions: [],
+              originToParkingMinutes: 4,
+              parkingBufferMinutes: 4,
+              transferToTerminalMinutes: 0,
+              walkingMinutes: 0,
+              transferType: 'walk',
+            },
+            score: 90,
+            cost: 18,
+            duration: 4,
+            stressScore: 70,
+            reasons: [],
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Live drive time: 4 min')).toBeInTheDocument();
+    expect(screen.getByText('Total trip time')).toBeInTheDocument();
+    expect(screen.getByText('4 min drive + 12 min parking/walk buffer')).toBeInTheDocument();
+    expect(screen.queryByText(/Recommended option/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Best choice/i)).not.toBeInTheDocument();
+  });
+
+  test('shows backup route estimate label without foregrounding Mapbox', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: {
+            ...trafficEstimate({
+              duration: 4,
+              trustStatus: 'live',
+              sourceName: 'Mapbox Directions',
+            }),
+          },
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Estimated drive time: ~4 min')).toBeInTheDocument();
+    expect(screen.getByText('Backup routing source used. Open directions to confirm.')).toBeInTheDocument();
+    expect(screen.queryByText(/Mapbox route estimate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Straight-line fallback/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+    // Google Maps remains the user-facing directions link.
+    expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
   });
 });

@@ -147,6 +147,53 @@ export type PriceDisplay =
 
 export type PriceUnit = 'total' | 'per-day' | 'per-hour';
 
+export type ParkingRateRuleKind =
+  | 'hourly'
+  | 'daily_max'
+  | 'early_bird'
+  | 'evening'
+  | 'weekend'
+  | 'holiday'
+  | 'event'
+  | 'overnight'
+  | 'validation'
+  | 'street_meter'
+  | 'flat';
+
+export type ParkingRateRule = {
+  id: string;
+  label: string;
+  kind: ParkingRateRuleKind;
+  amount: number;
+  currency?: 'USD';
+  appliesOnDays?: number[]; // 0 = Sunday, 6 = Saturday
+  entryWindow?: { start: string; end: string };
+  startTime?: string;
+  endTime?: string;
+  exitBy?: string;
+  minDurationMinutes?: number;
+  maxDurationMinutes?: number;
+  hourlyRate?: number;
+  dailyMax?: number;
+  priority?: number;
+  sourceName: string;
+  sourceUrl?: string;
+  confidence: 'high' | 'medium' | 'low';
+  estimated?: boolean;
+  notes?: string[];
+};
+
+export type ParkingRateResolution = {
+  total: number | null;
+  label: string;
+  rateType: ParkingRateRuleKind | 'fallback';
+  confidence: 'high' | 'medium' | 'low';
+  sourceName?: string;
+  sourceUrl?: string;
+  ruleId?: string;
+  warnings: string[];
+};
+
 export type ParkingPriceSource =
   | 'official-rate'
   | 'direct-lot-rate'
@@ -261,6 +308,10 @@ export type ParkingOption = {
   googlePlaceName?: string;
   googlePlaceAddress?: string;
   googleMapsUri?: string;
+  /** Google Places v1 photo resource name, e.g. places/{placeId}/photos/{photoId}. */
+  googlePhotoName?: string;
+  /** Ordered Google Places v1 photo resource names. Never expose API keys in these values. */
+  googlePhotoNames?: string[];
   imageUrl?: string;
   images?: string[];
   photoAttributions?: string[];
@@ -353,6 +404,8 @@ export type ParkingOption = {
   validationConfidence?: 'high' | 'medium' | 'low' | 'unknown';
   freeParkingMinutes?: number;
   freeParkingNotes?: string;
+  rateRules?: ParkingRateRule[];
+  activeRate?: ParkingRateResolution;
   accessType?:
     | 'public'
     | 'customer_only'

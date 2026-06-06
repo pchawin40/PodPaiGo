@@ -91,6 +91,42 @@ describe('ParkingLotVisual attribution', () => {
     });
   });
 
+  test('passes Google photo resource names to the server photo selector', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        imageUrl: '/api/google-place-photo?name=places%2Fabc%2Fphotos%2Fprimary',
+        source: 'google_live',
+        attribution: 'Photo © Google',
+        attributionUrl: 'https://maps.google.com',
+        requiresGoogleAttribution: true,
+      }),
+    });
+
+    render(
+      <ParkingLotVisual
+        option={{
+          id: 'lot-photos',
+          name: 'Photo Lot',
+          type: 'off-airport',
+          googlePlaceId: 'places/abc',
+          googlePhotoNames: ['places/abc/photos/primary'],
+        }}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `googlePhotoName=${encodeURIComponent('places/abc/photos/primary')}`,
+        ),
+      );
+    });
+
+    expect(await screen.findByText(/Photo © Google/)).toBeInTheDocument();
+  });
+
   test('shows Google photos safe mode message when API returns notice', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,

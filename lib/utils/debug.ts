@@ -2,7 +2,7 @@
 export const DEBUG = process.env.DEBUG_LOGS === 'true';
 
 export function debugLog(...args: unknown[]) {
-  if (DEBUG) {
+  if (process.env.DEBUG_LOGS === 'true') {
     console.log(...args);
   }
 }

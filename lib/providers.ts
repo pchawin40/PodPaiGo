@@ -15,6 +15,7 @@ import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
+import { debugLog } from './utils/debug';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
 import {
   applyParkingOriginDriveMinutes,
@@ -356,6 +357,8 @@ type RouteRequestContext = {
   airportCode?: string | null;
   lotId?: string | null;
   routePurpose?: 'main_to_destination' | 'origin_to_parking';
+  tripType?: string | null;
+  tripMode?: string | null;
   originLatLng?: RouteLatLng | null;
   targetTerminalArrivalTime?: string;
 };
@@ -411,6 +414,13 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]>;
+  /**
+   * Optional address → coordinates resolver (budget-guarded + cached). Used to
+   * resolve trip origin/destination coordinates before route timing so live and
+   * straight-line fallback timing both have coordinates. Optional so lightweight
+   * mock providers (tests) need not implement it.
+   */
+  geocodeAddress?(address: string): Promise<{ lat: number; lng: number } | null>;
 }
 
 export class MockTrafficProvider implements TrafficProvider {
@@ -459,6 +469,76 @@ function initialLiveParkingRouteLimit(): number {
   return DEFAULT_INITIAL_LIVE_PARKING_ROUTE_LIMIT;
 }
 
+function readPositiveTimeoutMs(name: string, fallback: number): number {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+function getGoogleRouteTimeoutMs(): number {
+  return readPositiveTimeoutMs('GOOGLE_ROUTE_TIMEOUT_MS', 4000);
+}
+
+function getMapboxRouteTimeoutMs(): number {
+  return readPositiveTimeoutMs('MAPBOX_ROUTE_TIMEOUT_MS', 5000);
+}
+
+function hasMapboxAccessToken(): boolean {
+  return Boolean(process.env.MAPBOX_ACCESS_TOKEN?.trim());
+}
+
+function isDisplayedQuickGoMainRoute(routeContext?: RouteRequestContext): boolean {
+  return (
+    routeContext?.routePurpose === 'main_to_destination' &&
+    routeContext?.tripMode === 'quick-go'
+  );
+}
+
+function routeDebugPayload(args: {
+  routeKey: string;
+  cacheKey: string;
+  originLatLng?: RouteLatLng | null;
+  destinationLatLng?: RouteLatLng | null;
+  routeContext?: RouteRequestContext;
+  estimate?: TrafficEstimate | null;
+  extra?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const originCoords = resolveRouteLatLng(args.originLatLng);
+  const destinationCoords = resolveRouteLatLng(args.destinationLatLng);
+  const estimate = args.estimate;
+
+  return {
+    route: args.routeKey,
+    cacheKey: shortRequestKey(args.cacheKey),
+    originCoordsPresent: Boolean(originCoords),
+    destinationCoordsPresent: Boolean(destinationCoords),
+    mapboxTokenPresent: hasMapboxAccessToken(),
+    sourceName: estimate?.sourceName ?? null,
+    trustStatus: estimate?.trustStatus ?? null,
+    routeUnavailable: estimate?.routeUnavailable ?? null,
+    duration: estimate?.duration ?? null,
+    displayedInQuickGo: isDisplayedQuickGoMainRoute(args.routeContext),
+    routePurpose: args.routeContext?.routePurpose ?? null,
+    tripType: args.routeContext?.tripType ?? null,
+    tripMode: args.routeContext?.tripMode ?? null,
+    ...args.extra,
+  };
+}
+
+/**
+ * A cached estimate is only worth serving if it represents a real route result
+ * (live Google Routes or a route snapshot). Cached straight-line/coordinate or
+ * "unavailable" fallbacks must NOT be served on later requests, otherwise a single
+ * transient failure (e.g. a momentary route-budget trip during testing) gets cached
+ * and permanently shadows live timing until TTL expiry. Returning null for those
+ * forces a live retry on the next request (still gated by budget/kill-switch, so no
+ * extra Google calls happen while a real outage persists).
+ */
+export function isServeableCachedRouteEstimate(estimate: TrafficEstimate): boolean {
+  if (estimate.routeUnavailable === true) return false;
+  if (estimate.sourceName === 'Estimated from coordinates') return false;
+  return true;
+}
+
 function getCachedRouteEstimate(cacheKey: string): TrafficEstimate | null {
   const cached = ROUTE_CACHE.get(cacheKey);
 
@@ -466,6 +546,10 @@ function getCachedRouteEstimate(cacheKey: string): TrafficEstimate | null {
 
   if (Date.now() - cached.ts >= getRouteCacheTtlMs()) {
     ROUTE_CACHE.delete(cacheKey);
+    return null;
+  }
+
+  if (!isServeableCachedRouteEstimate(cached.estimate)) {
     return null;
   }
 
@@ -553,6 +637,189 @@ export class LiveTrafficProvider implements TrafficProvider {
     });
   }
 
+  /**
+   * Backup route timing via Mapbox Directions (driving-traffic). Used ONLY for the
+   * main route when Google Routes is unavailable. Server-side token only; never
+   * exposed to the client. Returns null (skips) when the token or coordinates are
+   * missing, or on any error/timeout/no-route. The user-facing "Open directions"
+   * link continues to use Google Maps elsewhere.
+   */
+  private async mapboxRouteEstimate(
+    args: {
+      routeKey: string;
+      cacheKey: string;
+      originLatLng?: RouteLatLng | null;
+      destinationLatLng?: RouteLatLng | null;
+      routeContext?: RouteRequestContext;
+    },
+  ): Promise<TrafficEstimate | null> {
+    const token = process.env.MAPBOX_ACCESS_TOKEN?.trim();
+    const originCoords = resolveRouteLatLng(args.originLatLng);
+    const destinationCoords = resolveRouteLatLng(args.destinationLatLng);
+    const logMapboxEvent = (
+      event: string,
+      extra: Record<string, unknown>,
+      estimate?: TrafficEstimate | null,
+    ) => {
+      debugLog(event, routeDebugPayload({
+        routeKey: args.routeKey,
+        cacheKey: args.cacheKey,
+        originLatLng: args.originLatLng,
+        destinationLatLng: args.destinationLatLng,
+        routeContext: args.routeContext,
+        estimate,
+        extra,
+      }));
+    };
+
+    if (!token) {
+      logMapboxEvent('mapbox_route_skipped', { reason: 'missing_token' });
+      debugLog('route_timing_mapbox_failed', { route: args.routeKey, reason: 'missing_token' });
+      return null;
+    }
+    if (!originCoords || !destinationCoords) {
+      logMapboxEvent('mapbox_route_skipped', { reason: 'missing_coordinates' });
+      debugLog('route_timing_mapbox_failed', { route: args.routeKey, reason: 'missing_coordinates' });
+      return null;
+    }
+
+    logMapboxEvent('mapbox_route_attempt', { timeoutMs: getMapboxRouteTimeoutMs() });
+    debugLog('route_timing_mapbox_start', { route: args.routeKey });
+
+    const coords = `${originCoords.lng},${originCoords.lat};${destinationCoords.lng},${destinationCoords.lat}`;
+    const url =
+      `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}` +
+      `?access_token=${encodeURIComponent(token)}&overview=false&annotations=duration,distance`;
+
+    const timeoutMs = getMapboxRouteTimeoutMs();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        logMapboxEvent('mapbox_route_failed', { reason: `http_${res.status}` });
+        debugLog('route_timing_mapbox_failed', { route: args.routeKey, reason: `http_${res.status}` });
+        return null;
+      }
+
+      const data = (await res.json()) as {
+        routes?: Array<{ duration?: number; distance?: number }>;
+        code?: string;
+      };
+      const route = Array.isArray(data?.routes) ? data.routes[0] : null;
+
+      if (!route || typeof route.duration !== 'number' || !Number.isFinite(route.duration)) {
+        logMapboxEvent('mapbox_route_failed', { reason: data?.code || 'no_route' });
+        debugLog('route_timing_mapbox_failed', { route: args.routeKey, reason: data?.code || 'no_route' });
+        return null;
+      }
+
+      const durationMinutes = Math.max(1, Math.round(route.duration / 60));
+      const distanceMeters =
+        typeof route.distance === 'number' && Number.isFinite(route.distance)
+          ? Math.round(route.distance)
+          : undefined;
+
+      const estimate: TrafficEstimate = {
+        route: args.routeKey,
+        duration: durationMinutes,
+        distanceMeters,
+        congestion: 'medium',
+        trustStatus: 'live',
+        routeUnavailable: false,
+        sourceName: 'Mapbox Directions',
+        lastUpdated: new Date().toISOString(),
+        assumptions: ['Backup route timing from Mapbox Directions (Google Routes unavailable).'],
+      };
+
+      logMapboxEvent('mapbox_route_success', { durationMinutes }, estimate);
+      debugLog('route_timing_mapbox_success', { route: args.routeKey, durationMinutes });
+
+      return estimate;
+    } catch (error) {
+      const reason = error instanceof Error ? error.name : 'error';
+      logMapboxEvent('mapbox_route_failed', { reason });
+      debugLog('route_timing_mapbox_failed', {
+        route: args.routeKey,
+        reason,
+      });
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Backup chain when Google Routes is unavailable: Mapbox Directions -> straight-line
+   * coordinate fallback -> unavailable. Mapbox is attempted only for the main route
+   * (never per parking candidate). Successful Mapbox/route results are cached as
+   * serveable; coordinate/unavailable fallbacks are cached but not serveable, so a
+   * later request retries live.
+   */
+  private async resolveBackupRouteEstimate(args: {
+    routeKey: string;
+    cacheKey: string;
+    originLatLng?: RouteLatLng | null;
+    destinationLatLng?: RouteLatLng | null;
+    unavailableReason: string;
+    routeContext?: RouteRequestContext;
+  }): Promise<TrafficEstimate> {
+    const allowMapbox =
+      !args.routeContext?.lotId && args.routeContext?.routePurpose !== 'origin_to_parking';
+
+    if (allowMapbox) {
+      const mapbox = await this.mapboxRouteEstimate({
+        routeKey: args.routeKey,
+        cacheKey: args.cacheKey,
+        originLatLng: args.originLatLng,
+        destinationLatLng: args.destinationLatLng,
+        routeContext: args.routeContext,
+      });
+      if (mapbox) {
+        debugLog('route_timing_final', { source: 'mapbox', duration: mapbox.duration });
+        return cacheRouteEstimate(args.cacheKey, mapbox);
+      }
+    } else {
+      debugLog('mapbox_route_skipped', routeDebugPayload({
+        routeKey: args.routeKey,
+        cacheKey: args.cacheKey,
+        originLatLng: args.originLatLng,
+        destinationLatLng: args.destinationLatLng,
+        routeContext: args.routeContext,
+        extra: { reason: 'not_main_route' },
+      }));
+    }
+
+    const coordinateFallback = coordinateFallbackTrafficEstimate(
+      args.routeKey,
+      args.originLatLng,
+      args.destinationLatLng,
+    );
+    if (coordinateFallback) {
+      debugLog('coordinate_fallback_used', routeDebugPayload({
+        routeKey: args.routeKey,
+        cacheKey: args.cacheKey,
+        originLatLng: args.originLatLng,
+        destinationLatLng: args.destinationLatLng,
+        routeContext: args.routeContext,
+        estimate: coordinateFallback,
+      }));
+      debugLog('route_timing_coordinate_fallback_used', {
+        route: args.routeKey,
+        duration: coordinateFallback.duration,
+      });
+      debugLog('route_timing_final', { source: 'coordinate_fallback', duration: coordinateFallback.duration });
+      return cacheRouteEstimate(args.cacheKey, coordinateFallback);
+    }
+
+    debugLog('route_timing_final', { source: 'unavailable' });
+    return cacheRouteEstimate(
+      args.cacheKey,
+      unavailableTrafficEstimate(args.routeKey, 'Google Routes API', args.unavailableReason),
+    );
+  }
+
   async getTrafficEstimate(
     origin: string,
     destination: string,
@@ -575,23 +842,80 @@ export class LiveTrafficProvider implements TrafficProvider {
       destination: destinationKey,
       dateTime: resolvedDateTime,
       mode: 'DRIVE',
+      routePurpose: routeContext?.routePurpose,
+      tripType: routeContext?.tripType,
       airportCode: routeContext?.airportCode,
       lotId: routeContext?.lotId,
     });
     const routeKey = normalizeTrafficRoute(origin, destination);
     const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
     const requestKey = shortRequestKey(cacheKey);
+    const logRouteEvent = (
+      event: string,
+      extra: Record<string, unknown> = {},
+      estimate?: TrafficEstimate | null,
+      originLatLng: RouteLatLng | null | undefined = resolvedOriginLatLngForFallback,
+      destinationRouteLatLng: RouteLatLng | null | undefined = resolvedDestinationLatLngForFallback,
+    ) => {
+      debugLog(event, routeDebugPayload({
+        routeKey,
+        cacheKey,
+        originLatLng,
+        destinationLatLng: destinationRouteLatLng,
+        routeContext,
+        estimate,
+        extra,
+      }));
+    };
+    const finishRouteEstimate = (
+      estimate: TrafficEstimate,
+      stage: string,
+      originLatLng: RouteLatLng | null | undefined = resolvedOriginLatLngForFallback,
+      destinationRouteLatLng: RouteLatLng | null | undefined = resolvedDestinationLatLngForFallback,
+    ): TrafficEstimate => {
+      if (isDisplayedQuickGoMainRoute(routeContext)) {
+        logRouteEvent('quickgo_main_route_final', { stage }, estimate, originLatLng, destinationRouteLatLng);
+      }
+      return estimate;
+    };
+
+    if (isDisplayedQuickGoMainRoute(routeContext)) {
+      logRouteEvent('quickgo_main_route_start', {
+        requestKey,
+        routeLabel,
+      });
+      logRouteEvent('quickgo_main_route_inputs', {
+        requestKey,
+        originTextPresent: Boolean(origin?.trim()),
+        destinationTextPresent: Boolean(destination?.trim()),
+      });
+    }
+    logRouteEvent('google_route_attempt', {
+      requestKey,
+      routeLabel,
+      googleKeyPresent: Boolean(this.serverKey),
+      timeoutMs: getGoogleRouteTimeoutMs(),
+    });
+
+    debugLog('route_timing_google_start', {
+      route: routeKey,
+      routePurpose: routeContext?.routePurpose,
+      hasOriginCoords: Boolean(providedOriginLatLng),
+      hasDestinationCoords: Boolean(providedDestinationLatLng),
+    });
 
     try {
       if (!providedOriginLatLng && isClearlyNonDrivableRoute(origin, destination)) {
-        return unavailableTrafficEstimate(
+        logRouteEvent('google_route_failed_or_unavailable', { reason: 'non_drivable_route' });
+        return finishRouteEstimate(unavailableTrafficEstimate(
           routeKey,
           'Route validation',
           routeUnavailableReasonForContext(routeContext),
-        );
+        ), 'route_validation');
       }
 
       if (isProviderKillSwitchEnabled('google_routes')) {
+        logRouteEvent('google_route_failed_or_unavailable', { reason: 'kill_switch' });
         const snapshotEstimate = await routeSnapshotToTrafficEstimate({
           origin: originKey,
           destination: destinationKey,
@@ -607,7 +931,10 @@ export class LiveTrafficProvider implements TrafficProvider {
             snapshotHit: true,
             blockedByKillSwitch: true,
           });
-          return cacheRouteEstimate(cacheKey, snapshotEstimate);
+          return finishRouteEstimate(
+            cacheRouteEstimate(cacheKey, snapshotEstimate),
+            'snapshot_kill_switch',
+          );
         }
 
         emitProviderCall({
@@ -615,23 +942,21 @@ export class LiveTrafficProvider implements TrafficProvider {
           requestKey,
           blockedByKillSwitch: true,
         });
-        const coordinateFallback = coordinateFallbackTrafficEstimate(
-          routeKey,
-          providedOriginLatLng,
-          providedDestinationLatLng,
-        );
-        if (coordinateFallback) {
-          return cacheRouteEstimate(cacheKey, coordinateFallback);
-        }
-
-        return unavailableTrafficEstimate(
-          routeKey,
-          'Google Routes API',
-          'Live routing disabled; using cached or estimated timing only.',
+        return finishRouteEstimate(
+          await this.resolveBackupRouteEstimate({
+            routeKey,
+            cacheKey,
+            originLatLng: providedOriginLatLng,
+            destinationLatLng: providedDestinationLatLng,
+            unavailableReason: 'Live routing disabled; using cached or estimated timing only.',
+            routeContext,
+          }),
+          'backup_after_kill_switch',
         );
       }
 
       if (!this.serverKey) {
+        logRouteEvent('google_route_failed_or_unavailable', { reason: 'missing_google_key' });
         throw new Error('Google Maps server API key not configured');
       }
 
@@ -643,7 +968,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           cacheHit: true,
         });
         logRoutesApiCache('Routes API cache hit', cacheKey, routeLabel);
-        return cached;
+        return finishRouteEstimate(cached, 'cache_hit');
       }
 
       const snapshotEstimate = await routeSnapshotToTrafficEstimate({
@@ -661,7 +986,10 @@ export class LiveTrafficProvider implements TrafficProvider {
           snapshotHit: true,
         });
         logRoutesApiCache('Routes API cache hit', cacheKey, routeLabel);
-        return cacheRouteEstimate(cacheKey, snapshotEstimate);
+        return finishRouteEstimate(
+          cacheRouteEstimate(cacheKey, snapshotEstimate),
+          'snapshot_hit',
+        );
       }
 
       const existingInFlight = ROUTE_INFLIGHT.get(cacheKey);
@@ -673,18 +1001,29 @@ export class LiveTrafficProvider implements TrafficProvider {
           note: 'in-flight',
         });
         logRoutesApiCache('Routes API in-flight hit', cacheKey, routeLabel);
-        return await existingInFlight;
+        return finishRouteEstimate(await existingInFlight, 'in_flight_hit');
       }
 
       const inflightPromise = (async () => {
         const budget = await canMakeLiveApiCall('google_routes');
         if (!budget.allowed) {
+          logRouteEvent('google_route_failed_or_unavailable', {
+            reason: budget.reason,
+            blockedBy: budget.reason === 'kill_switch' ? 'kill_switch' : 'budget',
+          });
           emitProviderCall({
             provider: 'google_routes',
             requestKey,
             blockedByBudget: budget.reason !== 'kill_switch',
             blockedByKillSwitch: budget.reason === 'kill_switch',
             note: budget.reason,
+          });
+          debugLog('route_timing_live_blocked', {
+            route: routeKey,
+            reason: budget.reason,
+            blockedBy: budget.reason === 'kill_switch' ? 'kill_switch' : 'budget',
+            hasOriginCoords: Boolean(providedOriginLatLng),
+            hasDestinationCoords: Boolean(providedDestinationLatLng),
           });
 
           const staleSnapshot = await getCachedRouteQuoteSnapshot({
@@ -706,23 +1045,14 @@ export class LiveTrafficProvider implements TrafficProvider {
             return cacheRouteEstimate(cacheKey, snapshotToEstimate(staleSnapshot, routeKey));
           }
 
-          const coordinateFallback = coordinateFallbackTrafficEstimate(
+          return await this.resolveBackupRouteEstimate({
             routeKey,
-            providedOriginLatLng,
-            providedDestinationLatLng,
-          );
-          if (coordinateFallback) {
-            return cacheRouteEstimate(cacheKey, coordinateFallback);
-          }
-
-          return cacheRouteEstimate(
             cacheKey,
-            unavailableTrafficEstimate(
-              routeKey,
-              'Google Routes API',
-              'Route budget exceeded; open map directions to confirm drive time.',
-            ),
-          );
+            originLatLng: providedOriginLatLng,
+            destinationLatLng: providedDestinationLatLng,
+            unavailableReason: 'Route budget exceeded; open map directions to confirm drive time.',
+            routeContext,
+          });
         }
 
         await recordApiUsage('google_routes');
@@ -788,12 +1118,22 @@ export class LiveTrafficProvider implements TrafficProvider {
 
         logRoutesApiCache('Routes API fetch', cacheKey, routeLabel);
 
-        // Perform the network call
-        const res = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-        });
+        // Perform the network call with a bounded Google window so the Mapbox
+        // backup can still run before the engine-level traffic timeout.
+        const googleTimeoutMs = getGoogleRouteTimeoutMs();
+        const googleController = new AbortController();
+        const googleTimer = setTimeout(() => googleController.abort(), googleTimeoutMs);
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal: googleController.signal,
+          });
+        } finally {
+          clearTimeout(googleTimer);
+        }
 
         // Log which key type we're using for this request (server/browser/none)
         const keyType = this.serverKey ? 'server' : (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? 'browser' : 'none');
@@ -882,23 +1222,26 @@ export class LiveTrafficProvider implements TrafficProvider {
         else if (element?.staticDuration) hasDuration = true;
 
         if (res.status === 200 && condition && condition !== 'ROUTE_EXISTS') {
-          const coordinateFallback = coordinateFallbackTrafficEstimate(
-            routeKey,
+          logRouteEvent(
+            'google_route_failed_or_unavailable',
+            {
+              reason: 'route_condition_unavailable',
+              condition,
+              status: statusIsEmptyObject ? '[empty object]' : String(statusField),
+            },
+            null,
             originLatLng,
             destLatLng,
           );
-          if (coordinateFallback) {
-            return cacheRouteEstimate(cacheKey, coordinateFallback);
-          }
-
-          return cacheRouteEstimate(
+          return await this.resolveBackupRouteEstimate({
+            routeKey,
             cacheKey,
-            unavailableTrafficEstimate(
-              routeKey,
-              'Google Routes API',
-              'Google Routes could not calculate a driving route for this origin and destination.'
-            )
-          );
+            originLatLng,
+            destinationLatLng: destLatLng,
+            unavailableReason:
+              'Google Routes could not calculate a driving route for this origin and destination.',
+            routeContext,
+          });
         }
 
         if (!(res.status === 200 && condition === 'ROUTE_EXISTS' && hasDuration && statusAcceptable)) {
@@ -985,6 +1328,24 @@ export class LiveTrafficProvider implements TrafficProvider {
 
         if (process.env.NODE_ENV === 'development') console.log('Routes API: success (live) HTTP status OK');
 
+        logRouteEvent(
+          'google_route_success',
+          {
+            durationMinutes,
+            usedCoordinates: Boolean(originLatLng && destLatLng),
+          },
+          estimate,
+          originLatLng,
+          destLatLng,
+        );
+        debugLog('route_timing_live_success', {
+          route: routeKey,
+          durationMinutes,
+          usedCoordinates: Boolean(originLatLng && destLatLng),
+        });
+        debugLog('route_timing_google_success', { route: routeKey, durationMinutes });
+        debugLog('route_timing_final', { source: 'google', duration: durationMinutes });
+
         void saveRouteQuoteSnapshot({
           provider: 'google_routes',
           origin: originKey,
@@ -1005,7 +1366,7 @@ export class LiveTrafficProvider implements TrafficProvider {
 
       ROUTE_INFLIGHT.set(cacheKey, inflightPromise);
       try {
-        return await inflightPromise;
+        return finishRouteEstimate(await inflightPromise, 'provider_result');
       } finally {
         ROUTE_INFLIGHT.delete(cacheKey);
       }
@@ -1017,21 +1378,25 @@ export class LiveTrafficProvider implements TrafficProvider {
         console.error('Live traffic API failed, falling back to mock:', safeMsg);
       }
 
-      const coordinateFallback = coordinateFallbackTrafficEstimate(
-        routeKey,
-        resolvedOriginLatLngForFallback,
-        resolvedDestinationLatLngForFallback,
-      );
-      if (coordinateFallback) {
-        return cacheRouteEstimate(cacheKey, coordinateFallback);
-      }
+      logRouteEvent('google_route_failed_or_unavailable', {
+        reason: safeMsg,
+      });
+      debugLog('route_timing_google_failed', {
+        route: routeKey,
+        reason: safeMsg,
+      });
 
-      const fallback = unavailableTrafficEstimate(
-        routeKey,
-        'Google Routes API',
-        routeUnavailableReasonForContext(routeContext),
+      return finishRouteEstimate(
+        await this.resolveBackupRouteEstimate({
+          routeKey,
+          cacheKey,
+          originLatLng: resolvedOriginLatLngForFallback,
+          destinationLatLng: resolvedDestinationLatLngForFallback,
+          unavailableReason: routeUnavailableReasonForContext(routeContext),
+          routeContext,
+        }),
+        'backup_after_google_failure',
       );
-      return cacheRouteEstimate(cacheKey, fallback);
     }
   }
 }
@@ -1152,6 +1517,11 @@ export class MockProvider implements DataProvider {
     return null;
   }
 
+  /** Public address → coordinates resolver (cached + budget-guarded via LiveTrafficProvider). */
+  async geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+    return this.geocodeLatLng(address);
+  }
+
   private async getRouteEstimate(
     origin: string,
     destination: string,
@@ -1169,6 +1539,8 @@ export class MockProvider implements DataProvider {
       destination: destinationKey,
       dateTime,
       mode: allowLive ? 'DRIVE_LIVE' : 'DRIVE_ESTIMATED',
+      routePurpose: routeContext?.routePurpose,
+      tripType: routeContext?.tripType,
       airportCode: routeContext?.airportCode,
       lotId: routeContext?.lotId,
     });
@@ -1374,12 +1746,16 @@ export class MockProvider implements DataProvider {
           destination: routeDestinationKey,
           dateTime: routeDepartureTime,
           mode: 'DRIVE_LIVE',
+          routePurpose: 'origin_to_parking',
+          lotId: option.id,
         }),
         liveRouteCacheKey: buildRouteEstimateCacheKey({
           origin,
           destination: routeDestinationKey,
           dateTime: routeDepartureTime,
           mode: 'DRIVE',
+          routePurpose: 'origin_to_parking',
+          lotId: option.id,
         }),
       };
     });

@@ -135,10 +135,7 @@ describe('ParkWhiz live pricing', () => {
   });
 
   test('airport ParkWhiz live quote stays live, not final_on_provider', () => {
-    const confidence = resolvePricingConfidence({
-      ...liveParkWhiz,
-      serviceAirportCode: 'SEA',
-    });
+    const confidence = resolvePricingConfidence(liveParkWhiz);
 
     expect(confidence).toBe('live');
   });
@@ -182,6 +179,8 @@ describe('city parking labels and baselines', () => {
         waitTime: 0,
         status: 'estimated',
         trustStatus: 'estimated',
+        sourceName: 'Test',
+        assumptions: [],
       },
     );
 

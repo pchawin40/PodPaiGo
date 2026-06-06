@@ -23,6 +23,15 @@ export const QUICK_GO_EXAMPLE_DESTINATIONS = [
 
 export type QuickGoOriginSource = 'manual' | 'geolocation' | 'saved';
 
+export type QuickGoPurpose =
+  | 'flying-out'
+  | 'picking-up'
+  | 'dropping-off'
+  | 'parking-trip'
+  | 'general-destination';
+
+export type QuickGoPreference = 'easiest' | 'cheapest' | 'fastest';
+
 export type QuickGoDestinationSource =
   | 'saved'
   | 'recent'
@@ -75,6 +84,10 @@ export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
   'parkingCheckInDate',
   'parkingCheckInTime',
   'parkingDuration',
+  'quickGoPurpose',
+  'quickGoPreference',
+  'calculateLeaveTime',
+  'familyLuggageFriendly',
   'detectedAirportCode',
   'detectedAirport',
   'quickGoConfirmed',
@@ -402,6 +415,11 @@ export type BuildQuickGoSearchParamsInput = {
   origin: QuickGoOriginSelection;
   continueAsQuickGo?: boolean;
   transportAvailability?: TransportAvailability;
+  purpose?: QuickGoPurpose;
+  preference?: QuickGoPreference;
+  calculateLeaveTime?: boolean;
+  familyLuggageFriendly?: boolean;
+  parkingDurationMinutes?: number;
   now?: Date;
 };
 
@@ -411,6 +429,14 @@ export function buildQuickGoSearchParams(input: BuildQuickGoSearchParamsInput): 
     buildQuickGoDestinationSelectionFromText(input.destinationText || '');
   const destination = destinationSelection.destination.trim();
   const now = input.now ?? new Date();
+  const parkingDurationMinutes =
+    typeof input.parkingDurationMinutes === 'number' &&
+    Number.isFinite(input.parkingDurationMinutes) &&
+    input.parkingDurationMinutes > 0
+      ? Math.round(input.parkingDurationMinutes)
+      : 2 * 60;
+  const purpose = input.purpose || 'general-destination';
+  const preference = input.preference || 'easiest';
   const airportCode =
     destinationSelection.detectedAirportCode ||
     (input.continueAsQuickGo ? null : detectAirportFromDestination(destination)?.id);
@@ -421,23 +447,29 @@ export function buildQuickGoSearchParams(input: BuildQuickGoSearchParamsInput): 
   params.set('tripMode', QUICK_GO_TRIP_MODE);
   applyQuickGoOriginToSearchParams(params, input.origin);
   applyQuickGoDestinationToSearchParams(params, destinationSelection);
-  params.set('intent', 'general-trip');
+  params.set('intent', purpose === 'flying-out' ? 'flying-out' : 'general-trip');
   params.set('transport', input.transportAvailability || 'all');
   params.set('transitPayment', 'normal');
   params.set('destinationKind', inferQuickGoDestinationKind(destination, airport));
+  params.set('quickGoPurpose', purpose);
+  params.set('quickGoPreference', preference);
+  params.set('calculateLeaveTime', input.calculateLeaveTime === false ? '0' : '1');
+  if (input.familyLuggageFriendly) {
+    params.set('familyLuggageFriendly', '1');
+  }
 
   const arrivalDate = formatQuickGoDate(now);
   const arrivalTime = formatQuickGoTime(now);
 
   params.set('arrivalDate', arrivalDate);
   params.set('arrivalTime', arrivalTime);
-  const parkingWindow = deriveParkingWindowFromArrival(arrivalDate, arrivalTime, 2 * 60);
+  const parkingWindow = deriveParkingWindowFromArrival(arrivalDate, arrivalTime, parkingDurationMinutes);
 
   params.set('parkingCheckInDate', parkingWindow?.parkingCheckInDate || arrivalDate);
   params.set('parkingCheckInTime', parkingWindow?.parkingCheckInTime || arrivalTime);
   params.set('parkingCheckOutDate', parkingWindow?.parkingCheckOutDate || '');
   params.set('parkingCheckOutTime', parkingWindow?.parkingCheckOutTime || '');
-  params.set('parkingDuration', String(parkingWindow?.parkingDuration ?? 2 * 60));
+  params.set('parkingDuration', String(parkingWindow?.parkingDuration ?? parkingDurationMinutes));
 
   if (airport) {
     params.set('detectedAirportCode', airport.id);
@@ -711,7 +743,7 @@ export function resolveQuickGoBestWay(input: {
     return {
       bestWayLabel: 'Drive',
       backupWayLabel: 'Rideshare / taxi',
-      bestOption: parkingOption || rankedBest,
+      bestOption: parkingOption,
       backupOption: rideshareOption || rankedBackup,
     };
   }
@@ -720,7 +752,7 @@ export function resolveQuickGoBestWay(input: {
     return {
       bestWayLabel: 'Drive',
       backupWayLabel: formatRankedOptionLabel(rideshareOption) || 'Rideshare / taxi',
-      bestOption: parkingOption || rankedBest,
+      bestOption: parkingOption,
       backupOption: rideshareOption || rankedBackup,
     };
   }

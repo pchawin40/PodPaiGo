@@ -2,107 +2,10 @@ import { TransportAvailability, TripData, Recommendation, ParkingOption, Ridesha
 import { ActiveDataProvider, DataProvider } from './providers';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
-
-/**
- * Resolve a promise, but fall back to a degraded value if it does not settle in
- * `ms`. Used to isolate slow live provider calls so the results page renders with
- * partial data instead of hanging on "Recalculating...". Never rejects.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
-  if (!Number.isFinite(ms) || ms <= 0) return promise;
-
-  return new Promise<T>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(onTimeout());
-    }, ms);
-
-    promise.then(
-      (value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      },
-      () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(onTimeout());
-      },
-    );
-  });
-}
-
-function getParkingFetchTimeoutMs(): number {
-  const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 5000;
-}
-
-function getProviderFetchTimeoutMs(provider: string): number {
-  const envKey = `${provider.toUpperCase()}_FETCH_TIMEOUT_MS`;
-  const configured = Number(process.env[envKey]);
-  if (Number.isFinite(configured) && configured > 0) return configured;
-
-  if (provider === 'parking') return getParkingFetchTimeoutMs();
-  if (provider === 'traffic') return Number(process.env.ROUTE_FETCH_TIMEOUT_MS) || 4500;
-  return 3500;
-}
-
-function providerFetch<T>(
-  provider: string,
-  fetcher: () => Promise<T>,
-  fallback: (error: unknown, timedOut: boolean) => T,
-  timeoutMs = getProviderFetchTimeoutMs(provider),
-): Promise<T> {
-  const startedAt = Date.now();
-  debugLog('provider_fetch_start', { provider, timeoutMs });
-
-  const promise = fetcher()
-    .then((value) => {
-      debugLog('provider_fetch_success', {
-        provider,
-        ms: Date.now() - startedAt,
-      });
-      return value;
-    })
-    .catch((error) => {
-      debugLog('provider_fetch_failed', {
-        provider,
-        ms: Date.now() - startedAt,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return fallback(error, false);
-    });
-
-  return withTimeout(promise, timeoutMs, () => {
-    debugLog('provider_fetch_timeout', {
-      provider,
-      ms: Date.now() - startedAt,
-      timeoutMs,
-    });
-    return fallback(new Error(`${provider} fetch timed out`), true);
-  });
-}
-
-function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): TrafficEstimate {
-  return {
-    route: `${tripData.origin}->${tripData.destination}`,
-    duration: 35,
-    congestion: 'medium',
-    trustStatus: 'fallback',
-    routeUnavailable: false,
-    sourceName: timedOut ? 'Provider timeout fallback' : 'Provider fallback',
-    lastUpdated: new Date().toISOString(),
-    assumptions: [
-      timedOut
-        ? 'Live route data is still updating; open directions to confirm current traffic.'
-        : 'Live route data unavailable; using fallback route timing.',
-    ],
-  };
-}
+import {
+  estimateDriveMinutesFromStraightLineMiles,
+  haversineMiles,
+} from './parking/routeMinutes';
 import {
   resolveRouteDepartureIsoForPurpose,
   resolveScheduledTripDateTime,
@@ -146,6 +49,213 @@ import {
   partitionParkingByAccessKind,
 } from './access/parkAndRideAccess';
 import { rankAccessOptions } from './access/rankAccessOptions';
+
+/**
+ * Resolve a promise, but fall back to a degraded value if it does not settle in
+ * `ms`. Used to isolate slow live provider calls so the results page renders with
+ * partial data instead of hanging on "Recalculating...". Never rejects.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(onTimeout());
+    }, ms);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(onTimeout());
+      },
+    );
+  });
+}
+
+function getParkingFetchTimeoutMs(): number {
+  const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 5000;
+}
+
+function readPositiveEnvMs(name: string, fallback: number): number {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+function getTrafficFetchTimeoutMs(): number {
+  const configured = Number(process.env.ROUTE_FETCH_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  const googleTimeoutMs = readPositiveEnvMs('GOOGLE_ROUTE_TIMEOUT_MS', 4000);
+  const mapboxTimeoutMs = readPositiveEnvMs('MAPBOX_ROUTE_TIMEOUT_MS', 5000);
+
+  return googleTimeoutMs + mapboxTimeoutMs + 1500;
+}
+
+function getProviderFetchTimeoutMs(provider: string): number {
+  const envKey = `${provider.toUpperCase()}_FETCH_TIMEOUT_MS`;
+  const configured = Number(process.env[envKey]);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  if (provider === 'parking') return getParkingFetchTimeoutMs();
+  // Give the provider enough time to run Google Routes and, if needed, Mapbox
+  // before the engine-level safety fallback returns a straight-line estimate.
+  if (provider === 'traffic') return getTrafficFetchTimeoutMs();
+  return 3500;
+}
+
+function providerFetch<T>(
+  provider: string,
+  fetcher: () => Promise<T>,
+  fallback: (error: unknown, timedOut: boolean) => T,
+  timeoutMs = getProviderFetchTimeoutMs(provider),
+): Promise<T> {
+  const startedAt = Date.now();
+  debugLog('provider_fetch_start', { provider, timeoutMs });
+
+  const promise = fetcher()
+    .then((value) => {
+      debugLog('provider_fetch_success', {
+        provider,
+        ms: Date.now() - startedAt,
+      });
+      return value;
+    })
+    .catch((error) => {
+      debugLog('provider_fetch_failed', {
+        provider,
+        ms: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return fallback(error, false);
+    });
+
+  return withTimeout(promise, timeoutMs, () => {
+    debugLog('provider_fetch_timeout', {
+      provider,
+      ms: Date.now() - startedAt,
+      timeoutMs,
+    });
+    return fallback(new Error(`${provider} fetch timed out`), true);
+  });
+}
+
+function getCoordinateResolveTimeoutMs(): number {
+  const configured = Number(process.env.QUICKGO_COORD_RESOLVE_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 3500;
+}
+
+/**
+ * Resolve coordinates for a trip endpoint: use existing lat/lng when present,
+ * otherwise geocode the address text (cached + budget-guarded by the provider,
+ * bounded by a short timeout so it never blocks the results render). Returns
+ * undefined when coordinates cannot be resolved. Never throws.
+ */
+async function resolveTripCoordinate(
+  provider: DataProvider,
+  text: string | undefined,
+  existingLat: number | undefined,
+  existingLng: number | undefined,
+): Promise<{ lat: number; lng: number } | undefined> {
+  if (
+    typeof existingLat === 'number' &&
+    Number.isFinite(existingLat) &&
+    typeof existingLng === 'number' &&
+    Number.isFinite(existingLng)
+  ) {
+    return { lat: existingLat, lng: existingLng };
+  }
+
+  const address = text?.trim();
+  if (!address || typeof provider.geocodeAddress !== 'function') return undefined;
+
+  const geocode = provider.geocodeAddress(address).then(
+    (result) => result ?? undefined,
+    () => undefined,
+  );
+
+  return withTimeout<{ lat: number; lng: number } | undefined>(
+    geocode,
+    getCoordinateResolveTimeoutMs(),
+    () => undefined,
+  );
+}
+
+function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): TrafficEstimate {
+  const hasOriginCoords =
+    typeof tripData.originLat === 'number' &&
+    Number.isFinite(tripData.originLat) &&
+    typeof tripData.originLng === 'number' &&
+    Number.isFinite(tripData.originLng);
+  const hasDestinationCoords =
+    typeof tripData.destinationLat === 'number' &&
+    Number.isFinite(tripData.destinationLat) &&
+    typeof tripData.destinationLng === 'number' &&
+    Number.isFinite(tripData.destinationLng);
+  const route = `${tripData.origin}->${tripData.destination}`;
+
+  // This is the Quick Go safety net when the live traffic provider times out or rejects.
+  // Never invent the old generic 35-minute value for local point A -> B trips.
+  if (hasOriginCoords && hasDestinationCoords) {
+    const samePlace =
+      tripData.originLat === tripData.destinationLat &&
+      tripData.originLng === tripData.destinationLng;
+    const straightLineMiles = samePlace
+      ? 0
+      : haversineMiles(
+          tripData.originLat!,
+          tripData.originLng!,
+          tripData.destinationLat!,
+          tripData.destinationLng!,
+        );
+    const duration = samePlace
+      ? 0
+      : estimateDriveMinutesFromStraightLineMiles(straightLineMiles);
+
+    return {
+      route,
+      duration,
+      distanceMeters: samePlace ? 0 : Math.max(1, Math.round(straightLineMiles * 1609.34)),
+      congestion: 'medium',
+      trustStatus: 'estimated',
+      routeUnavailable: false,
+      sourceName: 'Estimated from coordinates',
+      lastUpdated: new Date().toISOString(),
+      assumptions: [
+        timedOut
+          ? 'Live route data timed out; estimated from straight-line distance. Open directions to confirm.'
+          : 'Live route data unavailable; estimated from straight-line distance. Open directions to confirm.',
+      ],
+    };
+  }
+
+  return {
+    route,
+    duration: 0,
+    congestion: 'high',
+    trustStatus: 'fallback',
+    routeUnavailable: true,
+    routeUnavailableReason: 'Route timing unavailable; open directions to confirm.',
+    sourceName: timedOut ? 'Provider timeout fallback' : 'Provider fallback',
+    lastUpdated: new Date().toISOString(),
+    assumptions: [
+      timedOut
+        ? 'Live route data is still updating; open directions to confirm current traffic.'
+        : 'Live route data unavailable; using fallback route timing.',
+    ],
+  };
+}
 
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
@@ -421,16 +531,64 @@ export class RecommendationEngine {
       routeTiming,
       'origin_to_parking',
     );
+    // Resolve coordinates up front for non-airport (Quick Go / point A->B) trips so
+    // BOTH the live route call and the straight-line fallback have coordinates.
+    // Without this, a destination picked from address autocomplete (which carries no
+    // lat/lng) shows "drive time unknown" whenever the live route times out, fails,
+    // or is over budget. Airport trips keep their existing coordinate resolution.
+    const [resolvedOriginCoords, resolvedDestinationCoords] = isAirportTrip
+      ? [undefined, undefined]
+      : await Promise.all([
+          resolveTripCoordinate(this.provider, tripData.origin, tripData.originLat, tripData.originLng),
+          resolveTripCoordinate(
+            this.provider,
+            tripData.destination,
+            tripData.destinationLat,
+            tripData.destinationLng,
+          ),
+        ]);
+
+    const effectiveOriginLat = resolvedOriginCoords?.lat ?? tripData.originLat;
+    const effectiveOriginLng = resolvedOriginCoords?.lng ?? tripData.originLng;
+    const effectiveDestinationLat = resolvedDestinationCoords?.lat ?? tripData.destinationLat;
+    const effectiveDestinationLng = resolvedDestinationCoords?.lng ?? tripData.destinationLng;
+
     const mainDestinationLatLng =
-      typeof tripData.destinationLat === 'number' &&
-      typeof tripData.destinationLng === 'number'
-        ? { lat: tripData.destinationLat, lng: tripData.destinationLng }
+      typeof effectiveDestinationLat === 'number' &&
+      Number.isFinite(effectiveDestinationLat) &&
+      typeof effectiveDestinationLng === 'number' &&
+      Number.isFinite(effectiveDestinationLng)
+        ? { lat: effectiveDestinationLat, lng: effectiveDestinationLng }
         : undefined;
     const mainOriginLatLng =
-      typeof tripData.originLat === 'number' &&
-      typeof tripData.originLng === 'number'
-        ? { lat: tripData.originLat, lng: tripData.originLng }
+      typeof effectiveOriginLat === 'number' &&
+      Number.isFinite(effectiveOriginLat) &&
+      typeof effectiveOriginLng === 'number' &&
+      Number.isFinite(effectiveOriginLng)
+        ? { lat: effectiveOriginLat, lng: effectiveOriginLng }
         : undefined;
+
+    // tripData augmented with resolved coords so the traffic fallback can compute a
+    // straight-line estimate instead of returning "unavailable".
+    const trafficTripData: TripData =
+      mainOriginLatLng || mainDestinationLatLng
+        ? {
+            ...tripData,
+            originLat: effectiveOriginLat,
+            originLng: effectiveOriginLng,
+            destinationLat: effectiveDestinationLat,
+            destinationLng: effectiveDestinationLng,
+          }
+        : tripData;
+
+    debugLog('quickgo_route_timing_inputs', {
+      destinationText: tripData.destination,
+      originCoordsPresent: Boolean(mainOriginLatLng),
+      destinationCoordsPresent: Boolean(mainDestinationLatLng),
+      originResolvedViaGeocode: Boolean(resolvedOriginCoords) && typeof tripData.originLat !== 'number',
+      destinationResolvedViaGeocode:
+        Boolean(resolvedDestinationCoords) && typeof tripData.destinationLat !== 'number',
+    });
     const route =
       isAirportArrivalTrip(tripData)
         ? 'airport-home'
@@ -611,11 +769,13 @@ export class RecommendationEngine {
                 ? ((tripData as TripDataWithTransport).airportCode || undefined)
                 : undefined,
               routePurpose: 'main_to_destination',
+              tripType: tripData.type,
+              tripMode: tripData.tripMode,
               originLatLng: mainOriginLatLng,
               targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
             },
           ),
-        (_error, timedOut) => fallbackTrafficEstimate(tripData, timedOut),
+        (_error, timedOut) => fallbackTrafficEstimate(trafficTripData, timedOut),
       ),
 
       isAirportTrip
@@ -634,6 +794,20 @@ export class RecommendationEngine {
           )
         : Promise.resolve(null),
     ]);
+
+    debugLog('quickgo_route_timing_result', {
+      destinationText: tripData.destination,
+      timingSource: trafficEstimate.routeUnavailable
+        ? 'unavailable'
+        : trafficEstimate.sourceName === 'Estimated from coordinates'
+          ? 'fallback'
+          : trafficEstimate.trustStatus === 'live'
+            ? 'live'
+            : 'cached',
+      duration: trafficEstimate.duration,
+      routeUnavailable: trafficEstimate.routeUnavailable ?? false,
+      reason: trafficEstimate.routeUnavailableReason,
+    });
 
     const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);
 

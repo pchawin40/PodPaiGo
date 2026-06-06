@@ -28,6 +28,10 @@ type ParkingLike = {
     bookingProvider?: string;
     providerSource?: string;
     googlePlaceId?: string;
+    googlePhotoName?: string;
+    googlePhotoNames?: string[];
+    photoName?: string;
+    photoNames?: string[];
     transferType?: string;
     covered?: boolean;
 };
@@ -59,6 +63,12 @@ function buildPhotoQuery(option: ParkingLike, tripContext: TripParkingContext, a
     params.set('provider', option.bookingProvider || option.providerSource || '');
   }
   if (option.googlePlaceId) params.set('googlePlaceId', option.googlePlaceId);
+  const googlePhotoName =
+    option.googlePhotoName ||
+    option.googlePhotoNames?.[0] ||
+    option.photoName ||
+    option.photoNames?.[0];
+  if (googlePhotoName) params.set('googlePhotoName', googlePhotoName);
   if (airportCode) params.set('airportCode', airportCode);
   if (option.name) params.set('lotName', option.name);
   if (option.type) params.set('lotType', option.type);
@@ -95,6 +105,18 @@ export default function ParkingLotVisual({
       fetch(`/api/parking-lot-photo?${buildPhotoQuery(option, tripContext, airportCode).toString()}`)
         .then((response) => response.json())
         .then((data: ParkingPhotoSelection) => {
+          if (
+            process.env.NODE_ENV === 'development' &&
+            data.source === 'placeholder' &&
+            (option.googlePhotoName || option.googlePhotoNames?.length)
+          ) {
+            console.warn('[parking-photo] Google photo fell back to placeholder', {
+              lotName: option.name,
+              googlePlaceId: option.googlePlaceId,
+              googlePhotoName: option.googlePhotoName || option.googlePhotoNames?.[0],
+              safeModeNotice: data.safeModeNotice,
+            });
+          }
           if (!cancelled) setSelection(data);
         })
         .catch(() => {
@@ -149,7 +171,7 @@ export default function ParkingLotVisual({
               </p>
             ) : null}
             <div
-                className="group relative h-36 w-full overflow-hidden rounded-2xl bg-slate-100 text-left shadow-sm outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500 sm:h-40"
+                className="group relative h-36 w-full overflow-hidden rounded-2xl bg-muted text-left shadow-sm outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-ring sm:h-40"
                 aria-label={`${option.name ?? 'Parking lot'} photo`}
             >
                 <img
@@ -218,7 +240,7 @@ export default function ParkingLotVisual({
     ).imageUrl;
 
     return (
-        <div className="relative h-36 w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 sm:h-40">
+        <div className="relative h-36 w-full overflow-hidden rounded-2xl border border-border bg-muted sm:h-40">
             <img
                 src={fallbackSrc || '/assets/parking/airport-parking.svg'}
                 alt={`${option.name ?? 'Parking lot'} illustration`}

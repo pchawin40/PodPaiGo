@@ -114,6 +114,7 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
 
 import { getParkingTerminalTimeMinutes, buildParkingDriveContextFromOption } from './parking/routeMinutes';
 import { resolveTripParkingContext } from './trip/tripContext';
+import type { WeatherImpact } from './weather/types';
 
 function getParkingTotalMinutes(parking: ParkingOption, tripData: TripData): number {
   return getParkingTerminalTimeMinutes(
@@ -234,6 +235,11 @@ export function calculateOfficialParkingCost(
   tripDuration: number
 ): number {
   if (parking.type !== 'official') return 0;
+  if (parking.priceUnit === 'total') return parking.price;
+  if (parking.priceUnit === 'per-hour') {
+    const hours = Math.max(1, Math.ceil(tripDuration / 60));
+    return parking.price * hours;
+  }
 
   // Daily rate for official parking
   const days = Math.ceil(tripDuration / (24 * 60));
@@ -245,6 +251,11 @@ export function calculateOffAirportParkingCost(
   tripDuration: number
 ): number {
   if (parking.type !== 'off-airport') return 0;
+  if (parking.priceUnit === 'total') return parking.price;
+  if (parking.priceUnit === 'per-hour') {
+    const hours = Math.max(1, Math.ceil(tripDuration / 60));
+    return parking.price * hours;
+  }
 
   // Daily rate for off-airport parking
   const days = Math.ceil(tripDuration / (24 * 60));
@@ -310,12 +321,81 @@ export type RankedRecommendation = {
   reasons: string[];
 };
 
+export type RecommendationRankingContext = {
+  weatherImpact?: WeatherImpact | null;
+  familyFriendly?: boolean;
+  preference?: RecommendationSortMode;
+};
+
+function weatherSeverity(weatherImpact?: WeatherImpact | null): number {
+  if (!weatherImpact || weatherImpact.riskLevel === 'low') return 0;
+
+  let severity = weatherImpact.riskLevel === 'high' ? 2 : 1;
+  if (weatherImpact.condition === 'snow' || weatherImpact.condition === 'storm') severity += 1;
+  if ((weatherImpact.precipitationChance ?? 0) >= 70) severity += 1;
+  if ((weatherImpact.windMph ?? 0) >= 30) severity += 1;
+  return Math.min(severity, 4);
+}
+
+function applyWeatherAdjustment(
+  type: RankedRecommendation['type'],
+  option: ParkingOption | RideshareOption | TransitOption | TransitJourney,
+  weatherImpact?: WeatherImpact | null,
+): { score: number; reasons: string[] } {
+  const severity = weatherSeverity(weatherImpact);
+  if (!severity) return { score: 0, reasons: [] };
+
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (type === 'parking') {
+    const parking = option as ParkingOption;
+    const transferMinutes =
+      parking.transferToTerminalMinutes ??
+      parking.walkingMinutes ??
+      parking.shuttleMinutes ??
+      0;
+
+    if (parking.covered) {
+      score += 10 * severity;
+      reasons.push('Weather-friendly covered parking');
+    } else {
+      score -= 8 * severity;
+      reasons.push('Weather exposure');
+    }
+
+    if (parking.type === 'official' || parking.transferType === 'airport-garage') {
+      score += 6 * severity;
+      reasons.push('Closer terminal access in bad weather');
+    }
+
+    if (parking.transferType === 'shuttle') {
+      score -= 5 * severity;
+      reasons.push('Outdoor shuttle wait risk');
+    }
+
+    if (transferMinutes >= 12) {
+      score -= 4 * severity;
+      reasons.push('Longer transfer in bad weather');
+    }
+  } else if (type === 'transit') {
+    score -= 8 * severity;
+    reasons.push('Outdoor waiting and walking risk');
+  } else {
+    score += 4 * severity;
+    reasons.push('Less walking in bad weather');
+  }
+
+  return { score, reasons };
+}
+
 export function rankRecommendations(
   tripData: TripData,
   parkingOptions: ParkingOption[],
   rideshareOptions: RideshareOption[],
   transitJourneys: Array<TransitOption | TransitJourney>,
-  tsaEstimate: TsaEstimate
+  tsaEstimate: TsaEstimate,
+  rankingContext: RecommendationRankingContext = {},
 ): RankedRecommendation[] {
   const parkingDuration = calculateParkingDuration(tripData);
   const recommendations: RankedRecommendation[] = [];
@@ -326,6 +406,8 @@ export function rankRecommendations(
 
   const transportPreference =
     'transportAvailability' in tripData ? tripData.transportAvailability || 'all' : 'all';
+  const familyFriendly = rankingContext.familyFriendly === true;
+  const preference = rankingContext.preference || 'easiest';
 
   // Mode preference adjustment function
   const modePreferenceAdjustment = (
@@ -413,6 +495,31 @@ export function rankRecommendations(
       // Shuttle friction
       if ((parking.shuttleMinutes ?? 0) > 15) score -= 10;
 
+      if (parking.availabilityStatus === 'unavailable' || parking.isAvailable === false) {
+        score -= 200;
+      }
+      if ((parking.availability ?? 100) < 30) score -= 24;
+
+      if (preference === 'cheapest') score -= cost * 0.35;
+      if (preference === 'fastest') score -= totalDuration * 0.75;
+      if (preference === 'easiest') {
+        if (parking.type === 'official' || parking.transferType === 'airport-garage') score += 12;
+        if (parking.transferType === 'shuttle') score -= 4;
+      }
+
+      if (familyFriendly) {
+        if (parking.type === 'official' || parking.covered) score += 10;
+        if (parking.transferType === 'shuttle') score -= 6;
+        if ((parking.walkingMinutes ?? parking.transferToTerminalMinutes ?? 0) > 10) score -= 8;
+      }
+
+      const weatherAdjustment = applyWeatherAdjustment(
+        'parking',
+        parking,
+        rankingContext.weatherImpact,
+      );
+      score += weatherAdjustment.score;
+
       // Confidence and source bonuses/penalties
       if (parking.priceConfidence === 'high') score += 18;
       if (parking.priceConfidence === 'medium') score += 8;
@@ -468,6 +575,13 @@ export function rankRecommendations(
       if (parking.shuttleMinutes && parking.shuttleMinutes <= 12) reasons.push(`${parking.shuttleMinutes} min shuttle`);
       if (parking.walkingMinutes && parking.walkingMinutes <= 5) reasons.push(`${parking.walkingMinutes} min walk`);
       if (parking.bestFor?.length) reasons.push(parking.bestFor[0]);
+      reasons.push(...weatherAdjustment.reasons);
+      if (familyFriendly && (parking.type === 'official' || parking.covered)) {
+        reasons.push('Good with family or luggage');
+      }
+      if (parking.availabilityStatus === 'unavailable' || parking.isAvailable === false) {
+        reasons.push('Availability risk');
+      }
 
       if (reasons.length === 0) reasons.push('Available option');
 
@@ -493,6 +607,16 @@ export function rankRecommendations(
     score -= arrivalWaitPenalty;
 
     score += modePreferenceAdjustment('rideshare');
+    if (preference === 'fastest') score -= rideshare.duration * 0.45;
+    if (preference === 'cheapest') score -= cost * 0.35;
+    if (preference === 'easiest') score += 10;
+    if (familyFriendly) score += 8;
+    const weatherAdjustment = applyWeatherAdjustment(
+      'rideshare',
+      rideshare,
+      rankingContext.weatherImpact,
+    );
+    score += weatherAdjustment.score;
 
     const reasons = [];
     if (rideshare.duration < 30) reasons.push('Quick ride');
@@ -503,6 +627,8 @@ export function rankRecommendations(
     if (rideshare.trustStatus === 'live') reasons.push('Live availability');
     if (rideshare.trustStatus === 'verified-source') reasons.push('Verified source');
     if (cost < 100) reasons.push('Reasonable price');
+    if (familyFriendly) reasons.push('Easy with luggage');
+    reasons.push(...weatherAdjustment.reasons);
     if (reasons.length === 0) reasons.push('Available option');
 
     const stressScore = getStressScore('rideshare', rideshare, cost, tripData);
@@ -533,6 +659,17 @@ export function rankRecommendations(
     score -= transitWaitPenalty;
 
     score += modePreferenceAdjustment('transit');
+    if (preference === 'cheapest') score += 18;
+    if (preference === 'fastest') score -= totalDuration * 0.5;
+    if (preference === 'easiest') score -= 8;
+    if (familyFriendly) score -= 12;
+
+    const weatherAdjustment = applyWeatherAdjustment(
+      'transit',
+      transit,
+      rankingContext.weatherImpact,
+    );
+    score += weatherAdjustment.score;
 
     if (totalDuration >= 90) score -= 20;
     if (totalDuration >= 110) score -= 20;
@@ -570,6 +707,8 @@ export function rankRecommendations(
       const totalDriveTime = driveSegments.reduce((sum, s) => sum + s.duration, 0);
       reasons.push(`Drive ${totalDriveTime} min to transit`);
     }
+    if (familyFriendly) reasons.push('More effort with family or luggage');
+    reasons.push(...weatherAdjustment.reasons);
 
     if (reasons.length === 0) reasons.push('Transit option available');
 

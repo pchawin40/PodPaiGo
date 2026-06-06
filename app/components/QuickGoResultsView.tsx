@@ -2,7 +2,11 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { RankedRecommendation } from '../../lib/domain';
+import {
+  sortRankedRecommendations,
+  type RankedRecommendation,
+  type RecommendationSortMode,
+} from '../../lib/domain';
 import {
   buildFullAirportPlannerPath,
   buildQuickGoResultsPath,
@@ -45,15 +49,29 @@ export default function QuickGoResultsView({
 
   const driveTime = resolveQuickGoDriveTime(recommendation.trafficEstimate ?? null);
   const driveMinutes = driveTime.minutes;
+  const preference: RecommendationSortMode =
+    searchParams.get('quickGoPreference') === 'cheapest'
+      ? 'cheapest'
+      : searchParams.get('quickGoPreference') === 'fastest'
+        ? 'fastest'
+        : 'easiest';
+  const rankedForPreference = sortRankedRecommendations(rankedOptions, preference);
 
   const { bestWayLabel, backupWayLabel, bestOption, backupOption } = resolveQuickGoBestWay({
     tripData,
-    rankedOptions,
+    rankedOptions: rankedForPreference,
     driveMinutes,
     classification,
   });
 
   const originDisplayLabel = formatQuickGoOriginDisplayLabel(searchParams);
+  const quickGoPurpose = searchParams.get('quickGoPurpose') || 'general-destination';
+  const showLeaveTime = searchParams.get('calculateLeaveTime') !== '0';
+  const fullDetailsParams = new URLSearchParams(searchParams.toString());
+  fullDetailsParams.set('type', 'general-trip');
+  fullDetailsParams.delete('tripMode');
+  fullDetailsParams.set('quickGoConfirmed', '1');
+  const fullDetailsHref = `/results?${fullDetailsParams.toString()}`;
 
   const handleContinueQuickGo = () => {
     const origin = readQuickGoOriginFromSearchParams(searchParams);
@@ -111,14 +129,22 @@ export default function QuickGoResultsView({
           bestOption={bestOption}
           backupOption={backupOption}
           driveMinutes={driveMinutes}
+          leaveByTime={showLeaveTime ? recommendation.leaveByTime ?? null : null}
+          preference={preference}
+          quickGoPurpose={quickGoPurpose}
+          weatherImpact={recommendation.weatherImpact}
           driveTimeTrustStatus={recommendation.trafficEstimate?.trustStatus}
           driveTimeSourceName={recommendation.trafficEstimate?.sourceName}
           driveTimeUnavailable={driveTime.unavailable}
+          fullDetailsHref={fullDetailsHref}
         />
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <PrimaryButton href="/trip" variant="secondary">
-            Open full trip planner
+          <PrimaryButton href={fullDetailsHref} variant="secondary">
+            Open full trip details
+          </PrimaryButton>
+          <PrimaryButton href="/trip" variant="ghost">
+            New full trip
           </PrimaryButton>
           <Link
             href="/"

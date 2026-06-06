@@ -18,8 +18,10 @@ import {
   getRecentOrigins,
   rememberRecentOrigin,
   resolveGeolocationOrigin,
+  type QuickGoPreference,
   type QuickGoDestinationSelection,
   type QuickGoOriginSelection,
+  type QuickGoPurpose,
 } from '../../lib/trip/quickGo';
 import {
   getRecentDestinations,
@@ -34,6 +36,20 @@ import StatusPill from './ui/StatusPill';
 type QuickGoPanelProps = {
   className?: string;
 };
+
+const quickGoPurposes: Array<{ key: QuickGoPurpose; label: string }> = [
+  { key: 'general-destination', label: 'Going somewhere' },
+  { key: 'flying-out', label: 'Flying out' },
+  { key: 'picking-up', label: 'Picking up' },
+  { key: 'dropping-off', label: 'Dropping off' },
+  { key: 'parking-trip', label: 'Parking trip' },
+];
+
+const quickGoPreferences: Array<{ key: QuickGoPreference; label: string }> = [
+  { key: 'easiest', label: 'Easiest' },
+  { key: 'cheapest', label: 'Cheapest' },
+  { key: 'fastest', label: 'Fastest' },
+];
 
 function buildManualOriginSelection(originText: string): QuickGoOriginSelection {
   const trimmed = originText.trim();
@@ -87,6 +103,17 @@ function resolveAirportCode(
   return detectAirportFromDestination(destinationText)?.id ?? null;
 }
 
+function localDateTimeInputValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function dateFromLocalDateTimeInput(value: string): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const router = useRouter();
   const quickGoStartedTracked = useRef(false);
@@ -111,6 +138,15 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [pendingAirportCode, setPendingAirportCode] = useState<string | null>(null);
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>('all');
+  const [tripPurpose, setTripPurpose] = useState<QuickGoPurpose>('general-destination');
+  const [quickGoPreference, setQuickGoPreference] = useState<QuickGoPreference>('easiest');
+  const [timingMode, setTimingMode] = useState<'now' | 'later'>('now');
+  const [plannedDateTime, setPlannedDateTime] = useState(() =>
+    localDateTimeInputValue(new Date()),
+  );
+  const [parkingDurationHours, setParkingDurationHours] = useState('2');
+  const [calculateLeaveTime, setCalculateLeaveTime] = useState(true);
+  const [familyLuggageFriendly, setFamilyLuggageFriendly] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
   const [geolocationSupported, setGeolocationSupported] = useState(false);
@@ -345,6 +381,18 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
         origin,
         continueAsQuickGo,
         transportAvailability,
+        purpose: tripPurpose,
+        preference: quickGoPreference,
+        calculateLeaveTime,
+        familyLuggageFriendly,
+        parkingDurationMinutes: Math.max(
+          30,
+          Math.round((Number(parkingDurationHours) || 2) * 60),
+        ),
+        now:
+          timingMode === 'later'
+            ? dateFromLocalDateTimeInput(plannedDateTime) || new Date()
+            : new Date(),
       }),
     );
   };
@@ -515,7 +563,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
                 ) : null}
 
                 {!destinationSearchLoading && destinationSearchError ? (
-                  <div className="px-4 py-3 text-sm text-destructive">{destinationSearchError}</div>
+                  <div className="px-4 py-3 text-sm text-danger">{destinationSearchError}</div>
                 ) : null}
 
                 {!destinationSearchLoading &&
@@ -568,6 +616,137 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
             {destinationSelection.destinationConfidence === 'low' ? ' · lower confidence' : ''}
           </p>
         ) : null}
+
+        <div className="grid gap-3 rounded-xl border border-border/80 bg-muted/20 p-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Trip purpose
+            </div>
+            <div className="mt-2 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {quickGoPurposes.map((purpose) => {
+                const selected = tripPurpose === purpose.key;
+                return (
+                  <button
+                    key={purpose.key}
+                    type="button"
+                    onClick={() => setTripPurpose(purpose.key)}
+                    className={
+                      'shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
+                      (selected
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground')
+                    }
+                  >
+                    {purpose.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Timing
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-1 rounded-lg border border-border bg-card p-1">
+                {(['now', 'later'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setTimingMode(mode)}
+                    className={
+                      'rounded-md px-2 py-2 text-xs font-semibold transition ' +
+                      (timingMode === mode
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground')
+                    }
+                  >
+                    {mode === 'now' ? 'Now' : 'Later'}
+                  </button>
+                ))}
+              </div>
+              {timingMode === 'later' ? (
+                <input
+                  type="datetime-local"
+                  value={plannedDateTime}
+                  onChange={(event) => setPlannedDateTime(event.target.value)}
+                  className={`${inputClassName} mt-2`}
+                  aria-label="Quick Go date and time"
+                />
+              ) : null}
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Decision style
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg border border-border bg-card p-1">
+                {quickGoPreferences.map((preference) => (
+                  <button
+                    key={preference.key}
+                    type="button"
+                    onClick={() => setQuickGoPreference(preference.key)}
+                    className={
+                      'rounded-md px-2 py-2 text-xs font-semibold transition ' +
+                      (quickGoPreference === preference.key
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground')
+                    }
+                  >
+                    {preference.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {(tripPurpose === 'parking-trip' || tripPurpose === 'flying-out') ? (
+            <label className="block">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Parking duration
+              </span>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={parkingDurationHours}
+                  onChange={(event) => setParkingDurationHours(event.target.value)}
+                  className={`${inputClassName} max-w-28`}
+                />
+                <span className="text-sm text-muted-foreground">hours</span>
+              </div>
+            </label>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setCalculateLeaveTime((current) => !current)}
+              className={
+                'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
+                (calculateLeaveTime
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground')
+              }
+            >
+              Leave-time help {calculateLeaveTime ? 'on' : 'off'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFamilyLuggageFriendly((current) => !current)}
+              className={
+                'rounded-full border px-3 py-1.5 text-xs font-semibold transition ' +
+                (familyLuggageFriendly
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground')
+              }
+            >
+              Family/luggage friendly
+            </button>
+          </div>
+        </div>
 
         <div className="rounded-xl border border-border/80 bg-muted/20 p-2">
           <div className="grid grid-cols-3 gap-1">

@@ -61,6 +61,35 @@ function formatCompactMinutes(minutes: number): string {
   return `${mins}m`;
 }
 
+function formatPriceSource(option: ParkingOption): string {
+  if (option.priceDisplay === 'live' || option.pricingConfidence === 'live') return 'Live price';
+  if (option.priceDisplay === 'from-per-day') return 'From-per-day price';
+  if (option.priceDisplay === 'check-live') return 'Check live price';
+  if (option.priceDisplay === 'estimated' || option.priceConfidence === 'low') return 'Estimated price';
+  if (option.priceSource === 'official-rate') return 'Official posted rate';
+  return 'Price estimate';
+}
+
+function formatConfidence(option: ParkingOption): string {
+  if (option.routeTrustStatus === 'live' || option.trustStatus === 'live') return 'High confidence';
+  if (option.trustStatus === 'verified-source' || option.priceConfidence === 'high') {
+    return 'Good confidence';
+  }
+  if (option.trustStatus === 'fallback' || option.priceConfidence === 'low') {
+    return 'Lower confidence';
+  }
+  return 'Medium confidence';
+}
+
+function transferDirectionLabel(option: ParkingOption, airportTrip: boolean): string {
+  if (!airportTrip) return 'Go from parking to your destination';
+  if (option.transferType === 'walk' || option.transferType === 'airport-garage') {
+    return 'Walk from parking to terminal';
+  }
+  if (option.transferType === 'transit') return 'Take transit from lot to terminal';
+  return 'Take shuttle from parking to terminal';
+}
+
 function getWeatherScoreAdjustment(
   option: ParkingOption,
   weatherImpact?: WeatherImpact | null
@@ -354,15 +383,22 @@ export default function ParkingSmartPick({
   });
 
   const candidateOptions =
-    smartPickCandidates.length > 0 ? smartPickCandidates : routeAvailableOptions;
+    smartPickCandidates.length > 0
+      ? smartPickCandidates
+      : routeAvailableOptions.length > 0
+        ? routeAvailableOptions
+        : optionsWithAprLivePrice.filter((option) => !airportTrip || isAirportPlausibleParking(option));
 
   if (candidateOptions.length === 0) return null;
 
-  const modeSortedCandidates = sortParkingOptionsForMode(candidateOptions, sortMode, {
-    isUnavailable: isParkingRouteUnavailable,
-    totalCost: (option) => getParkingComparableCost(option, tripData),
-    tripData,
-  });
+  const modeSortedCandidates =
+    routeAvailableOptions.length > 0
+      ? sortParkingOptionsForMode(candidateOptions, sortMode, {
+          isUnavailable: isParkingRouteUnavailable,
+          totalCost: (option) => getParkingComparableCost(option, tripData),
+          tripData,
+        })
+      : candidateOptions;
 
   const cheapestOfficial = [...routeAvailableOptions]
     .filter((p) => p.type === 'official')
@@ -483,8 +519,8 @@ export default function ParkingSmartPick({
 
   const selectedSmartPick =
     selectedOptionWithAprLivePrice &&
-      !isParkingRouteUnavailable(selectedOptionWithAprLivePrice) &&
       (!airportTrip || isAirportPlausibleParking(selectedOptionWithAprLivePrice))
+      && (!isParkingRouteUnavailable(selectedOptionWithAprLivePrice) || routeAvailableOptions.length === 0)
       ? selectedOptionWithAprLivePrice
       : null;
 
@@ -506,20 +542,28 @@ export default function ParkingSmartPick({
 
   const bestPriceDisplay = parkingPriceLine(best, tripData);
   const priceTrust = resolveParkingPriceTrust(best, tripData);
+  const routeTimingUnavailable = isParkingRouteUnavailable(best);
 
   const parkingTripContext = tripData
     ? resolveTripParkingContext(tripData)
     : 'airport_trip';
 
-  const bestTime = parkingTimeBreakdown(
-    best,
-    buildParkingDriveContextFromOption(best),
-    parkingTripContext,
-  );
+  const bestTime = routeTimingUnavailable
+    ? { totalMinutes: 0, parts: [] as Array<{ label: string; minutes: number; display?: string }> }
+    : parkingTimeBreakdown(
+        best,
+        buildParkingDriveContextFromOption(best),
+        parkingTripContext,
+      );
+  const bestTimeLabel = routeTimingUnavailable
+    ? 'Route timing unavailable'
+    : `${formatCompactMinutes(bestTime.totalMinutes)} total`;
 
   const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
   const modeBadges = reasonBadgesForOption(best, sortMode, tripData);
-  const pickExplanation = explanationForOption(best, sortMode, tripData);
+  const pickExplanation = routeTimingUnavailable
+    ? 'Showing best available parking estimate. Open directions to confirm route timing.'
+    : explanationForOption(best, sortMode, tripData);
   const customerOnlyWarning =
     best.accessType === 'customer_only' || best.accessType === 'validated_customer'
       ? 'Customer-only parking may require shopping, validation, or posted-lot compliance.'
@@ -550,8 +594,8 @@ export default function ParkingSmartPick({
   };
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-sky-100 bg-white/95 p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
-      <div className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase text-blue-700">
+    <section className="travel-card overflow-hidden rounded-3xl p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
+      <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
         Smart parking pick
       </div>
 
@@ -565,7 +609,7 @@ export default function ParkingSmartPick({
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold leading-tight text-slate-950 sm:text-2xl">{best.name}</h2>
+          <h2 className="text-xl font-semibold leading-tight text-foreground sm:text-2xl">{best.name}</h2>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             {modeBadges.map((badge) => (
@@ -667,7 +711,7 @@ export default function ParkingSmartPick({
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-700">
             <span className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
-              {formatCompactMinutes(bestTime.totalMinutes)} total
+              {bestTimeLabel}
             </span>
 
             {bestTime.parts.slice(0, 4).map((part) => (
@@ -708,6 +752,12 @@ export default function ParkingSmartPick({
           {customerOnlyWarning ? (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-950">
               {customerOnlyWarning}
+            </div>
+          ) : null}
+
+          {routeTimingUnavailable ? (
+            <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm font-medium text-foreground">
+              Showing best available parking estimate. Open directions to confirm route timing.
             </div>
           ) : null}
 
@@ -753,6 +803,148 @@ export default function ParkingSmartPick({
             </div>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-border bg-card p-4 text-sm text-foreground">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-base font-semibold text-foreground">
+                  Full route plan
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Drive to the lot first, then follow the{' '}
+                  {airportTrip ? 'parking-to-terminal' : 'walk-to-destination'} step.
+                </p>
+              </div>
+              <div className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
+                {routeTimingUnavailable ? 'Route timing unavailable' : `${formatCompactMinutes(bestTime.totalMinutes)} total trip`}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  1. Origin to parking lot
+                </div>
+                <div className="mt-2 font-semibold text-foreground">
+                  {routeTimingUnavailable
+                    ? 'Check route'
+                    : formatCompactMinutes(
+                        best.originToParkingMinutes ??
+                          best.routeToParkingMinutes ??
+                          best.driveMinutes ??
+                          best.duration ??
+                          bestTime.parts[0]?.minutes ??
+                          0,
+                      )}
+                </div>
+                <div className="mt-2 text-muted-foreground">
+                  {best.address || best.canonicalAddress || best.routeDestination || best.name}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {bestRouteLinks.routeToParkingUrl ? (
+                    <a
+                      href={bestRouteLinks.routeToParkingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      Directions to lot
+                    </a>
+                  ) : null}
+                  {(best.address || best.canonicalAddress) ? (
+                    <button
+                      type="button"
+                      onClick={() => void copyText(best.address || best.canonicalAddress || '')}
+                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      Copy address
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  2. Parking to {airportTrip ? 'terminal' : 'destination'}
+                </div>
+                <div className="mt-2 font-semibold text-foreground">
+                  {formatCompactMinutes(
+                    best.transferToTerminalMinutes ??
+                      best.shuttleMinutes ??
+                      best.walkingMinutes ??
+                      bestTime.parts[1]?.minutes ??
+                      0,
+                  )}
+                </div>
+                <div className="mt-2 text-muted-foreground">
+                  {transferDirectionLabel(best, airportTrip)}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {bestRouteLinks.parkingToDestinationUrl ? (
+                    <a
+                      href={bestRouteLinks.parkingToDestinationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      Directions from lot
+                    </a>
+                  ) : null}
+                  {bestRouteLinks.parkingToAirportUrl ? (
+                    <a
+                      href={bestRouteLinks.parkingToAirportUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      Terminal step
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  3. Total trip summary
+                </div>
+                <div className="mt-2 font-semibold text-foreground">
+                  {bestPriceDisplay.primary}
+                </div>
+                <dl className="mt-2 space-y-1 text-muted-foreground">
+                  <div className="flex justify-between gap-3">
+                    <dt>Price label</dt>
+                    <dd className="font-medium text-foreground">{formatPriceSource(best)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Confidence</dt>
+                    <dd className="font-medium text-foreground">{formatConfidence(best)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Weather</dt>
+                    <dd className="font-medium text-foreground">
+                      {weatherImpact?.riskLevel === 'high'
+                        ? 'High impact'
+                        : weatherImpact?.riskLevel === 'medium'
+                          ? 'Moderate impact'
+                          : 'Low impact'}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Coverage</dt>
+                    <dd className="font-medium text-foreground">
+                      {best.covered ? 'Covered' : 'Uncovered or unknown'}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Provider</dt>
+                    <dd className="font-medium text-foreground">
+                      {best.bookingProvider || best.sourceName || 'Parking source'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-2 text-xs font-medium text-emerald-700">
             Smart pick for {airportTrip ? 'this airport' : 'this destination'}
           </div>
@@ -770,33 +962,41 @@ export default function ParkingSmartPick({
                   <div>
                     <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
                     <div className="mt-1 text-xs text-zinc-500">
-                      From your origin to being inside the airport terminal.
+                      {airportTrip
+                        ? 'From your origin to being inside the airport terminal.'
+                        : 'From your origin to destination arrival.'}
                     </div>
                   </div>
 
                   <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-900">
-                    {formatCompactMinutes(bestTime.totalMinutes)}
+                    {routeTimingUnavailable ? 'Check route' : formatCompactMinutes(bestTime.totalMinutes)}
                   </div>
                 </div>
 
-                <div className="mt-4 space-y-2">
-                  {bestTime.parts.map((part) => (
-                    <div
-                      key={`${part.label}-${part.minutes}`}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <span>{part.label}</span>
-                      <span className="font-medium text-zinc-900">
-                        {part.display ?? formatCompactMinutes(part.minutes)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {routeTimingUnavailable ? (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                    Route timing is unavailable for this lot. Price, provider, and access details are shown so you can compare, but directions should be confirmed in Maps.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {bestTime.parts.map((part) => (
+                      <div
+                        key={`${part.label}-${part.minutes}`}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span>{part.label}</span>
+                        <span className="font-medium text-zinc-900">
+                          {part.display ?? formatCompactMinutes(part.minutes)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="mt-3 border-t border-zinc-200 pt-3">
                   <div className="flex items-center justify-between gap-3 font-semibold text-zinc-900">
-                    <span>Total to terminal</span>
-                    <span>{formatCompactMinutes(bestTime.totalMinutes)}</span>
+                    <span>{airportTrip ? 'Total to terminal' : 'Total to destination'}</span>
+                    <span>{routeTimingUnavailable ? 'Check route' : formatCompactMinutes(bestTime.totalMinutes)}</span>
                   </div>
                 </div>
               </div>
@@ -816,15 +1016,15 @@ export default function ParkingSmartPick({
 
                 {best.priceConfidence && (
                   <div>
-                    Price confidence:{' '}
-                    <span className="font-medium capitalize">{best.priceConfidence}</span>
+                    Price label:{' '}
+                    <span className="font-medium">{formatPriceSource(best)}</span>
                   </div>
                 )}
 
                 {best.trustStatus && (
                   <div>
-                    Trust status:{' '}
-                    <span className="font-medium capitalize">{best.trustStatus}</span>
+                    Overall confidence:{' '}
+                    <span className="font-medium">{formatConfidence(best)}</span>
                   </div>
                 )}
 
@@ -884,7 +1084,7 @@ export default function ParkingSmartPick({
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
             >
-              Parking to terminal
+              {airportTrip ? 'Parking to terminal' : 'Parking to destination'}
             </a>
           )}
         </div>

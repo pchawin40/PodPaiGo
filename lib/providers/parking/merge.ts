@@ -12,6 +12,7 @@ import { inferPriceFreshness } from './types';
 import { isLiveGoogleParkingDiscoveryEnabled } from '../../parking/parkingDiscoveryMode';
 import { SHOWING_CACHED_PROVIDER_DATA_MESSAGE } from '../../parking/googlePlacesSafeMode';
 import { validateParkingInventoryOption } from '../../parking/inventoryValidation';
+import { buildSeaOfficialParkingOptions } from '../../parking/seaOfficialParking';
 import { debugLog } from '../../utils/debug';
 
 function normalizeSnapshotName(name: string): string {
@@ -144,8 +145,14 @@ export async function mergeLiveParkingSources(
     : buildSnapshotParkingOptions({ airportCode, snapshots: latestPriceSnapshots });
 
   const discoveredLots = dedupeParkingOptions(parts.liveGoogleOptions);
+  const officialAirportOptions = buildSeaOfficialParkingOptions({
+    airportCode,
+    checkInAt: args.checkInAt,
+    checkOutAt: args.checkOutAt,
+  });
 
   const merged = dedupeParkingOptions([
+    ...officialAirportOptions,
     ...parts.parkWhizOptions,
     ...parts.aprOptions,
     ...snapshotOptions,

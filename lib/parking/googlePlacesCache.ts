@@ -1493,6 +1493,11 @@ export async function resolveParkingGoogleReviews(args: {
 
 export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheRecord): Partial<ParkingOption> {
   const hasGoogleCoords = typeof place.lat === 'number' && typeof place.lng === 'number';
+  const photoNames = place.photoNames?.length
+    ? place.photoNames
+    : place.photoName
+      ? [place.photoName]
+      : undefined;
 
   return {
     googlePlaceId: place.googlePlaceId,
@@ -1502,6 +1507,8 @@ export function parkingGooglePlaceToOptionUpdate(place: ParkingGooglePlaceCacheR
     googlePlaceName: place.googlePlaceName,
     googlePlaceAddress: place.googleFormattedAddress,
     googleMapsUri: place.googleMapsUri,
+    googlePhotoName: photoNames?.[0],
+    googlePhotoNames: photoNames,
     reviewScore: typeof place.rating === 'number' ? place.rating : undefined,
     reviewCount: typeof place.reviewCount === 'number' ? place.reviewCount : undefined,
     normalizedAddress: place.googleFormattedAddress || undefined,

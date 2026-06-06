@@ -241,6 +241,19 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
   );
 }
 
+function googlePhotoNames(
+  photos: GooglePlace['photos'] | null | undefined,
+  limit = 4,
+): string[] {
+  return Array.from(
+    new Set(
+      (photos ?? [])
+        .map((photo) => photo.name?.trim() || '')
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ).slice(0, limit);
+}
+
 function resolveLotKeyFromName(name: string): string | null {
   const lower = name.toLowerCase();
 
@@ -484,6 +497,7 @@ export async function getGoogleParkingPlaces(args: {
     filteredPlaces.map(async (place: GooglePlace): Promise<ParkingOption> => {
         const rating = typeof place.rating === 'number' ? place.rating : undefined;
         const reviewCount = typeof place.userRatingCount === 'number' ? place.userRatingCount : undefined;
+        const photoNames = googlePhotoNames(place.photos);
 
         const name = place.displayName?.text || `${airportCode} Parking`;
         const lowerName = name.toLowerCase();
@@ -549,6 +563,8 @@ export async function getGoogleParkingPlaces(args: {
           mapLink: place.googleMapsUri || googleMapsSearchUrl(place.formattedAddress || name),
           googlePlaceId: place.id,
           googleMapsUri: place.googleMapsUri,
+          googlePhotoName: photoNames[0],
+          googlePhotoNames: photoNames.length ? photoNames : undefined,
           address: place.formattedAddress,
           imageUrl: undefined,
           images: undefined,

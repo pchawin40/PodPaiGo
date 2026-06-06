@@ -40,7 +40,7 @@ const features = [
   {
     title: 'Confidence labels',
     description:
-      'Prices and route details are labeled as live, verified, estimated, fallback, or unavailable.',
+      'Prices and route details are labeled as live, verified, estimated, or unavailable.',
   },
 ];
 

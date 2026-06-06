@@ -79,6 +79,22 @@ describe('city destination parking context', () => {
     expect(estimatePikePlaceMarketPrice(5 * 60)).toBe(36);
   });
 
+  test('Pike Place active rate exposes eligible early bird special and warnings', () => {
+    const pricing = resolveCityParkingPricing({
+      name: 'Pike Place Market Parking Garage',
+      address: '1531 Western Ave, Seattle, WA 98101',
+      durationMinutes: 8 * 60,
+      covered: true,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '08:30',
+    });
+
+    expect(pricing.price).toBe(17);
+    expect(pricing.activeRate?.rateType).toBe('early_bird');
+    expect(pricing.priceNote).toMatch(/Early bird/i);
+    expect(pricing.assumptions?.join(' ')).toMatch(/Event rates may override/i);
+  });
+
   test('city garage badge is not labeled Airport Garage', () => {
     const label = getParkingVisualBadgeLabel(PIKE_PLACE_GARAGE, 'city_destination_trip');
     expect(label).not.toMatch(/Airport/i);
@@ -153,5 +169,6 @@ describe('city destination parking context', () => {
     expect(hints[0]?.sourceLink).toMatch(/pikeplacemarket\.org\/parking/);
     expect(hints[0]?.bookingProvider).toBeUndefined();
     expect(hints[0]?.priceNote).toMatch(/Provider controls final price/);
+    expect(hints[0]?.activeRate?.warnings.join(' ')).toMatch(/Check garage|Event rates/i);
   });
 });
