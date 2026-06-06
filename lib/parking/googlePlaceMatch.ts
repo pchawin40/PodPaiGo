@@ -5,6 +5,7 @@ import {
 import { mergeParkingRouteStatus, withStableParkingRouteStatus } from './routeStatus';
 import { shouldDiscoverParkingForTrip } from '../trip/tripContext';
 import { isGooglePlacesLiveBlocked } from './googlePlacesGuard';
+import { logParkingPhotoReviewTrace } from './photoReviewDebug';
 
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
@@ -36,7 +37,16 @@ function buildMatchKey(parking: ParkingOption, airportCode: string | null): stri
   ].join('|');
 }
 
-function buildRequestBody(parking: ParkingOption, tripData: TripData | null, airportCode: string | null) {
+function hasGooglePhotoMetadata(parking: ParkingOption): boolean {
+  return Boolean(parking.googlePhotoName || parking.googlePhotoNames?.length);
+}
+
+function buildRequestBody(
+  parking: ParkingOption,
+  tripData: TripData | null,
+  airportCode: string | null,
+  options: { includePhoto: boolean },
+) {
   return {
     name: parking.name,
     address: parking.address || parking.normalizedAddress || parking.routeDestination || null,
@@ -46,7 +56,7 @@ function buildRequestBody(parking: ParkingOption, tripData: TripData | null, air
     provider: parking.bookingProvider || null,
     source: parking.sourceName || null,
     googlePlaceId: parking.googlePlaceId || null,
-    includePhoto: false,
+    includePhoto: options.includePhoto,
   };
 }
 
@@ -108,12 +118,14 @@ export async function attachGooglePlaceToParking(
   }
 
   const inflight = matchInFlightCache.get(cacheKey);
-  if (inflight) return inflight;
+  if (inflight && !options.force) return inflight;
 
   const cached = matchResultCache.get(cacheKey);
   if (cached && !options.force) return withStableParkingRouteStatus(cached);
 
-  const body = buildRequestBody(parking, tripData, airportCode);
+  const body = buildRequestBody(parking, tripData, airportCode, {
+    includePhoto: options.force || !hasGooglePhotoMetadata(parking),
+  });
 
   const promise = (async () => {
     const controller = new AbortController();
@@ -161,6 +173,18 @@ export async function attachGooglePlaceToParking(
       ]);
 
       const imageUrl = responseImages[0];
+      const googlePhotoNames = uniqueStrings([
+        place.googlePhotoName,
+        place.photoName,
+        data.googlePhotoName,
+        data.photoName,
+        ...stringArray(place.googlePhotoNames),
+        ...stringArray(place.photoNames),
+        ...stringArray(data.googlePhotoNames),
+        ...stringArray(data.photoNames),
+        parking.googlePhotoName,
+        ...(parking.googlePhotoNames || []),
+      ]);
 
       if (!placeId) {
         const fallbackWithImage = imageUrl
@@ -170,6 +194,22 @@ export async function attachGooglePlaceToParking(
             images: responseImages.length ? responseImages : [imageUrl],
           } as ParkingOption)
           : withStableParkingRouteStatus(parking);
+
+        logParkingPhotoReviewTrace('after_client_google_place_attach', fallbackWithImage, {
+          stageNote: 'Google place match response had no place id; keeping parking object with any returned image',
+          apiReturnedPlaceId: false,
+          apiReturnedGooglePhotoName: Boolean(googlePhotoNames.length),
+          selectedVisualSource:
+            fallbackWithImage.googlePhotoName || fallbackWithImage.googlePhotoNames?.length
+              ? 'google photo'
+              : fallbackWithImage.imageUrl || fallbackWithImage.images?.length
+                ? 'provider image'
+                : 'illustration',
+          illustrationReason:
+            fallbackWithImage.googlePhotoName || fallbackWithImage.googlePhotoNames?.length || fallbackWithImage.imageUrl || fallbackWithImage.images?.length
+              ? null
+              : 'google_place_match_response_had_no_metadata',
+        });
 
         if (!options.force) {
           matchResultCache.set(cacheKey, withStableParkingRouteStatus(fallbackWithImage));
@@ -197,6 +237,23 @@ export async function attachGooglePlaceToParking(
         googlePlaceName: place.displayName ?? place.name ?? parking.googlePlaceName,
         googlePlaceAddress: place.formattedAddress ?? place.address ?? parking.googlePlaceAddress,
         googleMapsUri: place.googleMapsUri ?? parking.googleMapsUri,
+        googlePhotoName: googlePhotoNames[0] ?? parking.googlePhotoName,
+        googlePhotoNames: googlePhotoNames.length ? googlePhotoNames : parking.googlePhotoNames,
+        photoSource: place.photoSource ?? data.photoSource ?? parking.photoSource,
+        photoAttribution: place.photoAttribution ?? data.photoAttribution ?? parking.photoAttribution,
+        photoAttributionUrl:
+          place.photoAttributionUrl ?? data.photoAttributionUrl ?? parking.photoAttributionUrl,
+        photoAttributions: stringArray(place.photoAttributions).length
+          ? stringArray(place.photoAttributions)
+          : stringArray(data.photoAttributions).length
+            ? stringArray(data.photoAttributions)
+            : parking.photoAttributions,
+        requiresGoogleAttribution:
+          typeof place.requiresGoogleAttribution === 'boolean'
+            ? place.requiresGoogleAttribution
+            : typeof data.requiresGoogleAttribution === 'boolean'
+              ? data.requiresGoogleAttribution
+              : parking.requiresGoogleAttribution,
         reviewScore: typeof place.rating === 'number' ? place.rating : parking.reviewScore,
         reviewCount:
           typeof place.userRatingCount === 'number'
@@ -210,9 +267,39 @@ export async function attachGooglePlaceToParking(
         images: imageUrl ? responseImages : parking.images,
       }) as ParkingOption;
 
+      logParkingPhotoReviewTrace('after_client_google_place_attach', enriched, {
+        stageNote: 'Google place match response merged into parking option',
+        apiReturnedPlaceId: true,
+        apiReturnedGooglePhotoName: Boolean(googlePhotoNames.length),
+        selectedVisualSource:
+          enriched.googlePhotoName || enriched.googlePhotoNames?.length
+            ? 'google photo'
+            : enriched.imageUrl || enriched.images?.length
+              ? 'provider image'
+              : 'illustration',
+        illustrationReason:
+          enriched.googlePhotoName || enriched.googlePhotoNames?.length || enriched.imageUrl || enriched.images?.length
+            ? null
+            : 'google_place_match_response_merged_without_photo_metadata',
+      });
+
       matchResultCache.set(cacheKey, enriched);
       return enriched;
     } catch {
+      logParkingPhotoReviewTrace('after_client_google_place_attach', parking, {
+        stageNote: 'Google place match request failed; keeping original parking object',
+        apiRequestFailed: true,
+        selectedVisualSource:
+          parking.googlePhotoName || parking.googlePhotoNames?.length
+            ? 'google photo'
+            : parking.imageUrl || parking.images?.length
+              ? 'provider image'
+              : 'illustration',
+        illustrationReason:
+          parking.googlePhotoName || parking.googlePhotoNames?.length || parking.imageUrl || parking.images?.length
+            ? null
+            : 'google_place_match_request_failed_and_original_has_no_photo_metadata',
+      });
       if (!options.force) {
         matchResultCache.set(cacheKey, withStableParkingRouteStatus(parking));
       }

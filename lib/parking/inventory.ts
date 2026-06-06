@@ -1,4 +1,4 @@
-import { db } from '../db/client';
+import { db, parkingDbCacheDisabledByConfig } from '../db/client';
 import { getAirportById } from '../airports/catalog';
 import { withTimeout } from '../utils/asyncTimeout';
 
@@ -6,7 +6,7 @@ const PARKING_DB_READ_TIMEOUT_MS =
   Number(process.env.PARKING_DB_READ_TIMEOUT_MS || 4000);
 
 function parkingDbCacheDisabled(): boolean {
-    return process.env.DISABLE_PARKING_DB_CACHE === 'true';
+    return parkingDbCacheDisabledByConfig();
 }
 
 export type ParkingLotInventoryInput = {
@@ -42,6 +42,7 @@ export async function saveParkingLots(
     lots: ParkingLotInventoryInput[],
 ): Promise<number> {
     if (lots.length === 0) return 0;
+    if (parkingDbCacheDisabled()) return 0;
 
     const client = await db.connect();
 

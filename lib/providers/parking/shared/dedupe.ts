@@ -1,5 +1,6 @@
 import type { ParkingOption } from '../../../types';
 import { isLiveParkWhizOption } from '../../../parking/parkWhizMatch';
+import { logParkingPhotoReviewTrace } from '../../../parking/photoReviewDebug';
 
 export function normalizeLotName(name: string): string {
   return name
@@ -65,6 +66,13 @@ function mergeParkingDuplicates(primary: ParkingOption, secondary: ParkingOption
     lng: coordSource.lng ?? primary.lng ?? secondary.lng,
     googlePlaceId: primary.googlePlaceId ?? secondary.googlePlaceId,
     googleMapsUri: primary.googleMapsUri ?? secondary.googleMapsUri,
+    googlePhotoName: primary.googlePhotoName ?? secondary.googlePhotoName,
+    googlePhotoNames: primary.googlePhotoNames ?? secondary.googlePhotoNames,
+    googleReviews: primary.googleReviews ?? secondary.googleReviews,
+    googleReviewsFetchedAt: primary.googleReviewsFetchedAt ?? secondary.googleReviewsFetchedAt,
+    googleReviewsExpiresAt: primary.googleReviewsExpiresAt ?? secondary.googleReviewsExpiresAt,
+    googlePlaceName: primary.googlePlaceName ?? secondary.googlePlaceName,
+    googlePlaceAddress: primary.googlePlaceAddress ?? secondary.googlePlaceAddress,
     parkingRouteDebug: primary.parkingRouteDebug ?? secondary.parkingRouteDebug,
     imageUrl: secondary.imageUrl ?? primary.imageUrl,
     images: secondary.images ?? primary.images,
@@ -92,7 +100,25 @@ export function dedupeParkingOptions(options: ParkingOption[]): ParkingOption[] 
       parkingOptionRank(option) >= parkingOptionRank(existing) ? option : existing;
     const secondary = primary === option ? existing : option;
 
-    byKey.set(key, mergeParkingDuplicates(primary, secondary));
+    const merged = mergeParkingDuplicates(primary, secondary);
+    logParkingPhotoReviewTrace('after_provider_merge_dedupe', merged, {
+      stageNote: 'dedupe merged duplicate parking options',
+      primaryName: primary.name,
+      primaryProvider: primary.bookingProvider ?? primary.sourceName ?? null,
+      secondaryName: secondary.name,
+      secondaryProvider: secondary.bookingProvider ?? secondary.sourceName ?? null,
+      selectedVisualSource:
+        merged.googlePhotoName || merged.googlePhotoNames?.length
+          ? 'google photo'
+          : merged.imageUrl || merged.images?.length
+            ? 'provider image'
+            : 'illustration',
+      illustrationReason:
+        merged.googlePhotoName || merged.googlePhotoNames?.length || merged.imageUrl || merged.images?.length
+          ? null
+          : 'no_google_or_provider_photo_metadata_after_dedupe',
+    });
+    byKey.set(key, merged);
   }
 
   return Array.from(byKey.values());

@@ -1,5 +1,6 @@
 import { RecommendationEngine } from '../recommendationEngine';
 import type { DataProvider } from '../providers';
+import { getAirportById } from '../airports/catalog';
 import type {
   FlightInfo,
   LocationInfo,
@@ -598,5 +599,170 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
 
     expect(recommendation.trafficEstimate?.routeUnavailable).toBe(true);
     expect(recommendation.trafficEstimate?.duration).not.toBe(35);
+  });
+
+  test('airport main route forwards geocoded origin and airport catalog coordinates', async () => {
+    const sea = getAirportById('SEA')!;
+    const monroeCoords = { lat: 47.855, lng: -121.97 };
+    const trafficSpy = jest.fn(async () => okTraffic);
+    const geocodeSpy = jest.fn(async (address: string) =>
+      /monroe/i.test(address) ? monroeCoords : null,
+    );
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: geocodeSpy,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    await RecommendationEngine.generateRecommendations({
+      type: 'one-way-departure',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport',
+      airportCode: 'SEA',
+      departureDate: '2026-06-01',
+      departureTime: '12:00',
+      timeAnchor: 'flight-departure',
+      transportAvailability: 'all',
+    });
+
+    const trafficCalls = trafficSpy.mock.calls as Array<Parameters<DataProvider['getTrafficEstimate']>>;
+    const mainCall = trafficCalls.find(
+      (call) => (call[4] as { routePurpose?: string } | undefined)?.routePurpose === 'main_to_destination',
+    );
+    expect(mainCall).toBeDefined();
+    expect(mainCall?.[3]).toEqual(sea.geoLocation);
+    expect(mainCall?.[4]).toEqual(
+      expect.objectContaining({
+        airportCode: 'SEA',
+        routePurpose: 'main_to_destination',
+        tripType: 'one-way-departure',
+        originLatLng: monroeCoords,
+      }),
+    );
+    expect(geocodeSpy).toHaveBeenCalledWith('Monroe, WA');
+    expect(geocodeSpy).not.toHaveBeenCalledWith('Seattle-Tacoma International Airport');
+  });
+
+  test('airport Mapbox backup estimate is accepted for leave-by timing', async () => {
+    const mapboxTraffic: TrafficEstimate = {
+      route: 'home-airport',
+      duration: 42,
+      congestion: 'medium',
+      trustStatus: 'live',
+      routeUnavailable: false,
+      sourceName: 'Mapbox Directions',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Backup route timing from Mapbox Directions (Google Routes unavailable).'],
+    };
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => mapboxTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: async () => ({ lat: 47.855, lng: -121.97 }),
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'one-way-departure',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport',
+      airportCode: 'SEA',
+      departureDate: '2026-06-01',
+      departureTime: '12:00',
+      timeAnchor: 'flight-departure',
+      transportAvailability: 'all',
+      securityOption: 'standard',
+      flightType: 'domestic',
+      cabin: 'economy',
+      bagPlan: 'none',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Mapbox Directions');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.airportRouteUnavailable).toBe(false);
+    expect(recommendation.leaveByTime).toMatch(/^\d{2}:\d{2}$/);
+    expect(recommendation.tsaEstimate).toBeDefined();
+  });
+
+  test('airport traffic timeout uses coordinate fallback before unavailable', async () => {
+    process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => new Promise(() => {}) as Promise<never>,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: async () => ({ lat: 47.855, lng: -121.97 }),
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'one-way-departure',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport',
+      airportCode: 'SEA',
+      departureDate: '2026-06-01',
+      departureTime: '12:00',
+      timeAnchor: 'flight-departure',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Estimated from coordinates');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.airportRouteUnavailable).toBe(false);
+    expect(recommendation.leaveByTime).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  test('airport route stays unavailable only when no usable fallback coordinates exist', async () => {
+    process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => new Promise(() => {}) as Promise<never>,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'one-way-departure',
+      origin: 'Current location',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport',
+      airportCode: 'SEA',
+      departureDate: '2026-06-01',
+      departureTime: '12:00',
+      timeAnchor: 'flight-departure',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.routeUnavailable).toBe(true);
+    expect(recommendation.airportRouteUnavailable).toBe(true);
+    expect(recommendation.leaveByTime).toBeNull();
   });
 });

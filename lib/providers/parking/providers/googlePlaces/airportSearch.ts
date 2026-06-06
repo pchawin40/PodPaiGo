@@ -9,6 +9,7 @@ import { withAvailabilityScore } from '../../shared/availability';
 import { milesBetween } from '../../shared/geo';
 import { googleMapsSearchUrl } from '../../shared/urls';
 import { debugLog } from '../../../../utils/debug';
+import { logParkingPhotoReviewTrace } from '../../../../parking/photoReviewDebug';
 
 type GooglePlace = {
   id?: string;
@@ -602,7 +603,21 @@ export async function getGoogleParkingPlaces(args: {
           parkAndRideRules: isParkAndRide ? DEFAULT_UNKNOWN_PARK_AND_RIDE_RULES : undefined,
         };
 
-        return withAvailabilityScore(option);
+        const scoredOption = withAvailabilityScore(option);
+        logParkingPhotoReviewTrace('after_google_places_discovery', scoredOption, {
+          stageNote: 'Google Places airport discovery mapped to ParkingOption',
+          selectedVisualSource:
+            scoredOption.googlePhotoName || scoredOption.googlePhotoNames?.length
+              ? 'google photo'
+              : scoredOption.imageUrl || scoredOption.images?.length
+                ? 'provider image'
+                : 'illustration',
+          illustrationReason:
+            scoredOption.googlePhotoName || scoredOption.googlePhotoNames?.length || scoredOption.imageUrl || scoredOption.images?.length
+              ? null
+              : 'google_places_discovery_returned_no_photo_metadata',
+        });
+        return scoredOption;
       }),
   );
 

@@ -5,6 +5,7 @@ import { registerDefaultParkingProviders, resetDefaultParkingProvidersForTests }
 import { applyLegacyDisplayOrder } from '../displayOrder';
 import { mergeLiveParkingSourceResults } from '../merge';
 import { resetParkingSearchCacheForTests } from '../searchCache';
+import { getParkingPriceSnapshotsCached } from '../shared/snapshots';
 
 jest.mock('../shared/snapshots', () => ({
   getParkingPriceSnapshotsCached: jest.fn(async () => []),
@@ -40,50 +41,61 @@ describe('aggregateAirportParkingOptions', () => {
   });
 
   it('merges provider search results and filters by airport', async () => {
-    jest.spyOn(parkingProviderRegistry, 'executeSearch').mockResolvedValueOnce([
-      {
-        providerId: 'inventory',
-        options: [baseOption({ id: 'inv-1', name: 'Inventory Lot A' })],
-        health: { status: 'healthy', checkedAt: new Date().toISOString() },
-      },
-      {
-        providerId: 'parkwhiz',
-        options: [baseOption({ id: 'pw-1', name: 'ParkWhiz Lot B', sourceName: 'ParkWhiz', bookingProvider: 'ParkWhiz' })],
-        health: { status: 'healthy', checkedAt: new Date().toISOString() },
-      },
-    ]);
+    jest.spyOn(parkingProviderRegistry, 'executeSearchPartial').mockResolvedValueOnce({
+      timedOut: false,
+      results: [
+        {
+          providerId: 'inventory',
+          options: [baseOption({ id: 'inv-1', name: 'Inventory Lot A' })],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+        {
+          providerId: 'parkwhiz',
+          options: [baseOption({ id: 'pw-1', name: 'ParkWhiz Lot B', sourceName: 'ParkWhiz', bookingProvider: 'ParkWhiz' })],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+      ],
+    });
 
     const options = await aggregateAirportParkingOptions({
       airportCode: 'SEA',
       destination: 'Seattle-Tacoma International Airport (SEA)',
     });
 
-    expect(options.map((option) => option.id)).toEqual(['pw-1', 'inv-1']);
+    expect(options.map((option) => option.id)).toEqual(
+      expect.arrayContaining(['pw-1', 'inv-1']),
+    );
+    expect(options.findIndex((option) => option.id === 'pw-1')).toBeLessThan(
+      options.findIndex((option) => option.id === 'inv-1'),
+    );
   });
 
   it('keeps successful airport providers when one provider reports a failure', async () => {
-    jest.spyOn(parkingProviderRegistry, 'executeSearch').mockResolvedValueOnce([
-      {
-        providerId: 'google',
-        options: [],
-        health: {
-          status: 'offline',
-          message: 'Google provider failed',
-          checkedAt: new Date().toISOString(),
+    jest.spyOn(parkingProviderRegistry, 'executeSearchPartial').mockResolvedValueOnce({
+      timedOut: false,
+      results: [
+        {
+          providerId: 'google',
+          options: [],
+          health: {
+            status: 'offline',
+            message: 'Google provider failed',
+            checkedAt: new Date().toISOString(),
+          },
+          error: 'Google provider failed',
         },
-        error: 'Google provider failed',
-      },
-      {
-        providerId: 'inventory',
-        options: [baseOption({ id: 'inv-available', name: 'Inventory Available Lot' })],
-        health: { status: 'healthy', checkedAt: new Date().toISOString() },
-      },
-      {
-        providerId: 'parkwhiz',
-        options: [baseOption({ id: 'pw-available', name: 'ParkWhiz Available Lot', sourceName: 'ParkWhiz' })],
-        health: { status: 'healthy', checkedAt: new Date().toISOString() },
-      },
-    ]);
+        {
+          providerId: 'inventory',
+          options: [baseOption({ id: 'inv-available', name: 'Inventory Available Lot' })],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+        {
+          providerId: 'parkwhiz',
+          options: [baseOption({ id: 'pw-available', name: 'ParkWhiz Available Lot', sourceName: 'ParkWhiz' })],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+      ],
+    });
 
     const options = await aggregateAirportParkingOptions({
       airportCode: 'SEA',
@@ -92,6 +104,71 @@ describe('aggregateAirportParkingOptions', () => {
 
     expect(options.map((option) => option.id)).toContain('inv-available');
     expect(options.map((option) => option.id)).toContain('pw-available');
+  });
+
+  it('keeps partial provider results when provider search times out', async () => {
+    jest.spyOn(parkingProviderRegistry, 'executeSearchPartial').mockResolvedValueOnce({
+      timedOut: true,
+      results: [
+        {
+          providerId: 'parkwhiz',
+          options: [
+            baseOption({
+              id: 'pw-jiffy',
+              name: 'Jiffy Airport Parking Lot SEA - Self Uncovered',
+              sourceName: 'ParkWhiz',
+              bookingProvider: 'ParkWhiz',
+              priceDisplay: 'live',
+            }),
+          ],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+      ],
+    });
+
+    const options = await aggregateAirportParkingOptions({
+      airportCode: 'SEA',
+      destination: 'Seattle-Tacoma International Airport (SEA)',
+    });
+
+    expect(options.map((option) => option.id)).toContain('pw-jiffy');
+  });
+
+  it('does not block provider results on slow snapshot cache reads', async () => {
+    const originalTimeout = process.env.PARKING_CRITICAL_SNAPSHOT_TIMEOUT_MS;
+    process.env.PARKING_CRITICAL_SNAPSHOT_TIMEOUT_MS = '1';
+    (getParkingPriceSnapshotsCached as jest.Mock).mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve([]), 25)),
+    );
+    jest.spyOn(parkingProviderRegistry, 'executeSearchPartial').mockResolvedValueOnce({
+      timedOut: false,
+      results: [
+        {
+          providerId: 'parkwhiz',
+          options: [
+            baseOption({
+              id: 'pw-live',
+              name: 'Live ParkWhiz Lot',
+              sourceName: 'ParkWhiz',
+              bookingProvider: 'ParkWhiz',
+            }),
+          ],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
+        },
+      ],
+    });
+
+    const options = await aggregateAirportParkingOptions({
+      airportCode: 'SEA',
+      destination: 'Seattle-Tacoma International Airport (SEA)',
+    });
+
+    expect(options.map((option) => option.id)).toContain('pw-live');
+    if (typeof originalTimeout === 'string') {
+      process.env.PARKING_CRITICAL_SNAPSHOT_TIMEOUT_MS = originalTimeout;
+    } else {
+      delete process.env.PARKING_CRITICAL_SNAPSHOT_TIMEOUT_MS;
+    }
   });
 
   it('registers default providers once', () => {
@@ -130,6 +207,11 @@ describe('mergeLiveParkingSourceResults', () => {
       },
     );
 
-    expect(merged.map((option) => option.id)).toEqual(['pw-1', 'inv-1']);
+    expect(merged.map((option) => option.id)).toEqual(
+      expect.arrayContaining(['pw-1', 'inv-1']),
+    );
+    expect(merged.findIndex((option) => option.id === 'pw-1')).toBeLessThan(
+      merged.findIndex((option) => option.id === 'inv-1'),
+    );
   });
 });

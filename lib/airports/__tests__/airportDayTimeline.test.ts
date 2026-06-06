@@ -33,4 +33,23 @@ describe('buildAirportDayTimeline', () => {
     expect(html).toContain('Boarding target');
     expect(html).toContain('Flight departure');
   });
+
+  test('uses backup route travel minutes for airport arrival timing', () => {
+    const milestones = buildAirportDayTimeline({
+      leaveByTime: '08:00',
+      departureTime: '12:00',
+      travelMinutes: 42,
+      airportBufferMinutes: 90,
+      transportMode: 'parking',
+    });
+
+    const html = renderToStaticMarkup(
+      React.createElement(AirportDayTimeline, { milestones }),
+    );
+
+    expect(html).toContain('Arrive at parking / pickup point');
+    expect(html).toContain('8:42 AM');
+    expect(html).toContain('42 min travel estimate');
+    expect(html).not.toContain('Travel time estimate unavailable');
+  });
 });

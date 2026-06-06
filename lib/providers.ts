@@ -474,6 +474,93 @@ function readPositiveTimeoutMs(name: string, fallback: number): number {
   return Number.isFinite(configured) && configured > 0 ? configured : fallback;
 }
 
+function getParkingOptionsReturnBudgetMs(): number {
+  const overall = readPositiveTimeoutMs('PARKING_FETCH_TIMEOUT_MS', 5000);
+  const reserve = readPositiveTimeoutMs('PARKING_FETCH_RETURN_RESERVE_MS', 700);
+
+  return Math.max(1000, overall - reserve);
+}
+
+function remainingParkingOptionsBudgetMs(startedAt: number): number {
+  return Math.max(0, getParkingOptionsReturnBudgetMs() - (Date.now() - startedAt));
+}
+
+async function withParkingStepFallback<T>(
+  label: string,
+  startedAt: number,
+  run: () => Promise<T>,
+  fallback: T,
+  maxStepMs: number,
+): Promise<{ value: T; timedOut: boolean }> {
+  const timeoutMs = Math.min(maxStepMs, remainingParkingOptionsBudgetMs(startedAt));
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    debugLog('parking_enrichment_skipped', { label, reason: 'budget_exhausted' });
+    return { value: fallback, timedOut: true };
+  }
+
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  return new Promise((resolve) => {
+    let promise: Promise<T>;
+    try {
+      promise = run();
+    } catch (error) {
+      debugLog('parking_enrichment_failed', {
+        label,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      resolve({ value: fallback, timedOut: false });
+      return;
+    }
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      debugLog('parking_enrichment_timeout', { label, timeoutMs });
+      resolve({ value: fallback, timedOut: true });
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve({ value, timedOut: false });
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        debugLog('parking_enrichment_failed', {
+          label,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        resolve({ value: fallback, timedOut: false });
+      },
+    );
+  });
+}
+
+function withDeferredParkingDetails(
+  options: ParkingOption[],
+  reason: string,
+): ParkingOption[] {
+  const note = 'Some live parking details are still refreshing. Open provider or directions to confirm.';
+
+  return options.map((option) => ({
+    ...option,
+    assumptions: [
+      ...(option.assumptions || []),
+      ...(option.assumptions?.includes(note) ? [] : [note]),
+    ],
+    parkingRouteDebug: {
+      ...(option.parkingRouteDebug || {}),
+      deferredReason: reason,
+    },
+  }));
+}
+
 function getGoogleRouteTimeoutMs(): number {
   return readPositiveTimeoutMs('GOOGLE_ROUTE_TIMEOUT_MS', 4000);
 }
@@ -1618,6 +1705,7 @@ export class MockProvider implements DataProvider {
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]> {
+    const parkingOptionsStartedAt = Date.now();
     const routeOrigins = origin;
 
     const destinationKind = context?.destinationKind ?? 'airport';
@@ -1673,42 +1761,69 @@ export class MockProvider implements DataProvider {
         checkOutAt: parkingDates.checkOutAt,
       });
 
-    const parkingSource = await Promise.all(
-      liveParkingOptions.map(async (option) => {
-        const canonicalUpdate = await resolveCanonicalParkingCoordinates({
-          option,
-          airportCode: isAirportDestination ? airportCode : null,
-          destinationContext: isAirportDestination ? undefined : destination,
-          geocodeAddress: (address) => this.geocodeLatLng(address),
-        });
+    if (liveParkingOptions.length === 0) return [];
+    if (remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
+      return withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout');
+    }
 
-        return applyCanonicalCoordinatesToOption(option, canonicalUpdate);
-      }),
+    const { value: parkingSource, timedOut: canonicalTimedOut } = await withParkingStepFallback(
+      'canonical_parking_coordinates',
+      parkingOptionsStartedAt,
+      () => Promise.all(
+        liveParkingOptions.map(async (option) => {
+          const canonicalUpdate = await resolveCanonicalParkingCoordinates({
+            option,
+            airportCode: isAirportDestination ? airportCode : null,
+            destinationContext: isAirportDestination ? undefined : destination,
+            geocodeAddress: (address) => this.geocodeLatLng(address),
+          });
+
+          return applyCanonicalCoordinatesToOption(option, canonicalUpdate);
+        }),
+      ),
+      liveParkingOptions,
+      readPositiveTimeoutMs('PARKING_CANONICAL_ENRICH_TIMEOUT_MS', 900),
     );
+
+    if (canonicalTimedOut && remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
+      return withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout');
+    }
 
     const routeDestination = isAirportDestination
       ? resolveAirportDestinationForRouting(destination)
       : destination;
     const routeDepartureTime = context?.routeDepartureTime || dateTime;
     const routeDestinationCoords = isAirportDestination ? null : destinationCoords ?? null;
-    const destinationRouteEstimate = await this.getRouteEstimate(
-      origin,
-      routeDestination,
-      routeDepartureTime,
-      true,
-      routeDestinationCoords,
-      {
-        airportCode: isAirportDestination ? airportCode : null,
-        routePurpose: 'main_to_destination',
-        targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
-      },
+    const { value: destinationRouteEstimate } = await withParkingStepFallback<TrafficEstimate | null>(
+      'parking_destination_route',
+      parkingOptionsStartedAt,
+      () => this.getRouteEstimate(
+        origin,
+        routeDestination,
+        routeDepartureTime,
+        true,
+        routeDestinationCoords,
+        {
+          airportCode: isAirportDestination ? airportCode : null,
+          routePurpose: 'main_to_destination',
+          targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
+        },
+      ),
+      null,
+      readPositiveTimeoutMs('PARKING_DESTINATION_ROUTE_TIMEOUT_MS', 1200),
     );
 
-    const originCoords = await this.geocodeLatLng(origin);
+    const { value: originCoords } = await withParkingStepFallback<RouteLatLng | null>(
+      'parking_origin_geocode',
+      parkingOptionsStartedAt,
+      () => this.geocodeLatLng(origin),
+      null,
+      readPositiveTimeoutMs('PARKING_ORIGIN_GEOCODE_TIMEOUT_MS', 700),
+    );
 
     // Do not hide parking lots just because the home → airport route failed.
     // Parking discovery can still be useful; individual lot routes can be checked separately.
-    const destinationDriveUnavailable = Boolean(destinationRouteEstimate.routeUnavailable);
+    const destinationDriveUnavailable = Boolean(destinationRouteEstimate?.routeUnavailable);
 
     const routeDestinationFor = (option: ParkingOption): string => {
       const resolved = resolveParkingLotDestination(option, routeDestination);
@@ -1830,8 +1945,15 @@ export class MockProvider implements DataProvider {
       return promise;
     };
 
-    const enriched = await Promise.all(
-      parkingRouteEntries.map(async (entry) => {
+    const routeEnrichmentFallback = withDeferredParkingDetails(
+      parkingSource,
+      'parking_route_enrichment_timeout',
+    );
+    const { value: enriched } = await withParkingStepFallback(
+      'parking_route_enrichment',
+      parkingOptionsStartedAt,
+      () => Promise.all(
+        parkingRouteEntries.map(async (entry) => {
         const { option, routeDestination, lotDestination } = entry;
         const shouldUseLiveRoute = liveRouteKeys.has(entry.routeCacheKey);
 
@@ -2045,7 +2167,10 @@ export class MockProvider implements DataProvider {
         }
 
         return enrichedOption;
-      })
+        }),
+      ),
+      routeEnrichmentFallback,
+      readPositiveTimeoutMs('PARKING_ROUTE_ENRICH_TIMEOUT_MS', 1600),
     );
 
     return enriched;

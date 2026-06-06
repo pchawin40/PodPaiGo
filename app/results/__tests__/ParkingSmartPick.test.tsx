@@ -2,12 +2,21 @@
  * @jest-environment jsdom
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import ParkingSmartPick from '@/app/results/ParkingSmartPick';
 import type { ParkingOption, TripData } from '@/lib/types';
 
-jest.mock('@/app/results/ParkingLotVisual', () => function MockParkingLotVisual() {
-  return <div data-testid="parking-lot-visual" />;
+jest.mock('@/app/results/ParkingLotVisual', () => function MockParkingLotVisual({
+  option,
+}: {
+  option: { googlePhotoName?: string; googlePhotoNames?: string[] };
+}) {
+  return (
+    <div
+      data-testid="parking-lot-visual"
+      data-photo-name={option.googlePhotoName || option.googlePhotoNames?.[0] || ''}
+    />
+  );
 });
 
 const tripData: TripData = {
@@ -66,5 +75,68 @@ describe('ParkingSmartPick fallback', () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByText('Live price').length).toBeGreaterThan(0);
     expect(screen.getAllByText('AirportParkingReservations').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Check reviews')).not.toBeInTheDocument();
+  });
+
+  test('shows enriched Google photo metadata, rating, count, and review snippets', () => {
+    const onShowReviews = jest.fn();
+    const routeAvailableParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="easiest"
+        onShowReviews={onShowReviews}
+        googleEnrichedParking={{
+          [routeAvailableParking.id]: {
+            googlePlaceId: 'places/jiffy',
+            googleMapsUri: 'https://maps.google.com/?cid=jiffy',
+            googlePhotoName: 'places/jiffy/photos/primary',
+            googlePhotoNames: ['places/jiffy/photos/primary'],
+            reviewScore: 4.6,
+            reviewCount: 1248,
+            googleReviews: [
+              {
+                id: 'review-1',
+                source: 'google-places',
+                rating: 5,
+                relativeTimeDescription: '2 weeks ago',
+                text: 'Fast shuttle and easy uncovered self parking.',
+              },
+              {
+                id: 'review-2',
+                source: 'google-places',
+                rating: 4,
+                text: 'Good price near SEA.',
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('parking-lot-visual')).toHaveAttribute(
+      'data-photo-name',
+      'places/jiffy/photos/primary',
+    );
+    expect(screen.getAllByText('★ 4.6 · 1,248 reviews').length).toBeGreaterThan(0);
+    expect(screen.getByText('Google reviews')).toBeInTheDocument();
+    expect(screen.getByText('Fast shuttle and easy uncovered self parking.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: /4\.6/ })[0]);
+    expect(onShowReviews).toHaveBeenCalledWith(
+      expect.objectContaining({
+        googlePlaceId: 'places/jiffy',
+        googlePhotoName: 'places/jiffy/photos/primary',
+        reviewScore: 4.6,
+        reviewCount: 1248,
+      }),
+    );
   });
 });

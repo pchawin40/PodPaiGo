@@ -99,6 +99,7 @@ import {
   TransportAvailability,
   Recommendation,
   TripData,
+  TrafficEstimate,
   TrustStatus,
   ParkingOption,
   RideshareEstimateConfidence,
@@ -147,6 +148,7 @@ import {
 import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 import { trackEvent } from '../../lib/analytics/trackEvent';
+import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import {
   getTransitPassAppliedBadge,
   getTransitPassCoveredLabel,
@@ -337,6 +339,77 @@ function ParkingRouteDebugPanel({
   );
 }
 
+function ParkingPhotoReviewHandoffTrace({
+  stage,
+  option,
+  stageNote,
+}: {
+  stage: string;
+  option: ParkingOption | null | undefined;
+  stageNote: string;
+}) {
+  useEffect(() => {
+    if (!option) return;
+
+    logParkingPhotoReviewTrace(stage, option, {
+      stageNote,
+      selectedVisualSource:
+        option.googlePhotoName || option.googlePhotoNames?.length
+          ? 'google photo'
+          : option.imageUrl || option.images?.length
+            ? 'provider image'
+            : 'illustration',
+      illustrationReason:
+        option.googlePhotoName || option.googlePhotoNames?.length || option.imageUrl || option.images?.length
+          ? null
+          : 'no_google_or_provider_photo_metadata_at_results_handoff',
+    });
+  }, [option, stage, stageNote]);
+
+  return null;
+}
+
+function ParkingPhotoReviewListTrace({
+  stage,
+  options,
+  stageNote,
+}: {
+  stage: string;
+  options: ParkingOption[];
+  stageNote: string;
+}) {
+  useEffect(() => {
+    options.forEach((option) => {
+      logParkingPhotoReviewTrace(stage, option, {
+        stageNote,
+        selectedVisualSource:
+          option.googlePhotoName || option.googlePhotoNames?.length
+            ? 'google photo'
+            : option.imageUrl || option.images?.length
+              ? 'provider image'
+              : 'illustration',
+        illustrationReason:
+          option.googlePhotoName || option.googlePhotoNames?.length || option.imageUrl || option.images?.length
+            ? null
+            : 'no_google_or_provider_photo_metadata_in_final_parking_array',
+      });
+    });
+  }, [options, stage, stageNote]);
+
+  return null;
+}
+
+function needsParkingGooglePhotoReviewMetadata(option: ParkingOption | null | undefined): boolean {
+  if (!option) return true;
+  const hasGooglePhoto = Boolean(option.googlePhotoName || option.googlePhotoNames?.length);
+  const hasReview = Boolean(
+    typeof option.reviewScore === 'number' ||
+      typeof option.reviewCount === 'number' ||
+      option.googleReviews?.length,
+  );
+  return !hasGooglePhoto || !hasReview;
+}
+
 function ParkingTimeSummary({
   option,
   compact = false,
@@ -488,6 +561,46 @@ function ridesharePriceSecondary(option: AppOption): string | null {
 
 function getTripAirportCode(tripData: TripData | null): string {
   return ((tripData as TripDataWithExtras | null)?.airportCode || 'SEA').toUpperCase();
+}
+
+function isBackupRouteEstimate(estimate?: TrafficEstimate | null): boolean {
+  return estimate?.sourceName === 'Mapbox Directions';
+}
+
+function isStraightLineRouteEstimate(estimate?: TrafficEstimate | null): boolean {
+  return estimate?.sourceName === 'Estimated from coordinates';
+}
+
+function routeEstimateSummaryLabel(estimate?: TrafficEstimate | null): string {
+  if (!estimate) return '—';
+
+  const formatted = formatMinutes(estimate.duration);
+  if (isBackupRouteEstimate(estimate)) return `Estimated drive time: ~${formatted}`;
+  if (isStraightLineRouteEstimate(estimate)) return `Straight-line fallback estimate: ~${formatted}`;
+
+  return formatted;
+}
+
+function routeEstimateHelperText(estimate?: TrafficEstimate | null): string {
+  if (isBackupRouteEstimate(estimate)) {
+    return 'Backup routing source used. Open directions to confirm.';
+  }
+
+  if (isStraightLineRouteEstimate(estimate)) {
+    return 'Straight-line fallback estimate; open directions to confirm.';
+  }
+
+  if (estimate?.trustStatus === 'fallback') {
+    return 'Using cached estimate. Open directions to confirm.';
+  }
+
+  if (estimate?.trustStatus === 'estimated') {
+    return 'Using cached estimate';
+  }
+
+  return estimate?.congestion
+    ? `${estimate.congestion} congestion`
+    : 'Based on available route data';
 }
 
 function formatWeatherDateLabel(date: string): string {
@@ -1945,6 +2058,32 @@ function formatTag(tag: string): string {
   return tag.charAt(0).toUpperCase() + tag.slice(1);
 }
 
+function hasParkingReviewSource(option: ParkingOption): boolean {
+  return Boolean(
+    typeof option.reviewScore === 'number' ||
+      typeof option.reviewCount === 'number' ||
+      (option.googleReviews || []).some((review) => Boolean(review.text?.trim())) ||
+      option.googlePlaceId ||
+      option.googleMapsUri,
+  );
+}
+
+function parkingReviewLabel(option: ParkingOption): string {
+  if (typeof option.reviewScore === 'number') {
+    const rating = option.reviewScore.toFixed(1);
+    if (typeof option.reviewCount === 'number') {
+      return `★ ${rating} · ${option.reviewCount.toLocaleString()} reviews`;
+    }
+    return `★ ${rating}`;
+  }
+
+  if (typeof option.reviewCount === 'number') {
+    return `${option.reviewCount.toLocaleString()} reviews`;
+  }
+
+  return 'Check reviews';
+}
+
 function getAirportReadyBufferForTiming(params: {
   timeAnchor?: 'flight-departure' | 'airport-arrival';
   airportReadinessBufferMinutes?: number | null;
@@ -2172,6 +2311,7 @@ function OptionCard({
             option={displayParkingOption}
             tripContext={parkingTripContext}
             airportCode={airportCode}
+            photoPriority={rank <= 3 ? 'top' : 'background'}
           />
         </div>
       )}
@@ -2356,26 +2496,16 @@ function OptionCard({
 
               {item.type === "parking" ? (() => {
                 const parking = (googleEnrichedParking?.[opt.id || ""] || opt) as ParkingOption;
+                if (!hasParkingReviewSource(parking) || !onShowReviews) return null;
 
                 return (
                   <button
                     type="button"
                     onClick={() => onShowReviews?.(parking)}
-                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                    title="See Google review details"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                    title="See review details"
                   >
-                    {typeof parking.reviewScore === "number" ? (
-                      <>
-                        <span>⭐ {parking.reviewScore.toFixed(1)}</span>
-                        {typeof parking.reviewCount === "number" ? (
-                          <span className="text-amber-700/70">
-                            ({parking.reviewCount.toLocaleString()} reviews)
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span>⭐ Check reviews</span>
-                    )}
+                    {parkingReviewLabel(parking)}
                   </button>
                 );
               })() : null}
@@ -3730,6 +3860,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const aprRequestKeyRef = useRef('');
   const priceMatchKeyRef = useRef('');
   const googlePlaceAttemptedKeysRef = useRef(new Set<string>());
+  const googlePhotoReviewRetryKeysRef = useRef(new Set<string>());
   const googlePlaceInFlightKeysRef = useRef(new Map<string, Promise<ParkingOption>>());
   const recommendationsRequestRef = useRef<RecommendationRequestRef | null>(null);
   const recommendationsLoadedKeyRef = useRef('');
@@ -3813,6 +3944,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       lat: canonicalLat ?? enriched.lat ?? merged.lat ?? base.lat,
       lng: canonicalLng ?? enriched.lng ?? merged.lng ?? base.lng,
       googlePlaceId: enriched.googlePlaceId ?? merged.googlePlaceId ?? base.googlePlaceId,
+      googleMapsUri: enriched.googleMapsUri ?? merged.googleMapsUri ?? base.googleMapsUri,
+      googlePhotoName: enriched.googlePhotoName ?? merged.googlePhotoName ?? base.googlePhotoName,
+      googlePhotoNames: enriched.googlePhotoNames ?? merged.googlePhotoNames ?? base.googlePhotoNames,
+      googleReviews: enriched.googleReviews ?? merged.googleReviews ?? base.googleReviews,
+      googleReviewsFetchedAt:
+        enriched.googleReviewsFetchedAt ?? merged.googleReviewsFetchedAt ?? base.googleReviewsFetchedAt,
+      googleReviewsExpiresAt:
+        enriched.googleReviewsExpiresAt ?? merged.googleReviewsExpiresAt ?? base.googleReviewsExpiresAt,
+      reviewScore: enriched.reviewScore ?? merged.reviewScore ?? base.reviewScore,
+      reviewCount: enriched.reviewCount ?? merged.reviewCount ?? base.reviewCount,
       parkingRouteDebug: enriched.parkingRouteDebug ?? merged.parkingRouteDebug ?? base.parkingRouteDebug,
       routesUsedCanonicalCoords: staleDriveMinutes
         ? undefined
@@ -3907,7 +4048,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         }
 
         const key = parkingGoogleMatchKey(parking, airportCode);
-        return !googleEnrichedParking[parking.id] && !googlePlaceAttemptedKeysRef.current.has(key);
+        const cached = googleEnrichedParking[parking.id];
+        const effectiveParking = cached || parking;
+        const needsMetadata = needsParkingGooglePhotoReviewMetadata(effectiveParking);
+        const attempted = googlePlaceAttemptedKeysRef.current.has(key);
+        const metadataRetried = googlePhotoReviewRetryKeysRef.current.has(key);
+
+        return (!cached && !attempted) || (needsMetadata && !metadataRetried);
       })
       .slice(
         0,
@@ -3926,15 +4073,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         const batchPairs = await Promise.all(
           batch.map(async (parking) => {
             const key = parkingGoogleMatchKey(parking, airportCode);
+            const cached = googleEnrichedParking[parking.id];
+            const forceMetadataRefresh = needsParkingGooglePhotoReviewMetadata(cached || parking);
             googlePlaceAttemptedKeysRef.current.add(key);
+            if (forceMetadataRefresh) {
+              googlePhotoReviewRetryKeysRef.current.add(key);
+            }
 
             const inflight = googlePlaceInFlightKeysRef.current.get(key);
-            if (inflight) {
+            if (inflight && !forceMetadataRefresh) {
               const enriched = mergeGoogleEnrichedParkingOption(parking, await inflight);
               return [parking.id, enriched] as const;
             }
 
-            const promise = attachGooglePlaceToParking(parking, tripData, airportCode);
+            const promise = attachGooglePlaceToParking(parking, tripData, airportCode, {
+              force: forceMetadataRefresh,
+            });
             googlePlaceInFlightKeysRef.current.set(key, promise);
 
             try {
@@ -4168,6 +4322,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setSelectedParkingId(null);
 
         googlePlaceAttemptedKeysRef.current.clear();
+        googlePhotoReviewRetryKeysRef.current.clear();
         googlePlaceInFlightKeysRef.current.clear();
 
         priceMatchKeyRef.current = '';
@@ -4380,6 +4535,31 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
   }, [searchParamsString]);
 
+  useEffect(() => {
+    if (!tripData || !recommendation) return;
+
+    const ranked = rankRecommendations(
+      tripData,
+      recommendation.parking,
+      recommendation.rideshare,
+      recommendation.transit,
+      recommendation.tsaEstimate,
+      {
+        weatherImpact: recommendation.weatherImpact,
+        familyFriendly:
+          searchParams.get('familyLuggageFriendly') === '1' ||
+          searchParams.get('bagPlan') === 'checked' ||
+          searchParams.get('bags') === 'yes',
+        preference: ((): RecommendationSortMode => {
+          const raw = searchParams.get('quickGoPreference') || searchParams.get('sort') || 'easiest';
+          return raw === 'cheapest' || raw === 'fastest' ? raw : 'easiest';
+        })(),
+      },
+    );
+
+    setRankedOptions(ranked);
+  }, [recommendation, searchParams, tripData]);
+
   const weatherToneBg =
     recommendation?.weatherImpact?.riskLevel === 'high'
       ? 'bg-red-50'
@@ -4520,6 +4700,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     Boolean(recommendation?.airportRouteUnavailable) ||
     Boolean(recommendation?.trafficEstimate?.routeUnavailable);
   const routeUnavailableBlocksParking = airportRouteUnavailable && !isCityTrip;
+  const usesLiveGoogleRoute =
+    recommendation?.trafficEstimate?.trustStatus === 'live' &&
+    !isBackupRouteEstimate(recommendation.trafficEstimate) &&
+    !isStraightLineRouteEstimate(recommendation.trafficEstimate);
 
   const airportRouteUnavailableReason =
     recommendation?.airportRouteUnavailableReason ||
@@ -5364,12 +5548,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 {isCityTrip
                   ? airportRouteUnavailable
                     ? 'Route timing is unavailable; destination parking options may still be useful.'
-                    : recommendation.trafficEstimate?.trustStatus === 'live'
+                    : usesLiveGoogleRoute
                       ? 'Live traffic + destination parking analyzed'
                       : 'Estimated route timing + destination parking analyzed'
                   : airportRouteUnavailable
                   ? 'Airport readiness and TSA timing shown only; ground route timing is unavailable.'
-                  : recommendation.trafficEstimate?.trustStatus === 'live'
+                  : usesLiveGoogleRoute
                     ? 'Live traffic + airport timing + parking pricing analyzed'
                     : 'Estimated route timing + airport timing + parking pricing analyzed'}
               </p>
@@ -5632,19 +5816,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </div>
 
               <div className="mt-1 text-sm font-semibold text-foreground">
-                {recommendation.trafficEstimate
-                  ? formatMinutes(recommendation.trafficEstimate.duration)
-                  : '—'}
+                {routeEstimateSummaryLabel(recommendation.trafficEstimate)}
               </div>
 
               <div className="mt-1 text-xs text-muted-foreground">
-                {recommendation.trafficEstimate?.trustStatus === 'fallback'
-                  ? 'Using cached estimate. Open directions to confirm.'
-                  : recommendation.trafficEstimate?.trustStatus === 'estimated'
-                    ? 'Using cached estimate'
-                    : recommendation.trafficEstimate?.congestion
-                  ? `${recommendation.trafficEstimate.congestion} congestion`
-                  : 'Based on available route data'}
+                {routeEstimateHelperText(recommendation.trafficEstimate)}
               </div>
             </div>
           )}
@@ -6412,21 +6588,33 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               )}
 
               {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
-                <ParkingSmartPick
-                  options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
-                  tripData={tripData}
-                  sortMode={sort}
-                  leaveByTime={routeUnavailableBlocksParking ? null : recommendation.leaveByTime}
-                  selectedOption={
-                    googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
-                  }
-                  aprLivePrices={aprLivePrices}
-                  aprLiveChecking={aprLiveChecking}
-                  weatherImpact={recommendation?.weatherImpact}
-                  weatherContext={recommendation?.weatherContext}
-                  onShowReviews={handleShowReviews}
-                  googleEnrichedParking={googleEnrichedParking}
-                />
+                <>
+                  <ParkingPhotoReviewListTrace
+                    stage="final_parking_option_array"
+                    options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
+                    stageNote="ResultsContent final parking option array before Smart Pick"
+                  />
+                  <ParkingPhotoReviewHandoffTrace
+                    stage="parking_smart_pick_handoff"
+                    option={googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption}
+                    stageNote="ResultsContent final selected parking object passed into ParkingSmartPick"
+                  />
+                  <ParkingSmartPick
+                    options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
+                    tripData={tripData}
+                    sortMode={sort}
+                    leaveByTime={routeUnavailableBlocksParking ? null : recommendation.leaveByTime}
+                    selectedOption={
+                      googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
+                    }
+                    aprLivePrices={aprLivePrices}
+                    aprLiveChecking={aprLiveChecking}
+                    weatherImpact={recommendation?.weatherImpact}
+                    weatherContext={recommendation?.weatherContext}
+                    onShowReviews={handleShowReviews}
+                    googleEnrichedParking={googleEnrichedParking}
+                  />
+                </>
               )}
               <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-5">
                 {/* Show Parking Lots Map */}

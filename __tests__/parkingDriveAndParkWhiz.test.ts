@@ -1,4 +1,5 @@
 import { resolvePricingConfidence } from '../lib/access/pricingLadder';
+import { parkingDbCacheDisabledByConfig } from '../lib/db/client';
 import { mergeLiveCityParkWhizPricing, resolveCityParkingPricing } from '../lib/parking/cityParkingPricing';
 import { findMatchingParkWhizOption } from '../lib/parking/parkWhizMatch';
 import {
@@ -159,6 +160,49 @@ describe('ParkWhiz live pricing', () => {
     expect(deduped[0].priceDisplay).toBe('live');
   });
 
+  test('dedupe preserves Google photo and review metadata when live provider wins', () => {
+    const deduped = dedupeParkingOptions([
+      {
+        ...liveParkWhiz,
+        id: 'parkwhiz-jiffy',
+        name: 'Jiffy Airport Parking Lot SEA - Self Uncovered',
+      },
+      {
+        ...CITY_GARAGE,
+        id: 'google-jiffy',
+        name: 'Jiffy Airport Parking Lot SEA - Self Uncovered',
+        sourceName: 'Google Places',
+        googlePlaceId: 'places/jiffy',
+        googleMapsUri: 'https://maps.google.com/?cid=jiffy',
+        googlePhotoName: 'places/jiffy/photos/primary',
+        googlePhotoNames: ['places/jiffy/photos/primary', 'places/jiffy/photos/second'],
+        reviewScore: 4.6,
+        reviewCount: 1248,
+        googleReviews: [
+          {
+            id: 'review-1',
+            source: 'google-places',
+            rating: 5,
+            text: 'Fast shuttle and easy uncovered self parking.',
+          },
+        ],
+      },
+    ]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].id).toBe('parkwhiz-jiffy');
+    expect(deduped[0].priceDisplay).toBe('live');
+    expect(deduped[0].googlePlaceId).toBe('places/jiffy');
+    expect(deduped[0].googlePhotoName).toBe('places/jiffy/photos/primary');
+    expect(deduped[0].googlePhotoNames).toEqual([
+      'places/jiffy/photos/primary',
+      'places/jiffy/photos/second',
+    ]);
+    expect(deduped[0].reviewScore).toBe(4.6);
+    expect(deduped[0].reviewCount).toBe(1248);
+    expect(deduped[0].googleReviews?.[0]?.text).toMatch(/Fast shuttle/);
+  });
+
   test('ParkWhiz matcher links LAZ/Pike Place google place to live quote', () => {
     const match = findMatchingParkWhizOption(CITY_GARAGE, [liveParkWhiz]);
     expect(match?.id).toBe(liveParkWhiz.id);
@@ -211,5 +255,40 @@ describe('city parking labels and baselines', () => {
     expect(lazPricing.pricingConfidence).toBe('estimated');
     expect(lazPricing.price).toBeGreaterThanOrEqual(18);
     expect(lazPricing.price).toBeLessThanOrEqual(72);
+  });
+});
+
+describe('parking cache configuration', () => {
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  const originalLocalDatabaseUrl = process.env.LOCAL_DATABASE_URL;
+  const originalDisableParkingDbCache = process.env.DISABLE_PARKING_DB_CACHE;
+
+  function restoreEnv(name: 'DATABASE_URL' | 'LOCAL_DATABASE_URL' | 'DISABLE_PARKING_DB_CACHE', value: string | undefined): void {
+    if (typeof value === 'string') {
+      process.env[name] = value;
+      return;
+    }
+
+    delete process.env[name];
+  }
+
+  afterEach(() => {
+    restoreEnv('DATABASE_URL', originalDatabaseUrl);
+    restoreEnv('LOCAL_DATABASE_URL', originalLocalDatabaseUrl);
+    restoreEnv('DISABLE_PARKING_DB_CACHE', originalDisableParkingDbCache);
+  });
+
+  test('placeholder Supabase config disables parking DB cache in local/test', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.DISABLE_PARKING_DB_CACHE = 'false';
+    process.env.DATABASE_URL =
+      'postgresql://postgres:password@postgres.<PROJECT_REF>.supabase.co:6543/postgres';
+    delete process.env.LOCAL_DATABASE_URL;
+
+    try {
+      expect(parkingDbCacheDisabledByConfig()).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

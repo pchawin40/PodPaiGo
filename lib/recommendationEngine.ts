@@ -192,6 +192,35 @@ async function resolveTripCoordinate(
   );
 }
 
+function resolveAirportCoordinate(tripData: TripData): { lat: number; lng: number } | undefined {
+  const existing = resolveFiniteCoordinate(tripData.destinationLat, tripData.destinationLng);
+  if (existing) return existing;
+
+  const airportCode =
+    tripData.airportCode?.trim().toUpperCase() ||
+    tripData.destination.match(/\b([A-Z]{3})\b/)?.[1]?.toUpperCase();
+  const airport = airportCode ? getAirportById(airportCode) : null;
+  const geoLocation = airport?.geoLocation;
+
+  return resolveFiniteCoordinate(geoLocation?.lat, geoLocation?.lng);
+}
+
+function resolveFiniteCoordinate(
+  lat: number | undefined,
+  lng: number | undefined,
+): { lat: number; lng: number } | undefined {
+  if (
+    typeof lat === 'number' &&
+    Number.isFinite(lat) &&
+    typeof lng === 'number' &&
+    Number.isFinite(lng)
+  ) {
+    return { lat, lng };
+  }
+
+  return undefined;
+}
+
 function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): TrafficEstimate {
   const hasOriginCoords =
     typeof tripData.originLat === 'number' &&
@@ -531,22 +560,24 @@ export class RecommendationEngine {
       routeTiming,
       'origin_to_parking',
     );
-    // Resolve coordinates up front for non-airport (Quick Go / point A->B) trips so
-    // BOTH the live route call and the straight-line fallback have coordinates.
-    // Without this, a destination picked from address autocomplete (which carries no
-    // lat/lng) shows "drive time unknown" whenever the live route times out, fails,
-    // or is over budget. Airport trips keep their existing coordinate resolution.
-    const [resolvedOriginCoords, resolvedDestinationCoords] = isAirportTrip
-      ? [undefined, undefined]
-      : await Promise.all([
-          resolveTripCoordinate(this.provider, tripData.origin, tripData.originLat, tripData.originLng),
-          resolveTripCoordinate(
+    // Resolve coordinates up front so BOTH the provider's backup chain
+    // (Google -> Mapbox -> coordinates) and the engine timeout fallback have
+    // coordinates. Airport trips can use catalog coordinates for the airport
+    // destination, while origins may still need bounded geocoding.
+    const airportDestinationCoords = isAirportTrip
+      ? resolveAirportCoordinate(tripData)
+      : undefined;
+    const [resolvedOriginCoords, resolvedDestinationCoords] = await Promise.all([
+      resolveTripCoordinate(this.provider, tripData.origin, tripData.originLat, tripData.originLng),
+      airportDestinationCoords
+        ? Promise.resolve(airportDestinationCoords)
+        : resolveTripCoordinate(
             this.provider,
             tripData.destination,
             tripData.destinationLat,
             tripData.destinationLng,
           ),
-        ]);
+    ]);
 
     const effectiveOriginLat = resolvedOriginCoords?.lat ?? tripData.originLat;
     const effectiveOriginLng = resolvedOriginCoords?.lng ?? tripData.originLng;
@@ -1132,18 +1163,19 @@ export class RecommendationEngine {
       allAccessOptions.length > 0
         ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
+    const hasParkingResults = finalParking.length > 0;
     const parkingDataStatus =
       !shouldLoadParking
         ? 'not_requested'
-        : parkingResult.failed
-          ? 'unavailable'
-          : finalParking.length > 0
-            ? 'available'
+        : hasParkingResults
+          ? 'available'
+          : parkingResult.failed
+            ? 'unavailable'
             : 'empty';
     const parkingDataMessage =
-      parkingResult.failed
+      parkingResult.failed && !hasParkingResults
         ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
-        : shouldLoadParking && finalParking.length === 0
+        : shouldLoadParking && !hasParkingResults
           ? isAirportTrip
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
@@ -1186,9 +1218,11 @@ export class RecommendationEngine {
       accessStrategies,
       parkingDiscoveryNotice:
         shouldLoadParking
-          ? isAirportTrip
-            ? getParkingDiscoveryNotice(finalParking.length)
-            : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
+          ? parkingResult.timedOut && hasParkingResults
+            ? 'Some live parking details are still refreshing.'
+            : isAirportTrip
+              ? getParkingDiscoveryNotice(finalParking.length)
+              : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
           : undefined,
       tsaEstimate: resolvedTsaEstimate,
       airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),

@@ -20,6 +20,32 @@ function getConnectionString(): string {
   return connectionString;
 }
 
+let warnedPlaceholderParkingDb = false;
+
+export function parkingDbCacheDisabledByConfig(): boolean {
+  if (process.env.DISABLE_PARKING_DB_CACHE === 'true') return true;
+
+  const connectionString =
+    (process.env.NODE_ENV !== 'production' && process.env.LOCAL_DATABASE_URL?.trim()) ||
+    process.env.DATABASE_URL ||
+    process.env.LOCAL_DATABASE_URL ||
+    '';
+
+  const isPlaceholder =
+    connectionString.includes('<PROJECT_REF>') ||
+    connectionString.includes('postgres.<PROJECT_REF>');
+
+  if (process.env.NODE_ENV !== 'production' && isPlaceholder) {
+    if (!warnedPlaceholderParkingDb) {
+      warnedPlaceholderParkingDb = true;
+      console.warn('Parking DB cache disabled: placeholder Supabase config.');
+    }
+    return true;
+  }
+
+  return false;
+}
+
 export function getDb(): Pool {
   if (global.parkingDbPool) {
     return global.parkingDbPool;

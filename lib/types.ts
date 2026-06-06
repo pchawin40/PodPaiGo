@@ -349,6 +349,7 @@ export type ParkingOption = {
   parkingRouteDebug?: {
     routesApiDestination?: string;
     googleMapsUrlDestination?: string;
+    deferredReason?: string;
   };
   lat?: number;
   lng?: number;

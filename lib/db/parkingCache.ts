@@ -1,5 +1,5 @@
 import { debugLog } from '../utils/debug';
-import { db } from './client';
+import { db, parkingDbCacheDisabledByConfig } from './client';
 import { ParkingOption } from '../types';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { withTimeout } from '../utils/asyncTimeout';
@@ -8,7 +8,7 @@ const PARKING_DB_READ_TIMEOUT_MS = Number(process.env.PARKING_DB_READ_TIMEOUT_MS
 const PARKING_DB_WRITE_TIMEOUT_MS = Number(process.env.PARKING_DB_WRITE_TIMEOUT_MS || 2500);
 
 function parkingDbCacheDisabled(): boolean {
-    return process.env.DISABLE_PARKING_DB_CACHE === 'true';
+    return parkingDbCacheDisabledByConfig();
 }
 
 function emptyRowsResult<T extends QueryResultRow = QueryResultRow>(): QueryResult<T> {

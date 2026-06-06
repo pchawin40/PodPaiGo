@@ -6,7 +6,6 @@ import { withStableParkingRouteStatus } from '../../parking/routeStatus';
 import { isLiveParkWhizOption } from '../../parking/parkWhizMatch';
 import { dedupeParkingOptions } from './shared/dedupe';
 import { withAvailabilityScore } from './shared/availability';
-import { getParkingPriceSnapshotsCached } from './shared/snapshots';
 import { buildSnapshotParkingOptions } from './providers/snapshot/buildOptions';
 import { inferPriceFreshness } from './types';
 import { isLiveGoogleParkingDiscoveryEnabled } from '../../parking/parkingDiscoveryMode';
@@ -14,6 +13,7 @@ import { SHOWING_CACHED_PROVIDER_DATA_MESSAGE } from '../../parking/googlePlaces
 import { validateParkingInventoryOption } from '../../parking/inventoryValidation';
 import { buildSeaOfficialParkingOptions } from '../../parking/seaOfficialParking';
 import { debugLog } from '../../utils/debug';
+import { logParkingPhotoReviewTrace } from '../../parking/photoReviewDebug';
 
 function normalizeSnapshotName(name: string): string {
   return name
@@ -126,19 +126,28 @@ export async function mergeLiveParkingSources(
     ...parts.parkWhizOptions,
     ...parts.aprOptions,
   ];
+  for (const option of pricedProviderOptions) {
+    logParkingPhotoReviewTrace('before_provider_merge_priced_provider', option, {
+      stageNote: 'priced provider option before Google/discovery merge',
+      selectedVisualSource:
+        option.googlePhotoName || option.googlePhotoNames?.length
+          ? 'google photo'
+          : option.imageUrl || option.images?.length
+            ? 'provider image'
+            : 'illustration',
+      illustrationReason:
+        option.googlePhotoName || option.googlePhotoNames?.length || option.imageUrl || option.images?.length
+          ? null
+          : 'priced_provider_option_has_no_google_or_provider_photo_metadata',
+    });
+  }
 
   const pricedInventoryOptions = enrichInventoryOptionsWithPrices({
     inventoryOptions: parts.inventoryOptions,
     pricedOptions: pricedProviderOptions,
   });
 
-  const latestPriceSnapshots = parts.latestPriceSnapshots.length > 0
-    ? parts.latestPriceSnapshots
-    : await getParkingPriceSnapshotsCached({
-      airportCode,
-      checkInDate: args.checkInDate,
-      checkOutDate: args.checkOutDate,
-    });
+  const latestPriceSnapshots = parts.latestPriceSnapshots;
 
   const snapshotOptions = parts.snapshotOptions.length > 0
     ? parts.snapshotOptions
@@ -196,7 +205,24 @@ export async function mergeLiveParkingSources(
     return true;
   });
 
-  return applySafeModeProviderLabels(validated);
+  const finalOptions = applySafeModeProviderLabels(validated);
+  for (const option of finalOptions) {
+    logParkingPhotoReviewTrace('after_provider_merge_dedupe', option, {
+      stageNote: 'final provider merge output after validation and safe-mode labels',
+      selectedVisualSource:
+        option.googlePhotoName || option.googlePhotoNames?.length
+          ? 'google photo'
+          : option.imageUrl || option.images?.length
+            ? 'provider image'
+            : 'illustration',
+      illustrationReason:
+        option.googlePhotoName || option.googlePhotoNames?.length || option.imageUrl || option.images?.length
+          ? null
+          : 'no_google_or_provider_photo_metadata_after_provider_merge',
+    });
+  }
+
+  return finalOptions;
 }
 
 export async function mergeLiveParkingSourceResults(

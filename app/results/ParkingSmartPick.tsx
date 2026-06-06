@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ParkingOption, TripData } from '../../lib/types';
+import { ParkingGoogleReview, ParkingOption, TripData } from '../../lib/types';
 import { withAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMoneyWhole } from '../utils/formatter';
 import {
@@ -34,6 +34,7 @@ import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 // import ParkingBookingSources from './ParkingBookSources';
 import ParkingLotVisual from './ParkingLotVisual';
+import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -220,6 +221,101 @@ function isAirportPlausibleParking(option: ParkingOption): boolean {
 
 function uniqueBadges(labels: Array<string | null | undefined>): string[] {
   return Array.from(new Set(labels.map((label) => String(label || '').trim()).filter(Boolean)));
+}
+
+function parkingReviewSnippets(option: ParkingOption): ParkingGoogleReview[] {
+  return (option.googleReviews || [])
+    .filter((review) => Boolean(review.text?.trim()))
+    .slice(0, 3);
+}
+
+function hasParkingReviewSource(option: ParkingOption): boolean {
+  return Boolean(
+    typeof option.reviewScore === 'number' ||
+      typeof option.reviewCount === 'number' ||
+      parkingReviewSnippets(option).length > 0 ||
+      option.googlePlaceId ||
+      option.googleMapsUri,
+  );
+}
+
+function parkingReviewLabel(option: ParkingOption): string {
+  if (typeof option.reviewScore === 'number') {
+    const rating = option.reviewScore.toFixed(1);
+    if (typeof option.reviewCount === 'number') {
+      return `★ ${rating} · ${option.reviewCount.toLocaleString()} reviews`;
+    }
+    return `★ ${rating}`;
+  }
+
+  if (typeof option.reviewCount === 'number') {
+    return `${option.reviewCount.toLocaleString()} reviews`;
+  }
+
+  return 'Check reviews';
+}
+
+function reviewSourceLabel(option: ParkingOption): string {
+  if (option.googlePlaceId || option.googleMapsUri || option.googleReviews?.length) {
+    return 'Google reviews';
+  }
+
+  return 'Provider reviews';
+}
+
+function visualSourceFromParkingOption(option: ParkingOption): {
+  selectedVisualSource: 'google photo' | 'provider image' | 'illustration';
+  illustrationReason: string | null;
+} {
+  if (option.googlePhotoName || option.googlePhotoNames?.length) {
+    return { selectedVisualSource: 'google photo', illustrationReason: null };
+  }
+
+  if (option.imageUrl || option.images?.length) {
+    return { selectedVisualSource: 'provider image', illustrationReason: null };
+  }
+
+  return {
+    selectedVisualSource: 'illustration',
+    illustrationReason: 'no_google_or_provider_photo_metadata_at_smart_pick_selection',
+  };
+}
+
+function ParkingPhotoReviewTrace({
+  stage,
+  option,
+  stageNote,
+}: {
+  stage: string;
+  option: ParkingOption;
+  stageNote: string;
+}) {
+  const visualSource = visualSourceFromParkingOption(option);
+
+  useEffect(() => {
+    logParkingPhotoReviewTrace(stage, option, {
+      stageNote,
+      ...visualSource,
+    });
+  }, [
+    option.id,
+    option.name,
+    option.providerLotId,
+    option.googlePlaceId,
+    option.googlePhotoName,
+    option.googlePhotoNames?.length,
+    option.imageUrl,
+    option.images?.length,
+    option.reviewScore,
+    option.reviewCount,
+    option.googleReviews?.length,
+    stage,
+    stageNote,
+    visualSource.illustrationReason,
+    visualSource.selectedVisualSource,
+  ]);
+
+  return null;
 }
 
 function reasonBadgesForOption(
@@ -578,6 +674,9 @@ export default function ParkingSmartPick({
     savings && officialTotal ? Math.round((savings / officialTotal) * 100) : null;
 
   const displayLeaveByTime = leaveByTime ? formatTimeFriendly(leaveByTime) : null;
+  const reviewSnippets = parkingReviewSnippets(best);
+  const reviewSource = reviewSourceLabel(best);
+  const canShowReviewAction = hasParkingReviewSource(best);
 
   const ctaLabel =
     best.bookingProvider === 'AirportParkingReservations'
@@ -595,15 +694,26 @@ export default function ParkingSmartPick({
 
   return (
     <section className="travel-card overflow-hidden rounded-3xl p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
+      <ParkingPhotoReviewTrace
+        stage="after_smart_pick_selection"
+        option={best}
+        stageNote="ParkingSmartPick selected final best parking option"
+      />
       <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
         Smart parking pick
       </div>
 
       <div className="mt-4">
+        <ParkingPhotoReviewTrace
+          stage="parking_smart_pick_visual_handoff"
+          option={best}
+          stageNote="ParkingSmartPick props passed into ParkingLotVisual"
+        />
         <ParkingLotVisual
           option={best}
           tripContext={parkingTripContext}
           airportCode={(tripData as { airportCode?: string } | null)?.airportCode ?? null}
+          photoPriority="smart-pick"
         />
       </div>
 
@@ -622,25 +732,25 @@ export default function ParkingSmartPick({
             ))}
 
             <ParkingAvailabilityBadge option={best} />
-            <button
-              type="button"
-              onClick={() => onShowReviews?.(best)}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-              title="See Google review details"
-            >
-              {typeof best.reviewScore === "number" ? (
-                <>
-                  <span>⭐ {best.reviewScore.toFixed(1)}</span>
-                  {typeof best.reviewCount === "number" ? (
-                    <span className="text-amber-700/70">
-                      ({best.reviewCount.toLocaleString()} reviews)
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <span>⭐ Check reviews</span>
-              )}
-            </button>
+            {canShowReviewAction && onShowReviews ? (
+              <button
+                type="button"
+                onClick={() => onShowReviews(best)}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                title="See review details"
+              >
+                {parkingReviewLabel(best)}
+              </button>
+            ) : canShowReviewAction && best.googleMapsUri ? (
+              <a
+                href={best.googleMapsUri}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+              >
+                {parkingReviewLabel(best)}
+              </a>
+            ) : null}
 
             {savings && (
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
@@ -729,6 +839,37 @@ export default function ParkingSmartPick({
               Leave by {displayLeaveByTime} based on your timing choice
             </div>
           )}
+
+          {canShowReviewAction ? (
+            <div className="mt-3 rounded-xl border border-border bg-card p-3 text-sm text-foreground">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-semibold">{parkingReviewLabel(best)}</span>
+                <span className="text-xs text-muted-foreground">{reviewSource}</span>
+              </div>
+
+              {reviewSnippets.length > 0 ? (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs font-semibold text-primary hover:underline">
+                    Reviews
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {reviewSnippets.map((review) => (
+                      <blockquote
+                        key={review.id}
+                        className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground"
+                      >
+                        <div className="mb-1 font-semibold text-foreground">
+                          {typeof review.rating === 'number' ? `★ ${review.rating.toFixed(0)}` : reviewSource}
+                          {review.relativeTimeDescription ? ` · ${review.relativeTimeDescription}` : ''}
+                        </div>
+                        <p>{review.text}</p>
+                      </blockquote>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-3 text-sm text-zinc-700">
             {savings ? (

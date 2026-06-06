@@ -9,7 +9,7 @@ import { registerDefaultParkingProviders } from './registerDefaults';
 import { mergeLiveParkingSourceResults } from './merge';
 import { getParkingPriceSnapshotsCached } from './shared/snapshots';
 import { withParkingSearchCache } from './searchCache';
-import type { ParkingSearchContext } from './types';
+import type { ParkingProviderSearchResult, ParkingSearchContext } from './types';
 import { debugLog } from '../../utils/debug';
 
 export type AggregateAirportParkingArgs = {
@@ -38,10 +38,67 @@ function toSearchContext(args: AggregateAirportParkingArgs): ParkingSearchContex
 }
 
 function optionsForProvider(
-  results: Awaited<ReturnType<typeof parkingProviderRegistry.executeSearch>>,
+  results: ParkingProviderSearchResult[],
   providerId: string,
 ): ParkingOption[] {
   return results.find((result) => result.providerId === providerId)?.options ?? [];
+}
+
+function readPositiveMs(name: string, fallback: number): number {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+function getProviderPartialTimeoutMs(): number {
+  const configured = Number(process.env.PARKING_PROVIDER_PARTIAL_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  const overall = readPositiveMs('PARKING_FETCH_TIMEOUT_MS', 5000);
+  return Math.max(1000, overall - 1000);
+}
+
+function getSnapshotCriticalTimeoutMs(): number {
+  return readPositiveMs('PARKING_CRITICAL_SNAPSHOT_TIMEOUT_MS', 350);
+}
+
+async function withFallbackTimeout<T>(
+  label: string,
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  return new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      debugLog('parking_noncritical_timeout', { label, timeoutMs });
+      resolve(fallback);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        debugLog('parking_noncritical_failed', {
+          label,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        resolve(fallback);
+      },
+    );
+  });
 }
 
 async function aggregateAirportParkingOptionsUncached(
@@ -60,14 +117,22 @@ async function aggregateAirportParkingOptionsUncached(
     destination: args.destination,
   });
 
-  const [results, latestPriceSnapshots] = await Promise.all([
-    parkingProviderRegistry.executeSearch(context),
-    getParkingPriceSnapshotsCached({
-      airportCode,
-      checkInDate: args.checkInDate,
-      checkOutDate: args.checkOutDate,
-    }),
+  const snapshotPromise = getParkingPriceSnapshotsCached({
+    airportCode,
+    checkInDate: args.checkInDate,
+    checkOutDate: args.checkOutDate,
+  });
+
+  const [providerSearch, latestPriceSnapshots] = await Promise.all([
+    parkingProviderRegistry.executeSearchPartial(context, getProviderPartialTimeoutMs()),
+    withFallbackTimeout(
+      'latest_price_snapshots',
+      snapshotPromise,
+      getSnapshotCriticalTimeoutMs(),
+      [],
+    ),
   ]);
+  const results = providerSearch.results;
 
   const merged = await mergeLiveParkingSourceResults(
     {
@@ -100,6 +165,7 @@ async function aggregateAirportParkingOptionsUncached(
     destinationKind: 'airport',
     airportCode,
     providerCount: results.length,
+    providerSearchTimedOut: providerSearch.timedOut,
     providerResults: results.map((result) => ({
       providerId: result.providerId,
       resultCount: result.options.length,

@@ -16,7 +16,16 @@ export type ParkingPhotoSelection = {
   requiresGoogleAttribution: boolean;
   /** Set when a Google photo was requested but live PhotoMedia is blocked. */
   safeModeNotice?: string | null;
+  /** Diagnostic reason when the selector had to fall back to a placeholder. */
+  fallbackReason?: string | null;
 };
+
+export type ParkingPhotoPriority =
+  | 'smart-pick'
+  | 'top'
+  | 'visible'
+  | 'background'
+  | 'manual';
 
 export type ParkingLotPhotoLookup = {
   parkingLotId?: string | null;
@@ -26,6 +35,7 @@ export type ParkingLotPhotoLookup = {
   airportCode?: string | null;
   googlePhotoName?: string | null;
   lotName?: string | null;
+  lotAddress?: string | null;
   lotType?: string | null;
   lotCategory?: string | null;
   covered?: boolean;
