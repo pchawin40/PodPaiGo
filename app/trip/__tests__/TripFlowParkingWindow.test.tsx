@@ -88,4 +88,34 @@ describe('TripFlow general parking window', () => {
     expect(params.get('parkingCheckOutTime')).toBe('17:00');
     expect(params.get('parkingDuration')).toBe('480');
   });
+
+  test('submits manually typed MM/DD/YYYY trip date as normalized search params', async () => {
+    render(<TripFlow />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    fireEvent.change(screen.getByPlaceholderText('Office, stadium, restaurant, hotel, hospital, or address'), {
+      target: { value: 'Pike Place Market' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Start typing your address'), {
+      target: { value: 'Monroe, WA' },
+    });
+    fireEvent.change(screen.getByLabelText('Trip date'), {
+      target: { value: '11/13/2026' },
+    });
+    fireEvent.change(document.querySelector('input[type="time"]')!, {
+      target: { value: '09:00' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'See options' }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
+
+    const params = readStoredTripParams();
+    expect(params.get('arrivalDate')).toBe('2026-11-13');
+    expect(params.get('parkingCheckInDate')).toBe('2026-11-13');
+    expect(params.get('parkingCheckOutDate')).toBe('2026-11-13');
+  });
 });

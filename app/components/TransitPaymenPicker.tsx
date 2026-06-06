@@ -6,6 +6,7 @@ import {
   resolveTransitPaymentRegionContext,
   type TransitPaymentRegionContext,
 } from '../../lib/transit/transitPaymentLabels';
+import { getOptionCardClass, getOptionInlineBadgeClass } from '../../lib/ui/optionClasses';
 
 export type TransitPaymentOption = 'normal' | 'orca-pass';
 
@@ -39,28 +40,36 @@ export default function TransitPaymentPicker({
         <button
           type="button"
           onClick={() => onChange('normal')}
-          className={
-            `ppg-option-card rounded-xl p-4 text-left transition ` +
-            (value === 'normal' ? 'ppg-option-card-selected' : '')
-          }
+          className={getOptionCardClass(value === 'normal')}
         >
-          <div className="ppg-option-card-title text-sm font-semibold">I’ll pay normally</div>
-          <div className="ppg-option-card-description mt-1 text-xs">
-            Estimate normal transit fare.
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="ppg-option-card-title text-sm font-semibold">I’ll pay normally</div>
+              <div className="ppg-option-card-description mt-1 text-xs">
+                Estimate normal transit fare.
+              </div>
+            </div>
+            {value === 'normal' ? (
+              <span className={getOptionInlineBadgeClass()}>Selected</span>
+            ) : null}
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => onChange('orca-pass')}
-          className={
-            `ppg-option-card rounded-xl p-4 text-left transition ` +
-            (value === 'orca-pass' ? 'ppg-option-card-selected' : '')
-          }
+          className={getOptionCardClass(value === 'orca-pass')}
         >
-          <div className="ppg-option-card-title text-sm font-semibold">{passLabel}</div>
-          <div className="ppg-option-card-description mt-1 text-xs">
-            Show transit fare as $0.
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="ppg-option-card-title text-sm font-semibold">{passLabel}</div>
+              <div className="ppg-option-card-description mt-1 text-xs">
+                Show transit fare as $0.
+              </div>
+            </div>
+            {value === 'orca-pass' ? (
+              <span className={getOptionInlineBadgeClass()}>Selected</span>
+            ) : null}
           </div>
         </button>
       </div>

@@ -178,6 +178,34 @@ describe('quickGo', () => {
     expect(tripData?.parkingDuration).toBe(8 * 60);
   });
 
+  test('existing ISO date search params still parse and serialize unchanged', () => {
+    const params = new URLSearchParams({
+      type: 'one-way-departure',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      departureDate: '2026-06-05',
+      departureTime: '09:00',
+      parkingCheckInDate: '2026-06-05',
+      parkingCheckInTime: '09:00',
+      parkingCheckOutDate: '2026-06-07',
+      parkingCheckOutTime: '17:00',
+      parkingDuration: String(2 * 24 * 60),
+      airportCode: 'SEA',
+      destinationKind: 'airport',
+    });
+
+    const tripData = parseTripDataFromSearchParams(params);
+    expect(tripData?.type).toBe('one-way-departure');
+    expect(tripData && 'departureDate' in tripData ? tripData.departureDate : undefined).toBe('2026-06-05');
+    expect(tripData?.parkingCheckInDate).toBe('2026-06-05');
+    expect(tripData?.parkingCheckOutDate).toBe('2026-06-07');
+
+    const serialized = tripDataToSearchParams(tripData!, { intent: 'flying-out', preserve: params });
+    expect(serialized.get('departureDate')).toBe('2026-06-05');
+    expect(serialized.get('parkingCheckInDate')).toBe('2026-06-05');
+    expect(serialized.get('parkingCheckOutDate')).toBe('2026-06-07');
+  });
+
   test('formatQuickGoOriginDisplayLabel reflects origin source', () => {
     const manualParams = buildQuickGoSearchParams({
       destinationText: 'Coffee shop',

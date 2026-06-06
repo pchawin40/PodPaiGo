@@ -15,6 +15,10 @@ import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
 import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
+import {
+  FlexibleDateInput,
+  normalizeFlexibleDateInputValue,
+} from '../components/FlexibleDateInput';
 import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
 import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
@@ -6933,48 +6937,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   );
 }
 
-const editableDateHelperText = 'Format: MM/DD/YYYY or YYYY-MM-DD.';
-
 function normalizeEditableDateInputValue(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  const us = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-
-  const parts = iso
-    ? { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) }
-    : us
-      ? { year: Number(us[3]), month: Number(us[1]), day: Number(us[2]) }
-      : null;
-
-  if (!parts) return null;
-
-  const { year, month, day } = parts;
-  if (![year, month, day].every(Number.isFinite)) return null;
-  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) {
-    return null;
-  }
-
-  const parsed = new Date(year, month - 1, day);
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day
-  ) {
-    return null;
-  }
-
-  return formatLocalYYYYMMDD(parsed);
-}
-
-function readableEditInputClass(className = ''): string {
-  return [
-    'ppg-readable-input mt-2 w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100',
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  return normalizeFlexibleDateInputValue(value);
 }
 
 function EditDateTextInput({
@@ -6987,19 +6951,12 @@ function EditDateTextInput({
   ariaLabel: string;
 }) {
   return (
-    <>
-      <input
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        placeholder="MM/DD/YYYY or YYYY-MM-DD"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-label={ariaLabel}
-        className={readableEditInputClass()}
-      />
-      <p className="mt-2 text-xs text-zinc-500">{editableDateHelperText}</p>
-    </>
+    <FlexibleDateInput
+      value={value}
+      onChange={onChange}
+      ariaLabel={ariaLabel}
+      className="mt-2 w-full"
+    />
   );
 }
 

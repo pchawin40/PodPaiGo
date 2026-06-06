@@ -299,25 +299,25 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         }}
         onBlur={() => setTimeout(() => setIsOpen(false), 150)}
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+        className="ppg-readable-input w-full rounded-2xl border border-border px-4 py-3 text-base shadow-sm outline-none transition focus:border-ring focus:ring-4 focus:ring-ring/15"
       />
 
       {isOpen && inputValue.trim().length >= 3 && (
         <div
           id="address-suggestion-list"
           role="listbox"
-          className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
+          className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-border bg-card shadow-xl"
         >
           {loadingPredictions && (
-            <div className="px-4 py-3 text-sm text-zinc-600">Searching…</div>
+            <div className="px-4 py-3 text-sm text-muted-foreground">Searching…</div>
           )}
 
           {!loadingPredictions && predictionError && (
-            <div className="px-4 py-3 text-sm text-red-700">{predictionError}</div>
+            <div className="px-4 py-3 text-sm text-danger">{predictionError}</div>
           )}
 
           {!loadingPredictions && !predictionError && predictions.length === 0 && inputValue.trim().length >= 3 && (
-            <div className="px-4 py-3 text-sm text-zinc-600">No matches found</div>
+            <div className="px-4 py-3 text-sm text-muted-foreground">No matches found</div>
           )}
 
           {!loadingPredictions && predictions.map((prediction, idx) => {
@@ -331,7 +331,7 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onSelectPrediction(prediction)}
                 tabIndex={-1}
-                className={`cursor-pointer px-4 py-3 text-sm ${selected ? 'bg-blue-600 text-white' : 'text-zinc-900 hover:bg-zinc-100'
+                className={`cursor-pointer px-4 py-3 text-sm ${selected ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-muted'
                   }`}
               >
                 {prediction.description}
@@ -342,8 +342,8 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
       )}
 
       {recentOrigins.length > 0 && !isOpen && (
-        <div className="mt-3 rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm">
-          <div className="mb-2 text-xs font-semibold uppercase text-slate-500">Recent origins</div>
+        <div className="mt-3 rounded-2xl border border-border bg-card/90 p-3 shadow-sm">
+          <div className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Recent origins</div>
           <ul className="flex flex-wrap gap-2">
             {recentOrigins.map((origin) => {
               const selected = inputValue.trim() === origin.trim();
@@ -367,9 +367,9 @@ export function AddressInput({ label, value, onChange, placeholder }: Props) {
         </div>
       )}
 
-      {locateError && <p className="text-xs text-red-600 mt-1">{locateError}</p>}
+      {locateError && <p className="text-xs text-danger mt-1">{locateError}</p>}
 
-      <p className="text-xs text-zinc-500 mt-1">Tip: start typing an address, or use your current location.</p>
+      <p className="text-xs text-muted-foreground mt-1">Tip: start typing an address, or use your current location.</p>
     </div>
   );
 }

@@ -169,7 +169,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   let data: TripData | null = null;
 
   if (type === 'one-way-departure') {
-    const departureDate = searchParams.get('departureDate') || '';
+    const departureDate =
+      searchParams.get('departureDate') ||
+      searchParams.get('flightDate') ||
+      '';
     const departureTime = searchParams.get('departureTime') || '';
 
     let computedParkingDuration = parkingDuration;
