@@ -17,6 +17,7 @@ type TravelPreferencesPanelProps = {
   value?: TripTravelPreferences;
   onChange?: (preferences: TripTravelPreferences) => void;
   className?: string;
+  embedded?: boolean;
 };
 
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
@@ -43,6 +44,7 @@ export default function TravelPreferencesPanel({
   value,
   onChange,
   className = '',
+  embedded = false,
 }: TravelPreferencesPanelProps) {
   const [preferences, setPreferences] = useState<TripTravelPreferences>(
     value || DEFAULT_TRAVEL_PREFERENCES,
@@ -73,8 +75,8 @@ export default function TravelPreferencesPanel({
     });
   };
 
-  return (
-    <TravelCard padding="sm" className={className}>
+  const content = (
+    <>
       <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         Travel preferences
       </div>
@@ -131,6 +133,16 @@ export default function TravelPreferencesPanel({
           })}
         </div>
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className={className}>{content}</div>;
+  }
+
+  return (
+    <TravelCard padding="sm" className={className}>
+      {content}
     </TravelCard>
   );
 }

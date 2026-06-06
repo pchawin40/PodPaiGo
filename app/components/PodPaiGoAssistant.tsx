@@ -286,9 +286,13 @@ export default function PodPaiGoAssistant({
 
   return (
     <>
-      <div className="fixed bottom-5 right-4 z-40 flex items-center gap-2 sm:right-6">
+      <div className="pointer-events-none fixed bottom-20 right-4 z-[120] flex items-center gap-2 sm:bottom-5 sm:right-6">
         {showFeatureInfo ? (
-          <div className="absolute bottom-full right-0 mb-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl">
+          <div
+            id="podpaigo-assistant-info-tooltip"
+            role="tooltip"
+            className="pointer-events-auto absolute bottom-full right-0 mb-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
             AI planning is available for signed-in users. Ask PodPaiGo can explain routes,
             parking, timing, and tradeoffs using your trip results. Describe your trip. PodPaiGo
             will ask follow-up questions, then fill the planner for review.
@@ -300,16 +304,23 @@ export default function PodPaiGoAssistant({
             setOpen(true);
             setShowFeatureInfo(false);
           }}
-          className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)] hover:bg-blue-700"
+          className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(37,99,235,0.35)] hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
           aria-label="Ask PodPaiGo"
+          aria-haspopup="dialog"
+          aria-expanded={open}
         >
           Ask PodPaiGo
         </button>
         <button
           type="button"
           onClick={() => setShowFeatureInfo((current) => !current)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-700 shadow-lg hover:bg-slate-50"
+          onMouseEnter={() => setShowFeatureInfo(true)}
+          onFocus={() => setShowFeatureInfo(true)}
+          onMouseLeave={() => setShowFeatureInfo(false)}
+          onBlur={() => setShowFeatureInfo(false)}
+          className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-700 shadow-lg hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
           aria-label="AI Trip Planner info"
+          aria-describedby="podpaigo-assistant-info-tooltip"
           title="AI planning is available for signed-in users."
         >
           ?
@@ -317,7 +328,7 @@ export default function PodPaiGoAssistant({
       </div>
 
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-end bg-slate-950/30 p-0 sm:p-4">
+        <div className="fixed inset-0 z-[130] flex items-end justify-end bg-slate-950/30 p-0 sm:p-4">
           <button
             type="button"
             aria-label="Close assistant"

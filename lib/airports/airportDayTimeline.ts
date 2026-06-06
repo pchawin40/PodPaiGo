@@ -12,10 +12,13 @@ export type AirportDayTimelineInput = {
   leaveByTime?: string | null;
   departureTime?: string | null;
   travelMinutes?: number | null;
+  parkingBufferMinutes?: number | null;
   airportBufferMinutes?: number | null;
   transportMode?: AirportDayTransportMode;
   shuttleWalkMinutes?: number | null;
   parkingPickName?: string | null;
+  /** When set, lot arrival is anchored to this time instead of leave + drive. */
+  parkingCheckInTime?: string | null;
 };
 
 function parseTimeToMinutes(time: string): number | null {
@@ -71,10 +74,26 @@ export function buildAirportDayTimeline(input: AirportDayTimelineInput): Airport
     typeof input.airportBufferMinutes === 'number' && input.airportBufferMinutes > 0
       ? input.airportBufferMinutes
       : null;
+  const parkingBufferMinutes =
+    typeof input.parkingBufferMinutes === 'number' && input.parkingBufferMinutes > 0
+      ? input.parkingBufferMinutes
+      : null;
   const shuttleMinutes =
     typeof input.shuttleWalkMinutes === 'number' && input.shuttleWalkMinutes > 0
       ? input.shuttleWalkMinutes
       : null;
+  const parkingCheckIn = input.parkingCheckInTime?.trim() || null;
+  const resolvedTravelMinutes =
+    travelMinutes ??
+    (leaveBy && parkingCheckIn
+      ? (() => {
+          const leaveMin = parseTimeToMinutes(leaveBy);
+          const checkInMin = parseTimeToMinutes(parkingCheckIn);
+          if (leaveMin == null || checkInMin == null) return null;
+          const diff = checkInMin - leaveMin;
+          return diff > 0 ? diff : null;
+        })()
+      : null);
 
   milestones.push({
     id: 'leave-home',
@@ -84,16 +103,23 @@ export function buildAirportDayTimeline(input: AirportDayTimelineInput): Airport
     estimated: !leaveBy,
   });
 
-  if (leaveBy && travelMinutes != null) {
+  if (parkingCheckIn || (leaveBy && resolvedTravelMinutes != null)) {
+    const arriveTime =
+      parkingCheckIn ||
+      (leaveBy && resolvedTravelMinutes != null
+        ? addMinutesToTime(leaveBy, resolvedTravelMinutes)
+        : null);
     milestones.push({
       id: 'arrive-access',
       label: arriveLabel(input.transportMode ?? 'parking'),
-      timeLabel: formatDisplayTime(addMinutesToTime(leaveBy, travelMinutes)),
+      timeLabel: arriveTime ? formatDisplayTime(arriveTime) : null,
       detail:
         input.transportMode === 'parking' && input.parkingPickName
           ? input.parkingPickName
-          : `${travelMinutes} min travel estimate`,
-      estimated: true,
+          : resolvedTravelMinutes != null
+            ? `${resolvedTravelMinutes} min travel estimate`
+            : 'Travel time estimate unavailable',
+      estimated: !parkingCheckIn,
     });
   } else {
     milestones.push({
@@ -107,13 +133,32 @@ export function buildAirportDayTimeline(input: AirportDayTimelineInput): Airport
 
   if (input.transportMode === 'parking') {
     const arriveTime =
-      leaveBy && travelMinutes != null ? addMinutesToTime(leaveBy, travelMinutes) : null;
+      parkingCheckIn ||
+      (leaveBy && resolvedTravelMinutes != null
+        ? addMinutesToTime(leaveBy, resolvedTravelMinutes)
+        : null);
+    const parkingReadyTime =
+      arriveTime && parkingBufferMinutes != null
+        ? addMinutesToTime(arriveTime, parkingBufferMinutes)
+        : arriveTime;
     const terminalTime =
-      arriveTime && shuttleMinutes != null
-        ? addMinutesToTime(arriveTime, shuttleMinutes)
-        : arriveTime && travelMinutes != null
-          ? addMinutesToTime(arriveTime, Math.max(10, Math.round(travelMinutes * 0.2)))
-          : null;
+      parkingReadyTime && shuttleMinutes != null
+        ? addMinutesToTime(parkingReadyTime, shuttleMinutes)
+        : parkingReadyTime && resolvedTravelMinutes != null
+          ? addMinutesToTime(parkingReadyTime, Math.max(10, Math.round(resolvedTravelMinutes * 0.2)))
+          : parkingReadyTime && parkingCheckIn
+            ? addMinutesToTime(parkingReadyTime, 10)
+            : null;
+
+    milestones.push({
+      id: 'park-check-in',
+      label: 'Park / check in',
+      timeLabel: parkingReadyTime ? formatDisplayTime(parkingReadyTime) : null,
+      detail: parkingBufferMinutes
+        ? `${parkingBufferMinutes} min to park, unload, and check in`
+        : input.parkingPickName || 'Confirm parking reservation details',
+      estimated: !parkingCheckIn,
+    });
 
     milestones.push({
       id: 'terminal-access',
@@ -121,8 +166,10 @@ export function buildAirportDayTimeline(input: AirportDayTimelineInput): Airport
       timeLabel: terminalTime ? formatDisplayTime(terminalTime) : null,
       detail: shuttleMinutes
         ? `${shuttleMinutes} min airport access estimate`
-        : 'Estimated terminal arrival',
-      estimated: true,
+        : terminalTime
+          ? 'Estimated terminal arrival'
+          : 'Shuttle/walk estimate unavailable',
+      estimated: !shuttleMinutes,
     });
   }
 

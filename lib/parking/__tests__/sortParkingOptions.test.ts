@@ -103,6 +103,49 @@ describe('sortParkingOptionsForMode', () => {
     expect(ids(sorted)).toEqual(['trusted', 'untrusted']);
   });
 
+  test('easiest prefers high-confidence live price over close untrusted option', () => {
+    const trustedFar = lot({
+      id: 'trusted-live',
+      trustStatus: 'live',
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      sourceLink: 'https://book.example',
+      originToParkingMinutes: 18,
+      walkingMinutes: 6,
+    });
+    const untrustedClose = lot({
+      id: 'untrusted-close',
+      trustStatus: 'estimated',
+      priceDisplay: 'estimated',
+      priceConfidence: 'low',
+      originToParkingMinutes: 6,
+      walkingMinutes: 3,
+    });
+
+    const sorted = sortParkingOptionsForMode([untrustedClose, trustedFar], 'easiest');
+    expect(ids(sorted)).toEqual(['trusted-live', 'untrusted-close']);
+  });
+
+  test('cheapest prefers reliable live price when totals are close', () => {
+    const vagueCheap = lot({
+      id: 'vague',
+      price: 25,
+      priceDisplay: 'estimated',
+      priceConfidence: 'low',
+      originToParkingMinutes: 8,
+    });
+    const liveClose = lot({
+      id: 'live',
+      price: 25,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      sourceLink: 'https://book.example',
+      originToParkingMinutes: 8,
+    });
+
+    expect(compareParkingByCheapest(liveClose, vagueCheap)).toBeLessThan(0);
+  });
+
   test('route-unavailable options sink to the bottom in every mode', () => {
     const unavailable = lot({ id: 'unavailable', price: 0, originToParkingMinutes: 2 });
     const available = lot({ id: 'available', price: 25, originToParkingMinutes: 20 });

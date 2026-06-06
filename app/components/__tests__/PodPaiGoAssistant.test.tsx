@@ -101,6 +101,25 @@ describe('PodPaiGoAssistant', () => {
     });
   });
 
+  test('info control opens feature tooltip on hover and click', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+    } as Response);
+
+    render(<PodPaiGoAssistant page="home" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'AI Trip Planner info' })).toBeInTheDocument();
+    });
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'AI Trip Planner info' }));
+    expect(screen.getByText(/Ask PodPaiGo can explain routes/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI Trip Planner info' }));
+    expect(screen.queryByText(/Ask PodPaiGo can explain routes/i)).not.toBeInTheDocument();
+  });
+
   test('signed-out user sees sign-in prompt and does not call parse route', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,

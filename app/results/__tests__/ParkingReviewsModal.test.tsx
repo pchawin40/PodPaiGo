@@ -48,6 +48,30 @@ function mockReviewsFetch(payload: Record<string, unknown>) {
   });
 }
 
+describe('ParkingReviewsModal filter buttons', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  test('sort filter buttons use shared option selected/unselected classes', async () => {
+    render(
+      <ParkingReviewsModal
+        parking={baseParking}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    const mostRelevant = screen.getByRole('button', { name: 'Most relevant' });
+    const newest = screen.getByRole('button', { name: 'Newest' });
+
+    expect(mostRelevant.className).toContain('pod-option-button-selected');
+    expect(newest.className).toContain('pod-option-button-unselected');
+    expect(mostRelevant.className).toContain('pod-option-button--compact');
+  });
+});
+
 describe('ParkingReviewsModal attribution', () => {
   beforeEach(() => {
     global.fetch = jest.fn();

@@ -398,6 +398,7 @@ export default function ParkingSmartPick({
   selectedOption,
   sortMode = 'easiest',
   leaveByTime,
+  leaveByReason,
   aprLivePrices = {},
   weatherImpact,
   weatherContext,
@@ -409,6 +410,7 @@ export default function ParkingSmartPick({
   selectedOption?: ParkingOption | null;
   sortMode?: ParkingSortMode;
   leaveByTime?: string | null;
+  leaveByReason?: string | null;
   aprLivePrices?: Record<string, number>;
   aprLiveChecking?: boolean;
   weatherImpact?: WeatherImpact | null;
@@ -817,9 +819,6 @@ export default function ParkingSmartPick({
             <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${priceTrust.badgeClassName}`}>
               {priceTrust.label}
             </span>
-            <span className="text-xs font-medium text-zinc-600">
-              Provider controls final price.
-            </span>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-700">
@@ -839,7 +838,10 @@ export default function ParkingSmartPick({
 
           {displayLeaveByTime && (
             <div className="mt-2 text-sm font-semibold text-emerald-700">
-              Leave by {displayLeaveByTime} based on your timing choice
+              Leave by {displayLeaveByTime}
+              <span className="block text-xs font-medium text-emerald-800/80">
+                {leaveByReason || 'Based on your timing choice.'}
+              </span>
             </div>
           )}
 

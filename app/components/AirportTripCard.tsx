@@ -24,7 +24,9 @@ type AirportTripCardProps = {
   transportMode?: AirportDayTransportMode;
   transportModeLabel?: string | null;
   travelMinutes?: number | null;
+  parkingBufferMinutes?: number | null;
   shuttleWalkMinutes?: number | null;
+  parkingCheckInTime?: string | null;
   departureTime?: string | null;
   airportBufferMinutes?: number | null;
   bookingUrl?: string | null;
@@ -59,7 +61,7 @@ function transportSummary(mode: AirportDayTransportMode, label: string | null): 
 function CompanionSection({
   title,
   children,
-  defaultOpen = true,
+  defaultOpen = false,
 }: {
   title: string;
   children: ReactNode;
@@ -93,7 +95,9 @@ export default function AirportTripCard({
   transportMode = null,
   transportModeLabel = null,
   travelMinutes = null,
+  parkingBufferMinutes = null,
   shuttleWalkMinutes = null,
+  parkingCheckInTime = null,
   departureTime = null,
   airportBufferMinutes = null,
   bookingUrl = null,
@@ -120,10 +124,12 @@ export default function AirportTripCard({
     leaveByTime: model.leaveByTime,
     departureTime,
     travelMinutes,
+    parkingBufferMinutes,
     airportBufferMinutes,
     transportMode,
     shuttleWalkMinutes,
     parkingPickName: model.parkingPickName,
+    parkingCheckInTime,
   });
 
   const checklistStorageKey = [airportCode, departureTime, returnDate, airlineOrFlight]
@@ -161,7 +167,7 @@ export default function AirportTripCard({
       </div>
 
       <div className="space-y-3 px-4 py-4 sm:px-5">
-        <CompanionSection title="Overview" defaultOpen>
+        <CompanionSection title="Overview">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl bg-white/8 p-3">
               <div className="text-[11px] uppercase tracking-wide text-slate-300">Getting there</div>
@@ -195,7 +201,7 @@ export default function AirportTripCard({
           </div>
         </CompanionSection>
 
-        <CompanionSection title="Timeline">
+        <CompanionSection title="Timeline" defaultOpen>
           <AirportDayTimeline milestones={timeline} showHeading={false} />
         </CompanionSection>
 
@@ -209,7 +215,7 @@ export default function AirportTripCard({
           />
         </CompanionSection>
 
-        <CompanionSection title="Actions" defaultOpen>
+        <CompanionSection title="Actions">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {tripData ? (
               <SaveAccountTripButton tripData={tripData} intent={intent} className="w-full sm:w-auto" />

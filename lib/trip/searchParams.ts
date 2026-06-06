@@ -100,6 +100,13 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const parkingCheckInTime = searchParams.get('parkingCheckInTime') || '';
   const parkingCheckOutDate = searchParams.get('parkingCheckOutDate') || '';
   const parkingCheckOutTime = searchParams.get('parkingCheckOutTime') || '';
+  const parkingCheckInUserOverrideRaw = searchParams.get('parkingCheckInUserOverride') || '';
+  const parkingCheckInUserOverride =
+    parkingCheckInUserOverrideRaw === '1'
+      ? true
+      : parkingCheckInUserOverrideRaw === '0'
+        ? false
+        : undefined;
   const originLatRaw = searchParams.get('originLat');
   const originLngRaw = searchParams.get('originLng');
   const originLat = originLatRaw ? Number(originLatRaw) : undefined;
@@ -207,6 +214,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               parkingDuration: computedParkingDuration,
               parkingCheckInDate: resolvedParkingCheckInDate,
               parkingCheckInTime: resolvedParkingCheckInTime,
+              parkingCheckInUserOverride,
               parkingCheckOutDate: resolvedParkingCheckOutDate,
               parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
@@ -231,6 +239,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
               parkingDuration: computedParkingDuration,
               parkingCheckInDate: resolvedParkingCheckInDate,
               parkingCheckInTime: resolvedParkingCheckInTime,
+              parkingCheckInUserOverride,
               parkingCheckOutDate: resolvedParkingCheckOutDate,
               parkingCheckOutTime: resolvedParkingCheckOutTime,
               transportAvailability,
@@ -559,6 +568,13 @@ export function tripDataToSearchParams(
     params.set('departureTime', data.departureTime);
     params.set('parkingCheckInDate', data.parkingCheckInDate || data.departureDate);
     params.set('parkingCheckInTime', data.parkingCheckInTime || data.departureTime);
+    if (extras.parkingCheckInUserOverride === true) {
+      params.set('parkingCheckInUserOverride', '1');
+    } else if (extras.parkingCheckInUserOverride === false) {
+      params.set('parkingCheckInUserOverride', '0');
+    } else {
+      params.delete('parkingCheckInUserOverride');
+    }
     if (data.parkingCheckOutDate) params.set('parkingCheckOutDate', data.parkingCheckOutDate);
     if (extras.parkingCheckOutTime) params.set('parkingCheckOutTime', extras.parkingCheckOutTime);
     if (data.parkingDuration) params.set('parkingDuration', String(data.parkingDuration));

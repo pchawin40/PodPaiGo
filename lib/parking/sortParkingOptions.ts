@@ -93,6 +93,31 @@ function priceConfidencePenalty(option: ParkingOption): number {
   return 8;
 }
 
+function unknownPricePenalty(option: ParkingOption, tripData?: TripData | null): number {
+  const cost = getParkingComparableCost(option, tripData);
+  if (cost >= BIG) return 120;
+  if (option.priceDisplay === 'check-live' || option.priceDisplay === 'unavailable') return 36;
+  if (option.priceDisplay === 'estimated' && option.priceConfidence !== 'high') return 18;
+  return 0;
+}
+
+function bookabilityBonus(option: ParkingOption): number {
+  if (option.priceDisplay === 'live' || option.pricingConfidence === 'live') return -14;
+  if (option.priceSource === 'official-rate') return -8;
+  if (option.sourceLink) return -4;
+  return 0;
+}
+
+function easiestConfidenceBonus(option: ParkingOption): number {
+  let bonus = bookabilityBonus(option);
+  if (option.trustStatus === 'live' || option.routeTrustStatus === 'live') bonus -= 10;
+  if (option.priceConfidence === 'high') bonus -= 6;
+  if (option.transferType === 'walk' || option.transferType === 'airport-garage') bonus -= 8;
+  if (option.transferType === 'shuttle') bonus += 6;
+  if (option.availabilityStatus === 'unknown') bonus += 8;
+  return bonus;
+}
+
 function routePenalty(option: ParkingOption, tripData?: TripData | null): number {
   if (isParkingRouteUnavailable(option)) return BIG;
 
@@ -175,6 +200,8 @@ function easiestKey(option: ParkingOption, tripData?: TripData | null): number {
     availabilityPenalty(option) +
     trustPenalty(option.trustStatus) +
     priceConfidencePenalty(option) +
+    unknownPricePenalty(option, tripData) +
+    easiestConfidenceBonus(option) +
     walkTransfer * 0.6
   );
 }
@@ -211,8 +238,19 @@ export function compareParkingByCheapest(
   b: ParkingOption,
   tripData?: TripData | null,
 ): number {
+  const costDiff = cheapestKey(a, tripData) - cheapestKey(b, tripData);
+  if (costDiff !== 0) {
+    if (Math.abs(costDiff) <= 3) {
+      const livePreference =
+        bookabilityBonus(a) - bookabilityBonus(b) ||
+        priceConfidencePenalty(a) - priceConfidencePenalty(b);
+      if (livePreference !== 0) return livePreference;
+    }
+    return costDiff;
+  }
+
   return (
-    cheapestKey(a, tripData) - cheapestKey(b, tripData) ||
+    unknownPricePenalty(a, tripData) - unknownPricePenalty(b, tripData) ||
     priceConfidencePenalty(a) - priceConfidencePenalty(b) ||
     getParkingTotalTimeMinutes(a, tripData) - getParkingTotalTimeMinutes(b, tripData)
   );
@@ -226,6 +264,7 @@ export function compareParkingByFastest(
   return (
     getParkingTotalTimeMinutes(a, tripData) - getParkingTotalTimeMinutes(b, tripData) ||
     routePenalty(a, tripData) - routePenalty(b, tripData) ||
+    unknownPricePenalty(a, tripData) - unknownPricePenalty(b, tripData) ||
     getParkingComparableCost(a, tripData) - getParkingComparableCost(b, tripData)
   );
 }
@@ -293,14 +332,16 @@ export function parkingRankEvidenceLabel(
     return 'Verified free parking';
   }
 
-  if (mode === 'cheapest') return 'Lowest total price';
-  if (mode === 'fastest') return 'Fastest door-to-destination';
+  if (mode === 'cheapest') return 'Lowest reliable total price';
+  if (mode === 'fastest') return 'Shortest door-to-terminal time';
 
   const walk = parkingWalkTransferMinutes(option);
-  if (walk > 0 && walk <= 6) return 'Closest walk';
+  if (walk > 0 && walk <= 6) return 'Low shuttle/walk friction';
   if (option.priceDisplay === 'live' || option.pricingConfidence === 'live') {
     return 'Live bookable price';
   }
-  if (option.priceConfidence === 'high' || option.trustStatus === 'live') return 'High confidence';
-  return null;
+  if (option.priceConfidence === 'high' || option.trustStatus === 'live') {
+    return 'High confidence';
+  }
+  return 'Lower stress estimate';
 }

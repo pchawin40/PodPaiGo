@@ -94,6 +94,8 @@ type BaseTripData = {
   parkingCheckInTime?: string;
   parkingCheckOutDate?: string;
   parkingCheckOutTime?: string;
+  /** True when the user manually set parking check-in; false when using PodPaiGo recommended time. */
+  parkingCheckInUserOverride?: boolean;
 };
 
 export type TripData =

@@ -9,6 +9,7 @@ import {
     GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
     SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
 } from "../../lib/parking/googlePlacesSafeMode";
+import { getOptionButtonClass } from "../../lib/ui/optionClasses";
 import GoogleMapsAttribution from "./GoogleMapsAttribution";
 
 type SortMode = "most_relevant" | "newest" | "highest" | "lowest";
@@ -255,12 +256,10 @@ export default function ParkingReviewsModal({
                                 key={key}
                                 type="button"
                                 onClick={() => setSort(key as SortMode)}
-                                className={
-                                    "rounded-full border px-4 py-2 text-sm font-medium " +
-                                    (sort === key
-                                        ? "border-blue-200 bg-blue-100 text-blue-800"
-                                        : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50")
-                                }
+                                className={getOptionButtonClass(sort === key, {
+                                    compact: true,
+                                    className: "rounded-full font-medium",
+                                })}
                             >
                                 {label}
                             </button>

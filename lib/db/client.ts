@@ -31,6 +31,10 @@ export function parkingDbCacheDisabledByConfig(): boolean {
     process.env.LOCAL_DATABASE_URL ||
     '';
 
+  if (!connectionString.trim()) {
+    return true;
+  }
+
   const isPlaceholder =
     connectionString.includes('<PROJECT_REF>') ||
     connectionString.includes('postgres.<PROJECT_REF>');

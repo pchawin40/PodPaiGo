@@ -14,6 +14,9 @@ describe('AirportTripCard', () => {
         leaveByTime: '06:42',
         parkingPickName: 'SEA Garage',
         transportMode: 'parking',
+        travelMinutes: 20,
+        parkingBufferMinutes: 6,
+        shuttleWalkMinutes: 9,
         departureTime: '09:30',
       }),
     );
@@ -25,5 +28,7 @@ describe('AirportTripCard', () => {
     expect(html).toContain('Actions');
     expect(html).toContain('Leave by');
     expect(html).toContain('SEA Garage');
+    expect(html).toContain('Park / check in');
+    expect(html).toContain('7:08 AM');
   });
 });
