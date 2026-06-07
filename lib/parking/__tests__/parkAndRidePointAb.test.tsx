@@ -1,0 +1,298 @@
+/**
+ * @jest-environment jsdom
+ */
+import { render, screen } from '@testing-library/react';
+import OptionComparisonCard from '../../../app/components/OptionComparisonCard';
+import ParkAndRideDetailsPanel from '../../../app/components/ParkAndRideDetailsPanel';
+import { PARK_AND_RIDE_UI_COPY } from '../../access/parkAndRideAccess';
+import { buildParkAndRideDetailsPanel } from '../parkAndRideDetails';
+import { getSeattleRegionParkAndRideLots } from '../parkAndRideProvider';
+import {
+  selectBestParkAndRideForPointAb,
+  toPointAbParkRidePresentation,
+} from '../parkAndRideSelection';
+import { buildPointAbModeActions } from '../pointAbModeActions';
+import { rankPointAbModes } from '../pointAbRanking';
+import type { TripData } from '../../types';
+
+function generalTrip(overrides: Partial<TripData> = {}): TripData {
+  return {
+    type: 'general-trip',
+    origin: 'Lynnwood, WA',
+    destination: 'Downtown Seattle, WA',
+    originLat: 47.8209,
+    originLng: -122.2931,
+    destinationLat: 47.6062,
+    destinationLng: -122.3321,
+    parkingDuration: 8 * 60,
+    ...overrides,
+  } as TripData;
+}
+
+describe('Point A→B Park & Ride provider', () => {
+  test('seeds Seattle-region curated lots', () => {
+    const lots = getSeattleRegionParkAndRideLots();
+    const names = lots.map((lot) => lot.lotName);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Northgate Station Garage / Park-and-Ride A',
+        'Mountlake Terrace Station',
+        'Lynnwood City Center Station',
+        'Mercer Island Park-and-Ride',
+        'Redmond Technology Station',
+        'Redmond Transit Center',
+        'Tukwila International Blvd Station',
+        'Angle Lake Station',
+      ]),
+    );
+    expect(lots.every((lot) => lot.rulesUrl.startsWith('http'))).toBe(true);
+  });
+});
+
+describe('Point A→B Park & Ride selection', () => {
+  test('selects a viable downtown Seattle lot with estimated time and cost', () => {
+    const result = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destination: 'Downtown Seattle, WA',
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+      parkingDurationMinutes: 8 * 60,
+      isAirportTrip: false,
+      sort: 'easiest',
+      parkingTotal: 28,
+    });
+
+    expect(result.best).not.toBeNull();
+    expect(result.best?.isRecommended).toBe(true);
+    expect(result.best?.totalTimeMinutes).toBeGreaterThan(0);
+    expect(result.best?.costEstimate?.display).toMatch(/Estimated \$/);
+    expect(
+      result.best?.lotName.includes('Lynnwood') ||
+        result.best?.lotName.includes('Northgate') ||
+        result.best?.lotName.includes('Mountlake'),
+    ).toBe(true);
+  });
+
+  test('returns unavailable reason when no useful lot exists', () => {
+    const result = selectBestParkAndRideForPointAb({
+      origin: 'Spokane, WA',
+      originLat: 47.6588,
+      originLng: -117.426,
+      destination: 'Boise, ID',
+      destinationLat: 43.615,
+      destinationLng: -116.2023,
+      parkingDurationMinutes: 8 * 60,
+      isAirportTrip: false,
+    });
+
+    expect(result.best).toBeNull();
+    expect(result.notUsefulReason).toMatch(/Not useful|no Park & Ride/i);
+  });
+
+  test('does not recommend overnight airport Park & Ride', () => {
+    const result = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      destination: 'SEA Airport',
+      parkingDurationMinutes: 7 * 24 * 60,
+      isAirportTrip: true,
+    });
+
+    expect(result.best).toBeNull();
+    expect(result.notUsefulReason).toBe(PARK_AND_RIDE_UI_COPY.notRecommendedOvernight);
+  });
+});
+
+describe('Point A→B Park & Ride URLs and actions', () => {
+  test('generates Google Maps drive and transit URLs', () => {
+    const result = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationLat: 47.6097,
+      destinationLng: -122.3425,
+      parkingDurationMinutes: 6 * 60,
+      isAirportTrip: false,
+    });
+
+    expect(result.best).not.toBeNull();
+    expect(result.best!.directionsToLotUrl).toMatch(/google\.com\/maps\/dir/);
+    expect(result.best!.directionsToLotUrl).toMatch(/travelmode=driving/);
+    expect(result.best!.transitRouteUrl).toMatch(/google\.com\/maps\/dir/);
+    expect(result.best!.transitRouteUrl).toMatch(/travelmode=transit/);
+  });
+
+  test('viable Park & Ride actions use route and transit buttons', () => {
+    const actions = buildPointAbModeActions({
+      mode: 'park-ride',
+      parkRideDirectionsUrl: 'https://maps.example/drive',
+      parkRideTransitUrl: 'https://maps.example/transit',
+      parkRideViable: true,
+      onDetails: () => undefined,
+    });
+
+    expect(actions[0]).toEqual({ label: 'Route to lot', href: 'https://maps.example/drive' });
+    expect(actions[1]).toEqual({
+      label: 'Transit to destination',
+      href: 'https://maps.example/transit',
+    });
+    expect(actions[2].label).toBe('Details');
+  });
+
+  test('unavailable Park & Ride actions open rules and why-unavailable details', () => {
+    const actions = buildPointAbModeActions({
+      mode: 'park-ride',
+      parkRideRulesUrl: 'https://soundtransit.org/rules',
+      parkRideTransitPlannerUrl: 'https://soundtransit.org/',
+      parkRideViable: false,
+      onDetails: () => undefined,
+    });
+
+    expect(actions[0]).toEqual({
+      label: 'Check lot rules',
+      href: 'https://soundtransit.org/rules',
+    });
+    expect(actions[1].label).toBe('Why unavailable');
+    expect(actions[2]).toEqual({
+      label: 'Open transit planner',
+      href: 'https://soundtransit.org/',
+    });
+  });
+});
+
+describe('Point A→B Park & Ride details and ranking', () => {
+  test('details panel includes lot, rules, routes, and route breakdown', () => {
+    const selection = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destination: 'Downtown Seattle, WA',
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+      parkingDurationMinutes: 8 * 60,
+      isAirportTrip: false,
+    });
+    const presentation = toPointAbParkRidePresentation(selection);
+    const seed = getSeattleRegionParkAndRideLots().find((lot) => lot.id === selection.best?.id);
+    const details = buildParkAndRideDetailsPanel(selection.best!, seed);
+
+    expect(presentation?.details.lotName).toBeTruthy();
+    expect(details.routesServed.length).toBeGreaterThan(0);
+    expect(details.parkingRuleSummary).toMatch(/Verify|overnight|same-day|48-hour|FCFS/i);
+    expect(details.routeBreakdown.totalMinutes).toBeGreaterThan(0);
+    expect(details.verifySignsWarning).toMatch(/Verify posted signs/i);
+  });
+
+  test('rankPointAbModes uses curated Park & Ride presentation for city trips', () => {
+    const selection = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destination: 'Downtown Seattle, WA',
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+      parkingDurationMinutes: 8 * 60,
+      isAirportTrip: false,
+    });
+    const pointAbParkRide = toPointAbParkRidePresentation(selection);
+    const ranking = rankPointAbModes({
+      tripData: generalTrip(),
+      sort: 'easiest',
+      destinationLabel: 'Downtown Seattle, WA',
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingTotal: 28,
+      parkingMinutes: 35,
+      bestRideOption: null,
+      ridePrice: 42,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: 6,
+      transitDuration: 52,
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      pointAbParkRide,
+      parkRideCost: pointAbParkRide?.cost ?? null,
+      parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
+      parkRideReliable: Boolean(pointAbParkRide?.recommended),
+    });
+
+    const parkRideRow = ranking.modes.find((mode) => mode.key === 'park-ride');
+    expect(parkRideRow?.name).toMatch(/Lynnwood|Northgate|Mountlake/);
+    expect(parkRideRow?.time).not.toBe('Depends');
+    expect(parkRideRow?.cost).toMatch(/Estimated \$/);
+  });
+});
+
+describe('OptionComparisonCard layout', () => {
+  test('renders badge, metrics, and three action buttons', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Park & Ride"
+        name="Lynnwood City Center Station"
+        cost="Estimated $3–$8 total"
+        time="58 min"
+        pros={['Lower parking cost']}
+        cons={['Verify posted signs']}
+        status="verify_rules"
+        actions={[
+          { label: 'Route to lot', href: 'https://maps.example/drive' },
+          { label: 'Transit to destination', href: 'https://maps.example/transit' },
+          { label: 'Details', onClick: () => undefined },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Park & Ride')).toBeInTheDocument();
+    expect(screen.getByText('Verify')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Route to lot' })).toHaveAttribute(
+      'href',
+      'https://maps.example/drive',
+    );
+    expect(screen.getByRole('link', { name: 'Transit to destination' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
+  });
+
+  test('desktop cards share equal-height flex layout', () => {
+    const { container } = render(
+      <OptionComparisonCard
+        confidence="High"
+        label="Destination parking"
+        name="Sample Garage"
+        cost="$24"
+        time="32 min"
+        pros={['Near destination']}
+        cons={['Paid garage']}
+        className="h-full"
+      />,
+    );
+
+    expect(container.firstChild).toHaveClass('h-full');
+    expect(container.firstChild).toHaveClass('flex');
+    expect(container.firstChild).toHaveClass('flex-col');
+  });
+
+  test('details panel component renders operator and warnings', () => {
+    const selection = selectBestParkAndRideForPointAb({
+      origin: 'Lynnwood, WA',
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destination: 'Downtown Seattle, WA',
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+      parkingDurationMinutes: 8 * 60,
+      isAirportTrip: false,
+    });
+    const presentation = toPointAbParkRidePresentation(selection);
+
+    render(<ParkAndRideDetailsPanel details={presentation!.details} />);
+
+    expect(screen.getByText(/Routes served/i)).toBeInTheDocument();
+    expect(screen.getByText(/Parking rules/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open lot rules' })).toBeInTheDocument();
+  });
+});

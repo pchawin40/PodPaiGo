@@ -189,7 +189,7 @@ describe('pointAbRanking', () => {
     });
 
     expect(signal.freeLikely).toBe(true);
-    expect(signal.headline).toContain('Sunday');
+    expect(signal.headline).toBe('Free street parking may be available today');
   });
 
   test('airport trips exclude street parking through local rules penalty', () => {

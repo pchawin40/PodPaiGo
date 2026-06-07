@@ -12,7 +12,7 @@ export const CURATED_LOCAL_PARKING_ZONES: CuratedLocalParkingZone[] = [
     id: 'monroe-downtown',
     matchPattern: /\bmonroe\b.*\b(downtown|main st|main street)\b|\bdowntown monroe\b/i,
     headline: 'Monroe downtown street parking',
-    detail: '4-hour street parking is common downtown. Check posted signs for time limits and overnight rules.',
+    detail: '4-hour limit may apply downtown. Check posted signs for time limits and overnight rules.',
     streetParkingAllowed: true,
     maxStreetHours: 4,
   },

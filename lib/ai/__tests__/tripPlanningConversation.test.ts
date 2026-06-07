@@ -1,4 +1,9 @@
 import { parseTripTextMock } from '../mockTripParser';
+import {
+  isAirportPlanningTrip,
+  isLocalDestinationTrip,
+  normalizeParsedTripAssistantResult,
+} from '../normalizeParsedTrip';
 import { parsedTripToSearchParams } from '../parsedTripToSearchParams';
 import {
   applyTripPlanningDefaults,
@@ -9,6 +14,143 @@ import {
 } from '../tripPlanningConversation';
 
 const NOW = new Date('2026-06-05T12:00:00');
+
+describe('AI trip planner classification guards', () => {
+  test('Pike Place is classified as local destination, not airport', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock("I'm going to Pike Place Market", NOW),
+      {},
+      NOW,
+    );
+
+    expect(parsed.mode).toBe('quick_go');
+    expect(parsed.destinationKind).toBe('downtown');
+    expect(isLocalDestinationTrip(parsed)).toBe(true);
+    expect(isAirportPlanningTrip(parsed)).toBe(false);
+    expect(parsed.airportCode).toBeNull();
+  });
+
+  test('Pike Place never asks which airport even when parser returns airport_trip', () => {
+    const parsed = reprocessParsedTrip(
+      normalizeParsedTripAssistantResult(
+        {
+          mode: 'airport_trip',
+          destinationText: 'Pike Place Market',
+          destinationKind: 'downtown',
+          originText: null,
+          airportCode: null,
+          confidence: 'medium',
+          missingFields: ['originText', 'airportCode'],
+        },
+        'openai',
+      )!,
+      {},
+      NOW,
+    );
+
+    const turn = buildTripPlanningTurn(parsed, {
+      geolocationAvailable: true,
+      geolocationDenied: false,
+      currentLocationLabel: 'Monroe, WA',
+    });
+
+    expect(parsed.mode).toBe('quick_go');
+    expect(parsed.missingFields).not.toContain('airportCode');
+    expect(turn.question).toMatch(/starting near Monroe, WA/i);
+    expect(turn.question).not.toMatch(/Which airport/i);
+    expect(turn.quickReplies.map((reply) => reply.label)).not.toContain('SEA');
+    expect(turn.quickReplies.map((reply) => reply.label)).not.toContain('PAE');
+  });
+
+  test('Pike Place asks origin before any other field', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock("I'm going to Pike Place Market", NOW),
+      {},
+      NOW,
+    );
+
+    expect(getNextMissingField(parsed)).toBe('originText');
+    expect(parsed.missingFields[0]).toBe('originText');
+    expect(parsed.clarificationQuestions).toHaveLength(1);
+  });
+
+  test('Fred Meyer does not trigger airport flow', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock("I'm heading to Fred Meyer in Monroe", NOW),
+      {},
+      NOW,
+    );
+
+    expect(parsed.mode).toBe('quick_go');
+    expect(isAirportPlanningTrip(parsed)).toBe(false);
+    expect(parsed.missingFields).not.toContain('airportCode');
+
+    const turn = buildTripPlanningTurn(parsed, {
+      geolocationAvailable: false,
+      geolocationDenied: false,
+      currentLocationLabel: null,
+    });
+    expect(turn.question).not.toMatch(/Which airport/i);
+  });
+
+  test('SeaTac airport asks flight follow-up after origin is known', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock('Weekend trip from Monroe to SeaTac, Nov 15 to Nov 18', NOW),
+      {},
+      NOW,
+    );
+
+    expect(parsed.mode).toBe('airport_trip');
+    expect(parsed.airportCode).toBe('SEA');
+    expect(isAirportPlanningTrip(parsed)).toBe(true);
+    expect(getNextMissingField(parsed)).toBe('departureTime');
+  });
+
+  test('LAX parking for 4 days stays in airport parking flow', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock('Need parking at LAX for 4 days', NOW),
+      {},
+      NOW,
+    );
+
+    expect(parsed.airportCode).toBe('LAX');
+    expect(isAirportPlanningTrip(parsed)).toBe(true);
+    expect(isLocalDestinationTrip(parsed)).toBe(false);
+    expect(['airport_trip', 'parking_only']).toContain(parsed.mode);
+    expect(parsed.missingFields).not.toContain('destinationText');
+  });
+
+  test('only one active clarification question at a time', () => {
+    const parsed = reprocessParsedTrip(
+      parseTripTextMock('Flying to Vegas Friday night and coming back Sunday.', NOW),
+      {},
+      NOW,
+    );
+
+    expect(parsed.missingFields.length).toBeGreaterThan(1);
+    expect(parsed.clarificationQuestions).toHaveLength(1);
+    expect(getNextMissingField(parsed)).toBe('originText');
+  });
+
+  test('local trips never expose SEA or PAE quick replies', () => {
+    const turn = buildTripPlanningTurn(
+      reprocessParsedTrip(
+        parseTripTextMock("I'm going to Pike Place Market tomorrow. Plan commute for me.", NOW),
+        {},
+        NOW,
+      ),
+      {
+        geolocationAvailable: true,
+        geolocationDenied: false,
+        currentLocationLabel: 'Monroe, WA',
+      },
+    );
+
+    const labels = turn.quickReplies.map((reply) => reply.label);
+    expect(labels).not.toContain('SEA');
+    expect(labels).not.toContain('PAE');
+  });
+});
 
 describe('AI trip planner Pike Place flow', () => {
   test('incomplete Pike Place asks only for origin with conversational copy', () => {

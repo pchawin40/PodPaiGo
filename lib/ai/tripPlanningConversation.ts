@@ -1,6 +1,6 @@
 import { inferDestinationCategory } from '../parking/destinationParkingClassifier';
 import { RETAIL_GROCERY_PATTERN } from '../parking/destinationParkingClassifier';
-import { computeMissingParsedFields } from './normalizeParsedTrip';
+import { computeMissingParsedFields, isAirportPlanningTrip } from './normalizeParsedTrip';
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 import type { ParkingPreference } from '../types';
 
@@ -172,12 +172,14 @@ export function reprocessParsedTrip(
 
 export function getNextMissingField(parsed: ParsedTripAssistantResult): string | null {
   const missing = new Set(parsed.missingFields);
+  const airportTrip = isAirportPlanningTrip(parsed);
 
   for (const field of CLARIFICATION_PRIORITY) {
+    if (field === 'airportCode' && !airportTrip) continue;
     if (missing.has(field)) return field;
   }
 
-  return parsed.missingFields[0] ?? null;
+  return parsed.missingFields.find((field) => field !== 'airportCode' || airportTrip) ?? null;
 }
 
 export function extractCityLabelFromAddress(address: string): string {
@@ -359,6 +361,9 @@ function buildQuestionForField(
         ],
       };
     case 'airportCode':
+      if (!isAirportPlanningTrip(parsed)) {
+        return buildQuestionForField('originText', parsed, context);
+      }
       return {
         question: 'Which airport should I plan around?',
         quickReplies: [

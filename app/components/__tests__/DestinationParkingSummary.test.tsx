@@ -23,7 +23,6 @@ describe('DestinationParkingSummary', () => {
     );
 
     expect(screen.getByText('Restricted parking may apply')).toBeInTheDocument();
-    expect(screen.getByText(/Restricted parking may apply\./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'I have access' })).toBeInTheDocument();
   });
 
@@ -66,5 +65,32 @@ describe('DestinationParkingSummary', () => {
     expect(
       screen.getByText(/Destination parking is an expectation/),
     ).toBeInTheDocument();
+  });
+
+  test('unknown destination uses helpful copy and CTAs', () => {
+    render(
+      <DestinationParkingSummary
+        destination="123 Mystery Lane"
+        origin="Home, Seattle, WA"
+        onCheckNearbyParking={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Parking not confirmed yet')).toBeInTheDocument();
+    expect(screen.getByText(/could not verify exact parking rules/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search nearby parking' })).toBeInTheDocument();
+  });
+
+  test('hides diagnostics above the fold', () => {
+    const { container } = render(
+      <DestinationParkingSummary destination="123 Mystery Lane" origin="Home" />,
+    );
+
+    const hero = container.querySelector('section[aria-label="Destination parking outlook"]');
+    expect(hero).toBeTruthy();
+    expect(hero?.textContent).not.toContain('could not infer parking rules');
+    expect(screen.queryByText('Unknown confidence')).not.toBeInTheDocument();
+    expect(screen.getByText('Details and evidence')).toBeInTheDocument();
   });
 });

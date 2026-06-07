@@ -73,11 +73,165 @@ const TIME_ANCHOR_VALUES = new Set<ParsedTripTimeAnchor>([
   'unknown',
 ]);
 
-function resolveMode(parsed: Partial<ParsedTripAssistantResult>): TripParseMode {
-  if (parsed.mode && MODE_VALUES.has(parsed.mode)) {
-    return parsed.mode;
+const LOCAL_DESTINATION_KINDS = new Set<DestinationKind>([
+  'office',
+  'downtown',
+  'stadium',
+  'event',
+  'hospital',
+  'restaurant',
+  'hotel',
+  'general',
+]);
+
+const LOCAL_DESTINATION_PATTERN =
+  /\b(pike place|fred meyer|safeway|costco|walmart|target|restaurant|hotel|hospital|downtown|grocery|trailhead|office|mall|square|market)\b/i;
+
+const AIRPORT_DESTINATION_PATTERN =
+  /\b(airport|seatac|sea-tac|terminal|airfield|international airport)\b/i;
+
+const KNOWN_AIRPORT_CODES = new Set([
+  'SEA',
+  'LAX',
+  'LAS',
+  'SFO',
+  'ORD',
+  'JFK',
+  'DFW',
+  'ATL',
+  'DEN',
+  'PHX',
+  'MCO',
+  'PAE',
+  'BLI',
+]);
+
+function destinationTextLooksLikeAirport(destinationText: string): boolean {
+  if (AIRPORT_DESTINATION_PATTERN.test(destinationText)) return true;
+
+  const upper = destinationText.toUpperCase();
+  for (const match of upper.matchAll(/\b([A-Z]{3})\b/g)) {
+    if (KNOWN_AIRPORT_CODES.has(match[1])) return true;
   }
-  return 'airport_trip';
+
+  return false;
+}
+
+export function isLocalDestinationTrip(
+  parsed: {
+    destinationText?: string | null;
+    destinationKind?: DestinationKind | null;
+    destinationCategory?: DestinationCategory | null;
+  },
+): boolean {
+  if (parsed.destinationCategory === 'airport' || parsed.destinationKind === 'airport') {
+    return false;
+  }
+
+  if (parsed.destinationText?.trim()) {
+    if (destinationTextLooksLikeAirport(parsed.destinationText)) return false;
+    if (LOCAL_DESTINATION_PATTERN.test(parsed.destinationText)) return true;
+    if (parsed.destinationKind && LOCAL_DESTINATION_KINDS.has(parsed.destinationKind)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isAirportPlanningTrip(
+  parsed: Pick<
+    ParsedTripAssistantResult,
+    | 'mode'
+    | 'destinationKind'
+    | 'destinationCategory'
+    | 'destinationText'
+    | 'airportCode'
+    | 'destinationCity'
+  >,
+): boolean {
+  if (isLocalDestinationTrip(parsed)) return false;
+
+  if (parsed.destinationKind === 'airport' || parsed.destinationCategory === 'airport') {
+    return true;
+  }
+
+  if (parsed.mode === 'parking_only') {
+    return Boolean(parsed.airportCode) || !parsed.destinationText?.trim();
+  }
+
+  if (parsed.mode === 'airport_trip') {
+    return Boolean(parsed.airportCode || parsed.destinationCity);
+  }
+
+  return false;
+}
+
+type TripModeResolutionInput = {
+  mode?: TripParseMode | null;
+  destinationText?: string | null;
+  destinationKind?: DestinationKind | null;
+  destinationCategory?: DestinationCategory | null;
+  airportCode?: string | null;
+  destinationCity?: string | null;
+};
+
+function resolveTripMode(parsed: TripModeResolutionInput): TripParseMode {
+  const destinationKind =
+    parsed.destinationKind ??
+    inferDestinationKindFromCategory(parsed.destinationCategory ?? null, parsed.destinationText ?? null);
+  const classification = {
+    destinationText: parsed.destinationText ?? null,
+    destinationKind,
+    destinationCategory: parsed.destinationCategory ?? null,
+  };
+  const explicit =
+    parsed.mode && MODE_VALUES.has(parsed.mode) && parsed.mode !== 'unknown'
+      ? parsed.mode
+      : null;
+
+  if (isLocalDestinationTrip(classification)) {
+    if (explicit === 'parking_only') return 'parking_only';
+    if (explicit === 'general_trip') return 'general_trip';
+    return 'quick_go';
+  }
+
+  if (
+    destinationKind === 'airport' ||
+    parsed.destinationCategory === 'airport' ||
+    parsed.airportCode
+  ) {
+    if (explicit === 'parking_only') return 'parking_only';
+    return 'airport_trip';
+  }
+
+  if (explicit) return explicit;
+
+  if (parsed.destinationText?.trim()) return 'quick_go';
+  if (parsed.destinationCity || parsed.airportCode) return 'airport_trip';
+
+  return 'unknown';
+}
+
+function reconcileTripMode(parsed: ParsedTripAssistantResult): ParsedTripAssistantResult {
+  const mode = resolveTripMode(parsed);
+  const localMode = mode === 'quick_go' || mode === 'general_trip';
+  const shouldClearAirport = localMode && Boolean(parsed.airportCode);
+
+  if (mode === parsed.mode && !shouldClearAirport) {
+    return parsed;
+  }
+
+  return {
+    ...parsed,
+    mode,
+    airportCode: localMode ? null : parsed.airportCode,
+    tripType: localMode
+      ? mode === 'general_trip'
+        ? 'general-trip'
+        : 'quick-go'
+      : parsed.tripType,
+  };
 }
 
 function normalizeNullableString(value: unknown): string | null {
@@ -131,7 +285,6 @@ export function normalizeParsedTripAssistantResult(
     ? (parsed.confidence as ParsedTripAssistantResult['confidence'])
     : 'medium';
 
-  const mode = resolveMode(parsed);
   const originSource = ORIGIN_SOURCE_VALUES.has(
     parsed.originSource as ParsedTripAssistantResult['originSource'],
   )
@@ -149,6 +302,17 @@ export function normalizeParsedTripAssistantResult(
     DESTINATION_KIND_VALUES.has(parsed.destinationKind as DestinationKind)
       ? (parsed.destinationKind as DestinationKind)
       : inferDestinationKindFromCategory(destinationCategory, destinationText);
+  const mode = resolveTripMode({
+    mode: parsed.mode,
+    destinationText,
+    destinationKind,
+    destinationCategory,
+    airportCode:
+      typeof parsed.airportCode === 'string'
+        ? parsed.airportCode.trim().toUpperCase() || null
+        : null,
+    destinationCity: normalizeNullableString(parsed.destinationCity),
+  });
   const transportAvailability =
     parsed.transportAvailability &&
     TRANSPORT_VALUES.has(parsed.transportAvailability as TransportAvailability)
@@ -209,10 +373,15 @@ export function normalizeParsedTripAssistantResult(
 export function computeMissingParsedFields(
   parsed: ParsedTripAssistantResult,
 ): ParsedTripAssistantResult {
-  const withDefaults = applyTripPlanningDefaults(parsed);
+  const reconciled = reconcileTripMode(parsed);
+  const withDefaults = applyTripPlanningDefaults(reconciled);
   const missingFields = new Set(withDefaults.missingFields);
+  const localTrip =
+    withDefaults.mode === 'general_trip' ||
+    withDefaults.mode === 'quick_go' ||
+    !isAirportPlanningTrip(withDefaults);
 
-  if (withDefaults.mode === 'general_trip' || withDefaults.mode === 'quick_go') {
+  if (localTrip) {
     if (!withDefaults.destinationText?.trim()) missingFields.add('destinationText');
     else missingFields.delete('destinationText');
 
@@ -252,11 +421,15 @@ export function computeMissingParsedFields(
     missingFields.delete('departureDate');
     missingFields.delete('departureTime');
   } else if (withDefaults.mode === 'parking_only') {
-    if (!withDefaults.airportCode && !withDefaults.destinationText?.trim()) {
-      missingFields.add('airportCode');
-    } else {
-      missingFields.delete('airportCode');
+    if (isAirportPlanningTrip(withDefaults)) {
+      if (!withDefaults.airportCode) missingFields.add('airportCode');
+      else missingFields.delete('airportCode');
       missingFields.delete('destinationText');
+    } else if (!withDefaults.destinationText?.trim()) {
+      missingFields.add('destinationText');
+    } else {
+      missingFields.delete('destinationText');
+      missingFields.delete('airportCode');
     }
 
     if (!withDefaults.parkingCheckInDate) missingFields.add('parkingCheckInDate');
@@ -267,7 +440,7 @@ export function computeMissingParsedFields(
     else missingFields.delete('parkingCheckOutDate');
     if (!withDefaults.parkingCheckOutTime) missingFields.add('parkingCheckOutTime');
     else missingFields.delete('parkingCheckOutTime');
-  } else {
+  } else if (isAirportPlanningTrip(withDefaults)) {
     if (!withDefaults.originText && withDefaults.originSource !== 'current_location') {
       missingFields.add('originText');
     } else {

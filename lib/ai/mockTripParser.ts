@@ -800,11 +800,13 @@ export function parseTripTextMock(userText: string, now = new Date()): ParsedTri
   const detected = detectTripIntent(text);
   const mode: TripParseMode =
     detected === 'unknown'
-      ? extractAirportCode(text) || /\b(?:flight|flying|parking at|weekend trip)\b/i.test(text)
+      ? extractAirportCode(text) && /\b(?:flight|flying|airport|parking at|weekend trip|terminal)\b/i.test(text)
         ? 'airport_trip'
         : extractQuickGoDestination(text)
           ? 'quick_go'
-          : 'airport_trip'
+          : extractAirportCode(text) || /\b(?:flight|flying|weekend trip)\b/i.test(text)
+            ? 'airport_trip'
+            : 'quick_go'
       : detected;
 
   if (mode === 'quick_go' || mode === 'general_trip') {

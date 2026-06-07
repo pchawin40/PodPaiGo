@@ -3,20 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { googleMapsDirectionsLink } from '../../lib/maps';
 import {
-  classifyDestinationParking,
-  destinationParkingHeadline,
-  destinationParkingSubcopy,
-  formatParkingAccessLabel,
   readDestinationAccessConfirmed,
   writeDestinationAccessConfirmed,
-  type DestinationParkingClassification,
 } from '../../lib/parking/destinationParkingClassifier';
-import {
-  buildParkingOptionsHints,
-  type GoogleParkingOptionsSignals,
-} from '../../lib/parking/googleParkingOptionsSignals';
-import { matchCuratedLocalParkingZone } from '../../lib/parking/localParkingZones';
-import { accessBadgeLabel } from './ParkingAccessBadge';
+import { buildParkingOutlook } from '../../lib/parking/parkingOutlook';
+import type { GoogleParkingOptionsSignals } from '../../lib/parking/googleParkingOptionsSignals';
 import ParkingInfoReportModal from './ParkingInfoReportModal';
 import { trackEvent } from '../../lib/analytics/trackEvent';
 
@@ -26,22 +17,12 @@ type DestinationParkingSummaryProps = {
   destinationKind?: string | null;
   airportCode?: string | null;
   googleParkingOptions?: GoogleParkingOptionsSignals | null;
+  arrivalDate?: string | null;
+  arrivalTime?: string | null;
+  durationMinutes?: number;
   onCheckNearbyParking?: () => void;
   className?: string;
 };
-
-function confidenceLabel(confidence: DestinationParkingClassification['confidence']): string {
-  switch (confidence) {
-    case 'high':
-      return 'High confidence';
-    case 'medium':
-      return 'Medium confidence';
-    case 'low':
-      return 'Low confidence';
-    default:
-      return 'Unknown confidence';
-  }
-}
 
 export default function DestinationParkingSummary({
   destination,
@@ -49,27 +30,42 @@ export default function DestinationParkingSummary({
   destinationKind = null,
   airportCode = null,
   googleParkingOptions = null,
+  arrivalDate = null,
+  arrivalTime = null,
+  durationMinutes,
   onCheckNearbyParking,
   className = '',
 }: DestinationParkingSummaryProps) {
   const [accessConfirmed, setAccessConfirmed] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
 
-  const classification = useMemo(
+  const outlook = useMemo(
     () =>
-      classifyDestinationParking({
+      buildParkingOutlook({
         destination,
         destinationKind,
         airportCode,
+        googleParkingOptions,
+        arrivalDate,
+        arrivalTime,
+        durationMinutes,
       }),
-    [destination, destinationKind, airportCode],
+    [
+      destination,
+      destinationKind,
+      airportCode,
+      googleParkingOptions,
+      arrivalDate,
+      arrivalTime,
+      durationMinutes,
+    ],
   );
 
   useEffect(() => {
     setAccessConfirmed(readDestinationAccessConfirmed(destination));
   }, [destination]);
 
-  if (classification.mode === 'airport') {
+  if (destinationKind === 'airport') {
     return null;
   }
 
@@ -78,11 +74,9 @@ export default function DestinationParkingSummary({
       ? googleMapsDirectionsLink(origin.trim(), destination.trim())
       : null;
 
-  const headline = destinationParkingHeadline(classification.mode);
-  const subcopy = destinationParkingSubcopy(classification.mode);
-  const isRestricted = classification.mode === 'restricted_possible';
-  const localZone = matchCuratedLocalParkingZone(destination);
-  const parkingHints = buildParkingOptionsHints(googleParkingOptions, { airportTrip: false });
+  const isRestricted = outlook.diagnostics.accessType === 'Employee only'
+    || outlook.diagnostics.accessType === 'Tenant only'
+    || outlook.diagnostics.accessType === 'Permit required';
 
   const handleConfirmAccess = () => {
     writeDestinationAccessConfirmed(destination);
@@ -92,71 +86,39 @@ export default function DestinationParkingSummary({
   return (
     <>
       <section
-        className={`rounded-2xl border border-sky-100 bg-white p-4 shadow-sm ${className}`}
+        className={`rounded-2xl border border-border bg-card p-4 shadow-sm ${className}`}
         aria-label="Destination parking outlook"
       >
-        <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+        <div className="text-xs font-semibold uppercase tracking-wide text-primary">
           Parking outlook
         </div>
-        <h3 className="mt-1 text-lg font-semibold text-zinc-900">{headline}</h3>
-        <p className="mt-1 text-sm text-zinc-600">{subcopy}</p>
+        <h3 className="mt-1 text-lg font-semibold text-foreground">{outlook.title}</h3>
+        <p className="mt-1 text-sm text-muted-foreground">{outlook.body}</p>
 
-        {localZone ? (
-          <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-sky-950">
-            <div className="font-semibold">{localZone.headline}</div>
-            <p className="mt-1">{localZone.detail}</p>
+        {outlook.hints.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {outlook.hints.map((hint) => (
+              <span
+                key={hint}
+                className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-foreground"
+              >
+                {hint}
+              </span>
+            ))}
           </div>
         ) : null}
 
-        {parkingHints.hints.length > 0 ? (
-          <div className="mt-3 space-y-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Nearby parking signals
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {parkingHints.hints.map((hint) => (
-                <span
-                  key={hint.category}
-                  className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-800"
-                >
-                  {hint.label}
-                </span>
-              ))}
-            </div>
-            <p className="text-xs text-zinc-500">{parkingHints.verifyNotice}</p>
-          </div>
-        ) : null}
-
-        <dl className="mt-4 grid gap-2 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-zinc-500">Access type</dt>
-            <dd className="font-medium text-zinc-900">
-              {formatParkingAccessLabel(classification.accessType)}
-            </dd>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <dt className="text-zinc-500">Confidence</dt>
-            <dd className="font-medium text-zinc-900">{confidenceLabel(classification.confidence)}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">Reason</dt>
-            <dd className="mt-0.5 text-zinc-800">{classification.reason}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">Recommended action</dt>
-            <dd className="mt-0.5 text-zinc-800">{classification.recommendedAction}</dd>
-          </div>
-        </dl>
+        <p className="mt-3 text-xs text-muted-foreground">{outlook.verifyNotice}</p>
 
         {isRestricted && accessConfirmed ? (
-          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-foreground">
             Access confirmed for this trip. This preference is saved locally for this destination only.
           </div>
         ) : null}
 
         {isRestricted && !accessConfirmed ? (
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-            Restricted parking may apply. {classification.recommendedAction}
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+            Restricted parking may apply. {outlook.diagnostics.recommendedAction}
           </div>
         ) : null}
 
@@ -166,19 +128,19 @@ export default function DestinationParkingSummary({
               href={directionsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center rounded-full bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+              className="inline-flex items-center rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
             >
               Open directions
             </a>
           ) : null}
 
-          {!classification.shouldSearchPaidParking && onCheckNearbyParking ? (
+          {onCheckNearbyParking ? (
             <button
               type="button"
               onClick={onCheckNearbyParking}
-              className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+              className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
             >
-              Check nearby parking anyway
+              Search nearby parking
             </button>
           ) : null}
 
@@ -187,19 +149,10 @@ export default function DestinationParkingSummary({
               <button
                 type="button"
                 onClick={handleConfirmAccess}
-                className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-100"
+                className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-foreground hover:bg-emerald-500/20"
               >
                 I have access
               </button>
-              {onCheckNearbyParking ? (
-                <button
-                  type="button"
-                  onClick={onCheckNearbyParking}
-                  className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-                >
-                  Find public parking nearby
-                </button>
-              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -211,7 +164,7 @@ export default function DestinationParkingSummary({
                   });
                   setReportOpen(true);
                 }}
-                className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
               >
                 Report parking rules
               </button>
@@ -228,18 +181,41 @@ export default function DestinationParkingSummary({
                 });
                 setReportOpen(true);
               }}
-              className="inline-flex items-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+              className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
             >
               Report parking info
             </button>
           )}
         </div>
 
-        <p className="mt-3 text-xs text-zinc-500">
-          Access badge: {accessBadgeLabel(classification.accessType)}. Confirm rules with the garage or
-          business before relying on this.
-        </p>
       </section>
+
+      <details className="group mt-3 rounded-xl border border-border bg-muted/30">
+        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
+          Details and evidence
+          <span className="ml-2 text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
+            ▾
+          </span>
+        </summary>
+        <dl className="space-y-2 border-t border-border px-3 py-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <dt className="text-muted-foreground">Access type</dt>
+            <dd className="font-medium text-foreground">{outlook.diagnostics.accessType}</dd>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <dt className="text-muted-foreground">Confidence</dt>
+            <dd className="font-medium text-foreground">{outlook.diagnostics.confidence}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Reason</dt>
+            <dd className="mt-0.5 text-foreground">{outlook.diagnostics.reason}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Recommended action</dt>
+            <dd className="mt-0.5 text-foreground">{outlook.diagnostics.recommendedAction}</dd>
+          </div>
+        </dl>
+      </details>
 
       <ParkingInfoReportModal
         open={reportOpen}

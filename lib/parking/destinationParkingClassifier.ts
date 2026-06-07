@@ -232,7 +232,7 @@ export function destinationParkingHeadline(mode: DestinationParkingMode): string
     case 'airport':
       return 'Airport parking rules apply';
     default:
-      return 'Parking rules unknown';
+      return 'Parking not confirmed yet';
   }
 }
 
@@ -251,7 +251,7 @@ export function destinationParkingSubcopy(mode: DestinationParkingMode): string 
     case 'airport':
       return 'Use airport parking, rideshare, and transit options for this trip.';
     default:
-      return 'Check the destination website or signs on arrival before choosing parking.';
+      return 'PodPaiGo could not verify exact parking rules for this destination. I\'ll still compare drive, transit, rideshare, and nearby parking options.';
   }
 }
 
@@ -273,7 +273,7 @@ export function formatParkingAccessLabel(accessType: ParkingAccessType): string 
     case 'event_only':
       return 'Visitor parking';
     default:
-      return 'Unknown access';
+      return 'Not confirmed yet';
   }
 }
 

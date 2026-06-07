@@ -73,10 +73,10 @@ export function evaluateLocalStreetParkingRules(input: {
 
     if (isSunday || isHoliday) {
       freeLikely = true;
-      headline = isHoliday
-        ? 'Seattle holiday street parking may be free'
-        : 'Seattle Sunday street parking may be free';
-      detail = 'Verify posted signs and time limits before leaving your car.';
+      headline = 'Free street parking may be available today';
+      detail = isHoliday
+        ? 'Seattle holiday street parking may be free. Verify posted signs and time limits before leaving your car.'
+        : 'Seattle Sunday street parking may be free. Verify posted signs and time limits before leaving your car.';
     }
   }
 

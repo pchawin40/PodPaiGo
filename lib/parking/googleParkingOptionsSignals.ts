@@ -78,14 +78,17 @@ export function buildParkingOptionsHints(
     });
   }
 
-  if (
-    signals?.paidStreetParking ||
-    signals?.paidGarageParking ||
-    signals?.paidParkingLot
-  ) {
+  if (signals?.paidGarageParking || signals?.paidParkingLot) {
     hints.push({
       category: 'garage_paid',
       label: 'Paid parking likely',
+    });
+  }
+
+  if (signals?.paidStreetParking) {
+    hints.push({
+      category: 'garage_paid',
+      label: 'Metered street parking may be nearby',
     });
   }
 

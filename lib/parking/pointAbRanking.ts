@@ -1,6 +1,7 @@
 import type { RecommendationStatus } from '../recommendationStatusBadge';
 import type { AccessStrategyOption } from '../access/types';
 import type { ParkingOption, RideshareOption, TransitOption, TripData } from '../types';
+import type { PointAbParkRidePresentation } from './parkAndRideTypes';
 import {
   buildParkingOptionsHints,
   inferParkingCategoryFromSignals,
@@ -20,6 +21,7 @@ export type PointAbModeCandidate = {
   minutes: number;
   reliable: boolean;
   confidence: 'High' | 'Medium' | 'Low';
+  baseScore?: number;
 };
 
 export type PointAbModePresentation = {
@@ -64,6 +66,7 @@ type RankPointAbModesInput = {
   transitCostDisplay?: string | null;
   hasReliableTransit: boolean;
   bestParkRideAccess: AccessStrategyOption | null;
+  pointAbParkRide?: PointAbParkRidePresentation | null;
   parkRideCost: number | null;
   parkRideDuration: number | null;
   parkRideReliable: boolean;
@@ -140,7 +143,7 @@ export function scorePointAbMode(args: {
     if (args.mode.key === 'rideshare') score += 12;
     if (args.mode.key === 'parking') score += 4;
     if (args.mode.key === 'transit') score -= 8;
-    if (args.mode.key === 'park-ride') score -= 4;
+    if (args.mode.key === 'park-ride' && args.mode.baseScore == null) score -= 4;
   }
 
   score += computePointAbPreferenceBoost({
@@ -152,6 +155,10 @@ export function scorePointAbMode(args: {
 
   if (args.parkingBonus && args.mode.key === 'parking') {
     score += args.parkingBonus;
+  }
+
+  if (args.mode.baseScore) {
+    score += args.mode.baseScore;
   }
 
   return score;
@@ -273,7 +280,66 @@ function resolveModeStatus(args: {
   return 'easy_backup';
 }
 
+function resolveParkRidePresentation(input: RankPointAbModesInput): {
+  name: string;
+  cost: number | null;
+  costDisplay: string;
+  durationMinutes: number | null;
+  reliable: boolean;
+  confidenceScore: number;
+  recommended: boolean;
+  pros: string[];
+  cons: string[];
+  unavailable: boolean;
+} {
+  if (input.pointAbParkRide) {
+    return {
+      name: input.pointAbParkRide.displayName,
+      cost: input.pointAbParkRide.cost,
+      costDisplay: input.pointAbParkRide.costDisplay,
+      durationMinutes: input.pointAbParkRide.durationMinutes,
+      reliable: input.pointAbParkRide.reliable,
+      confidenceScore: input.pointAbParkRide.confidenceScore,
+      recommended: input.pointAbParkRide.recommended,
+      pros: input.pointAbParkRide.pros,
+      cons: input.pointAbParkRide.cons,
+      unavailable: !input.pointAbParkRide.recommended,
+    };
+  }
+
+  if (input.bestParkRideAccess) {
+    return {
+      name: input.bestParkRideAccess.displayName,
+      cost: input.parkRideCost,
+      costDisplay: input.bestParkRideAccess.pricing.displayPrimary,
+      durationMinutes: input.parkRideDuration,
+      reliable: input.parkRideReliable,
+      confidenceScore: input.bestParkRideAccess.confidenceScore ?? 45,
+      recommended: input.bestParkRideAccess.recommendedForTrip !== false,
+      pros: input.bestParkRideAccess.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
+      cons: [input.bestParkRideAccess.overnightCaveat || 'Verify lot rules before leaving your car'],
+      unavailable:
+        !input.bestParkRideAccess || input.bestParkRideAccess.recommendedForTrip === false,
+    };
+  }
+
+  return {
+    name: 'Only if lot rules allow it',
+    cost: null,
+    costDisplay: 'Varies',
+    durationMinutes: null,
+    reliable: false,
+    confidenceScore: 30,
+    recommended: false,
+    pros: ['Good for same-day transit trips'],
+    cons: ['Verify lot rules before leaving your car'],
+    unavailable: true,
+  };
+}
+
 export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingResult {
+  const parkRide = resolveParkRidePresentation(input);
+
   const candidates: PointAbModeCandidate[] = [
     input.bestParking
       ? {
@@ -305,19 +371,25 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           confidence: input.bestTransitOption?.trustStatus === 'verified-source' ? 'High' : 'Medium',
         }
       : null,
-    input.bestParkRideAccess
+    input.pointAbParkRide || input.bestParkRideAccess
       ? {
           key: 'park-ride',
           label: 'Park & Ride',
-          cost: finiteOr(input.parkRideCost),
-          minutes: finiteOr(input.parkRideDuration),
-          reliable: input.parkRideReliable,
+          cost: finiteOr(parkRide.cost),
+          minutes: finiteOr(parkRide.durationMinutes),
+          reliable: parkRide.reliable,
           confidence:
-            (input.bestParkRideAccess.confidenceScore ?? 0) >= 70
+            parkRide.confidenceScore >= 70
               ? 'High'
-              : (input.bestParkRideAccess.confidenceScore ?? 0) >= 50
+              : parkRide.confidenceScore >= 50
                 ? 'Medium'
                 : 'Low',
+          baseScore:
+            parkRide.confidenceScore < 50
+              ? -20
+              : parkRide.recommended
+                ? -4
+                : -40,
         }
       : null,
   ].filter(Boolean) as PointAbModeCandidate[];
@@ -452,24 +524,26 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     {
       key: 'park-ride',
       label: 'Park & Ride',
-      name: input.bestParkRideAccess?.displayName || 'Only if lot rules allow it',
-      cost: input.bestParkRideAccess
-        ? input.bestParkRideAccess.pricing.displayPrimary
-        : 'Varies',
+      name: parkRide.name,
+      cost: parkRide.costDisplay,
       time:
-        input.parkRideDuration != null
-          ? formatMinutesLabel(input.parkRideDuration)
-          : 'Depends',
+        parkRide.durationMinutes != null
+          ? formatMinutesLabel(parkRide.durationMinutes)
+          : 'Not estimated',
       confidence:
-        (input.bestParkRideAccess?.confidenceScore ?? 0) >= 70
+        parkRide.confidenceScore >= 70
           ? 'High'
-          : (input.bestParkRideAccess?.confidenceScore ?? 0) >= 50
+          : parkRide.confidenceScore >= 50
             ? 'Medium'
             : 'Low',
-      pros: input.bestParkRideAccess?.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
-      cons: [input.bestParkRideAccess?.overnightCaveat || 'Verify lot rules before leaving your car'],
-      status: input.bestParkRideAccess?.recommendedForTrip === false ? 'not_recommended' : 'verify_rules',
-      unavailable: !input.bestParkRideAccess || input.bestParkRideAccess.recommendedForTrip === false,
+      pros: parkRide.pros.length > 0 ? parkRide.pros : ['Good for same-day transit trips'],
+      cons: parkRide.cons,
+      status: parkRide.unavailable
+        ? 'unavailable'
+        : parkRide.recommended
+          ? 'verify_rules'
+          : 'not_recommended',
+      unavailable: parkRide.unavailable,
       hiddenByPreference: false,
     },
   ].map((row) => ({

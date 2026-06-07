@@ -7,6 +7,18 @@ import {
 import type { ParkingOption } from '../../types';
 
 describe('googleParkingOptionsSignals', () => {
+  test('metered street parking is a separate hint from paid lot or garage', () => {
+    const bundle = buildParkingOptionsHints({
+      paidStreetParking: true,
+      paidParkingLot: true,
+    });
+
+    expect(bundle.hints.map((hint) => hint.label)).toEqual([
+      'Paid parking likely',
+      'Metered street parking may be nearby',
+    ]);
+  });
+
   test('builds customer lot and street hints for local trips', () => {
     const bundle = buildParkingOptionsHints(
       {
