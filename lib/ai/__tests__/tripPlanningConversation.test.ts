@@ -8,9 +8,11 @@ import { parsedTripToSearchParams } from '../parsedTripToSearchParams';
 import {
   applyTripPlanningDefaults,
   buildTripPlanningTurn,
+  deriveTripPlanningPhase,
   extractCityLabelFromAddress,
   getNextMissingField,
   reprocessParsedTrip,
+  shouldAppendPlanningTurn,
 } from '../tripPlanningConversation';
 
 const NOW = new Date('2026-06-05T12:00:00');
@@ -255,7 +257,7 @@ describe('AI trip planner Fred Meyer and defaults', () => {
       geolocationDenied: false,
       currentLocationLabel: null,
     });
-    expect(turn.question).not.toMatch(/compare all options unless/i);
+    expect(turn.question ?? '').not.toMatch(/compare all options unless/i);
   });
 });
 
@@ -392,5 +394,99 @@ describe('AI trip planner conversation UX helpers', () => {
 
     expect(parsed.transportAvailability).toBe('rideshare');
     expect(parsed.parkingPreference).toBe('none');
+  });
+});
+
+describe('AI trip planner conversation state machine', () => {
+  const locationContext = {
+    geolocationAvailable: true,
+    geolocationDenied: false,
+    currentLocationLabel: 'Monroe, WA',
+  };
+
+  test('Yes confirmation advances to ready_to_plan without re-parse', () => {
+    const incomplete = reprocessParsedTrip(
+      parseTripTextMock('I am going to Pike Place Market tomorrow. Plan commute for me.', NOW),
+      {},
+      NOW,
+    );
+
+    const confirmed = reprocessParsedTrip(incomplete, {
+      originSource: 'current_location',
+      originText: null,
+    }, NOW);
+
+    const turn = buildTripPlanningTurn(confirmed, locationContext);
+
+    expect(confirmed.status).toBe('ready_for_review');
+    expect(turn.phase).toBe('ready_to_plan');
+    expect(turn.headline).toBe('Ready to plan');
+    expect(turn.summary.some((item) => item.label === 'From')).toBe(true);
+    expect(turn.quickReplies.map((reply) => reply.label)).toEqual([
+      'Plan trip',
+      'Change start',
+      'Edit details',
+    ]);
+  });
+
+  test('Change start enters awaiting_origin_input locally', () => {
+    const incomplete = reprocessParsedTrip(
+      parseTripTextMock('I am going to Pike Place Market tomorrow. Plan commute for me.', NOW),
+      {},
+      NOW,
+    );
+
+    const turn = buildTripPlanningTurn(incomplete, locationContext, { originInputMode: true });
+
+    expect(turn.phase).toBe('awaiting_origin_input');
+    expect(turn.question).toMatch(/Enter your starting address/i);
+    expect(turn.quickReplies.map((reply) => reply.label)).toEqual([
+      'Use current location',
+      'Back',
+    ]);
+    expect(incomplete.destinationText).toBe('Pike Place Market');
+  });
+
+  test('shouldAppendPlanningTurn suppresses duplicate active questions', () => {
+    const incomplete = reprocessParsedTrip(
+      parseTripTextMock('I am going to Pike Place Market tomorrow. Plan commute for me.', NOW),
+      {},
+      NOW,
+    );
+    const turn = buildTripPlanningTurn(incomplete, locationContext);
+
+    expect(
+      shouldAppendPlanningTurn(turn, turn, incomplete, incomplete),
+    ).toBe(false);
+  });
+
+  test('origin confirmation phase is detected before ready state', () => {
+    const incomplete = reprocessParsedTrip(
+      parseTripTextMock('I am going to Pike Place Market tomorrow. Plan commute for me.', NOW),
+      {},
+      NOW,
+    );
+
+    expect(
+      deriveTripPlanningPhase(incomplete, locationContext),
+    ).toBe('awaiting_origin_confirmation');
+  });
+
+  test('manual origin after change start reaches ready_to_plan', () => {
+    const incomplete = reprocessParsedTrip(
+      parseTripTextMock('I am going to Pike Place Market tomorrow. Plan commute for me.', NOW),
+      {},
+      NOW,
+    );
+
+    const confirmed = reprocessParsedTrip(incomplete, {
+      originText: 'Monroe',
+      originSource: 'manual',
+    }, NOW);
+    const turn = buildTripPlanningTurn(confirmed, locationContext);
+
+    expect(confirmed.status).toBe('ready_for_review');
+    expect(turn.phase).toBe('ready_to_plan');
+    expect(turn.headline).toBe('Ready to plan');
   });
 });

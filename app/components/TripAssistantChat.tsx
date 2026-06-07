@@ -49,6 +49,25 @@ function AssumptionChips({ assumptions }: { assumptions: TripPlanningAssumption[
   );
 }
 
+function SummaryChips({
+  summary,
+}: {
+  summary: TripPlanningTurn['summary'];
+}) {
+  if (!summary || summary.length === 0) return null;
+
+  return (
+    <div className="mt-2 grid gap-1.5 rounded-xl border border-border/70 bg-card/70 p-2 text-[11px] dark:bg-muted/20">
+      {summary.map((item) => (
+        <div key={item.id} className="flex items-baseline justify-between gap-2">
+          <span className="font-medium text-muted-foreground">{item.label}</span>
+          <span className="text-right text-foreground">{item.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuickReplyChips({
   replies,
   onQuickReply,
@@ -82,6 +101,10 @@ export default function TripAssistantChatThread({
   loading = false,
   onQuickReply,
 }: TripAssistantChatThreadProps) {
+  const latestPlanningMessageId = [...messages]
+    .reverse()
+    .find((message) => message.turn)?.id;
+
   return (
     <div className="space-y-3">
       {messages.map((message) => (
@@ -99,13 +122,16 @@ export default function TripAssistantChatThread({
                 {message.turn.headline}
               </p>
               <p>{message.turn.acknowledgment}</p>
+              <SummaryChips summary={message.turn.summary} />
               {message.turn.question ? <p className="mt-1">{message.turn.question}</p> : null}
               <AssumptionChips assumptions={message.turn.assumptions} />
-              <QuickReplyChips
-                replies={message.turn.quickReplies}
-                onQuickReply={onQuickReply}
-                disabled={loading}
-              />
+              {message.id === latestPlanningMessageId ? (
+                <QuickReplyChips
+                  replies={message.turn.quickReplies}
+                  onQuickReply={onQuickReply}
+                  disabled={loading}
+                />
+              ) : null}
             </div>
           ) : (
             <p>{message.text}</p>

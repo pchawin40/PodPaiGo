@@ -19,10 +19,14 @@ import TripAssistantChatThread, {
   createTripChatMessage,
   type TripAssistantChatMessage,
 } from './TripAssistantChat';
+import { resolveTripPlannerStatusLabel } from '../../lib/ai/tripPlanningAssistantLabel';
 import {
   buildTripPlanningTurn,
+  getNextMissingField,
   reprocessParsedTrip,
+  shouldAppendPlanningTurn,
   type TripPlanningQuickReply,
+  type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
 import { useTripPlanningLocation } from './useTripPlanningLocation';
 
@@ -49,7 +53,13 @@ export default function PodPaiGoAssistant({
   const [open, setOpen] = useState(false);
   const [showFeatureInfo, setShowFeatureInfo] = useState(false);
   const [disabled, setDisabled] = useState<boolean | null>(null);
-  const [assistantLabel, setAssistantLabel] = useState('Mock parser in development');
+  const [assistantLabel, setAssistantLabel] = useState('AI planner beta');
+  const [originInputMode, setOriginInputMode] = useState(false);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [originBackup, setOriginBackup] = useState<{
+    originText: ParsedTripAssistantResult['originText'];
+    originSource: ParsedTripAssistantResult['originSource'];
+  } | null>(null);
   const locationContext = useTripPlanningLocation();
   const [messages, setMessages] = useState<TripAssistantChatMessage[]>([
     createTripChatMessage(
@@ -71,6 +81,8 @@ export default function PodPaiGoAssistant({
     () => `assistant-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const lastPlanningTurnRef = useRef<TripPlanningTurn | null>(null);
+  const lastParsedRef = useRef<ParsedTripAssistantResult | null>(null);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
@@ -101,9 +113,10 @@ export default function PodPaiGoAssistant({
         if (cancelled) return;
         setDisabled(Boolean(data.disabled));
         setAssistantLabel(
-          data.liveProviderActive || data.providerUsed === 'openai'
-            ? 'AI Trip Planner'
-            : 'Mock parser in development',
+          resolveTripPlannerStatusLabel({
+            liveProviderActive: data.liveProviderActive,
+            providerUsed: data.providerUsed,
+          }),
         );
       })
       .catch(() => {
@@ -145,23 +158,86 @@ export default function PodPaiGoAssistant({
     setMessages((current) => [...current, message]);
   };
 
-  const applyParsedResponse = (data: ParsedTripAssistantResult, nextTurns: string[]) => {
-    const processed = reprocessParsedTrip(data);
-    const turn = buildTripPlanningTurn(data, locationContext);
+  const appendPlanningTurn = (
+    turn: TripPlanningTurn,
+    processed: ParsedTripAssistantResult,
+    options?: { force?: boolean },
+  ) => {
+    if (
+      !options?.force &&
+      !shouldAppendPlanningTurn(
+        lastPlanningTurnRef.current,
+        turn,
+        lastParsedRef.current,
+        processed,
+      )
+    ) {
+      return false;
+    }
+
+    lastPlanningTurnRef.current = turn;
+    lastParsedRef.current = processed;
+    appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+    return true;
+  };
+
+  const applyLocalTripState = (
+    base: ParsedTripAssistantResult,
+    patch: Partial<ParsedTripAssistantResult> = {},
+    options?: {
+      originInputMode?: boolean;
+      reviewMode?: boolean;
+      appendUserLabel?: string;
+      forceTurn?: boolean;
+    },
+  ) => {
+    const processed = reprocessParsedTrip(base, patch);
+    const nextOriginInputMode = options?.originInputMode ?? originInputMode;
+    const turn = buildTripPlanningTurn(processed, locationContext, {
+      originInputMode: nextOriginInputMode,
+      reviewMode: options?.reviewMode ?? showReviewPanel,
+    });
 
     setRawParsed(processed);
-    setParseTurns(nextTurns);
+    setOriginInputMode(nextOriginInputMode);
+
+    if (options?.appendUserLabel) {
+      appendMessage(createTripChatMessage('user', options.appendUserLabel));
+    }
 
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
       setAwaitingClarification(false);
-      appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+      setOriginInputMode(false);
+      appendPlanningTurn(turn, processed, { force: options?.forceTurn });
+      return processed;
+    }
+
+    setParsed(null);
+    setAwaitingClarification(true);
+    appendPlanningTurn(turn, processed, { force: options?.forceTurn });
+    return processed;
+  };
+
+  const applyParsedResponse = (data: ParsedTripAssistantResult, nextTurns: string[]) => {
+    const processed = reprocessParsedTrip(data);
+    const turn = buildTripPlanningTurn(processed, locationContext, { originInputMode: false });
+
+    setRawParsed(processed);
+    setParseTurns(nextTurns);
+    setOriginInputMode(false);
+    setShowReviewPanel(false);
+
+    if (turn.status === 'ready_for_review') {
+      setParsed(processed);
+      setAwaitingClarification(false);
+      appendPlanningTurn(turn, processed, { force: true });
       return;
     }
 
     setParsed(null);
     setAwaitingClarification(true);
-    appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+    appendPlanningTurn(turn, processed, { force: true });
   };
 
   const runTripParse = async (nextTurns: string[]) => {
@@ -184,13 +260,12 @@ export default function PodPaiGoAssistant({
       throw new Error(data.message || 'Could not parse trip.');
     }
 
-    if (data.assistantLabel) {
-      setAssistantLabel(
-        data.liveProviderActive || data.providerUsed === 'openai'
-          ? 'AI Trip Planner'
-          : 'Mock parser in development',
-      );
-    }
+    setAssistantLabel(
+      resolveTripPlannerStatusLabel({
+        liveProviderActive: data.liveProviderActive,
+        providerUsed: data.providerUsed,
+      }),
+    );
 
     applyParsedResponse(data, nextTurns);
   };
@@ -208,8 +283,10 @@ export default function PodPaiGoAssistant({
 
     setLoading(true);
     setError(null);
-    setParsed(null);
-    setAwaitingClarification(false);
+    setShowReviewPanel(false);
+    setOriginInputMode(false);
+    lastPlanningTurnRef.current = null;
+    lastParsedRef.current = null;
 
     try {
       const nextTurns = [...parseTurns, userText].filter(Boolean);
@@ -230,27 +307,60 @@ export default function PodPaiGoAssistant({
   const handleQuickReply = async (reply: TripPlanningQuickReply) => {
     if (loading) return;
 
-    if (reply.patch && rawParsed) {
-      const processed = reprocessParsedTrip(rawParsed, reply.patch);
-      const turn = buildTripPlanningTurn(processed, locationContext);
-      setRawParsed(processed);
+    if (reply.action === 'plan_trip') {
+      handleConfirmTrip();
+      return;
+    }
 
-      if (turn.status === 'ready_for_review') {
-        setParsed(processed);
-        setAwaitingClarification(false);
-        setParseTurns([]);
-        appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
-        return;
+    if (reply.action === 'edit_details') {
+      setShowReviewPanel(true);
+      return;
+    }
+
+    if (reply.action === 'change_start' || reply.action === 'await_origin_input') {
+      if (!rawParsed) return;
+      setShowReviewPanel(false);
+      if (reply.action === 'change_start' && rawParsed.status === 'ready_for_review') {
+        setOriginBackup({
+          originText: rawParsed.originText,
+          originSource: rawParsed.originSource,
+        });
+      } else {
+        setOriginBackup(null);
       }
+      const originReset =
+        reply.action === 'change_start'
+          ? { originText: null, originSource: 'unknown' as const }
+          : {};
+      applyLocalTripState(rawParsed, originReset, {
+        originInputMode: true,
+        appendUserLabel: reply.label,
+      });
+      return;
+    }
 
-      setParsed(null);
-      setAwaitingClarification(true);
-      appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+    if (reply.action === 'back_from_origin_input') {
+      if (!rawParsed) return;
+      const restorePatch = originBackup ?? {};
+      applyLocalTripState(rawParsed, restorePatch, {
+        originInputMode: false,
+        appendUserLabel: reply.label,
+      });
+      setOriginBackup(null);
+      return;
+    }
+
+    if (reply.patch && rawParsed) {
+      applyLocalTripState(rawParsed, reply.patch, { appendUserLabel: reply.label });
       return;
     }
 
     if (reply.value.endsWith(' ')) {
       setInput(reply.value);
+      return;
+    }
+
+    if (!reply.value.trim()) {
       return;
     }
 
@@ -275,7 +385,6 @@ export default function PodPaiGoAssistant({
     appendMessage(createTripChatMessage('user', userText));
     setInput('');
     setError(null);
-    setParsed(null);
 
     if (!signedIn) {
       appendMessage(
@@ -287,10 +396,37 @@ export default function PodPaiGoAssistant({
       return;
     }
 
+    if (originInputMode && rawParsed) {
+      applyLocalTripState(rawParsed, {
+        originText: userText,
+        originSource: 'manual',
+      }, { originInputMode: false });
+      return;
+    }
+
+    if (awaitingClarification && rawParsed) {
+      const current = reprocessParsedTrip(rawParsed);
+      const nextField = getNextMissingField(current);
+      if (nextField === 'originText') {
+        applyLocalTripState(rawParsed, {
+          originText: userText,
+          originSource: 'manual',
+        });
+        return;
+      }
+    }
+
     if (awaitingClarification) {
       await handleTripParse(userText);
       return;
     }
+
+    setParsed(null);
+    setRawParsed(null);
+    setShowReviewPanel(false);
+    setOriginInputMode(false);
+    lastPlanningTurnRef.current = null;
+    lastParsedRef.current = null;
 
     if (page === 'results' && resultsContext && !isTripPlanningMessage(userText)) {
       appendMessage(
@@ -419,13 +555,17 @@ export default function PodPaiGoAssistant({
                 }}
               />
 
-              {parsed ? (
+              {parsed && showReviewPanel ? (
                 <div className="mr-2">
                   <TripAssistantConfirm
                     parsed={parsed}
-                    onChange={setParsed}
+                    onChange={(next) => {
+                      const processed = reprocessParsedTrip(next);
+                      setParsed(processed);
+                      setRawParsed(processed);
+                    }}
                     onConfirm={handleConfirmTrip}
-                    onCancel={() => setParsed(null)}
+                    onCancel={() => setShowReviewPanel(false)}
                   />
                 </div>
               ) : null}
@@ -451,9 +591,11 @@ export default function PodPaiGoAssistant({
                 placeholder={
                   page === 'results'
                     ? 'Ask about leave time, parking, TSA, or weather…'
-                    : awaitingClarification
-                      ? 'Answer here or tap a quick reply…'
-                      : 'Describe your trip…'
+                    : originInputMode
+                      ? 'Enter your starting address…'
+                      : awaitingClarification
+                        ? 'Answer here or tap a quick reply…'
+                        : 'Describe your trip…'
                 }
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />

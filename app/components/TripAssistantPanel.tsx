@@ -5,10 +5,14 @@ import Link from 'next/link';
 import { trackEvent } from '../../lib/analytics/trackEvent';
 import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
+import { resolveTripPlannerStatusLabel, shouldShowDevMockProviderNote } from '../../lib/ai/tripPlanningAssistantLabel';
 import {
   buildTripPlanningTurn,
+  getNextMissingField,
   reprocessParsedTrip,
+  shouldAppendPlanningTurn,
   type TripPlanningQuickReply,
+  type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
@@ -52,6 +56,12 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const [configuredProvider, setConfiguredProvider] = useState<'mock' | 'openai'>('mock');
   const [confirmed, setConfirmed] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [originInputMode, setOriginInputMode] = useState(false);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [originBackup, setOriginBackup] = useState<{
+    originText: ParsedTripAssistantResult['originText'];
+    originSource: ParsedTripAssistantResult['originSource'];
+  } | null>(null);
   const [parseTurns, setParseTurns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,14 +69,19 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     () => `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
   const chatRef = useRef<HTMLDivElement | null>(null);
+  const lastPlanningTurnRef = useRef<TripPlanningTurn | null>(null);
+  const lastParsedRef = useRef<ParsedTripAssistantResult | null>(null);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
   const assistantStartedTracked = useRef(false);
   const planningTurn = useMemo(() => {
     if (!rawParsed) return null;
-    return buildTripPlanningTurn(rawParsed, locationContext);
-  }, [rawParsed, locationContext]);
+    return buildTripPlanningTurn(rawParsed, locationContext, {
+      originInputMode,
+      reviewMode: showReviewPanel,
+    });
+  }, [rawParsed, locationContext, originInputMode, showReviewPanel]);
 
   useEffect(() => {
     if (assistantStartedTracked.current) return;
@@ -79,8 +94,11 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     if (loading) return 'AI parse in progress…';
     if (planningTurn?.status === 'needs_clarification') return planningTurn.headline;
     if (parsed) return 'Review before running';
-    return liveProviderActive ? 'AI Trip Planner' : 'Mock parser in development';
-  }, [signedIn, loading, planningTurn, parsed, liveProviderActive]);
+    return resolveTripPlannerStatusLabel({
+      liveProviderActive,
+      providerUsed: configuredProvider,
+    });
+  }, [signedIn, loading, planningTurn, parsed, liveProviderActive, configuredProvider]);
 
   useEffect(() => {
     const container = chatRef.current;
@@ -122,22 +140,80 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     setMessages((current) => [...current, message]);
   };
 
-  const applyParsedResponse = (data: ParsedTripAssistantResult) => {
-    const processed = reprocessParsedTrip(data);
-    const turn = buildTripPlanningTurn(data, locationContext);
+  const appendPlanningTurn = (
+    turn: TripPlanningTurn,
+    processed: ParsedTripAssistantResult,
+    options?: { force?: boolean },
+  ) => {
+    if (
+      !options?.force &&
+      !shouldAppendPlanningTurn(
+        lastPlanningTurnRef.current,
+        turn,
+        lastParsedRef.current,
+        processed,
+      )
+    ) {
+      return false;
+    }
+
+    lastPlanningTurnRef.current = turn;
+    lastParsedRef.current = processed;
+    appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+    return true;
+  };
+
+  const applyLocalTripState = (
+    base: ParsedTripAssistantResult,
+    patch: Partial<ParsedTripAssistantResult> = {},
+    options?: {
+      originInputMode?: boolean;
+      reviewMode?: boolean;
+      appendUserLabel?: string;
+      forceTurn?: boolean;
+    },
+  ) => {
+    const processed = reprocessParsedTrip(base, patch);
+    const nextOriginInputMode = options?.originInputMode ?? originInputMode;
+    const turn = buildTripPlanningTurn(processed, locationContext, {
+      originInputMode: nextOriginInputMode,
+      reviewMode: options?.reviewMode ?? showReviewPanel,
+    });
 
     setRawParsed(processed);
+    setOriginInputMode(nextOriginInputMode);
+
+    if (options?.appendUserLabel) {
+      appendMessage(createTripChatMessage('user', options.appendUserLabel));
+    }
+
+    if (turn.status === 'ready_for_review') {
+      setParsed(processed);
+      setOriginInputMode(false);
+      appendPlanningTurn(turn, processed, { force: options?.forceTurn });
+      return processed;
+    }
+
+    setParsed(null);
+    appendPlanningTurn(turn, processed, { force: options?.forceTurn });
+    return processed;
+  };
+
+  const applyParsedResponse = (data: ParsedTripAssistantResult) => {
+    const processed = reprocessParsedTrip(data);
+    const turn = buildTripPlanningTurn(processed, locationContext, { originInputMode: false });
+
+    setRawParsed(processed);
+    setOriginInputMode(false);
+    setShowReviewPanel(false);
+
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
       setParseTurns([]);
-      appendMessage(
-        createTripChatMessage('assistant', turn.acknowledgment, turn),
-      );
+      appendPlanningTurn(turn, processed, { force: true });
     } else {
       setParsed(null);
-      appendMessage(
-        createTripChatMessage('assistant', turn.acknowledgment, turn),
-      );
+      appendPlanningTurn(turn, processed, { force: true });
     }
   };
 
@@ -194,6 +270,34 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     appendMessage(createTripChatMessage('user', trimmed));
     setUserText('');
     setLoading(true);
+    setShowReviewPanel(false);
+
+    if (originInputMode && rawParsed) {
+      applyLocalTripState(rawParsed, {
+        originText: trimmed,
+        originSource: 'manual',
+      }, { originInputMode: false });
+      setLoading(false);
+      return;
+    }
+
+    if (rawParsed && planningTurn?.status === 'needs_clarification') {
+      const nextField = getNextMissingField(reprocessParsedTrip(rawParsed));
+      if (nextField === 'originText') {
+        applyLocalTripState(rawParsed, {
+          originText: trimmed,
+          originSource: 'manual',
+        });
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (messages.length === 0) {
+      lastPlanningTurnRef.current = null;
+      lastParsedRef.current = null;
+      setOriginInputMode(false);
+    }
 
     try {
       const nextTurns = [...parseTurns, trimmed].filter(Boolean);
@@ -210,24 +314,60 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const handleQuickReply = async (reply: TripPlanningQuickReply) => {
     if (loading) return;
 
-    if (reply.patch && rawParsed) {
-      const processed = reprocessParsedTrip(rawParsed, reply.patch);
-      const turn = buildTripPlanningTurn(processed, locationContext);
-      setRawParsed(processed);
+    if (reply.action === 'plan_trip') {
+      handleConfirm();
+      return;
+    }
 
-      if (turn.status === 'ready_for_review') {
-        setParsed(processed);
-        setParseTurns([]);
-        appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
-        return;
+    if (reply.action === 'edit_details') {
+      setShowReviewPanel(true);
+      return;
+    }
+
+    if (reply.action === 'change_start' || reply.action === 'await_origin_input') {
+      if (!rawParsed) return;
+      setShowReviewPanel(false);
+      if (reply.action === 'change_start' && rawParsed.status === 'ready_for_review') {
+        setOriginBackup({
+          originText: rawParsed.originText,
+          originSource: rawParsed.originSource,
+        });
+      } else {
+        setOriginBackup(null);
       }
+      const originReset =
+        reply.action === 'change_start'
+          ? { originText: null, originSource: 'unknown' as const }
+          : {};
+      applyLocalTripState(rawParsed, originReset, {
+        originInputMode: true,
+        appendUserLabel: reply.label,
+      });
+      return;
+    }
 
-      appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+    if (reply.action === 'back_from_origin_input') {
+      if (!rawParsed) return;
+      const restorePatch = originBackup ?? {};
+      applyLocalTripState(rawParsed, restorePatch, {
+        originInputMode: false,
+        appendUserLabel: reply.label,
+      });
+      setOriginBackup(null);
+      return;
+    }
+
+    if (reply.patch && rawParsed) {
+      applyLocalTripState(rawParsed, reply.patch, { appendUserLabel: reply.label });
       return;
     }
 
     if (reply.value.endsWith(' ')) {
       setUserText(reply.value);
+      return;
+    }
+
+    if (!reply.value.trim()) {
       return;
     }
 
@@ -272,11 +412,10 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   };
 
   const handleCancel = () => {
-    setParsed(null);
-    setRawParsed(null);
-    setConfirmed(false);
-    setParseTurns([]);
-    setMessages([]);
+    setShowReviewPanel(false);
+    setOriginInputMode(false);
+    lastPlanningTurnRef.current = null;
+    lastParsedRef.current = null;
     setError(null);
   };
 
@@ -326,9 +465,10 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           <StatusPill tone="primary">{assistantStatusLabel}</StatusPill>
           <span className="text-xs text-muted-foreground">
             {signedIn
-              ? liveProviderActive
-                ? 'AI Trip Planner'
-                : 'Mock parser in development'
+              ? resolveTripPlannerStatusLabel({
+                  liveProviderActive,
+                  providerUsed: configuredProvider,
+                })
               : 'Register or sign in first'}
           </span>
         </div>
@@ -371,9 +511,11 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             disabled={!signedIn || authLoading || loading}
             rows={messages.length > 0 ? 2 : 4}
             placeholder={
-              planningTurn?.status === 'needs_clarification'
-                ? 'Answer here or tap a quick reply…'
-                : 'I am going to Pike Place Market tomorrow. Plan commute for me.'
+              originInputMode
+                ? 'Enter your starting address…'
+                : planningTurn?.status === 'needs_clarification'
+                  ? 'Answer here or tap a quick reply…'
+                  : 'I am going to Pike Place Market tomorrow. Plan commute for me.'
             }
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />
@@ -421,7 +563,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
         </div>
       </form>
 
-      {parsed && !confirmed ? (
+      {parsed && !confirmed && showReviewPanel ? (
         <div className="relative mt-5">
           <TripAssistantConfirm
             parsed={parsed}
@@ -433,10 +575,15 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             onConfirm={handleConfirm}
             onCancel={handleCancel}
           />
-          <p className="mt-3 text-xs text-muted-foreground">
-            Review before running. Provider: {parsed.parser}
-            {configuredProvider === 'openai' ? ' (live configured)' : ' (mock/dev fallback)'}.
-          </p>
+          {shouldShowDevMockProviderNote({
+            liveProviderActive,
+            providerUsed: configuredProvider,
+          }) ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Review before running. Provider: {parsed.parser}
+              {configuredProvider === 'openai' ? ' (live configured)' : ' (mock/dev fallback)'}.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>

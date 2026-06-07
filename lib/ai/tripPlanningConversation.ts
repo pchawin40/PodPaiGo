@@ -4,17 +4,34 @@ import { computeMissingParsedFields, isAirportPlanningTrip } from './normalizePa
 import type { ParsedTripAssistantResult } from './tripParseTypes';
 import type { ParkingPreference } from '../types';
 
+export type TripPlanningPhase =
+  | 'idle'
+  | 'parsed'
+  | 'awaiting_origin_confirmation'
+  | 'awaiting_origin_input'
+  | 'ready_to_plan'
+  | 'submitted'
+  | 'review_edit';
+
 export type TripPlanningContext = {
   geolocationAvailable: boolean;
   geolocationDenied: boolean;
   currentLocationLabel: string | null;
 };
 
+export type TripPlanningQuickReplyAction =
+  | 'plan_trip'
+  | 'change_start'
+  | 'edit_details'
+  | 'await_origin_input'
+  | 'back_from_origin_input';
+
 export type TripPlanningQuickReply = {
   id: string;
   label: string;
   value: string;
   patch?: Partial<ParsedTripAssistantResult>;
+  action?: TripPlanningQuickReplyAction;
 };
 
 export type TripPlanningAssumption = {
@@ -22,14 +39,29 @@ export type TripPlanningAssumption = {
   label: string;
 };
 
+export type TripPlanningSummaryItem = {
+  id: string;
+  label: string;
+  value: string;
+  field: 'destinationText' | 'originText' | 'targetTime' | 'transportAvailability' | 'parkingPreference';
+};
+
 export type TripPlanningTurn = {
   status: 'needs_clarification' | 'ready_for_review';
+  phase: TripPlanningPhase;
   headline: string;
   acknowledgment: string;
   question: string | null;
   quickReplies: TripPlanningQuickReply[];
   assumptions: TripPlanningAssumption[];
+  summary: TripPlanningSummaryItem[];
   nextField: string | null;
+};
+
+export type TripPlanningBuildOptions = {
+  originInputMode?: boolean;
+  reviewMode?: boolean;
+  phase?: TripPlanningPhase;
 };
 
 const CLARIFICATION_PRIORITY = [
@@ -46,6 +78,22 @@ const CLARIFICATION_PRIORITY = [
   'parkingDurationMinutes',
   'transportAvailability',
   'parkingPreference',
+] as const;
+
+const TURN_SNAPSHOT_FIELDS = [
+  'status',
+  'mode',
+  'destinationText',
+  'originText',
+  'originSource',
+  'departureDate',
+  'departureTime',
+  'timeAnchor',
+  'transportAvailability',
+  'parkingPreference',
+  'parkingDurationMinutes',
+  'airportCode',
+  'missingFields',
 ] as const;
 
 function pad2(value: number): string {
@@ -206,6 +254,169 @@ function destinationLabel(parsed: ParsedTripAssistantResult): string {
   );
 }
 
+function originSummaryLabel(
+  parsed: ParsedTripAssistantResult,
+  context: TripPlanningContext,
+): string {
+  if (parsed.originSource === 'current_location') {
+    return context.currentLocationLabel
+      ? `Near ${extractCityLabelFromAddress(context.currentLocationLabel)}`
+      : 'Current location';
+  }
+
+  return parsed.originText?.trim() || 'Not set';
+}
+
+function transportSummaryLabel(parsed: ParsedTripAssistantResult): string {
+  switch (parsed.transportAvailability) {
+    case 'all':
+      return 'Compare all';
+    case 'car':
+      return 'Drive / park';
+    case 'rideshare':
+      return 'Rideshare';
+    case 'transit':
+      return 'Transit';
+    default:
+      return 'Compare all';
+  }
+}
+
+function parkingSummaryLabel(parsed: ParsedTripAssistantResult): string {
+  switch (parsed.parkingPreference) {
+    case 'destination':
+      return 'At destination';
+    case 'nearby':
+      return 'Near destination';
+    case 'none':
+      return 'No parking';
+    default:
+      return 'Near destination';
+  }
+}
+
+function timeSummaryLabel(parsed: ParsedTripAssistantResult): string {
+  if (parsed.timeAnchor === 'now') return 'Leaving now';
+  if (parsed.departureDate && parsed.departureTime) {
+    return `${parsed.departureDate} ${parsed.departureTime}`;
+  }
+  return 'Not set';
+}
+
+export function buildTripPlanningSummary(
+  parsed: ParsedTripAssistantResult,
+  context: TripPlanningContext,
+): TripPlanningSummaryItem[] {
+  return [
+    {
+      id: 'from',
+      label: 'From',
+      value: originSummaryLabel(parsed, context),
+      field: 'originText',
+    },
+    {
+      id: 'to',
+      label: 'To',
+      value: destinationLabel(parsed),
+      field: 'destinationText',
+    },
+    {
+      id: 'when',
+      label: 'When',
+      value: timeSummaryLabel(parsed),
+      field: 'targetTime',
+    },
+    {
+      id: 'compare',
+      label: 'Compare',
+      value: transportSummaryLabel(parsed),
+      field: 'transportAvailability',
+    },
+    {
+      id: 'parking',
+      label: 'Parking',
+      value: parkingSummaryLabel(parsed),
+      field: 'parkingPreference',
+    },
+  ];
+}
+
+function parsedTripTurnSnapshot(parsed: ParsedTripAssistantResult | null): string {
+  if (!parsed) return '';
+
+  const snapshot: Record<string, unknown> = {};
+  for (const field of TURN_SNAPSHOT_FIELDS) {
+    if (field === 'missingFields') {
+      snapshot[field] = [...parsed.missingFields].sort();
+      continue;
+    }
+    snapshot[field] = parsed[field];
+  }
+
+  return JSON.stringify(snapshot);
+}
+
+export function shouldAppendPlanningTurn(
+  previousTurn: TripPlanningTurn | null | undefined,
+  nextTurn: TripPlanningTurn,
+  previousParsed: ParsedTripAssistantResult | null,
+  nextParsed: ParsedTripAssistantResult,
+): boolean {
+  if (!previousTurn) return true;
+
+  if (
+    nextTurn.status === 'ready_for_review' &&
+    previousTurn.status === 'ready_for_review' &&
+    parsedTripTurnSnapshot(previousParsed) === parsedTripTurnSnapshot(nextParsed)
+  ) {
+    return false;
+  }
+
+  if (
+    previousTurn.nextField &&
+    previousTurn.nextField === nextTurn.nextField &&
+    parsedTripTurnSnapshot(previousParsed) === parsedTripTurnSnapshot(nextParsed)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function deriveTripPlanningPhase(
+  parsed: ParsedTripAssistantResult,
+  context: TripPlanningContext,
+  options: TripPlanningBuildOptions = {},
+): TripPlanningPhase {
+  if (options.phase) return options.phase;
+  if (options.reviewMode) return 'review_edit';
+
+  // Use the already-processed parsed trip; reprocessParsedTrip would recurse back
+  // through computeMissingParsedFields -> buildClarificationQuestions.
+  const nextField = getNextMissingField(parsed);
+
+  if (parsed.status === 'ready_for_review' || !nextField) {
+    return 'ready_to_plan';
+  }
+
+  if (options.originInputMode) {
+    return 'awaiting_origin_input';
+  }
+
+  if (
+    nextField === 'originText' &&
+    context.geolocationAvailable &&
+    context.currentLocationLabel &&
+    !context.geolocationDenied &&
+    parsed.originSource !== 'current_location' &&
+    !parsed.originText?.trim()
+  ) {
+    return 'awaiting_origin_confirmation';
+  }
+
+  return 'parsed';
+}
+
 function buildAcknowledgment(parsed: ParsedTripAssistantResult): string {
   const destination = destinationLabel(parsed);
 
@@ -269,11 +480,68 @@ function buildHeadline(parsed: ParsedTripAssistantResult): string {
   return 'Almost ready';
 }
 
-function buildOriginQuestion(
+function buildReadyQuickReplies(): TripPlanningQuickReply[] {
+  return [
+    {
+      id: 'plan-trip',
+      label: 'Plan trip',
+      value: '',
+      action: 'plan_trip',
+    },
+    {
+      id: 'change-start-ready',
+      label: 'Change start',
+      value: '',
+      action: 'change_start',
+    },
+    {
+      id: 'edit-details',
+      label: 'Edit details',
+      value: '',
+      action: 'edit_details',
+    },
+  ];
+}
+
+function buildOriginInputQuestion(
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
 ): { question: string; quickReplies: TripPlanningQuickReply[] } {
   const destination = destinationLabel(parsed);
+  const quickReplies: TripPlanningQuickReply[] = [];
+
+  if (context.geolocationAvailable && !context.geolocationDenied) {
+    quickReplies.push({
+      id: 'origin-geo',
+      label: 'Use current location',
+      value: '',
+      patch: { originSource: 'current_location', originText: null },
+    });
+  }
+
+  quickReplies.push({
+    id: 'origin-back',
+    label: 'Back',
+    value: '',
+    action: 'back_from_origin_input',
+  });
+
+  return {
+    question: `Enter your starting address for ${destination}.`,
+    quickReplies,
+  };
+}
+
+function buildOriginQuestion(
+  parsed: ParsedTripAssistantResult,
+  context: TripPlanningContext,
+  phase: TripPlanningPhase,
+): { question: string; quickReplies: TripPlanningQuickReply[] } {
+  const destination = destinationLabel(parsed);
+
+  if (phase === 'awaiting_origin_input') {
+    return buildOriginInputQuestion(parsed, context);
+  }
 
   if (context.geolocationDenied) {
     return {
@@ -290,13 +558,14 @@ function buildOriginQuestion(
         {
           id: 'origin-yes',
           label: 'Yes',
-          value: 'Yes, use current location',
+          value: '',
           patch: { originSource: 'current_location', originText: null },
         },
         {
           id: 'origin-change',
           label: 'Change start',
-          value: 'Change starting point',
+          value: '',
+          action: 'await_origin_input',
         },
       ],
     };
@@ -309,7 +578,7 @@ function buildOriginQuestion(
         {
           id: 'origin-geo',
           label: 'Use current location',
-          value: 'From current location',
+          value: '',
           patch: { originSource: 'current_location', originText: null },
         },
         {
@@ -331,6 +600,7 @@ function buildQuestionForField(
   field: string,
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
+  phase: TripPlanningPhase,
 ): { question: string; quickReplies: TripPlanningQuickReply[] } {
   const destination = destinationLabel(parsed);
 
@@ -341,7 +611,7 @@ function buildQuestionForField(
         quickReplies: [],
       };
     case 'originText':
-      return buildOriginQuestion(parsed, context);
+      return buildOriginQuestion(parsed, context, phase);
     case 'targetTime':
       return {
         question: `What time do you want to arrive at ${destination}, or are you leaving now?`,
@@ -362,7 +632,7 @@ function buildQuestionForField(
       };
     case 'airportCode':
       if (!isAirportPlanningTrip(parsed)) {
-        return buildQuestionForField('originText', parsed, context);
+        return buildQuestionForField('originText', parsed, context, phase);
       }
       return {
         question: 'Which airport should I plan around?',
@@ -427,30 +697,36 @@ function buildQuestionForField(
 function buildTurnFromProcessed(
   processed: ParsedTripAssistantResult,
   context: TripPlanningContext,
+  options: TripPlanningBuildOptions = {},
 ): TripPlanningTurn {
+  const phase = deriveTripPlanningPhase(processed, context, options);
   const nextField = getNextMissingField(processed);
 
   if (processed.status === 'ready_for_review' || !nextField) {
     return {
       status: 'ready_for_review',
+      phase: 'ready_to_plan',
       headline: 'Ready to plan',
       acknowledgment: buildAcknowledgment(processed),
-      question: 'Looks good — review the details and tap Plan Trip when you are ready.',
-      quickReplies: [],
+      question: null,
+      quickReplies: buildReadyQuickReplies(),
       assumptions: buildAssumptions(processed),
+      summary: buildTripPlanningSummary(processed, context),
       nextField: null,
     };
   }
 
-  const { question, quickReplies } = buildQuestionForField(nextField, processed, context);
+  const { question, quickReplies } = buildQuestionForField(nextField, processed, context, phase);
 
   return {
     status: 'needs_clarification',
+    phase,
     headline: buildHeadline(processed),
     acknowledgment: buildAcknowledgment(processed),
     question,
     quickReplies,
     assumptions: buildAssumptions(processed),
+    summary: [],
     nextField,
   };
 }
@@ -458,8 +734,9 @@ function buildTurnFromProcessed(
 export function buildTripPlanningTurn(
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
+  options: TripPlanningBuildOptions = {},
 ): TripPlanningTurn {
-  return buildTurnFromProcessed(reprocessParsedTrip(parsed), context);
+  return buildTurnFromProcessed(reprocessParsedTrip(parsed), context, options);
 }
 
 export function buildSingleClarificationQuestion(
@@ -472,6 +749,7 @@ export function buildSingleClarificationQuestion(
 ): string {
   const nextField = getNextMissingField(parsed);
   if (!nextField) return '';
-  const { question } = buildQuestionForField(nextField, parsed, context);
+  const phase = deriveTripPlanningPhase(parsed, context);
+  const { question } = buildQuestionForField(nextField, parsed, context, phase);
   return question;
 }

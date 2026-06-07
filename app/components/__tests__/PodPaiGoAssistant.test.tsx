@@ -17,6 +17,16 @@ jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn() }),
 }));
 
+jest.mock('@/app/components/useTripPlanningLocation', () => ({
+  useTripPlanningLocation: () => ({
+    geolocationAvailable: true,
+    geolocationDenied: false,
+    currentLocationLabel: 'Monroe, WA',
+    isLocating: false,
+    refreshLocationLabel: jest.fn(),
+  }),
+}));
+
 const mockParsed: ParsedTripAssistantResult = {
   mode: 'airport_trip',
   destinationText: null,
@@ -97,7 +107,8 @@ describe('PodPaiGoAssistant', () => {
     await waitFor(() => {
       expect(screen.getByText('hello there')).toBeInTheDocument();
       expect(screen.getByText(/Hi!/i)).toBeInTheDocument();
-      expect(screen.getByText('Mock parser in development')).toBeInTheDocument();
+      expect(screen.getByText('AI planner beta')).toBeInTheDocument();
+      expect(screen.queryByText('Mock parser in development')).not.toBeInTheDocument();
     });
   });
 
@@ -179,13 +190,94 @@ describe('PodPaiGoAssistant', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Review parsed trip')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Confirm and run recommendations' })).toBeInTheDocument();
+      expect(screen.getByText('Ready to plan')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Plan Trip' })).toBeInTheDocument();
     });
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ai/parse-trip'))).toBe(
       true,
     );
+  });
+
+  test('Yes quick reply advances to ready state without another parse call', async () => {
+    mockSignedInAuth();
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            mode: 'quick_go',
+            destinationText: 'Pike Place Market',
+            originSource: 'unknown',
+            destinationCategory: 'general',
+            originText: null,
+            airportCode: null,
+            destinationCity: null,
+            airlineText: null,
+            departureDate: '2026-06-06',
+            departureTime: '09:00',
+            timeAnchor: 'arrive_by',
+            returnDate: null,
+            returnTime: null,
+            transportAvailability: 'all',
+            parkingPreference: 'nearby',
+            tripType: 'quick-go',
+            needsParking: true,
+            needsLeaveTime: true,
+            missingFields: ['originText'],
+            confidence: 'medium',
+            parser: 'mock',
+            status: 'needs_clarification',
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: {
+        value: 'I am going to Pike Place Market tomorrow. Plan commute for me.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument();
+    });
+
+    const parseCallsBeforeYes = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Ready to plan')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Plan Trip' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Change start' })).toBeInTheDocument();
+    });
+
+    const parseCallsAfterYes = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+    expect(parseCallsAfterYes).toBe(parseCallsBeforeYes);
   });
 
   test('trip parse asks clarification before review when required fields are missing', async () => {
