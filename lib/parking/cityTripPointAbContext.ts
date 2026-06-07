@@ -6,7 +6,7 @@ import {
 } from '../domain';
 import { isTransitFareKnown } from '../transit/transitPricing';
 import type { Recommendation, TripData } from '../types';
-import type { ParkingOption, RideshareOption, TransitOption } from '../types';
+import type { OptionScoreBreakdown, ParkingOption, RideshareOption, TransitOption } from '../types';
 import { parkingTimeBreakdown } from './routeDisplay';
 import { buildParkingDriveContextFromOption } from './routeMinutes';
 import { resolveTripParkingContext } from '../trip/tripContext';
@@ -49,6 +49,7 @@ export function computeCityTripPointAbRanking(input: {
   sortedOptions: RankedRecommendation[];
   recommendation: Recommendation;
   driveMinutes?: number | null;
+  scoreBreakdowns?: OptionScoreBreakdown[] | null;
 }): PointAbRankingResult | null {
   const parkingDurationMinutes = calculateParkingDuration(input.tripData);
   const bestParking = input.smartPickOption || input.parkingDisplayOptions[0] || null;
@@ -82,12 +83,19 @@ export function computeCityTripPointAbRanking(input: {
 
   const bestRide = input.sortedOptions.find((option) => option.type === 'rideshare') || null;
   const bestRideOption = bestRide?.option as RideshareOption | undefined;
-  const ridePrice =
+  const ridesharePriceUnavailable =
+    bestRideOption?.priceDisplay === 'check-live' ||
+    bestRideOption?.rideshareEstimateConfidence === 'unavailable';
+  const ridePriceCandidate =
     typeof bestRide?.cost === 'number' && bestRide.cost < 999999
       ? bestRide.cost
       : bestRideOption?.price ?? null;
+  const ridePrice = ridesharePriceUnavailable ? null : ridePriceCandidate;
   const rideDuration =
-    typeof bestRide?.duration === 'number' && bestRide.duration < 999999
+    typeof bestRideOption?.totalOptionMinutes === 'number' &&
+    Number.isFinite(bestRideOption.totalOptionMinutes)
+      ? bestRideOption.totalOptionMinutes
+      : typeof bestRide?.duration === 'number' && bestRide.duration < 999999
       ? bestRide.duration
       : bestRideOption?.duration ?? null;
 
@@ -162,6 +170,7 @@ export function computeCityTripPointAbRanking(input: {
     parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
     parkRideReliable: Boolean(pointAbParkRide?.reliable),
     streetMeterParking,
+    scoreBreakdowns: input.scoreBreakdowns,
     driveMinutes:
       input.driveMinutes ?? input.recommendation.trafficEstimate?.duration ?? null,
   });

@@ -41,6 +41,20 @@ describe('buildPointAbQuickReadMessage', () => {
     );
   });
 
+  test('leads with selected fastest winner when sort is fastest', () => {
+    expect(
+      buildPointAbQuickReadMessage({
+        parkingHidden: false,
+        sort: 'fastest',
+        selected: { key: 'rideshare', label: 'Rideshare', minutes: 43 },
+        cheapest: { key: 'transit', label: 'Transit', cost: 3.25 },
+        fastest: { key: 'rideshare', label: 'Rideshare', minutes: 43 },
+        transitCostDisplay: { primary: '$3.25 est.' },
+        formatMinutes,
+      }),
+    ).toBe('Rideshare is fastest around 43 min. Transit is cheapest at $3.25 est..');
+  });
+
   test('falls back to missing-data copy when parking is visible but modes are incomplete', () => {
     expect(
       buildPointAbQuickReadMessage({

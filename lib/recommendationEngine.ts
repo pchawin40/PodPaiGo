@@ -64,6 +64,7 @@ import {
   partitionParkingByAccessKind,
 } from './access/parkAndRideAccess';
 import { rankAccessOptions } from './access/rankAccessOptions';
+import { buildPointAbOptionScoreBreakdowns } from './parking/pointAbOptionScoring';
 
 /**
  * Resolve a promise, but fall back to a degraded value if it does not settle in
@@ -1317,6 +1318,20 @@ export class RecommendationEngine {
       allAccessOptions.length > 0
         ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
+    const optionScoreBreakdowns = !isAirportTrip
+      ? buildPointAbOptionScoreBreakdowns({
+          tripData,
+          destinationLabel: tripData.destinationName || tripData.destination,
+          parkingOptions: finalParking,
+          rideshareOptions: finalRideshare,
+          transitOptions: finalTransit as TransitOption[],
+          driveMinutes: effectiveTrafficEstimate.routeUnavailable
+            ? null
+            : effectiveTrafficEstimate.duration,
+          parkingDurationMinutes,
+          weatherRisk: weatherImpact?.riskLevel,
+        })
+      : undefined;
     const hasParkingResults = finalParking.length > 0;
     const parkingDiscoveryMetadata =
       parkingResult.metadata ??
@@ -1380,6 +1395,7 @@ export class RecommendationEngine {
       parking: finalParking,
       rideshare: finalRideshare,
       transit: finalTransit,
+      optionScoreBreakdowns,
       accessStrategies,
       parkingDiscoveryNotice:
         shouldLoadParking

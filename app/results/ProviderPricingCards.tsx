@@ -207,6 +207,8 @@ export function PricingLinksSection({
               ? transitPayment === 'orca-pass'
                 ? getTransitPassAppliedBadge(transitPassContext)
                 : 'fare estimate'
+              : isRideSection && ridesharePricing?.primary === 'Open app for live price'
+                ? 'live price unavailable'
               : isRideSection && typeof it.price === 'number'
                 ? 'ride estimate'
                 : null;

@@ -207,13 +207,6 @@ export function formatRidesharePriceDisplay(
     };
   }
 
-  if (typeof option.price === 'number' && option.price > 0) {
-    return {
-      primary: `Estimated $${option.price}`,
-      secondary: null,
-    };
-  }
-
   if (option.priceDisplay === 'check-live') {
     return {
       primary: 'Open app for live price',
@@ -225,6 +218,13 @@ export function formatRidesharePriceDisplay(
     return {
       primary: 'Fare estimate unavailable',
       secondary: 'Open the rideshare app for current pricing.',
+    };
+  }
+
+  if (typeof option.price === 'number' && option.price > 0) {
+    return {
+      primary: `Estimated $${option.price}`,
+      secondary: null,
     };
   }
 

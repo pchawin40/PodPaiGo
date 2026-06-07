@@ -263,6 +263,13 @@ export function calculateOffAirportParkingCost(
 }
 
 export function calculateRideshareCost(rideshare: RideshareOption, tripData: TripData): number {
+  if (
+    rideshare.priceDisplay === 'check-live' ||
+    rideshare.rideshareEstimateConfidence === 'unavailable'
+  ) {
+    return 999999;
+  }
+
   if (rideshare.rideshareTripScope === 'round-trip' || rideshare.rideshareTripScope === 'one-way') {
     return rideshare.price;
   }

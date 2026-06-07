@@ -12,6 +12,7 @@ import {
 
 export type ParkingPriorityBadge = {
   key: string;
+  semanticKey?: string;
   label: string;
   className: string;
 };
@@ -24,6 +25,33 @@ const INFO_BADGE_CLASS =
   'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-100';
 const WARN_BADGE_CLASS =
   'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100';
+
+function ratingReviewSource(option: ParkingOption): 'google' | 'provider' {
+  if (
+    option.googlePlaceId ||
+    option.googleMapsUri ||
+    (option.googleReviews || []).length > 0
+  ) {
+    return 'google';
+  }
+
+  return 'provider';
+}
+
+export function getParkingRatingReviewBadgeSemanticKey(
+  option: ParkingOption,
+): string | null {
+  const hasRating = typeof option.reviewScore === 'number';
+  const hasReviewCount = typeof option.reviewCount === 'number';
+  if (!hasRating && !hasReviewCount) return null;
+
+  return [
+    ratingReviewSource(option),
+    'rating-review',
+    hasRating ? option.reviewScore!.toFixed(1) : 'no-rating',
+    hasReviewCount ? String(option.reviewCount) : 'no-count',
+  ].join(':');
+}
 
 function modeHeadlineBadge(
   option: ParkingOption,
@@ -65,6 +93,7 @@ function modeHeadlineBadge(
 
 function parkingReviewBadge(option: ParkingOption): ParkingPriorityBadge | null {
   if (typeof option.reviewScore !== 'number') return null;
+  const semanticKey = getParkingRatingReviewBadgeSemanticKey(option);
   const rating = option.reviewScore.toFixed(1);
   const count =
     typeof option.reviewCount === 'number'
@@ -72,6 +101,7 @@ function parkingReviewBadge(option: ParkingOption): ParkingPriorityBadge | null 
       : '';
   return {
     key: 'reviews',
+    semanticKey: semanticKey ?? undefined,
     label: `★ ${rating}${count}`,
     className:
       'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100',
@@ -102,12 +132,16 @@ export function buildParkingPriorityBadges(args: {
   tripData?: TripData | null;
   peers?: ParkingOption[];
   maxBadges?: number;
+  excludeSemanticKeys?: Array<string | null | undefined>;
 }): ParkingPriorityBadge[] {
   const maxBadges = args.maxBadges ?? 4;
   const tripData = args.tripData ?? null;
   const peers = args.peers ?? [args.option];
   const totalCost = getParkingComparableCost(args.option, tripData);
   const priceTier = getParkingPriceTier(args.option, tripData);
+  const excludedSemanticKeys = new Set(
+    (args.excludeSemanticKeys || []).filter((key): key is string => Boolean(key)),
+  );
 
   const candidates: Array<ParkingPriorityBadge | null> = [
     modeHeadlineBadge(args.option, args.mode, tripData, peers),
@@ -135,11 +169,15 @@ export function buildParkingPriorityBadges(args: {
   ];
 
   const seen = new Set<string>();
+  const seenSemantic = new Set<string>();
   const badges: ParkingPriorityBadge[] = [];
 
   for (const badge of candidates) {
     if (!badge || seen.has(badge.key)) continue;
+    if (badge.semanticKey && excludedSemanticKeys.has(badge.semanticKey)) continue;
+    if (badge.semanticKey && seenSemantic.has(badge.semanticKey)) continue;
     seen.add(badge.key);
+    if (badge.semanticKey) seenSemantic.add(badge.semanticKey);
     badges.push(badge);
     if (badges.length >= maxBadges) break;
   }

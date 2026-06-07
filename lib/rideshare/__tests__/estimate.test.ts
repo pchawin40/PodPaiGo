@@ -166,10 +166,15 @@ describe('rideshare estimate v1', () => {
   });
 
   test('provider-only rideshare links ask users to open the app for live price', () => {
-    expect(formatRidesharePriceDisplay({ priceDisplay: 'check-live' })).toEqual({
-      primary: 'Open app for live price',
-      secondary: 'PodPaiGo does not have a live Uber/Lyft quote.',
-    });
+    for (const input of [
+      { priceDisplay: 'check-live' as const },
+      { priceDisplay: 'check-live' as const, price: 35 },
+    ]) {
+      expect(formatRidesharePriceDisplay(input)).toEqual({
+        primary: 'Open app for live price',
+        secondary: 'PodPaiGo does not have a live Uber/Lyft quote.',
+      });
+    }
 
     expect(formatRidesharePriceDisplay({ rideshareEstimateConfidence: 'unavailable' })).toEqual({
       primary: 'Fare estimate unavailable',

@@ -1,4 +1,4 @@
-import type { ParkingOption } from '../../types';
+import type { OptionScoreBreakdown, ParkingOption } from '../../types';
 import {
   computePointAbPreferenceBoost,
   formatPointAbRideshareCost,
@@ -31,6 +31,8 @@ const parkingOption = {
   price: 7,
   priceUnit: 'total' as const,
   distance: 0.2,
+  originToParkingMinutes: 35,
+  routeToParkingMinutes: 35,
   availability: 80,
   trustStatus: 'estimated' as const,
   sourceName: 'Test',
@@ -214,6 +216,8 @@ describe('pointAbRanking', () => {
       googleParkingOptions: { paidGarageParking: true },
       bookingProvider: 'ParkWhiz',
       sourceName: 'ParkWhiz',
+      originToParkingMinutes: 24,
+      routeToParkingMinutes: 24,
     } satisfies ParkingOption;
 
     const ranked = rankPointAbModes({
@@ -276,6 +280,8 @@ describe('pointAbRanking', () => {
       bookingProvider: 'ParkWhiz',
       sourceName: 'ParkWhiz',
       transferToTerminalMinutes: 5 + index,
+      originToParkingMinutes: 12,
+      routeToParkingMinutes: 12,
     })) satisfies ParkingOption[];
 
     const ranked = rankPointAbModes({
@@ -329,6 +335,8 @@ describe('pointAbRanking', () => {
       googleParkingOptions: { paidGarageParking: true },
       bookingProvider: 'ParkWhiz',
       sourceName: 'ParkWhiz',
+      originToParkingMinutes: 26,
+      routeToParkingMinutes: 26,
     } satisfies ParkingOption;
 
     const ranked = rankPointAbModes({
@@ -460,7 +468,7 @@ describe('pointAbRanking', () => {
     });
   });
 
-  test('route-degraded city garage can still be the recommended destination parking option', () => {
+  test('route-degraded city garage stays visible but does not rank as fastest without fallback', () => {
     const routeDegradedGarage = {
       ...parkingOption,
       name: 'Pike Place Market Parking Garage',
@@ -493,12 +501,12 @@ describe('pointAbRanking', () => {
 
     const parkingMode = ranked.modes.find((mode) => mode.key === 'parking');
 
-    expect(ranked.recommendationMode).toBe('parking');
-    expect(ranked.recommendedTitle).toBe('Park at Pike Place Market Parking Garage');
-    expect(parkingMode?.time).toBe('44 min');
+    expect(ranked.recommendationMode).not.toBe('parking');
+    expect(ranked.fastestMode?.key).not.toBe('parking');
+    expect(parkingMode?.time).toBe('Check route');
     expect(parkingMode?.unavailable).toBe(false);
-    expect(parkingMode?.status).toBe('best_pick');
-    expect(parkingMode?.cons).toContain('Backup route estimate; open directions to confirm');
+    expect(parkingMode?.status).toBe('route_needed');
+    expect(parkingMode?.cons).toContain('Route timing unavailable');
   });
 
   test('street meter rules do not suppress destination garage mode', () => {
@@ -577,6 +585,8 @@ describe('pointAbRanking', () => {
       sourceName: 'ParkWhiz',
       transferToTerminalMinutes: 5,
       parkingBufferMinutes: 8,
+      originToParkingMinutes: 18,
+      routeToParkingMinutes: 18,
     } satisfies ParkingOption;
 
     const ranked = rankPointAbModes({
@@ -633,6 +643,8 @@ describe('pointAbRanking', () => {
       sourceName: 'ParkWhiz',
       transferToTerminalMinutes: 5,
       parkingBufferMinutes: 8,
+      originToParkingMinutes: 12,
+      routeToParkingMinutes: 12,
     } satisfies ParkingOption;
     const appOnlyRide = {
       ...expensiveRide,
@@ -694,6 +706,143 @@ describe('pointAbRanking', () => {
       timeLabel: 'Total time',
       unavailable: false,
     });
+  });
+
+  test('canonical fastest score controls best pick under fastest sort', () => {
+    const scoreBreakdowns: OptionScoreBreakdown[] = [
+      {
+        optionId: 'transit',
+        mode: 'transit',
+        totalCostCents: 325,
+        totalTimeMinutes: 74,
+        confidenceScore: 82,
+        frictionScore: 58,
+        walkMinutes: null,
+        waitMinutes: 8,
+        driveMinutes: null,
+        parkingBufferMinutes: null,
+        sourceFreshnessScore: 82,
+        easiestScore: 62,
+        cheapestScore: 97,
+        fastestScore: 26,
+        bestOverallScore: 61,
+        reasons: ['Low cost'],
+        penalties: ['More walking and waiting'],
+      },
+      {
+        optionId: 'uber',
+        mode: 'rideshare',
+        totalCostCents: null,
+        totalTimeMinutes: 43,
+        confidenceScore: 58,
+        frictionScore: 25,
+        walkMinutes: null,
+        waitMinutes: 5,
+        driveMinutes: 38,
+        parkingBufferMinutes: null,
+        sourceFreshnessScore: 42,
+        easiestScore: 84,
+        cheapestScore: -1000000,
+        fastestScore: 57,
+        bestOverallScore: 69,
+        reasons: ['No parking required'],
+        penalties: ['Open app for live price'],
+      },
+    ];
+
+    const ranked = rankPointAbModes({
+      tripData,
+      sort: 'fastest',
+      destinationLabel: 'Brighton Jones, Seattle, WA',
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: {
+        ...expensiveRide,
+        id: 'uber',
+        priceDisplay: 'check-live' as const,
+        rideshareEstimateConfidence: 'unavailable' as const,
+        driveMinutes: 38,
+        pickupWaitMinutes: 5,
+        totalOptionMinutes: 43,
+        duration: 43,
+      },
+      ridePrice: null,
+      rideDuration: 43,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 74,
+      transitCostDisplay: '$3.25',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      scoreBreakdowns,
+      driveMinutes: 38,
+    });
+
+    expect(ranked.recommendationMode).toBe('rideshare');
+    expect(ranked.fastestMode).toMatchObject({ key: 'rideshare', minutes: 43 });
+    expect(ranked.cheapestMode).toMatchObject({ key: 'transit', cost: 3.25 });
+    expect(ranked.modes.find((mode) => mode.key === 'rideshare')?.status).toBe('best_pick');
+    expect(ranked.modes.find((mode) => mode.key === 'transit')?.status).toBe('budget_option');
+  });
+
+  test('paid garage with aggregate-only timing does not become fastest', () => {
+    const restaurantTrip = {
+      ...tripData,
+      destination: 'Franklin Barbecue, 900 E 11th St, Austin TX',
+      destinationKind: 'restaurant' as const,
+      parkingDuration: 120,
+    };
+    const {
+      originToParkingMinutes: _originToParkingMinutes,
+      routeToParkingMinutes: _routeToParkingMinutes,
+      ...parkingWithoutRouteTiming
+    } = parkingOption;
+    const aggregateOnlyLot = {
+      ...parkingWithoutRouteTiming,
+      id: 'aggregate-only-paid-garage',
+      name: 'Aggregate Only Garage',
+      price: 8,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: restaurantTrip,
+      sort: 'fastest',
+      destinationLabel: restaurantTrip.destination,
+      noParkingPreferred: false,
+      bestParking: aggregateOnlyLot,
+      parkingOptions: [aggregateOnlyLot],
+      parkingTotal: 8,
+      parkingMinutes: 13,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 12,
+    });
+
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.fastestMode?.key).toBe('destination-customer');
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(paidMode?.status).toBe('route_needed');
+    expect(paidMode?.timing?.driveMinutes).toBeNull();
   });
 
   test('Monroe 4-hour street parking rule penalizes longer stays', () => {

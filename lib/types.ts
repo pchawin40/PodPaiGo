@@ -248,6 +248,37 @@ export type PointToPointTiming = {
   totalOptionMinutes?: number | null;
 };
 
+export type OptionScoreMode =
+  | 'parking'
+  | 'street'
+  | 'customer_parking'
+  | 'rideshare'
+  | 'transit'
+  | 'park_ride';
+
+export type OptionScoreBreakdown = {
+  optionId: string;
+  mode: OptionScoreMode;
+
+  totalCostCents: number | null;
+  totalTimeMinutes: number | null;
+  confidenceScore: number;
+  frictionScore: number;
+  walkMinutes: number | null;
+  waitMinutes: number | null;
+  driveMinutes: number | null;
+  parkingBufferMinutes: number | null;
+  sourceFreshnessScore: number;
+
+  easiestScore: number;
+  cheapestScore: number;
+  fastestScore: number;
+  bestOverallScore: number;
+
+  reasons: string[];
+  penalties: string[];
+};
+
 export type ParkAndRideRuleConfidence = 'confirmed' | 'unknown' | 'estimated';
 
 export type ParkAndRideParkingRules = {
@@ -731,6 +762,7 @@ export type Recommendation = {
   parking: ParkingOption[];
   rideshare: RideshareOption[];
   transit: TransitOption[];
+  optionScoreBreakdowns?: OptionScoreBreakdown[];
   accessStrategies?: AccessRankingResult;
   tsaEstimate: TsaEstimate;
   airportRouteUnavailable?: boolean;

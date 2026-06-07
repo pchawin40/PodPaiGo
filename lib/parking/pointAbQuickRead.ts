@@ -27,6 +27,8 @@ export type PointAbQuickReadMode = {
 
 export type BuildPointAbQuickReadInput = {
   parkingHidden: boolean;
+  sort?: 'easiest' | 'cheapest' | 'fastest';
+  selected?: PointAbQuickReadMode | null;
   cheapest: PointAbQuickReadMode | null;
   fastest: PointAbQuickReadMode | null;
   transitCostDisplay?: { primary: string; secondary?: string | null } | null;
@@ -34,7 +36,37 @@ export type BuildPointAbQuickReadInput = {
 };
 
 export function buildPointAbQuickReadMessage(input: BuildPointAbQuickReadInput): string {
-  const { parkingHidden, cheapest, fastest, transitCostDisplay, formatMinutes } = input;
+  const { parkingHidden, sort, selected, cheapest, fastest, transitCostDisplay, formatMinutes } = input;
+  const prefix = parkingHidden ? 'Parking is hidden. ' : '';
+
+  if (selected && sort === 'fastest' && typeof selected.minutes === 'number') {
+    const cheapestContext =
+      cheapest && cheapest.key !== selected.key
+        ? ` ${cheapest.label} is cheapest${formatQuickReadCost(cheapest, transitCostDisplay) ? ` ${formatQuickReadCost(cheapest, transitCostDisplay)}` : ''}.`
+        : '';
+    return `${prefix}${selected.label} is fastest around ${formatMinutes(selected.minutes)}.${cheapestContext}`;
+  }
+
+  if (selected && sort === 'cheapest') {
+    const selectedCost = formatQuickReadCost(selected, transitCostDisplay);
+    const fastestContext =
+      fastest && fastest.key !== selected.key && typeof fastest.minutes === 'number'
+        ? ` ${fastest.label} is fastest around ${formatMinutes(fastest.minutes)}.`
+        : '';
+    return `${prefix}${selected.label} is cheapest${selectedCost ? ` ${selectedCost}` : ''}.${fastestContext}`;
+  }
+
+  if (selected && sort === 'easiest') {
+    const fastestContext =
+      fastest && fastest.key !== selected.key && typeof fastest.minutes === 'number'
+        ? ` ${fastest.label} is fastest around ${formatMinutes(fastest.minutes)}.`
+        : '';
+    const cheapestContext =
+      cheapest && cheapest.key !== selected.key
+        ? ` ${cheapest.label} is cheapest${formatQuickReadCost(cheapest, transitCostDisplay) ? ` ${formatQuickReadCost(cheapest, transitCostDisplay)}` : ''}.`
+        : '';
+    return `${prefix}${selected.label} is easiest overall.${cheapestContext}${fastestContext}`;
+  }
 
   if (parkingHidden && (!cheapest || !fastest)) {
     if (cheapest && !fastest) {
@@ -49,7 +81,6 @@ export function buildPointAbQuickReadMessage(input: BuildPointAbQuickReadInput):
 
   if (cheapest && fastest) {
     const cheapestCost = formatQuickReadCost(cheapest, transitCostDisplay);
-    const prefix = parkingHidden ? 'Parking is hidden. ' : '';
     return `${prefix}${cheapest.label} is cheapest${cheapestCost ? ` ${cheapestCost}` : ''}. ${fastest.label} is fastest around ${formatMinutes(fastest.minutes ?? 0)}.`;
   }
 

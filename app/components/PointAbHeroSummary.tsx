@@ -61,7 +61,9 @@ export default function PointAbHeroSummary({
   backupRoutingUsed = false,
   className = '',
 }: PointAbHeroSummaryProps) {
-  const bestMode = ranking.modes.find((mode) => mode.key === ranking.recommendationMode);
+  const bestOverallKey =
+    ranking.canonicalWinners.bestOverallWinner ?? ranking.displayRecommendationMode;
+  const bestMode = ranking.modes.find((mode) => mode.key === bestOverallKey);
   const cheapest = ranking.cheapestMode;
   const fastest = ranking.fastestMode;
 

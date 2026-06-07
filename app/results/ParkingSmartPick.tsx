@@ -25,7 +25,10 @@ import {
   sortParkingOptionsForMode,
   type ParkingSortMode,
 } from '../../lib/parking/sortParkingOptions';
-import { buildParkingPriorityBadges } from '../../lib/parking/priorityBadges';
+import {
+  buildParkingPriorityBadges,
+  getParkingRatingReviewBadgeSemanticKey,
+} from '../../lib/parking/priorityBadges';
 import { resolveParkingPriceTrust } from '../../lib/parking/priceTrust';
 import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
@@ -686,12 +689,17 @@ export default function ParkingSmartPick({
     : `${formatCompactMinutes(bestTime.totalMinutes)} total`;
 
   const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
+  const parkingReviewActionSemanticKey =
+    hasParkingReviewSource(best) && (onShowReviews || best.googleMapsUri)
+      ? getParkingRatingReviewBadgeSemanticKey(best)
+      : null;
   const modeBadges = buildParkingPriorityBadges({
     option: best,
     mode: 'best',
     tripData,
     peers: candidateOptions,
     maxBadges: 3,
+    excludeSemanticKeys: [parkingReviewActionSemanticKey],
   });
   const pickExplanation = routeTimingUnavailable
     ? 'Showing best available parking estimate. Open directions to confirm route timing.'

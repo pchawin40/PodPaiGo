@@ -59,6 +59,85 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.queryByText('Route timing unavailable')).not.toBeInTheDocument();
   });
 
+  test('renders paid parking timing decomposition when provided', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Paid garage/lot"
+        name="Sample Garage"
+        cost="$18"
+        time="25 min"
+        timeLabel="Total time"
+        timing={{
+          driveMinutes: 12,
+          parkingBufferMinutes: 8,
+          walkToDestinationMinutes: 5,
+          pickupWaitMinutes: null,
+          totalOptionMinutes: 25,
+        }}
+        timingBreakdownLabels={{
+          drive: 'Drive to lot',
+          parkingBuffer: 'Park/check-in buffer',
+          walk: 'Walk to destination',
+          total: 'Total to destination',
+        }}
+        pros={['Bookable paid backup']}
+        cons={['May cost more than street parking']}
+      />,
+    );
+
+    expect(screen.getByText('Drive to lot')).toBeInTheDocument();
+    expect(screen.getByText('Park/check-in buffer')).toBeInTheDocument();
+    expect(screen.getByText('Walk to destination')).toBeInTheDocument();
+    expect(screen.getByText('Total to destination')).toBeInTheDocument();
+    expect(screen.getAllByText('12 min').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('25 min').length).toBeGreaterThan(0);
+  });
+
+  test('renders street meter timing with total first and readable labels', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Street / meter parking"
+        name="Street parking near destination"
+        cost="$5"
+        time="1h 13m"
+        timeLabel="Total time"
+        timing={{
+          driveMinutes: 60,
+          parkingBufferMinutes: 7,
+          walkToDestinationMinutes: 6,
+          pickupWaitMinutes: null,
+          totalOptionMinutes: 73,
+        }}
+        timingBreakdownLabels={{
+          drive: 'Drive route',
+          parkingBuffer: 'Find/check parking',
+          walk: 'Walk to destination',
+          total: 'Total time',
+          totalFirst: true,
+        }}
+        pros={['Can be cheaper when a legal stall is open']}
+        cons={['Verify posted signs']}
+      />,
+    );
+
+    const labels = screen
+      .getAllByText(/Total time|Drive route|Find\/check parking|Walk to destination/)
+      .map((node) => node.textContent);
+
+    expect(labels).toEqual(expect.arrayContaining([
+      'Total time',
+      'Drive route',
+      'Find/check parking',
+      'Walk to destination',
+    ]));
+    expect(screen.getAllByText('1h 13m').length).toBeGreaterThan(0);
+    expect(screen.getByText('60 min')).toBeInTheDocument();
+    expect(screen.getByText('7 min')).toBeInTheDocument();
+    expect(screen.getByText('6 min')).toBeInTheDocument();
+  });
+
   test('renders a Details action button', () => {
     render(
       <OptionComparisonCard

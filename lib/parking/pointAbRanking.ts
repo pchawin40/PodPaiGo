@@ -3,6 +3,7 @@ import type { AccessStrategyOption } from '../access/types';
 import type {
   ParkingOption,
   PointToPointTiming,
+  OptionScoreBreakdown,
   RideshareOption,
   TransitOption,
   TripData,
@@ -29,6 +30,13 @@ import {
   resolveStreetMeterTiming,
 } from './pointAbModeTiming';
 import { shouldExcludeFromPointAbQuickRead } from './pointAbQuickRead';
+import { resolvePaidParkingDriveToLotMinutes } from './pointAbOptionScoring';
+import {
+  computePointAbCanonicalWinners,
+  resolvePointAbDisplayRecommendationMode,
+  resolvePointAbRecommendationMode,
+  type PointAbCanonicalWinners,
+} from './pointAbCanonicalFlow';
 
 export type PointAbModeKey =
   | 'destination-customer'
@@ -69,6 +77,8 @@ export type PointAbModePresentation = {
 export type PointAbRankingResult = {
   modes: PointAbModePresentation[];
   recommendationMode: PointAbModeKey | 'compare';
+  /** Visible hero mode after parking-hidden preference adjustments. */
+  displayRecommendationMode: PointAbModeKey | 'compare';
   recommendedTitle: string;
   recommendedReason: string;
   cheapestMode: { key: PointAbModeKey; label: string; cost: number; minutes?: number } | null;
@@ -76,6 +86,7 @@ export type PointAbRankingResult = {
   objectiveBestMode: PointAbModeKey | null;
   /** When cheapest mode differs from best overall (e.g. transit is cheapest). */
   cheapestVsBestNote: string | null;
+  canonicalWinners: PointAbCanonicalWinners;
 };
 
 type RankPointAbModesInput = {
@@ -102,6 +113,7 @@ type RankPointAbModesInput = {
   parkRideReliable: boolean;
   streetMeterParking?: StreetMeterParkingPresentation | null;
   driveMinutes?: number | null;
+  scoreBreakdowns?: OptionScoreBreakdown[] | null;
 };
 
 const BIG = 999_999;
@@ -457,8 +469,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   const parkingRouteUnavailable = input.bestParking
     ? isParkingRouteUnavailable(input.bestParking)
     : false;
+  const parkingDriveToLotMinutes = resolvePaidParkingDriveToLotMinutes(input.bestParking);
   const parkingTiming = resolvePaidGarageTiming({
-    driveMinutes: input.driveMinutes,
+    driveMinutes: parkingDriveToLotMinutes,
     parkingMinutes: input.parkingMinutes,
     parking: input.bestParking,
   });
@@ -480,7 +493,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
   const hasRideshareOption = Boolean(input.bestRideOption || rideshareTiming);
   const parkingHasUsableTiming =
-    parkingDisplayMinutes != null || Boolean(input.bestParking && !parkingRouteUnavailable);
+    Boolean(input.bestParking && !parkingRouteUnavailable) &&
+    parkingTiming?.driveMinutes != null &&
+    parkingDisplayMinutes != null;
 
   const candidates: PointAbModeCandidate[] = [
     customerCandidate
@@ -578,44 +593,37 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     }),
   }));
 
-  const preferenceScored = candidates.map((mode) => ({
-    mode,
-    score: scorePointAbMode({
-      mode,
-      sort: input.sort,
-      noParkingPreferred: input.noParkingPreferred,
-      parkingCost: input.parkingTotal,
-      rideshareCost: input.ridePrice,
-      parkingBonus: mode.key === 'parking' ? parkingBonus : 0,
-    }),
-  }));
-
   const objectiveBest =
     [...objectiveScored].sort((a, b) => b.score - a.score)[0]?.mode.key ?? null;
-  const preferenceBest =
-    [...preferenceScored].sort((a, b) => b.score - a.score)[0]?.mode.key ?? null;
 
   const extremeCostGap = preferenceBoostIsCapped({
     parkingCost: input.parkingTotal,
     rideshareCost: input.ridePrice,
   });
 
-  const recommendationMode: PointAbModeKey | null =
-    (input.noParkingPreferred && !extremeCostGap
-      ? preferenceBest
-      : objectiveBest ?? preferenceBest) ?? null;
+  const canonicalWinners = computePointAbCanonicalWinners({
+    candidates,
+    sort: input.sort,
+    noParkingPreferred: input.noParkingPreferred,
+    parkingCost: input.parkingTotal,
+    rideshareCost: input.ridePrice,
+    parkingBonus,
+  });
+
+  const recommendationMode: PointAbModeKey | null = resolvePointAbRecommendationMode({
+    candidates,
+    sort: input.sort,
+    noParkingPreferred: input.noParkingPreferred,
+    parkingCost: input.parkingTotal,
+    rideshareCost: input.ridePrice,
+    parkingBonus,
+  });
 
   const visibleForQuickRead = (key: PointAbModeKey) =>
     !shouldExcludeFromPointAbQuickRead(key, input.noParkingPreferred);
 
-  const cheapestMode =
-    [...candidates]
-      .filter((mode) => mode.reliable && mode.cost < BIG && visibleForQuickRead(mode.key))
-      .sort((a, b) => a.cost - b.cost)[0] ?? null;
-  const fastestMode =
-    [...candidates]
-      .filter((mode) => mode.reliable && visibleForQuickRead(mode.key))
-      .sort((a, b) => a.minutes - b.minutes)[0] ?? null;
+  const cheapestMode = canonicalWinners.cheapestWinner;
+  const fastestMode = canonicalWinners.fastestWinner;
 
   const parkingHints = input.bestParking?.googleParkingOptions
     ? buildParkingOptionsHints(input.bestParking.googleParkingOptions, {
@@ -695,7 +703,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
               : '',
           ].filter(Boolean)
         : ['Open map or provider to verify'],
-      status: 'unavailable',
+      status: parkingHasUsableTiming ? 'easy_backup' : 'route_needed',
       unavailable: !input.bestParking,
       hiddenByPreference: Boolean(
         input.noParkingPreferred &&
@@ -882,9 +890,17 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       }
     : null;
 
+  const resolvedRecommendationMode = recommendationMode ?? 'compare';
+  const displayRecommendationMode = resolvePointAbDisplayRecommendationMode({
+    recommendationMode: resolvedRecommendationMode,
+    noParkingPreferred: input.noParkingPreferred,
+    visibleOptionKeys: canonicalWinners.visibleOptionKeys,
+  });
+
   return {
     modes,
-    recommendationMode: recommendationMode ?? 'compare',
+    recommendationMode: resolvedRecommendationMode,
+    displayRecommendationMode,
     recommendedTitle,
     recommendedReason,
     cheapestMode: cheapestModeResult,
@@ -894,7 +910,8 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     objectiveBestMode: objectiveBest,
     cheapestVsBestNote: formatPointAbCheapestVsBestNote({
       cheapestMode: cheapestModeResult,
-      recommendationMode: recommendationMode ?? 'compare',
+      recommendationMode: displayRecommendationMode,
     }),
+    canonicalWinners,
   };
 }

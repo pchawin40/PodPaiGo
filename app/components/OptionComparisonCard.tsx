@@ -6,6 +6,56 @@ import DestinationModeActions, {
   type DestinationModeAction,
 } from '../results/DestinationModeActions';
 import type { RecommendationStatus } from '../../lib/recommendationStatusBadge';
+import type { PointToPointTiming } from '../../lib/types';
+
+type TimingBreakdownLabels = {
+  drive?: string;
+  parkingBuffer?: string;
+  walk?: string;
+  pickupWait?: string;
+  total?: string;
+  totalFirst?: boolean;
+};
+
+function timingMinutesLabel(minutes: number | null | undefined, total = false): string | null {
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes)) return null;
+  const rounded = Math.round(minutes);
+  if (!total || rounded < 60) return `${rounded} min`;
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+function buildTimingRows(
+  timing: PointToPointTiming | null | undefined,
+  labels: TimingBreakdownLabels | undefined,
+): Array<{ label: string; value: string }> {
+  if (!timing) return [];
+
+  const detailRows = [
+    { label: labels?.drive || 'Drive route', value: timingMinutesLabel(timing.driveMinutes) },
+    {
+      label: labels?.parkingBuffer || 'Access / verify',
+      value: timingMinutesLabel(timing.parkingBufferMinutes),
+    },
+    {
+      label: labels?.walk || 'Walk to destination',
+      value: timingMinutesLabel(timing.walkToDestinationMinutes),
+    },
+    { label: labels?.pickupWait || 'Pickup wait', value: timingMinutesLabel(timing.pickupWaitMinutes) },
+  ].filter((row): row is { label: string; value: string } => Boolean(row.value));
+
+  const total = timingMinutesLabel(timing.totalOptionMinutes, true);
+  if (total) {
+    const totalRow = { label: labels?.total || 'Total to destination', value: total };
+    const rows = labels?.totalFirst
+      ? [totalRow, ...detailRows]
+      : [...detailRows, totalRow];
+    return rows.length >= 2 ? rows : [];
+  }
+
+  return detailRows.length >= 2 ? detailRows : [];
+}
 
 export type OptionComparisonCardProps = {
   confidence: string;
@@ -15,6 +65,8 @@ export type OptionComparisonCardProps = {
   costNote?: string;
   time: string;
   timeLabel?: string;
+  timing?: PointToPointTiming | null;
+  timingBreakdownLabels?: TimingBreakdownLabels;
   pros: string[];
   cons: string[];
   status?: RecommendationStatus;
@@ -38,6 +90,8 @@ export default function OptionComparisonCard({
   costNote,
   time,
   timeLabel = 'Time',
+  timing,
+  timingBreakdownLabels,
   pros,
   cons,
   status,
@@ -70,6 +124,7 @@ export default function OptionComparisonCard({
 
   const badgeStatus = isHidden ? 'hidden_by_preference' : status;
   const badgeVerdict = isHidden ? 'Hidden by preference' : verdict;
+  const timingRows = isHidden ? [] : buildTimingRows(timing, timingBreakdownLabels);
 
   return (
     <div className={cardClassName}>
@@ -110,6 +165,17 @@ export default function OptionComparisonCard({
             <div className="mt-0.5 font-semibold text-foreground">{time}</div>
           </div>
         </div>
+
+        {timingRows.length > 0 ? (
+          <div className="mt-2 rounded-xl border border-border bg-card/70 p-2 text-xs leading-5">
+            {timingRows.map((row) => (
+              <div key={row.label} className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{row.label}</span>
+                <span className="font-semibold text-foreground">{row.value}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="mt-3 space-y-2 text-xs leading-5">
           {shortPro ? (

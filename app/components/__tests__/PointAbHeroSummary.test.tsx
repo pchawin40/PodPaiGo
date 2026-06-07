@@ -36,12 +36,22 @@ const ranking = {
     },
   ],
   recommendationMode: 'destination-customer',
+  displayRecommendationMode: 'destination-customer',
   recommendedTitle: 'Check customer parking first',
   recommendedReason: 'Best fit if you want to drive.',
   cheapestMode: { key: 'transit', label: 'Transit', cost: 3.25 },
   fastestMode: { key: 'rideshare', label: 'Rideshare', minutes: 28 },
   objectiveBestMode: 'parking',
   cheapestVsBestNote: null,
+  canonicalWinners: {
+    easiestWinner: 'destination-customer',
+    cheapestWinner: null,
+    fastestWinner: null,
+    bestOverallWinner: 'destination-customer',
+    heroWinner: 'destination-customer',
+    visibleOptionKeys: ['destination-customer', 'parking'],
+    hiddenOptionKeys: [],
+  },
 } satisfies PointAbRankingResult;
 
 describe('PointAbHeroSummary', () => {

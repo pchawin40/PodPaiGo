@@ -407,6 +407,17 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     });
     expect(recommendation.rideshare[0]?.sourceLink).toContain('https://m.uber.com/ul/');
     expect(recommendation.rideshare[0]?.priceNote).toBe('Open app for live price.');
+    expect(recommendation.optionScoreBreakdowns?.length).toBeGreaterThan(0);
+    expect(recommendation.optionScoreBreakdowns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mode: 'rideshare',
+          driveMinutes: 12,
+          waitMinutes: 5,
+          totalTimeMinutes: 17,
+        }),
+      ]),
+    );
   });
 
   test('local Quick Go missing coordinates returns confirm-timing state instead of bad 35 minute estimate', async () => {
