@@ -169,6 +169,30 @@ describe('resolveQuickGoDriveTime', () => {
     expect(driveTime.unavailable).toBe(false);
   });
 
+  test('stale unavailable flag does not override Mapbox backup duration', () => {
+    const traffic = {
+      duration: 4,
+      routeUnavailable: true,
+      trustStatus: 'live',
+      sourceName: 'Mapbox Directions',
+      routeStatus: 'ready' as const,
+    };
+
+    expect(classifyQuickGoServerRouteState(traffic)).toEqual({
+      serverRouteUnavailable: false,
+      latestRouteFinalStatus: 'ready',
+    });
+
+    expect(resolveQuickGoDriveTime(traffic)).toEqual({
+      minutes: 4,
+      unavailable: false,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'ready',
+      routeSource: 'mapbox',
+    });
+  });
+
   test('coordinate fallback resolves to ready with coordinate source', () => {
     const driveTime = resolveQuickGoDriveTime({
       duration: 6,
@@ -180,6 +204,23 @@ describe('resolveQuickGoDriveTime', () => {
 
     expect(driveTime.routeSource).toBe('coordinate_fallback');
     expect(driveTime.unavailable).toBe(false);
+  });
+
+  test('stale unavailable flag does not override coordinate fallback duration', () => {
+    expect(
+      resolveQuickGoDriveTime({
+        duration: 6,
+        routeUnavailable: true,
+        trustStatus: 'estimated',
+        sourceName: 'Estimated from coordinates',
+        routeStatus: 'ready',
+      }),
+    ).toMatchObject({
+      minutes: 6,
+      unavailable: false,
+      routeStatus: 'ready',
+      routeSource: 'coordinate_fallback',
+    });
   });
 
   test('unavailable only after all providers fail', () => {

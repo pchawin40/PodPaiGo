@@ -74,46 +74,48 @@ export default function OptionComparisonCard({
         />
       </div>
 
-      <div className="text-sm font-bold text-foreground">{label}</div>
+      <div className="flex-1">
+        <div className="text-sm font-bold text-foreground">{label}</div>
 
-      <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{name}</div>
+        <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{name}</div>
 
-      {hiddenByPreference ? (
-        <div className="mt-2 text-xs leading-5 text-violet-800 dark:text-violet-200">
-          Drive is cheaper, but hidden because you said no parking.
+        {hiddenByPreference ? (
+          <div className="mt-2 text-xs leading-5 text-violet-800 dark:text-violet-200">
+            Drive is cheaper, but hidden because you said no parking.
+          </div>
+        ) : null}
+
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-xl border border-border bg-card/80 p-2">
+            <div className="text-muted-foreground">Cost</div>
+            <div className="mt-0.5 font-semibold text-foreground">{cost}</div>
+            {costNote ? (
+              <div className="mt-1 text-[11px] text-muted-foreground">{costNote}</div>
+            ) : null}
+          </div>
+          <div className="rounded-xl border border-border bg-card/80 p-2">
+            <div className="text-muted-foreground">Time</div>
+            <div className="mt-0.5 font-semibold text-foreground">{time}</div>
+          </div>
         </div>
-      ) : null}
 
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-xl border border-border bg-card/80 p-2">
-          <div className="text-muted-foreground">Cost</div>
-          <div className="mt-0.5 font-semibold text-foreground">{cost}</div>
-          {costNote ? (
-            <div className="mt-1 text-[11px] text-muted-foreground">{costNote}</div>
+        <div className="mt-3 space-y-2 text-xs leading-5">
+          {shortPro ? (
+            <div>
+              <span className="font-semibold text-foreground">Pro: </span>
+              <span className="text-muted-foreground">{shortPro}</span>
+            </div>
+          ) : null}
+          {shortCon ? (
+            <div>
+              <span className="font-semibold text-foreground">Con: </span>
+              <span className="text-muted-foreground">{shortCon}</span>
+            </div>
           ) : null}
         </div>
-        <div className="rounded-xl border border-border bg-card/80 p-2">
-          <div className="text-muted-foreground">Time</div>
-          <div className="mt-0.5 font-semibold text-foreground">{time}</div>
-        </div>
       </div>
 
-      <div className="mt-3 space-y-2 text-xs leading-5">
-        {shortPro ? (
-          <div>
-            <span className="font-semibold text-foreground">Pro: </span>
-            <span className="text-muted-foreground">{shortPro}</span>
-          </div>
-        ) : null}
-        {shortCon ? (
-          <div>
-            <span className="font-semibold text-foreground">Con: </span>
-            <span className="text-muted-foreground">{shortCon}</span>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-auto pt-3">
+      <div className="mt-auto flex flex-col items-center gap-2 pt-4">
         {actions && actions.length > 0 ? (
           <DestinationModeActions compact actions={actions} />
         ) : null}

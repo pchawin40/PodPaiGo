@@ -795,12 +795,8 @@ export function deriveQuickGoRouteSource(
 ): QuickGoRouteSource | null {
   if (!traffic) return null;
 
-  if (traffic.routeSource) {
+  if (traffic.routeSource && traffic.routeSource !== 'unavailable') {
     return traffic.routeSource;
-  }
-
-  if (traffic.routeUnavailable === true) {
-    return 'unavailable';
   }
 
   const sourceName = String(traffic.sourceName || '').trim();
@@ -821,7 +817,32 @@ export function deriveQuickGoRouteSource(
     return traffic.trustStatus === 'live' ? 'google_live' : 'google_cached';
   }
 
+  if (traffic.routeSource) {
+    return traffic.routeSource;
+  }
+
+  if (traffic.routeUnavailable === true) {
+    return 'unavailable';
+  }
+
   return null;
+}
+
+function hasPositiveQuickGoRouteDuration(traffic: QuickGoDriveTimeInput): boolean {
+  const duration = typeof traffic?.duration === 'number' ? traffic.duration : null;
+  return duration != null && Number.isFinite(duration) && duration > 0;
+}
+
+function hasReadyQuickGoDurationDespiteUnavailable(traffic: QuickGoDriveTimeInput): boolean {
+  if (!traffic || !hasPositiveQuickGoRouteDuration(traffic)) return false;
+
+  const source = deriveQuickGoRouteSource(traffic);
+
+  if (source === 'mapbox' || source === 'coordinate_fallback' || source === 'google_cached') {
+    return true;
+  }
+
+  return traffic.routeStatus === 'ready' && source !== 'unavailable';
 }
 
 export function quickGoRouteLoadingBody(status: QuickGoRouteStatus): string {
@@ -1320,11 +1341,16 @@ function resolveQuickGoDriveMinutes(
 } {
   if (!traffic) return { minutes: null, unavailable: true };
 
-  if (traffic.routeUnavailable === true && !options?.suppressStaleUnavailable) {
+  const duration = typeof traffic.duration === 'number' ? traffic.duration : null;
+  const hasReadyDurationDespiteUnavailable = hasReadyQuickGoDurationDespiteUnavailable(traffic);
+
+  if (
+    traffic.routeUnavailable === true &&
+    !options?.suppressStaleUnavailable &&
+    !hasReadyDurationDespiteUnavailable
+  ) {
     return { minutes: null, unavailable: true };
   }
-
-  const duration = typeof traffic.duration === 'number' ? traffic.duration : null;
 
   if (duration != null && Number.isFinite(duration) && duration > 0) {
     return { minutes: duration, unavailable: false };

@@ -5875,6 +5875,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     if (option.type !== 'parking') return true;
 
+    if (isCityTrip) return true;
+
     return !isParkingRouteUnavailable(option);
   });
   const displayedParking = displayableRemainingParking.slice(0, visibleParkingCount);
@@ -5923,8 +5925,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <h1 className="mt-3 text-2xl font-semibold text-foreground sm:text-3xl">
                 {routeUnavailableBlocksParking
                   ? 'Route unavailable from this origin'
-                  : airportRouteUnavailable && isCityTrip
-                    ? 'Drive time unavailable'
                   : noViableFlyingOut
                     ? 'No reliable option gets you airport-ready on time'
                     : isCityTrip && cityTripPointAbRanking
@@ -5952,7 +5952,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       ? formatMinutes(recommendation.trafficEstimate.duration)
                       : null
                   }
-                  backupRoutingUsed={isBackupRouteEstimate(recommendation.trafficEstimate)}
+                  backupRoutingUsed={
+                    isBackupRouteEstimate(recommendation.trafficEstimate) ||
+                    isStraightLineRouteEstimate(recommendation.trafficEstimate)
+                  }
                 />
               ) : null}
 
@@ -5976,12 +5979,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
                     {isCityTrip
-                      ? 'Drive time is unavailable for this result.'
+                      ? recommendation.trafficEstimate?.duration
+                        ? 'Routing is degraded for this result.'
+                        : 'Drive timing could not be confirmed for this result.'
                       : 'We could not calculate a real route from your starting location to this destination.'}
                   </div>
                   <div className="mt-1">
                     {isCityTrip
-                      ? 'Open directions to confirm drive time.'
+                      ? recommendation.trafficEstimate?.duration
+                        ? 'Showing an estimated drive time. Open directions to confirm live traffic.'
+                        : 'Parking and provider options are still shown. Open directions to verify drive time.'
                       : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
                   {airportRouteUnavailableReason && (

@@ -182,6 +182,47 @@ describe('OptionComparisonCard compact layout', () => {
     expect(actionContainer).toHaveClass('flex-col');
   });
 
+  test('uses pinned full-width centered action buttons for wrapped labels', () => {
+    const { container } = render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Rideshare"
+        name="Uber / Lyft"
+        cost="Open app for live price"
+        time="Open app"
+        pros={['No parking required']}
+        cons={['Surge pricing can change']}
+        actions={[
+          { label: 'View ride estimates', href: 'https://uber.com/' },
+          { label: 'Open transit route', href: 'https://maps.example/transit' },
+          { label: 'Details', onClick: () => undefined },
+        ]}
+      />,
+    );
+
+    const card = container.firstChild as HTMLElement;
+    expect(card.querySelector('.flex-1')).toBeTruthy();
+    expect(card.querySelector('.mt-auto')).toHaveClass('pt-4');
+
+    const primary = screen.getByRole('link', { name: 'View ride estimates' });
+    const secondary = screen.getByRole('link', { name: 'Open transit route' });
+    const tertiary = screen.getByRole('button', { name: 'Details' });
+
+    for (const action of [primary, secondary, tertiary]) {
+      expect(action).toHaveClass('flex');
+      expect(action).toHaveClass('w-full');
+      expect(action).toHaveClass('items-center');
+      expect(action).toHaveClass('justify-center');
+      expect(action).toHaveClass('text-center');
+      expect(action).toHaveClass('leading-tight');
+      expect(action).toHaveClass('whitespace-normal');
+    }
+
+    expect(primary).toHaveClass('min-h-12');
+    expect(secondary).toHaveClass('min-h-12');
+    expect(tertiary).toHaveClass('min-h-10');
+  });
+
   test('keeps Park & Ride long-form content out of the comparison card', () => {
     const selection = selectBestParkAndRideForPointAb({
       origin: 'Lynnwood, WA',

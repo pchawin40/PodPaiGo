@@ -248,6 +248,97 @@ describe('pointAbRanking', () => {
     });
   });
 
+  test('route-degraded city garage can still be the recommended destination parking option', () => {
+    const routeDegradedGarage = {
+      ...parkingOption,
+      name: 'Pike Place Market Parking Garage',
+      routeUnavailable: true,
+      routeUnavailableReason: 'Route budget exceeded; open map directions to confirm drive time.',
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData,
+      sort: 'easiest',
+      destinationLabel: 'Pike Place Market',
+      noParkingPreferred: false,
+      bestParking: routeDegradedGarage,
+      parkingTotal: 7,
+      parkingMinutes: null,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 31,
+    });
+
+    const parkingMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.recommendationMode).toBe('parking');
+    expect(ranked.recommendedTitle).toBe('Park at Pike Place Market Parking Garage');
+    expect(parkingMode?.time).toBe('31 min');
+    expect(parkingMode?.unavailable).toBe(false);
+    expect(parkingMode?.status).toBe('best_pick');
+    expect(parkingMode?.cons).toContain('Backup route estimate; open directions to confirm');
+  });
+
+  test('street meter rules do not suppress destination garage mode', () => {
+    const ranked = rankPointAbModes({
+      tripData,
+      sort: 'cheapest',
+      destinationLabel: 'Pike Place Market',
+      noParkingPreferred: false,
+      bestParking: parkingOption,
+      parkingTotal: 18,
+      parkingMinutes: 35,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      streetMeterParking: {
+        applicable: true,
+        label: 'Street / meter parking',
+        name: 'Street / meter parking',
+        cost: 0,
+        costDisplay: 'Likely free street parking',
+        costNote: 'Seattle street parking is generally free on Sundays.',
+        durationMinutes: 35,
+        timeDisplay: '35 min',
+        confidence: 'Medium',
+        pros: ['Can be free off-hours'],
+        cons: ['Verify posted signs'],
+        warnings: [],
+        verifyRequired: true,
+        sourceLabel: 'Seattle payment hours estimate',
+      },
+      driveMinutes: 31,
+    });
+
+    const garageMode = ranked.modes.find((mode) => mode.key === 'parking');
+    const streetMode = ranked.modes.find((mode) => mode.key === 'street-meter');
+
+    expect(garageMode).toMatchObject({
+      name: 'Destination Garage',
+      unavailable: false,
+    });
+    expect(streetMode).toBeTruthy();
+  });
+
   test('RecommendationStatusBadge labels stay short and consistent', () => {
     expect(recommendationStatusLabel('best_pick')).toBe('Best pick');
     expect(recommendationStatusLabel('budget_option')).toBe('Budget');

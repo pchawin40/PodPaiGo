@@ -375,6 +375,12 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
 
 export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingResult {
   const parkRide = resolveParkRidePresentation(input);
+  const parkingRouteUnavailable = input.bestParking
+    ? isParkingRouteUnavailable(input.bestParking)
+    : false;
+  const parkingDisplayMinutes = input.parkingMinutes ?? input.driveMinutes ?? null;
+  const parkingHasUsableTiming =
+    parkingDisplayMinutes != null || Boolean(input.bestParking && !parkingRouteUnavailable);
 
   const candidates: PointAbModeCandidate[] = [
     input.bestParking
@@ -382,8 +388,8 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           key: 'parking',
           label: 'Destination parking',
           cost: finiteOr(input.parkingTotal),
-          minutes: finiteOr(input.parkingMinutes),
-          reliable: !isParkingRouteUnavailable(input.bestParking),
+          minutes: finiteOr(parkingDisplayMinutes),
+          reliable: parkingHasUsableTiming,
           confidence: input.bestParking.trustStatus === 'live' ? 'High' : 'Medium',
         }
       : null,
@@ -516,7 +522,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       name: input.bestParking?.name || 'No parking option found',
       cost: parkingCostDisplay,
       costNote: parkingHints?.hints[0]?.label,
-      time: input.parkingMinutes != null ? formatMinutesLabel(input.parkingMinutes) : 'Check route',
+      time: parkingDisplayMinutes != null ? formatMinutesLabel(parkingDisplayMinutes) : 'Check route',
       confidence: input.bestParking ? (input.bestParking.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
       pros: input.bestParking
         ? [
@@ -527,7 +533,11 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       cons: input.bestParking
         ? [
             input.noParkingPreferred ? 'You marked parking as not needed' : 'May cost more than transit',
-            isParkingRouteUnavailable(input.bestParking) ? 'Route timing unavailable' : '',
+            parkingRouteUnavailable
+              ? parkingDisplayMinutes != null
+                ? 'Backup route estimate; open directions to confirm'
+                : 'Route timing unavailable'
+              : '',
           ].filter(Boolean)
         : ['Open map or provider to verify'],
       status: 'unavailable',
@@ -535,7 +545,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       hiddenByPreference: Boolean(
         input.noParkingPreferred &&
           input.bestParking &&
-          !isParkingRouteUnavailable(input.bestParking),
+          !parkingRouteUnavailable,
       ),
     },
     ...(input.streetMeterParking?.applicable
