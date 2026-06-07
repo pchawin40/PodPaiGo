@@ -1,4 +1,5 @@
 import type { ParkingOption, TripData } from '../types';
+import { isDenseUrbanDestination } from './destinationParkingClassifier';
 import { evaluateLocalStreetParkingRules } from './localParkingRules';
 
 export type GoogleParkingOptionsSignals = {
@@ -60,14 +61,21 @@ export function inferParkingCategoryFromSignals(
 
 export function buildParkingOptionsHints(
   signals: GoogleParkingOptionsSignals | null | undefined,
-  options?: { airportTrip?: boolean },
+  options?: { airportTrip?: boolean; destination?: string | null },
 ): ParkingOptionsHintBundle {
   const hints: ParkingOptionsHint[] = [];
+  const denseUrban = isDenseUrbanDestination(options?.destination);
 
-  if (signals?.freeParkingLot) {
+  if (signals?.freeParkingLot && !denseUrban) {
     hints.push({
       category: 'customer_lot',
       label: 'Free customer parking likely',
+    });
+  } else if (signals?.freeParkingLot && denseUrban) {
+    hints.push({
+      category: 'garage_paid',
+      label: 'Paid garage or lot parking likely',
+      detail: 'Dense downtown areas rarely offer confirmed free customer parking without a posted lot.',
     });
   }
 

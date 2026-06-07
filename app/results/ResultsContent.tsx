@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -18,6 +18,7 @@ import DestinationParkingSummary from '../components/DestinationParkingSummary';
 import PointAbHeroSummary from '../components/PointAbHeroSummary';
 import { buildParkingOutlook } from '../../lib/parking/parkingOutlook';
 import { computeCityTripPointAbRanking } from '../../lib/parking/cityTripPointAbContext';
+import { buildStreetMeterParkingOption } from '../../lib/parking/streetMeterParking';
 import {
   FlexibleDateInput,
   normalizeFlexibleDateInputValue,
@@ -58,6 +59,11 @@ import {
   selectBestParkAndRideForPointAb,
   toPointAbParkRidePresentation,
 } from '../../lib/parking/parkAndRideSelection';
+import {
+  POINT_AB_DETAILS_SECTION_IDS,
+  scrollToPointAbDetailsSection,
+} from '../../lib/parking/pointAbDetailsScroll';
+import type { PointAbModeKey } from '../../lib/parking/pointAbRanking';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -3362,6 +3368,7 @@ function ProviderDropdownSection({
   transitPayment,
   tripData,
   footerContent,
+  detailsHeading = false,
 }: {
   title: string;
   subtitle: string;
@@ -3370,6 +3377,7 @@ function ProviderDropdownSection({
   transitPayment?: TransitPaymentOption;
   tripData?: TripData | null;
   footerContent?: ReactNode;
+  detailsHeading?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -3391,7 +3399,11 @@ function ProviderDropdownSection({
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-base font-semibold text-zinc-900">
+              <h3
+                className="text-base font-semibold text-zinc-900"
+                data-details-heading={detailsHeading ? true : undefined}
+                tabIndex={detailsHeading ? -1 : undefined}
+              >
                 {title}
               </h3>
 
@@ -4799,6 +4811,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     : ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
 
   const seasonalClimateGuidance = useMemo(() => {
+    if (recommendation?.weatherImpact) return null;
     if (recommendation?.weatherContext !== 'forecast-unavailable') return null;
 
     const targetDate =
@@ -4814,7 +4827,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       airportCode: currentAirportCode || 'SEA',
       targetDate,
     });
-  }, [recommendation?.weatherContext, tripData, currentAirportCode]);
+  }, [recommendation?.weatherContext, recommendation?.weatherImpact, tripData, currentAirportCode]);
 
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = isCityTrip
@@ -4822,8 +4835,26 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     : currentAirport.label;
   const tripBadgeLabel = isCityTrip ? 'General trip' : searchParams.get('airport') || currentAirportCode || 'SEA';
   const scrollToParkingOptions = () => {
-    document.getElementById('parking-options-section')?.scrollIntoView({ behavior: 'smooth' });
+    const sectionId = isCityTrip
+      ? POINT_AB_DETAILS_SECTION_IDS.parking
+      : 'parking-options-section';
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  const openPointAbModeDetails = useCallback((modeKey: PointAbModeKey) => {
+    setExpandedModeDetails(modeKey);
+    if (modeKey === 'rideshare') {
+      setOpenProviderSection('ride');
+    } else if (modeKey === 'transit') {
+      setOpenProviderSection('transit');
+    }
+
+    const sectionId = POINT_AB_DETAILS_SECTION_IDS[modeKey];
+    const delay = modeKey === 'rideshare' || modeKey === 'transit' ? 50 : 0;
+    window.setTimeout(() => {
+      scrollToPointAbDetailsSection(sectionId);
+    }, delay);
+  }, []);
   const airportRouteUnavailable =
     Boolean(recommendation?.airportRouteUnavailable) ||
     Boolean(recommendation?.trafficEstimate?.routeUnavailable);
@@ -5565,6 +5596,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           parkingDisplayOptions,
           sortedOptions,
           recommendation,
+          driveMinutes: recommendation.trafficEstimate?.duration ?? null,
         })
       : null;
   const cityTripParkingOutlook =
@@ -5579,6 +5611,43 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           durationMinutes: tripData.parkingDuration ?? undefined,
         })
       : null;
+  const cityTripParkRideSelection = useMemo(() => {
+    if (!isCityTrip || !tripData) return null;
+
+    const parkingTotal = visibleSmartPickOption
+      ? getParkingTotalPrice(visibleSmartPickOption, tripData) ??
+        visibleSmartPickOption.price ??
+        null
+      : null;
+
+    return selectBestParkAndRideForPointAb({
+      origin: tripData.origin,
+      originLat: tripData.originLat,
+      originLng: tripData.originLng,
+      destination: cityDestinationText || tripData.destination,
+      destinationLat: tripData.destinationLat,
+      destinationLng: tripData.destinationLng,
+      parkingDurationMinutes: calculateParkingDuration(tripData),
+      isAirportTrip: false,
+      sort,
+      parkingTotal,
+      weatherRisk: recommendation?.weatherImpact?.riskLevel,
+    });
+  }, [
+    isCityTrip,
+    tripData,
+    cityDestinationText,
+    sort,
+    visibleSmartPickOption,
+    recommendation?.weatherImpact?.riskLevel,
+  ]);
+  const cityTripParkRide = useMemo(() => {
+    if (!cityTripParkRideSelection) return null;
+    return toPointAbParkRidePresentation(cityTripParkRideSelection);
+  }, [cityTripParkRideSelection]);
+  const cityTripParkRideModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'park-ride',
+  );
   const selectedParkingTimingOption =
     visibleSmartPickOption
       ? googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
@@ -5716,6 +5785,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   className="mt-4"
                   ranking={cityTripPointAbRanking}
                   parkingOutlook={cityTripParkingOutlook}
+                  driveTimeLabel={
+                    recommendation.trafficEstimate?.duration
+                      ? formatMinutes(recommendation.trafficEstimate.duration)
+                      : null
+                  }
+                  backupRoutingUsed={isBackupRouteEstimate(recommendation.trafficEstimate)}
                 />
               ) : null}
 
@@ -6254,6 +6329,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 bestParkRideAccess?.recommendedForTrip !== false &&
                 !isOvernightTrip;
 
+            const streetMeterParking = isCityTrip
+              ? buildStreetMeterParkingOption({
+                  destination: cityDestinationText || tripData.destination,
+                  arrivalDate:
+                    tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+                  arrivalTime:
+                    tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+                  durationMinutes: parkingDurationMinutes,
+                  driveMinutes: recommendation.trafficEstimate?.duration ?? null,
+                  isAirportTrip: false,
+                })
+              : null;
+
             const pointAbRanking = isCityTrip
               ? rankPointAbModes({
                   tripData,
@@ -6276,6 +6364,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   parkRideCost,
                   parkRideDuration,
                   parkRideReliable,
+                  streetMeterParking,
+                  driveMinutes: recommendation.trafficEstimate?.duration ?? null,
                 })
               : null;
 
@@ -6697,7 +6787,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4 lg:items-stretch">
+                <div className={`mt-4 grid grid-cols-1 gap-3 ${isCityTrip && (pointAbRanking?.modes.some((m) => m.key === 'street-meter') ? 'lg:grid-cols-5' : 'lg:grid-cols-4')} lg:items-stretch`}>
                   {modeRows.map((row) => {
                     const selected = row.key === recommendationMode;
                     const action = cardActionFor(row.key);
@@ -6711,7 +6801,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                     if (isCityTrip) {
                       const modeActions = buildPointAbModeActions({
-                        mode: row.key as 'parking' | 'rideshare' | 'transit' | 'park-ride',
+                        mode: row.key as 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride',
                         routeToParkingUrl:
                           row.key === 'parking'
                             ? bestParking?.mapLink ||
@@ -6719,6 +6809,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                                 ? googleMapsDirectionsLink(tripData.origin, bestParking.address)
                                 : cityDestinationRouteUrl)
                             : cityDestinationRouteUrl,
+                        streetMeterDirectionsUrl: cityDestinationRouteUrl,
                         parkingToDestinationUrl:
                           bestParking?.address && (cityDestinationText || tripData.destination)
                             ? googleMapsDirectionsLink(
@@ -6742,21 +6833,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         parkRideTransitUrl: pointAbParkRide?.transitRouteUrl || null,
                         parkRideTransitPlannerUrl: pointAbParkRide?.transitPlannerUrl || null,
                         parkRideViable: pointAbParkRide?.recommended ?? false,
-                        onDetails: () => {
-                          if (row.key === 'park-ride') {
-                            setExpandedModeDetails((current) =>
-                              current === 'park-ride' ? null : 'park-ride',
-                            );
-                            return;
-                          }
-                          action.onClick();
-                        },
+                        onDetails: () => openPointAbModeDetails(row.key as PointAbModeKey),
+                        detailsSectionId: POINT_AB_DETAILS_SECTION_IDS[row.key as PointAbModeKey],
+                        detailsExpanded: expandedModeDetails === row.key,
                       });
-
-                      const detailsContent =
-                        row.key === 'park-ride' && pointAbParkRide?.details ? (
-                          <ParkAndRideDetailsPanel details={pointAbParkRide.details} />
-                        ) : null;
 
                       return (
                         <OptionComparisonCard
@@ -6784,13 +6864,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           }
                           selected={selected}
                           actions={modeActions}
-                          details={detailsContent}
-                          detailsOpen={expandedModeDetails === row.key}
-                          onToggleDetails={() =>
-                            setExpandedModeDetails((current) =>
-                              current === row.key ? null : row.key,
-                            )
-                          }
                         />
                       );
                     }
@@ -7086,9 +7159,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
         {
           showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
-            <div id="parking-options-section" className="mt-6 scroll-mt-6">
+            <div
+              id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section'}
+              className={`mt-6 scroll-mt-6${isCityTrip ? ' scroll-target' : ''}`}
+            >
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h2 className="text-xl font-bold">
+                <h2
+                  className="text-xl font-bold"
+                  data-details-heading={isCityTrip ? true : undefined}
+                  tabIndex={isCityTrip ? -1 : undefined}
+                >
                   {allParkingRoutesUnavailable
                     ? `Parking options near ${isCityTrip ? displayDestination : currentAirport.id}`
                     : 'Parking options'}
@@ -7594,33 +7674,53 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         {!routeUnavailableBlocksParking &&
           <div id="provider-links-section" className="mt-8 grid scroll-mt-6 grid-cols-1 items-start gap-4 lg:grid-cols-2">
             {showRideProviders && (
-              <ProviderDropdownSection
-                title="Ride providers"
-                subtitle="Compare estimated fares and provider links."
-                items={rideProviderItems}
-                defaultOpen={openProviderSection === 'ride'}
-              />
+              <section
+                id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.rideshare : undefined}
+                className={isCityTrip ? 'scroll-target' : undefined}
+              >
+                <ProviderDropdownSection
+                  title="Ride providers"
+                  subtitle="Compare estimated fares and provider links."
+                  items={rideProviderItems}
+                  defaultOpen={
+                    openProviderSection === 'ride' ||
+                    (isCityTrip && expandedModeDetails === 'rideshare')
+                  }
+                  detailsHeading={isCityTrip}
+                />
+              </section>
             )}
 
-            <ProviderDropdownSection
-              title="Transit options"
-              subtitle="Compare route planning, fares, confidence, and links."
-              items={[...(transitOptions), ...extraTransitProviders]}
-              defaultOpen={openProviderSection === 'transit'}
-              transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
-              tripData={tripData}
-              footerContent={
-                <TransitParkAndRideCards
-                  isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
-                  options={
-                    recommendation.accessStrategies?.options?.filter(
-                      (option) =>
-                        option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
-                    ) ?? []
-                  }
-                />
-              }
-            />
+            <section
+              id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.transit : undefined}
+              className={isCityTrip ? 'scroll-target' : undefined}
+            >
+              <ProviderDropdownSection
+                title="Transit options"
+                subtitle="Compare route planning, fares, confidence, and links."
+                items={[...(transitOptions), ...extraTransitProviders]}
+                defaultOpen={
+                  openProviderSection === 'transit' ||
+                  (isCityTrip && expandedModeDetails === 'transit')
+                }
+                transitPayment={(tripData as TripDataWithExtras | null)?.transitPayment}
+                tripData={tripData}
+                detailsHeading={isCityTrip}
+                footerContent={
+                  !isCityTrip ? (
+                    <TransitParkAndRideCards
+                      isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
+                      options={
+                        recommendation.accessStrategies?.options?.filter(
+                          (option) =>
+                            option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
+                        ) ?? []
+                      }
+                    />
+                  ) : undefined
+                }
+              />
+            </section>
 
             <ParkingReviewsModal
               parking={reviewsParking}
@@ -7635,6 +7735,60 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             />
           </div>
         }
+
+        {isCityTrip ? (
+          <section
+            id={POINT_AB_DETAILS_SECTION_IDS['park-ride']}
+            className="scroll-target mt-8 rounded-2xl border border-border bg-card shadow-sm"
+          >
+            <details
+              className="group"
+              open={expandedModeDetails === 'park-ride'}
+              onToggle={(event) => {
+                setExpandedModeDetails(event.currentTarget.open ? 'park-ride' : null);
+              }}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:hidden [&::-webkit-details-marker]:hidden">
+                <h2
+                  data-details-heading
+                  tabIndex={-1}
+                  className="text-xl font-bold text-foreground"
+                >
+                  Park &amp; Ride details
+                </h2>
+                <span
+                  className="text-xs text-muted-foreground transition group-open:rotate-180"
+                  aria-hidden
+                >
+                  ▾
+                </span>
+              </summary>
+              <div className="border-t border-border px-4 py-4">
+                {cityTripParkRide?.details ? (
+                  <ParkAndRideDetailsPanel details={cityTripParkRide.details} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {cityTripParkRide?.unavailableReason ||
+                      'No viable Park & Ride lot was found for this trip.'}
+                  </p>
+                )}
+
+                {cityTripParkRideModeRow ? (
+                  <div className="mt-4 space-y-2 text-xs leading-5 text-muted-foreground">
+                    <div>
+                      <span className="font-semibold text-foreground">Pros: </span>
+                      {cityTripParkRideModeRow.pros.join(', ')}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-foreground">Cons: </span>
+                      {cityTripParkRideModeRow.cons.join(', ')}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </details>
+          </section>
+        ) : null}
 
         <div className="mt-10 flex justify-center">
           <Link

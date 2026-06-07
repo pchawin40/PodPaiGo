@@ -22,7 +22,7 @@ describe('DestinationParkingSummary', () => {
       />,
     );
 
-    expect(screen.getByText('Restricted parking may apply')).toBeInTheDocument();
+    expect(screen.getByText(/Restricted parking may apply/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'I have access' })).toBeInTheDocument();
   });
 
@@ -61,10 +61,22 @@ describe('DestinationParkingSummary', () => {
   test('shows free_likely outlook copy', () => {
     render(<DestinationParkingSummary destination="Costco Wholesale" origin="Home" />);
 
-    expect(screen.getByText('Parking likely free at destination')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Destination parking is an expectation/),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Free customer parking likely')).toBeInTheDocument();
+    expect(screen.getAllByText(/Customer parking likely available/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Verify signs')).toBeInTheDocument();
+    expect(screen.getAllByText('High confidence').length).toBeGreaterThan(0);
+  });
+
+  test('shows suggest parking info CTA copy', () => {
+    render(
+      <DestinationParkingSummary
+        destination="123 Mystery Lane"
+        origin="Home, Seattle, WA"
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Suggest parking info' })).toBeInTheDocument();
+    expect(screen.getByText(/Know a better parking rule or garage/i)).toBeInTheDocument();
   });
 
   test('unknown destination uses helpful copy and CTAs', () => {
@@ -77,9 +89,27 @@ describe('DestinationParkingSummary', () => {
     );
 
     expect(screen.getByText('Parking not confirmed yet')).toBeInTheDocument();
-    expect(screen.getByText(/could not verify exact parking rules/)).toBeInTheDocument();
+    expect(screen.getAllByText(/could not verify exact parking rules/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Verify posted signs and lot rules/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Search nearby parking' })).toBeInTheDocument();
+  });
+
+  test('shows reason, source chips, and caveat above the fold', () => {
+    render(
+      <DestinationParkingSummary
+        destination="Brighton Jones, 1st Avenue, Seattle, WA, USA"
+        origin="Home, Seattle, WA"
+        arrivalDate="2026-06-02"
+        arrivalTime="10:00"
+      />,
+    );
+
+    expect(screen.getByText('Paid parking likely')).toBeInTheDocument();
+    expect(screen.getAllByText(/weekdays during meter hours/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Seattle rule')).toBeInTheDocument();
+    expect(screen.getAllByText('Medium confidence').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Verify posted signs and lot rules/)).toBeInTheDocument();
   });
 
   test('hides diagnostics above the fold', () => {

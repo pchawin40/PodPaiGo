@@ -900,3 +900,7 @@ textarea::placeholder {
   width: 28px !important;
   height: 28px !important;
 }
+
+.scroll-target {
+  scroll-margin-top: 96px;
+}

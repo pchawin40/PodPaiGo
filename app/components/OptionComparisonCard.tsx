@@ -25,15 +25,11 @@ export type OptionComparisonCardProps = {
   isFastestMode?: boolean;
   selected?: boolean;
   actions?: DestinationModeAction[];
-  details?: ReactNode;
-  detailsOpen?: boolean;
-  onToggleDetails?: () => void;
   footer?: ReactNode;
   className?: string;
 };
 
 export default function OptionComparisonCard({
-  confidence,
   label,
   name,
   cost,
@@ -50,14 +46,14 @@ export default function OptionComparisonCard({
   isFastestMode,
   selected,
   actions,
-  details,
-  detailsOpen,
-  onToggleDetails,
   footer,
   className = '',
 }: OptionComparisonCardProps) {
+  const shortPro = pros[0] ?? '';
+  const shortCon = cons[0] ?? '';
+
   const cardClassName =
-    'relative flex h-full flex-col rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
+    'relative flex h-full min-h-[17.5rem] flex-col rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
     (unavailable
       ? 'border-border bg-muted/60 opacity-80'
       : selected
@@ -78,11 +74,7 @@ export default function OptionComparisonCard({
         />
       </div>
 
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {confidence} confidence
-      </div>
-
-      <div className="mt-3 text-sm font-bold text-foreground">{label}</div>
+      <div className="text-sm font-bold text-foreground">{label}</div>
 
       <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{name}</div>
 
@@ -107,39 +99,23 @@ export default function OptionComparisonCard({
       </div>
 
       <div className="mt-3 space-y-2 text-xs leading-5">
-        <div>
-          <span className="font-semibold text-foreground">Pros: </span>
-          <span className="text-muted-foreground">{pros.join(', ')}</span>
-        </div>
-        <div>
-          <span className="font-semibold text-foreground">Cons: </span>
-          <span className="text-muted-foreground">{cons.join(', ')}</span>
-        </div>
+        {shortPro ? (
+          <div>
+            <span className="font-semibold text-foreground">Pro: </span>
+            <span className="text-muted-foreground">{shortPro}</span>
+          </div>
+        ) : null}
+        {shortCon ? (
+          <div>
+            <span className="font-semibold text-foreground">Con: </span>
+            <span className="text-muted-foreground">{shortCon}</span>
+          </div>
+        ) : null}
       </div>
 
-      <div className="mt-auto">
+      <div className="mt-auto pt-3">
         {actions && actions.length > 0 ? (
           <DestinationModeActions compact actions={actions} />
-        ) : null}
-
-        {details ? (
-          <details
-            className="mt-3 rounded-2xl border border-border bg-card/70"
-            open={detailsOpen}
-            onToggle={(event) => {
-              if (onToggleDetails) {
-                event.preventDefault();
-                onToggleDetails();
-              }
-            }}
-          >
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-primary marker:hidden [&::-webkit-details-marker]:hidden">
-              {detailsOpen ? 'Hide details' : 'Show details'}
-            </summary>
-            <div className="border-t border-border px-3 py-3 text-xs leading-5 text-muted-foreground">
-              {details}
-            </div>
-          </details>
         ) : null}
 
         {footer}

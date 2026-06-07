@@ -6,6 +6,8 @@ import type { ParkingOutlookPresentation } from '../../lib/parking/parkingOutloo
 type PointAbHeroSummaryProps = {
   ranking: PointAbRankingResult;
   parkingOutlook: ParkingOutlookPresentation;
+  driveTimeLabel?: string | null;
+  backupRoutingUsed?: boolean;
   className?: string;
 };
 
@@ -13,6 +15,8 @@ function modeLabel(key: string): string {
   switch (key) {
     case 'parking':
       return 'Drive + park';
+    case 'street-meter':
+      return 'Street / meter';
     case 'rideshare':
       return 'Rideshare';
     case 'transit':
@@ -47,44 +51,69 @@ function SummaryCard({
 export default function PointAbHeroSummary({
   ranking,
   parkingOutlook,
+  driveTimeLabel,
+  backupRoutingUsed = false,
   className = '',
 }: PointAbHeroSummaryProps) {
   const bestMode = ranking.modes.find((mode) => mode.key === ranking.recommendationMode);
   const cheapest = ranking.cheapestMode;
   const fastest = ranking.fastestMode;
 
+  const bestDetail = bestMode
+    ? `${bestMode.cost}${bestMode.time !== 'Check route' && bestMode.time !== 'Check app' ? ` · ${bestMode.time}` : ''}`
+    : driveTimeLabel
+      ? `Compare modes · drive ~${driveTimeLabel}`
+      : 'Open details below to compare modes';
+
+  const cheapestDetail = cheapest
+    ? cheapest.key === 'transit' && typeof cheapest.minutes === 'number'
+      ? `$${Math.round(cheapest.cost)} est.`
+      : `$${Math.round(cheapest.cost)} est.`
+    : undefined;
+
+  const fastestDetail =
+    fastest && fastest.minutes > 0
+      ? fastest.minutes < 60
+        ? `${Math.round(fastest.minutes)} min`
+        : `${Math.floor(fastest.minutes / 60)}h ${Math.round(fastest.minutes % 60)}m`
+      : driveTimeLabel && !fastest
+        ? `Drive ~${driveTimeLabel}`
+        : undefined;
+
   return (
-    <div className={`grid grid-cols-2 gap-2 sm:grid-cols-4 ${className}`}>
-      <SummaryCard
-        label="Best"
-        value={bestMode ? modeLabel(bestMode.key) : 'Compare options'}
-        detail={
-          bestMode
-            ? `${bestMode.cost} · ${bestMode.time}`
-            : 'Open details below to compare modes'
-        }
-      />
-      <SummaryCard
-        label="Cheapest"
-        value={cheapest ? modeLabel(cheapest.key) : 'Check options'}
-        detail={cheapest ? `$${Math.round(cheapest.cost)} est.` : undefined}
-      />
-      <SummaryCard
-        label="Fastest"
-        value={fastest ? modeLabel(fastest.key) : 'Check options'}
-        detail={
-          fastest
-            ? fastest.minutes < 60
-              ? `${Math.round(fastest.minutes)} min`
-              : `${Math.floor(fastest.minutes / 60)}h ${Math.round(fastest.minutes % 60)}m`
-            : undefined
-        }
-      />
-      <SummaryCard
-        label="Parking outlook"
-        value={parkingOutlook.title}
-        detail={parkingOutlook.hints[0] || parkingOutlook.verifyNotice}
-      />
+    <div className={className}>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SummaryCard
+          label="Best overall"
+          value={bestMode ? modeLabel(bestMode.key) : 'Compare options'}
+          detail={bestDetail}
+        />
+        <SummaryCard
+          label="Cheapest"
+          value={cheapest ? modeLabel(cheapest.key) : 'Check options'}
+          detail={cheapestDetail}
+        />
+        <SummaryCard
+          label="Fastest"
+          value={fastest ? modeLabel(fastest.key) : driveTimeLabel ? 'Drive' : 'Check options'}
+          detail={fastestDetail}
+        />
+        <SummaryCard
+          label="Parking outlook"
+          value={parkingOutlook.headline}
+          detail={parkingOutlook.reason}
+        />
+      </div>
+
+      {ranking.cheapestVsBestNote ? (
+        <p className="mt-2 text-sm text-muted-foreground">{ranking.cheapestVsBestNote}</p>
+      ) : null}
+
+      {backupRoutingUsed ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Backup routing source used. Open directions to confirm.
+        </p>
+      ) : null}
     </div>
   );
 }

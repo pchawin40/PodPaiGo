@@ -3,14 +3,47 @@ import {
   destinationParkingHeadline,
   destinationParkingSubcopy,
   formatParkingAccessLabel,
+  isDenseUrbanDestination,
+  qualifiesForSuburbanCustomerParkingInference,
   type DestinationParkingClassification,
 } from './destinationParkingClassifier';
 import {
-  buildParkingOptionsHints,
   type GoogleParkingOptionsSignals,
 } from './googleParkingOptionsSignals';
 import { evaluateLocalStreetParkingRules } from './localParkingRules';
 import { matchCuratedLocalParkingZone } from './localParkingZones';
+
+export type ParkingOutlookStatus =
+  | 'free_customer_likely'
+  | 'free_street_possible'
+  | 'paid_parking_likely'
+  | 'parking_not_confirmed'
+  | 'no_parking_needed';
+
+export type ParkingOutlookSource =
+  | 'google_parking_options'
+  | 'curated_local_rule'
+  | 'city_rule'
+  | 'destination_type_inference'
+  | 'unknown';
+
+export type ParkingOutlookRuleDetails = {
+  dayOfWeek?: string;
+  holidayName?: string;
+  meterHours?: string;
+  maxDuration?: number;
+};
+
+export type ParkingOutlook = {
+  status: ParkingOutlookStatus;
+  headline: string;
+  reason: string;
+  source: ParkingOutlookSource;
+  confidence: 'high' | 'medium' | 'low';
+  caveat: string;
+  appliesToday?: boolean;
+  ruleDetails?: ParkingOutlookRuleDetails;
+};
 
 export type ParkingOutlookDiagnostics = {
   accessType: string;
@@ -19,7 +52,7 @@ export type ParkingOutlookDiagnostics = {
   recommendedAction: string;
 };
 
-export type ParkingOutlookPresentation = {
+export type ParkingOutlookPresentation = ParkingOutlook & {
   title: string;
   body: string;
   hints: string[];
@@ -28,14 +61,18 @@ export type ParkingOutlookPresentation = {
   diagnostics: ParkingOutlookDiagnostics;
 };
 
-const VERIFY_NOTICE = 'Verify posted signs and lot rules.';
+const VERIFY_CAVEAT = 'Verify posted signs and lot rules before you park.';
 
-const UNKNOWN_TITLE = 'Parking not confirmed yet';
-const UNKNOWN_BODY =
-  'PodPaiGo could not verify exact parking rules for this destination. I\'ll still compare drive, transit, rideshare, and nearby parking options.';
+const STATUS_HEADLINES: Record<ParkingOutlookStatus, string> = {
+  free_customer_likely: 'Free customer parking likely',
+  free_street_possible: 'Free street parking may be available nearby',
+  paid_parking_likely: 'Paid parking likely',
+  parking_not_confirmed: 'Parking not confirmed yet',
+  no_parking_needed: 'No parking needed',
+};
 
 function consumerConfidenceLabel(
-  confidence: DestinationParkingClassification['confidence'],
+  confidence: DestinationParkingClassification['confidence'] | ParkingOutlook['confidence'],
 ): string {
   switch (confidence) {
     case 'high':
@@ -49,20 +86,248 @@ function consumerConfidenceLabel(
   }
 }
 
-function bodyForGoogleHint(label: string): string {
-  if (label === 'Free customer parking likely') {
-    return 'Google Places suggests customer parking may be free. PodPaiGo will still compare drive, transit, rideshare, and nearby parking options.';
+function confidenceLabelChip(confidence: ParkingOutlook['confidence']): string {
+  switch (confidence) {
+    case 'high':
+      return 'High confidence';
+    case 'medium':
+      return 'Medium confidence';
+    case 'low':
+      return 'Low confidence';
   }
-  if (label === 'Paid parking likely') {
-    return 'Google Places suggests paid parking near this destination. Compare drive, transit, rideshare, and nearby lots before you leave.';
+}
+
+function sourceChip(source: ParkingOutlookSource): string | null {
+  switch (source) {
+    case 'google_parking_options':
+      return 'Google signal';
+    case 'city_rule':
+      return 'Seattle rule';
+    case 'curated_local_rule':
+      return 'Local rule';
+    case 'destination_type_inference':
+      return 'Destination type';
+    default:
+      return null;
   }
-  if (label === 'Free street parking may be available nearby') {
-    return 'Street parking may be available nearby. Compare drive, transit, rideshare, and nearby parking options.';
+}
+
+function buildOutlookChips(
+  outlook: ParkingOutlook,
+  extraHints: string[],
+): string[] {
+  const chips = new Set<string>();
+
+  const source = sourceChip(outlook.source);
+  if (source) chips.add(source);
+  chips.add('Verify signs');
+  chips.add(confidenceLabelChip(outlook.confidence));
+
+  for (const hint of extraHints) {
+    if (hint !== outlook.headline) chips.add(hint);
   }
-  if (label === 'Metered street parking may be nearby') {
-    return 'Metered street parking may be nearby. Compare drive, transit, rideshare, and nearby parking options.';
+
+  return [...chips];
+}
+
+function googleHasPaidSignals(signals: GoogleParkingOptionsSignals | null | undefined): boolean {
+  return Boolean(
+    signals?.paidGarageParking ||
+      signals?.paidParkingLot ||
+      signals?.paidStreetParking,
+  );
+}
+
+function resolveGeneralParkingOutlook(input: {
+  destination: string;
+  destinationKind?: string | null;
+  googleParkingOptions?: GoogleParkingOptionsSignals | null;
+  arrivalDate?: string | null;
+  arrivalTime?: string | null;
+  durationMinutes?: number;
+  classification: DestinationParkingClassification;
+}): ParkingOutlook {
+  const signals = input.googleParkingOptions;
+  const denseUrban = isDenseUrbanDestination(input.destination);
+  const localRules = evaluateLocalStreetParkingRules({
+    destination: input.destination,
+    arrivalDate: input.arrivalDate,
+    arrivalTime: input.arrivalTime,
+    durationMinutes: input.durationMinutes ?? 120,
+    isAirportTrip: false,
+  });
+  const curatedZone = matchCuratedLocalParkingZone(input.destination);
+  const suburbanCustomer = qualifiesForSuburbanCustomerParkingInference({
+    destination: input.destination,
+    destinationKind: input.destinationKind,
+  });
+
+  if (signals?.freeParkingLot && !denseUrban) {
+    return {
+      status: 'free_customer_likely',
+      headline: STATUS_HEADLINES.free_customer_likely,
+      reason:
+        'Google Places reports free customer parking at this destination. PodPaiGo will still compare drive, transit, rideshare, and nearby parking options.',
+      source: 'google_parking_options',
+      confidence: 'high',
+      caveat: VERIFY_CAVEAT,
+    };
   }
-  return 'Compare drive, transit, rideshare, and nearby parking options for this trip.';
+
+  if (suburbanCustomer && input.classification.mode === 'free_likely') {
+    return {
+      status: 'free_customer_likely',
+      headline: STATUS_HEADLINES.free_customer_likely,
+      reason: input.classification.reason,
+      source: 'destination_type_inference',
+      confidence: input.classification.confidence === 'unknown' ? 'medium' : input.classification.confidence,
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
+  if (localRules.paidLikely && localRules.detail) {
+    return {
+      status: 'paid_parking_likely',
+      headline: STATUS_HEADLINES.paid_parking_likely,
+      reason: localRules.detail,
+      source: 'city_rule',
+      confidence: 'medium',
+      caveat: VERIFY_CAVEAT,
+      appliesToday: localRules.appliesToday,
+      ruleDetails: localRules.ruleDetails,
+    };
+  }
+
+  if (localRules.freeLikely && localRules.appliesToday && localRules.detail) {
+    return {
+      status: 'free_street_possible',
+      headline: 'Free street parking may be available today',
+      reason: localRules.detail,
+      source: 'city_rule',
+      confidence: 'medium',
+      caveat: VERIFY_CAVEAT,
+      appliesToday: true,
+      ruleDetails: localRules.ruleDetails,
+    };
+  }
+
+  if (googleHasPaidSignals(signals)) {
+    const paidStreet = Boolean(signals?.paidStreetParking);
+    return {
+      status: 'paid_parking_likely',
+      headline: STATUS_HEADLINES.paid_parking_likely,
+      reason: paidStreet
+        ? 'Google Places suggests paid garage or lot parking nearby, and metered street parking may also be nearby.'
+        : 'Google Places suggests paid garage or lot parking near this destination. Compare drive, transit, rideshare, and nearby lots before you leave.',
+      source: 'google_parking_options',
+      confidence: 'medium',
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
+  if (signals?.freeStreetParking && !denseUrban) {
+    return {
+      status: 'free_street_possible',
+      headline: STATUS_HEADLINES.free_street_possible,
+      reason:
+        'Google Places suggests free street parking may be available nearby. This is not the same as confirmed customer lot parking.',
+      source: 'google_parking_options',
+      confidence: 'low',
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
+  if (input.classification.mode === 'paid_likely') {
+    return {
+      status: 'paid_parking_likely',
+      headline: STATUS_HEADLINES.paid_parking_likely,
+      reason: input.classification.reason,
+      source: 'destination_type_inference',
+      confidence: input.classification.confidence === 'unknown' ? 'medium' : input.classification.confidence,
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
+  if (curatedZone && !denseUrban) {
+    return {
+      status: 'parking_not_confirmed',
+      headline: STATUS_HEADLINES.parking_not_confirmed,
+      reason: curatedZone.detail,
+      source: 'curated_local_rule',
+      confidence: 'low',
+      caveat: VERIFY_CAVEAT,
+      ruleDetails: curatedZone.maxStreetHours
+        ? { maxDuration: curatedZone.maxStreetHours }
+        : undefined,
+    };
+  }
+
+  if (denseUrban) {
+    return {
+      status: 'paid_parking_likely',
+      headline: STATUS_HEADLINES.paid_parking_likely,
+      reason:
+        'Dense urban destinations usually rely on paid street, garage, or lot parking unless signs or a business confirm otherwise.',
+      source: 'destination_type_inference',
+      confidence: 'low',
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
+  return {
+    status: 'parking_not_confirmed',
+    headline: STATUS_HEADLINES.parking_not_confirmed,
+    reason:
+      input.classification.mode === 'unknown'
+        ? 'PodPaiGo could not verify exact parking rules for this destination. I\'ll still compare drive, transit, rideshare, and nearby parking options.'
+        : destinationParkingSubcopy(input.classification.mode),
+    source: 'unknown',
+    confidence: 'low',
+    caveat: VERIFY_CAVEAT,
+  };
+}
+
+function collectExtraHints(input: {
+  destination: string;
+  arrivalDate?: string | null;
+  arrivalTime?: string | null;
+  durationMinutes?: number;
+  googleParkingOptions?: GoogleParkingOptionsSignals | null;
+  outlook: ParkingOutlook;
+}): string[] {
+  const hints: string[] = [];
+  const localRules = evaluateLocalStreetParkingRules({
+    destination: input.destination,
+    arrivalDate: input.arrivalDate,
+    arrivalTime: input.arrivalTime,
+    durationMinutes: input.durationMinutes ?? 120,
+    isAirportTrip: false,
+  });
+  const curatedZone = matchCuratedLocalParkingZone(input.destination);
+
+  if (
+    input.googleParkingOptions?.freeStreetParking &&
+    input.outlook.status !== 'free_street_possible' &&
+    input.outlook.source !== 'google_parking_options'
+  ) {
+    hints.push('Google also reports nearby street parking');
+  }
+
+  if (localRules.ruleDetails?.maxDuration) {
+    hints.push(`${localRules.ruleDetails.maxDuration}-hour limit may apply`);
+  } else if (curatedZone?.maxStreetHours) {
+    hints.push(`${curatedZone.maxStreetHours}-hour limit may apply`);
+  }
+
+  if (localRules.detail?.includes('longer than the posted limit')) {
+    hints.push('Your stay may exceed posted street limits');
+  }
+
+  if (input.googleParkingOptions?.valetParking) {
+    hints.push('Valet parking may be available');
+  }
+
+  return hints;
 }
 
 export function buildParkingOutlook(input: {
@@ -82,11 +347,23 @@ export function buildParkingOutlook(input: {
   });
 
   if (classification.mode === 'airport') {
+    const headline = destinationParkingHeadline('airport');
+    const reason = destinationParkingSubcopy('airport');
+    const outlook: ParkingOutlook = {
+      status: 'no_parking_needed',
+      headline,
+      reason,
+      source: 'destination_type_inference',
+      confidence: 'high',
+      caveat: VERIFY_CAVEAT,
+    };
+
     return {
-      title: destinationParkingHeadline('airport'),
-      body: destinationParkingSubcopy('airport'),
+      ...outlook,
+      title: headline,
+      body: reason,
       hints: [],
-      verifyNotice: VERIFY_NOTICE,
+      verifyNotice: VERIFY_CAVEAT,
       showSearchNearbyParking: true,
       diagnostics: {
         accessType: formatParkingAccessLabel(classification.accessType),
@@ -97,64 +374,42 @@ export function buildParkingOutlook(input: {
     };
   }
 
-  const googleHints = buildParkingOptionsHints(input.googleParkingOptions, {
-    airportTrip: false,
+  const outlook = resolveGeneralParkingOutlook({
+    destination: input.destination,
+    destinationKind: input.destinationKind,
+    googleParkingOptions: input.googleParkingOptions,
+    arrivalDate: input.arrivalDate,
+    arrivalTime: input.arrivalTime,
+    durationMinutes: input.durationMinutes,
+    classification,
   });
-  const localRules = evaluateLocalStreetParkingRules({
+
+  const extraHints = collectExtraHints({
     destination: input.destination,
     arrivalDate: input.arrivalDate,
     arrivalTime: input.arrivalTime,
-    durationMinutes: input.durationMinutes ?? 120,
-    isAirportTrip: input.isAirportTrip ?? false,
+    durationMinutes: input.durationMinutes,
+    googleParkingOptions: input.googleParkingOptions,
+    outlook,
   });
-  const curatedZone = matchCuratedLocalParkingZone(input.destination);
 
-  const hintChips = new Set<string>();
-  for (const hint of googleHints.hints) {
-    hintChips.add(hint.label);
-  }
-
-  if (localRules.freeLikely) {
-    hintChips.add('Free street parking may be available today');
-  }
-
-  if (curatedZone?.maxStreetHours) {
-    hintChips.add(`${curatedZone.maxStreetHours}-hour limit may apply`);
-  }
-
-  if (localRules.detail?.includes('longer than the posted limit')) {
-    hintChips.add('Your stay may exceed posted street limits');
-  }
-
-  let title: string;
-  let body: string;
-
-  if (googleHints.hints.length > 0) {
-    title = googleHints.hints[0].label;
-    body = bodyForGoogleHint(title);
-  } else if (classification.mode === 'unknown') {
-    title = UNKNOWN_TITLE;
-    body = UNKNOWN_BODY;
-  } else {
-    title = destinationParkingHeadline(classification.mode);
-    body = destinationParkingSubcopy(classification.mode);
-  }
-
-  const hints = [...hintChips].filter((hint) => hint !== title);
+  const hints = buildOutlookChips(outlook, extraHints);
 
   return {
-    title,
-    body,
+    ...outlook,
+    title: outlook.headline,
+    body: outlook.reason,
     hints,
-    verifyNotice: VERIFY_NOTICE,
+    verifyNotice: outlook.caveat,
     showSearchNearbyParking:
-      classification.mode === 'unknown' ||
+      outlook.status === 'parking_not_confirmed' ||
+      outlook.status === 'paid_parking_likely' ||
       classification.shouldSearchPaidParking ||
-      googleHints.hints.some((hint) => hint.category === 'garage_paid'),
+      googleHasPaidSignals(input.googleParkingOptions),
     diagnostics: {
       accessType: formatParkingAccessLabel(classification.accessType),
-      confidence: consumerConfidenceLabel(classification.confidence),
-      reason: classification.reason,
+      confidence: consumerConfidenceLabel(outlook.confidence),
+      reason: `${outlook.reason} Source: ${outlook.source.replace(/_/g, ' ')}.`,
       recommendedAction: classification.recommendedAction,
     },
   };

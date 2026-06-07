@@ -151,12 +151,21 @@ describe('pointAbRanking', () => {
   });
 
   test('Google ParkingOptions free customer lot signals improve parking presentation', () => {
+    const suburbanTrip = {
+      ...tripData,
+      destination: 'Costco Wholesale, Issaquah, WA',
+    };
+    const suburbanParking = {
+      ...parkingOption,
+      googleParkingOptions: { freeParkingLot: true },
+    };
+
     const ranked = rankPointAbModes({
-      tripData,
+      tripData: suburbanTrip,
       sort: 'easiest',
-      destinationLabel: tripData.destination,
+      destinationLabel: suburbanTrip.destination,
       noParkingPreferred: false,
-      bestParking: parkingOption,
+      bestParking: suburbanParking,
       parkingTotal: 0,
       parkingMinutes: 35,
       bestRideOption: expensiveRide,
@@ -175,7 +184,10 @@ describe('pointAbRanking', () => {
 
     expect(ranked.modes[0]?.costNote).toContain('Free customer parking likely');
     expect(
-      buildParkingOptionsHints(parkingOption.googleParkingOptions, { airportTrip: false }).hints,
+      buildParkingOptionsHints(suburbanParking.googleParkingOptions, {
+        airportTrip: false,
+        destination: suburbanTrip.destination,
+      }).hints,
     ).toHaveLength(1);
   });
 

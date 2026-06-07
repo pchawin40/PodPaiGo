@@ -15,6 +15,28 @@ import {
   toPointAbParkRidePresentation,
 } from './parkAndRideSelection';
 import { rankPointAbModes, type PointAbRankingResult } from './pointAbRanking';
+import { buildStreetMeterParkingOption } from './streetMeterParking';
+
+function getTripArrivalContext(tripData: TripData): {
+  arrivalDate?: string;
+  arrivalTime?: string;
+} {
+  if (tripData.type === 'general-trip' || tripData.type === 'one-way-arrival') {
+    return {
+      arrivalDate: tripData.arrivalDate,
+      arrivalTime: tripData.arrivalTime,
+    };
+  }
+
+  if (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') {
+    return {
+      arrivalDate: tripData.departureDate,
+      arrivalTime: tripData.departureTime,
+    };
+  }
+
+  return {};
+}
 
 export function computeCityTripPointAbRanking(input: {
   tripData: TripData;
@@ -25,10 +47,12 @@ export function computeCityTripPointAbRanking(input: {
   parkingDisplayOptions: ParkingOption[];
   sortedOptions: RankedRecommendation[];
   recommendation: Recommendation;
+  driveMinutes?: number | null;
 }): PointAbRankingResult | null {
   const parkingDurationMinutes = calculateParkingDuration(input.tripData);
   const bestParking = input.smartPickOption || input.parkingDisplayOptions[0] || null;
   const tripParkingContext = resolveTripParkingContext(input.tripData);
+  const arrivalContext = getTripArrivalContext(input.tripData);
 
   const parkingBreakdown = bestParking
     ? parkingTimeBreakdown(
@@ -41,6 +65,19 @@ export function computeCityTripPointAbRanking(input: {
   const parkingTotal = bestParking
     ? getParkingTotalPrice(bestParking, input.tripData) ?? bestParking.price ?? null
     : null;
+
+  const streetMeterParking = buildStreetMeterParkingOption({
+    destination: input.destinationLabel,
+    arrivalDate: arrivalContext.arrivalDate,
+    arrivalTime: arrivalContext.arrivalTime,
+    durationMinutes: parkingDurationMinutes,
+    driveMinutes:
+      input.driveMinutes ??
+      input.recommendation.trafficEstimate?.duration ??
+      parkingBreakdown?.parts[0]?.minutes ??
+      null,
+    isAirportTrip: false,
+  });
 
   const bestRide = input.sortedOptions.find((option) => option.type === 'rideshare') || null;
   const bestRideOption = bestRide?.option as RideshareOption | undefined;
@@ -117,5 +154,8 @@ export function computeCityTripPointAbRanking(input: {
     parkRideCost: pointAbParkRide?.cost ?? null,
     parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
     parkRideReliable: Boolean(pointAbParkRide?.recommended),
+    streetMeterParking,
+    driveMinutes:
+      input.driveMinutes ?? input.recommendation.trafficEstimate?.duration ?? null,
   });
 }

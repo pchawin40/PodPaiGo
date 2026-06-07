@@ -140,6 +140,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       href: 'https://maps.example/transit',
     });
     expect(actions[2].label).toBe('Details');
+    expect(actions[2].ariaControls).toBeUndefined();
   });
 
   test('unavailable Park & Ride actions open rules and why-unavailable details', () => {
@@ -156,6 +157,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       href: 'https://soundtransit.org/rules',
     });
     expect(actions[1].label).toBe('Why unavailable');
+    expect(actions[1].ariaControls).toBeUndefined();
     expect(actions[2]).toEqual({
       label: 'Open transit planner',
       href: 'https://soundtransit.org/',
@@ -228,7 +230,7 @@ describe('Point A→B Park & Ride details and ranking', () => {
 });
 
 describe('OptionComparisonCard layout', () => {
-  test('renders badge, metrics, and three action buttons', () => {
+  test('renders badge, metrics, compact pros/cons, and three action buttons', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -236,25 +238,36 @@ describe('OptionComparisonCard layout', () => {
         name="Lynnwood City Center Station"
         cost="Estimated $3–$8 total"
         time="58 min"
-        pros={['Lower parking cost']}
-        cons={['Verify posted signs']}
+        pros={['Lower parking cost', 'Extra pro hidden']}
+        cons={['Verify posted signs', 'Extra con hidden']}
         status="verify_rules"
         actions={[
           { label: 'Route to lot', href: 'https://maps.example/drive' },
           { label: 'Transit to destination', href: 'https://maps.example/transit' },
-          { label: 'Details', onClick: () => undefined },
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: 'details-park-ride',
+            ariaExpanded: false,
+          },
         ]}
       />,
     );
 
     expect(screen.getByText('Park & Ride')).toBeInTheDocument();
     expect(screen.getByText('Verify')).toBeInTheDocument();
+    expect(screen.getByText('Lower parking cost')).toBeInTheDocument();
+    expect(screen.queryByText('Extra pro hidden')).not.toBeInTheDocument();
+    expect(screen.queryByText('Extra con hidden')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Route to lot' })).toHaveAttribute(
       'href',
       'https://maps.example/drive',
     );
     expect(screen.getByRole('link', { name: 'Transit to destination' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute(
+      'aria-controls',
+      'details-park-ride',
+    );
   });
 
   test('desktop cards share equal-height flex layout', () => {
@@ -274,6 +287,7 @@ describe('OptionComparisonCard layout', () => {
     expect(container.firstChild).toHaveClass('h-full');
     expect(container.firstChild).toHaveClass('flex');
     expect(container.firstChild).toHaveClass('flex-col');
+    expect(container.firstChild).toHaveClass('min-h-[17.5rem]');
   });
 
   test('details panel component renders operator and warnings', () => {

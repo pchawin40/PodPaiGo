@@ -51,6 +51,38 @@ const PAID_VENUE_PATTERN =
 const RESTRICTED_PATTERN =
   /\b(office|corporate|headquarters|\bhq\b|campus|employee|tenant|private garage|badge|permit only|secured parking|pse\b|utility|power company)\b/i;
 
+const DENSE_URBAN_PATTERN =
+  /\b(downtown|central business|cbd|urban core|pike place|belltown|south lake union|denny triangle|waterfront district|financial district|city center|city centre|shopping district)\b/i;
+
+const SEATTLE_DOWNTOWN_STREET_PATTERN =
+  /\b(1st(?:\s|-)?(?:ave|avenue)|2nd(?:\s|-)?(?:ave|avenue)|3rd(?:\s|-)?(?:ave|avenue)|4th(?:\s|-)?(?:ave|avenue)|5th(?:\s|-)?(?:ave|avenue)|pike st|pine st|university st|seneca st|spring st|madison st|marion st|columbia st|yesler)\b/i;
+
+export function isDenseUrbanDestination(destination: string | null | undefined): boolean {
+  const text = normalizeDestination(destination);
+  if (!text) return false;
+  if (DENSE_URBAN_PATTERN.test(text)) return true;
+  if (/\bseattle\b/i.test(text) && SEATTLE_DOWNTOWN_STREET_PATTERN.test(text)) return true;
+  return false;
+}
+
+export function qualifiesForSuburbanCustomerParkingInference(
+  input: ClassifyDestinationParkingInput,
+): boolean {
+  const destination = normalizeDestination(input.destination);
+  if (!destination || isDenseUrbanDestination(destination)) return false;
+
+  if (isRetailOrGroceryDestination(destination)) return true;
+
+  const lower = destination.toLowerCase();
+  if (MALL_PATTERN.test(lower) && !DENSE_URBAN_PATTERN.test(lower)) return true;
+
+  if (RESTAURANT_PATTERN.test(lower) && !/\b(bar|brewpub|downtown)\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeDestination(value: string | null | undefined): string {
   return String(value || '')
     .trim()

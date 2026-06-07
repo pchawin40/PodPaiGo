@@ -53,6 +53,10 @@ export default function DestinationModeActions({
             type="button"
             onClick={action.onClick}
             disabled={action.disabled}
+            aria-expanded={
+              action.ariaControls != null ? action.ariaExpanded ?? false : undefined
+            }
+            aria-controls={action.ariaControls}
             className={
               action.disabled
                 ? className + ' cursor-not-allowed opacity-60'

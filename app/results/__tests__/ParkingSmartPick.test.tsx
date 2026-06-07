@@ -56,6 +56,25 @@ const routeUnavailableParking: ParkingOption = {
 };
 
 describe('ParkingSmartPick fallback', () => {
+  test('hides Sort lenses from default Smart Pick UI', () => {
+    const routeAvailableParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.queryByText('Sort lenses')).not.toBeInTheDocument();
+  });
+
   test('shows a recommended parking card even when route timing is unavailable', () => {
     render(
       <ParkingSmartPick

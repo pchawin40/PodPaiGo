@@ -3,12 +3,41 @@ export type DestinationModeAction = {
   onClick?: () => void;
   href?: string;
   disabled?: boolean;
+  ariaExpanded?: boolean;
+  ariaControls?: string;
 };
 
+function detailsAction(
+  onDetails: () => void,
+  detailsSectionId?: string,
+  detailsExpanded?: boolean,
+): DestinationModeAction {
+  return {
+    label: 'Details',
+    onClick: onDetails,
+    ariaControls: detailsSectionId,
+    ariaExpanded: detailsExpanded ?? false,
+  };
+}
+
+function unavailableDetailsAction(
+  onDetails: () => void,
+  detailsSectionId?: string,
+  detailsExpanded?: boolean,
+): DestinationModeAction {
+  return {
+    label: 'Why unavailable',
+    onClick: onDetails,
+    ariaControls: detailsSectionId,
+    ariaExpanded: detailsExpanded ?? false,
+  };
+}
+
 export function buildPointAbModeActions(input: {
-  mode: 'parking' | 'rideshare' | 'transit' | 'park-ride';
+  mode: 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
   routeToParkingUrl?: string | null;
   parkingToDestinationUrl?: string | null;
+  streetMeterDirectionsUrl?: string | null;
   rideshareUrl?: string | null;
   transitRouteUrl?: string | null;
   transitScheduleUrl?: string | null;
@@ -18,8 +47,18 @@ export function buildPointAbModeActions(input: {
   parkRideTransitPlannerUrl?: string | null;
   parkRideViable?: boolean;
   onDetails: () => void;
+  detailsSectionId?: string;
+  detailsExpanded?: boolean;
 }): DestinationModeAction[] {
   switch (input.mode) {
+    case 'street-meter':
+      return [
+        input.streetMeterDirectionsUrl
+          ? { label: 'Open directions', href: input.streetMeterDirectionsUrl }
+          : { label: 'Open directions', disabled: true },
+        { label: 'Verify signs', onClick: input.onDetails },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+      ];
     case 'parking':
       return [
         input.routeToParkingUrl
@@ -28,7 +67,7 @@ export function buildPointAbModeActions(input: {
         input.parkingToDestinationUrl
           ? { label: 'Parking to destination', href: input.parkingToDestinationUrl }
           : { label: 'Parking to destination', disabled: true },
-        { label: 'Details', onClick: input.onDetails },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
       ];
     case 'rideshare':
       return [
@@ -38,7 +77,7 @@ export function buildPointAbModeActions(input: {
         input.routeToParkingUrl
           ? { label: 'Route', href: input.routeToParkingUrl }
           : { label: 'Route', onClick: input.onDetails },
-        { label: 'Details', onClick: input.onDetails },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
       ];
     case 'transit':
       return [
@@ -48,7 +87,7 @@ export function buildPointAbModeActions(input: {
         input.transitScheduleUrl
           ? { label: 'Compare schedule', href: input.transitScheduleUrl }
           : { label: 'Compare schedule', onClick: input.onDetails },
-        { label: 'Details', onClick: input.onDetails },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
       ];
     case 'park-ride':
       if (input.parkRideViable) {
@@ -59,7 +98,7 @@ export function buildPointAbModeActions(input: {
           input.parkRideTransitUrl
             ? { label: 'Transit to destination', href: input.parkRideTransitUrl }
             : { label: 'Transit to destination', disabled: true },
-          { label: 'Details', onClick: input.onDetails },
+          detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
         ];
       }
 
@@ -67,7 +106,11 @@ export function buildPointAbModeActions(input: {
         input.parkRideRulesUrl
           ? { label: 'Check lot rules', href: input.parkRideRulesUrl }
           : { label: 'Check lot rules', onClick: input.onDetails },
-        { label: 'Why unavailable', onClick: input.onDetails },
+        unavailableDetailsAction(
+          input.onDetails,
+          input.detailsSectionId,
+          input.detailsExpanded,
+        ),
         input.parkRideTransitPlannerUrl
           ? { label: 'Open transit planner', href: input.parkRideTransitPlannerUrl }
           : input.parkRideTransitUrl

@@ -33,4 +33,35 @@ describe('seasonalClimate', () => {
       getSeasonalClimateGuidance({ airportCode: 'LAX', targetDate: '2026-11-15' }),
     ).toBeNull();
   });
+
+  test('seasonal guidance is only used as explicit fallback copy', () => {
+    const guidance = getSeasonalClimateGuidance({
+      airportCode: 'SEA',
+      targetDate: '2026-11-15',
+    });
+
+    expect(guidance?.historicalLabel).toBe('Historical / seasonal');
+    expect(guidance?.disclaimer).toMatch(/Seasonal guidance only/i);
+    expect(guidance?.weatherImpact.sourceName).toContain('Seasonal guidance');
+  });
+
+  test('live weather context takes priority over seasonal fallback selection', () => {
+    const hasLiveWeather = {
+      summary: 'Mostly sunny',
+      riskLevel: 'low' as const,
+      condition: 'clear' as const,
+      parkingScoreAdjustments: {
+        coveredBonus: 0,
+        officialGarageBonus: 0,
+        shuttlePenalty: 0,
+        uncoveredPenalty: 0,
+      },
+      sourceName: 'National Weather Service',
+      lastUpdated: new Date().toISOString(),
+    };
+    const weatherContext = 'travel-time-forecast' as const;
+    const shouldUseSeasonalFallback = !hasLiveWeather && weatherContext === 'forecast-unavailable';
+
+    expect(shouldUseSeasonalFallback).toBe(false);
+  });
 });

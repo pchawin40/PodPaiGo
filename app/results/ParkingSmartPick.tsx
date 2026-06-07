@@ -39,6 +39,7 @@ import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 import ParkingLotVisual from './ParkingLotVisual';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import { selectBestParkingPhotoFields } from '../../lib/parking/parkingLotPhotoShared';
+import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -833,39 +834,6 @@ export default function ParkingSmartPick({
             <div className="mt-2 text-sm text-zinc-700">{pickExplanation}</div>
           ) : null}
 
-          <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700">
-            <div className="font-semibold text-slate-950">Sort lenses</div>
-            <div className="mt-2 space-y-1 text-xs text-slate-600">
-              <div>
-                <span className="font-semibold text-slate-900">Best overall:</span>{' '}
-                {best.name}
-              </div>
-              {cheapestWinner ? (
-                <div>
-                  <span className="font-semibold text-slate-900">Cheapest:</span>{' '}
-                  {cheapestWinner.name}
-                </div>
-              ) : null}
-              {fastestWinner ? (
-                <div>
-                  <span className="font-semibold text-slate-900">Fastest:</span>{' '}
-                  {fastestWinner.name}
-                </div>
-              ) : null}
-              {easiestWinner ? (
-                <div>
-                  <span className="font-semibold text-slate-900">Easiest:</span>{' '}
-                  {easiestWinner.name}
-                </div>
-              ) : null}
-              {activeListMode !== 'best' ? (
-                <div className="pt-1 text-slate-500">
-                  Current tab ({activeListMode}) reorders the list; Smart Pick stays on best overall.
-                </div>
-              ) : null}
-            </div>
-          </div>
-
           {customerOnlyWarning ? (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-950">
               {customerOnlyWarning}
@@ -1167,6 +1135,41 @@ export default function ParkingSmartPick({
                     Source: <span className="font-medium">{best.sourceName}</span>
                   </div>
                 )}
+
+                {isPodPaiGoDebugUIEnabled() ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
+                    <div className="font-semibold text-slate-950">Sort lenses</div>
+                    <div className="mt-2 space-y-1">
+                      <div>
+                        <span className="font-semibold text-slate-900">Best overall:</span>{' '}
+                        {best.name}
+                      </div>
+                      {cheapestWinner ? (
+                        <div>
+                          <span className="font-semibold text-slate-900">Cheapest:</span>{' '}
+                          {cheapestWinner.name}
+                        </div>
+                      ) : null}
+                      {fastestWinner ? (
+                        <div>
+                          <span className="font-semibold text-slate-900">Fastest:</span>{' '}
+                          {fastestWinner.name}
+                        </div>
+                      ) : null}
+                      {easiestWinner ? (
+                        <div>
+                          <span className="font-semibold text-slate-900">Easiest:</span>{' '}
+                          {easiestWinner.name}
+                        </div>
+                      ) : null}
+                      {activeListMode !== 'best' ? (
+                        <div className="pt-1 text-slate-500">
+                          Current tab ({activeListMode}) reorders the list; Smart Pick stays on best overall.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 {bestWithMeta.updatedAt && (
                   <div>

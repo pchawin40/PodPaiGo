@@ -145,10 +145,10 @@ export default function ParkingInfoReportModal({
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 id="parking-report-title" className="text-lg font-semibold text-zinc-900">
-              Report parking info
+              Suggest parking info
             </h2>
             <p className="mt-1 text-sm text-zinc-600">
-              Help improve parking rules for this destination. Reports are reviewed before publishing.
+              Know a better parking rule or garage? Send a note. Reports are reviewed before publishing.
             </p>
           </div>
           <button

@@ -10,8 +10,9 @@ import {
 import { evaluateLocalStreetParkingRules } from './localParkingRules';
 import { getParkingTotalPrice } from './priceDisplay';
 import { isParkingRouteUnavailable } from './routeStatus';
+import type { StreetMeterParkingPresentation } from './streetMeterParking';
 
-export type PointAbModeKey = 'parking' | 'rideshare' | 'transit' | 'park-ride';
+export type PointAbModeKey = 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
 export type PointAbSortMode = 'easiest' | 'cheapest' | 'fastest';
 
 export type PointAbModeCandidate = {
@@ -44,9 +45,11 @@ export type PointAbRankingResult = {
   recommendationMode: PointAbModeKey | 'compare';
   recommendedTitle: string;
   recommendedReason: string;
-  cheapestMode: { key: PointAbModeKey; label: string; cost: number } | null;
+  cheapestMode: { key: PointAbModeKey; label: string; cost: number; minutes?: number } | null;
   fastestMode: { key: PointAbModeKey; label: string; minutes: number } | null;
   objectiveBestMode: PointAbModeKey | null;
+  /** When cheapest mode differs from best overall (e.g. transit is cheapest). */
+  cheapestVsBestNote: string | null;
 };
 
 type RankPointAbModesInput = {
@@ -70,6 +73,8 @@ type RankPointAbModesInput = {
   parkRideCost: number | null;
   parkRideDuration: number | null;
   parkRideReliable: boolean;
+  streetMeterParking?: StreetMeterParkingPresentation | null;
+  driveMinutes?: number | null;
 };
 
 const BIG = 999_999;
@@ -87,6 +92,32 @@ function formatMinutesLabel(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = Math.round(minutes % 60);
   return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+export function formatPointAbCheapestVsBestNote(input: {
+  cheapestMode: { key: PointAbModeKey; label: string; cost: number; minutes?: number } | null;
+  recommendationMode: PointAbModeKey | 'compare';
+}): string | null {
+  const { cheapestMode, recommendationMode } = input;
+  if (!cheapestMode || recommendationMode === 'compare') return null;
+  if (cheapestMode.key === recommendationMode) return null;
+
+  const cheapestLabel =
+    cheapestMode.key === 'street-meter'
+      ? 'Street / meter parking'
+      : cheapestMode.key === 'park-ride'
+        ? 'Park & Ride'
+        : cheapestMode.key === 'rideshare'
+          ? 'Rideshare'
+          : cheapestMode.key === 'transit'
+            ? 'Transit'
+            : 'Drive + park';
+
+  if (cheapestMode.key === 'transit' && typeof cheapestMode.minutes === 'number') {
+    return `${cheapestLabel} is cheapest, but takes around ${formatMinutesLabel(cheapestMode.minutes)}.`;
+  }
+
+  return `${cheapestLabel} is cheapest, but may take longer than the best overall option.`;
 }
 
 export function preferenceBoostIsCapped(args: {
@@ -351,6 +382,19 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           confidence: input.bestParking.trustStatus === 'live' ? 'High' : 'Medium',
         }
       : null,
+    input.streetMeterParking?.applicable
+      ? {
+          key: 'street-meter',
+          label: input.streetMeterParking.label,
+          cost: finiteOr(input.streetMeterParking.cost, 0),
+          minutes: finiteOr(input.streetMeterParking.durationMinutes),
+          reliable: Boolean(
+            input.streetMeterParking.durationMinutes != null || input.driveMinutes != null,
+          ),
+          confidence: input.streetMeterParking.confidence,
+          baseScore: -6,
+        }
+      : null,
     input.bestRideOption
       ? {
           key: 'rideshare',
@@ -447,7 +491,10 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       .sort((a, b) => a.minutes - b.minutes)[0] ?? null;
 
   const parkingHints = input.bestParking?.googleParkingOptions
-    ? buildParkingOptionsHints(input.bestParking.googleParkingOptions, { airportTrip: false })
+    ? buildParkingOptionsHints(input.bestParking.googleParkingOptions, {
+        airportTrip: false,
+        destination: input.destinationLabel,
+      })
     : null;
   const rideshareCost = formatPointAbRideshareCost(input.ridePrice);
   const parkingCostDisplay =
@@ -486,6 +533,24 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           !isParkingRouteUnavailable(input.bestParking),
       ),
     },
+    ...(input.streetMeterParking?.applicable
+      ? [
+          {
+            key: 'street-meter' as const,
+            label: input.streetMeterParking.label,
+            name: input.streetMeterParking.name,
+            cost: input.streetMeterParking.costDisplay,
+            costNote: input.streetMeterParking.costNote,
+            time: input.streetMeterParking.timeDisplay,
+            confidence: input.streetMeterParking.confidence,
+            pros: input.streetMeterParking.pros,
+            cons: input.streetMeterParking.cons,
+            status: 'verify_rules' as const,
+            unavailable: false,
+            hiddenByPreference: false,
+          },
+        ]
+      : []),
     {
       key: 'rideshare',
       label: 'Rideshare',
@@ -557,7 +622,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       fastestMode: fastestMode?.key ?? null,
       unavailable: row.unavailable,
       hiddenByPreference: row.hiddenByPreference,
-      verifyRules: row.key === 'park-ride' && row.status === 'verify_rules',
+      verifyRules:
+        (row.key === 'park-ride' && row.status === 'verify_rules') ||
+        (row.key === 'street-meter' && (input.streetMeterParking?.verifyRequired ?? false)),
       hasReliableData: !row.unavailable && row.status !== 'route_needed',
     }),
   })) as PointAbModePresentation[];
@@ -567,16 +634,20 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       ? input.bestParking?.name
         ? `Park at ${input.bestParking.name}`
         : 'Park near your destination'
-      : recommendationMode === 'rideshare'
-        ? `Take ${input.bestRideOption?.name || 'rideshare'}`
-        : recommendationMode === 'transit'
-          ? 'Take transit'
-          : recommendationMode === 'park-ride'
-            ? 'Use Park & Ride'
-            : 'Compare options';
+      : recommendationMode === 'street-meter'
+        ? 'Try street / meter parking'
+        : recommendationMode === 'rideshare'
+          ? `Take ${input.bestRideOption?.name || 'rideshare'}`
+          : recommendationMode === 'transit'
+            ? 'Take transit'
+            : recommendationMode === 'park-ride'
+              ? 'Use Park & Ride'
+              : 'Compare options';
 
   const recommendedReason =
-    recommendationMode === 'parking' && input.noParkingPreferred && extremeCostGap
+    recommendationMode === 'street-meter'
+      ? 'Best fit when a legal on-street stall is open and you can verify posted signs.'
+      : recommendationMode === 'parking' && input.noParkingPreferred && extremeCostGap
       ? 'Drive and parking are much cheaper than rideshare, even though you marked parking as not needed.'
       : recommendationMode === 'parking'
         ? 'Best fit if you want to drive and use parking near your destination.'
@@ -590,17 +661,28 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
               ? 'Best fit when lot rules allow same-day Park & Ride plus transit.'
               : 'Open provider pricing before making a final decision.';
 
+  const cheapestModeResult = cheapestMode
+    ? {
+        key: cheapestMode.key,
+        label: cheapestMode.label,
+        cost: cheapestMode.cost,
+        minutes: cheapestMode.key === 'transit' ? cheapestMode.minutes : undefined,
+      }
+    : null;
+
   return {
     modes,
     recommendationMode: recommendationMode ?? 'compare',
     recommendedTitle,
     recommendedReason,
-    cheapestMode: cheapestMode
-      ? { key: cheapestMode.key, label: cheapestMode.label, cost: cheapestMode.cost }
-      : null,
+    cheapestMode: cheapestModeResult,
     fastestMode: fastestMode
       ? { key: fastestMode.key, label: fastestMode.label, minutes: fastestMode.minutes }
       : null,
     objectiveBestMode: objectiveBest,
+    cheapestVsBestNote: formatPointAbCheapestVsBestNote({
+      cheapestMode: cheapestModeResult,
+      recommendationMode: recommendationMode ?? 'compare',
+    }),
   };
 }

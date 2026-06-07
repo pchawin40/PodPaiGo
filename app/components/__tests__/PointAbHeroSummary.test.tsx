@@ -28,6 +28,7 @@ const ranking = {
   cheapestMode: { key: 'transit', label: 'Transit', cost: 3.25 },
   fastestMode: { key: 'rideshare', label: 'Rideshare', minutes: 28 },
   objectiveBestMode: 'parking',
+  cheapestVsBestNote: null,
 } satisfies PointAbRankingResult;
 
 describe('PointAbHeroSummary', () => {
@@ -36,8 +37,14 @@ describe('PointAbHeroSummary', () => {
       <PointAbHeroSummary
         ranking={ranking}
         parkingOutlook={{
+          headline: 'Parking not confirmed yet',
           title: 'Parking not confirmed yet',
           body: 'Compare options.',
+          reason: 'Compare options.',
+          status: 'parking_not_confirmed',
+          source: 'unknown',
+          confidence: 'low',
+          caveat: 'Verify posted signs and lot rules.',
           hints: ['4-hour limit may apply'],
           verifyNotice: 'Verify posted signs and lot rules.',
           showSearchNearbyParking: true,
@@ -51,7 +58,7 @@ describe('PointAbHeroSummary', () => {
       />,
     );
 
-    expect(screen.getByText('Best')).toBeInTheDocument();
+    expect(screen.getByText('Best overall')).toBeInTheDocument();
     expect(screen.getByText('Cheapest')).toBeInTheDocument();
     expect(screen.getByText('Fastest')).toBeInTheDocument();
     expect(screen.getByText('Parking outlook')).toBeInTheDocument();
