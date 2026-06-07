@@ -7,22 +7,23 @@ import TravelCard from '../components/ui/TravelCard';
 
 export const metadata: Metadata = {
   title: 'Pricing',
-  description: 'PodPaiGo pricing overview for free airport planning and future Pro features.',
+  description: 'PodPaiGo pricing overview for free airport trip planning, city trip comparisons, and future Pro features.',
 };
 
 const freeFeatures = [
-  'Airport trip planning and mode comparison',
-  'Leave-by timing with airport buffers',
-  'Cached parking comparison and provider links',
-  'AI trip assistant review flow (mock by default in local dev)',
+  'Airport trip planning with leave-by timing, TSA/checklist context, parking, rideshare, and transit',
+  'Point-to-point trip comparisons for city, downtown, event, and general destinations',
+  'Destination parking suggestions with garages, lots, provider links, and directions',
+  'Street/meter parking outlook where supported',
+  'Cached parking fallback when live refresh is paused or rate-limited',
   'Account sign-in and saved trips',
 ];
 
 const futureProFeatures = [
-  'Price alerts for parking and airport access',
-  'Saved frequent trips and faster reopen flows',
-  'Flight delay leave-time updates',
-  'Calendar sync for airport departures and returns',
+  'Price and availability alerts for parking and airport access',
+  'Saved frequent trips, saved places, and faster reopen flows',
+  'Flight delay and event timing updates',
+  'Calendar sync for airport departures, returns, events, and city trips',
 ];
 
 export default function PricingPage() {
@@ -38,7 +39,7 @@ export default function PricingPage() {
         <SectionHeader
           eyebrow="Pricing"
           title="Free now. Pro later."
-          description="PodPaiGo is free for airport trip planning today. Payment integration is not live yet, but the product is structured for future partner links and optional Pro features."
+          description="PodPaiGo is free for airport trips and point-to-point trip comparisons today. Payment integration is not live yet, but the product is structured for future partner links and optional Pro features."
           className="mt-8"
         />
 
@@ -70,6 +71,16 @@ export default function PricingPage() {
             </p>
           </TravelCard>
         </section>
+
+        <TravelCard className="mt-6">
+          <h2 className="text-xl font-semibold text-foreground">Data transparency</h2>
+          <p className="mt-3 leading-7 text-muted-foreground">
+            Some prices and availability are estimates. Street parking rules vary by block,
+            posted signs always win, and live data may be rate-limited. When live refresh is
+            paused, PodPaiGo may show cached or saved parking options with provider and directions
+            links so you can verify price and availability.
+          </p>
+        </TravelCard>
 
         <PrimaryButton href="/trip" className="mt-10">
           Plan a trip

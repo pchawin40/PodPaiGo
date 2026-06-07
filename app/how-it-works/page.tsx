@@ -5,33 +5,33 @@ import SiteHeader from "../components/SiteHeader";
 export const metadata: Metadata = {
   title: "How It Works",
   description:
-    "How PodPaiGo compares airport parking, rideshare, and transit using timing, cost, weather, walking burden, and stress signals.",
+    "How PodPaiGo compares drive time, destination parking, street or meter rules, rideshare, transit, airport-day details, and backup options.",
 };
 
 const signals = [
   {
     title: "Timing",
-    body: "PodPaiGo looks at trip time, route duration, airport buffer, TSA estimate, and parking or transfer time.",
+    body: "PodPaiGo looks at trip time, route duration, leave-by timing, parking or transfer time, and airport buffers or TSA estimates when the trip involves a flight.",
   },
   {
     title: "Cost",
-    body: "Options are compared using estimated total trip cost, not just the visible parking or fare number.",
+    body: "Options are compared using estimated total trip cost, not just the visible parking, fare, or garage number.",
   },
   {
-    title: "Walking burden",
-    body: "The app considers walking, shuttle transfer, checkpoint walk, and whether checked bags may make the option harder.",
+    title: "Parking fit",
+    body: "Airport trips can include airport lots and shuttle friction. City trips can include garages, lots, street or meter outlook, and Park & Ride backups.",
   },
   {
-    title: "Weather",
-    body: "Weather can make covered parking, shorter walks, and lower-transfer options more attractive.",
+    title: "Rideshare and transit",
+    body: "Rideshare, taxi, transit, and park-and-ride options are compared when they are relevant to the trip and available in the data.",
   },
   {
     title: "Stress",
-    body: "Stress is an estimated score based on route confidence, walking burden, rush hour, weather, availability, and shuttle friction.",
+    body: "Stress is an estimated score based on route confidence, walking burden, rush hour, weather, availability, transfers, and shuttle friction.",
   },
   {
     title: "Confidence",
-    body: "Data is labeled as live, verified source, estimated, fallback, or unavailable so travelers know what to trust.",
+    body: "Data is labeled as live, verified source, cached, estimated, fallback, or unavailable so travelers know what to trust.",
   },
 ];
 
@@ -47,10 +47,9 @@ export default function HowItWorksPage() {
         <div className="mt-8 max-w-3xl">
           <h1 className="text-4xl font-bold tracking-tight">How it works</h1>
           <p className="mt-6 text-lg leading-8 text-slate-600">
-            PodPaiGo compares airport transportation options by combining
-            practical signals travelers actually care about: leave time, total
-            cost, luggage effort, weather exposure, route confidence, shuttle
-            friction, and overall trip stress.
+            PodPaiGo compares the actual trip decision: drive time, destination parking,
+            street or meter rules, rideshare, transit, backups, and airport-day details
+            when a flight is involved.
           </p>
         </div>
 
@@ -69,10 +68,12 @@ export default function HowItWorksPage() {
         <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold">Important note</h2>
           <p className="mt-3 leading-7 text-slate-600">
-            The current draft may have deeper support for some airports than others. 
-            Some prices, availability, shuttle times, traffic, weather, and TSA estimates
-            can change. Always confirm critical details with the parking provider, airline, 
-            airport, or transportation provider before relying on them.
+            The current draft may have deeper support for some airports and cities than others.
+            Some prices, availability, shuttle times, traffic, weather, and TSA estimates can
+            change. Street parking rules vary by block, posted signs always win, and live
+            refreshes may be rate-limited. Always confirm critical details with the parking
+            provider, posted sign, airline, airport, or transportation provider before relying
+            on them.
           </p>
         </section>
 

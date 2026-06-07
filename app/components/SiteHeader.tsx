@@ -14,7 +14,9 @@ type SiteHeaderProps = {
 };
 
 const DESKTOP_LINKS = [
+  { href: '/quick-go', label: 'Quick Go' },
   { href: '/airports', label: 'Airports' },
+  { href: '/how-it-works', label: 'How it works' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/roadmap', label: 'Roadmap' },
   { href: '/about', label: 'About' },
@@ -22,7 +24,9 @@ const DESKTOP_LINKS = [
 
 const MOBILE_LINKS = [
   { href: '/trip', label: 'Plan trip' },
+  { href: '/quick-go', label: 'Quick Go' },
   { href: '/airports', label: 'Airports' },
+  { href: '/how-it-works', label: 'How it works' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/roadmap', label: 'Roadmap' },
 ];
@@ -145,10 +149,10 @@ export default function SiteHeader({
     if (href === '/') return pathname === '/';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+  const showAdmin = configured && !loading && Boolean(session?.access_token) && isAdmin;
 
   useEffect(() => {
     if (!configured || loading || !session?.access_token) {
-      setIsAdmin(false);
       return;
     }
 
@@ -214,7 +218,7 @@ export default function SiteHeader({
               {link.label}
             </Link>
           ))}
-          {isAdmin ? (
+          {showAdmin ? (
             <Link href="/admin/parking-submissions" className={navLinkClass(isActive('/admin'))}>
               Admin
             </Link>
@@ -301,7 +305,7 @@ export default function SiteHeader({
                     {link.label}
                   </Link>
                 ))}
-                {isAdmin ? (
+                {showAdmin ? (
                   <Link
                     href="/admin/parking-submissions"
                     onClick={closeMobileMenu}

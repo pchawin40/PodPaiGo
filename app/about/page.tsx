@@ -8,7 +8,7 @@ import TravelCard from '../components/ui/TravelCard';
 export const metadata: Metadata = {
   title: 'About',
   description:
-    'Learn what PodPaiGo is building for airport parking, rideshare, transit, timing, and travel confidence.',
+    'Learn what PodPaiGo is building for airport trips, city parking, rideshare, transit, timing, and travel confidence.',
 };
 
 export default function AboutPage() {
@@ -23,35 +23,38 @@ export default function AboutPage() {
         <SectionHeader title="About PodPaiGo" className="mt-8" />
 
         <p className="mt-6 text-lg leading-8 text-muted-foreground">
-          PodPaiGo is an airport trip decision engine. It helps travelers compare parking, rideshare, and
-          transit with the practical details that usually get missed: when to leave, how much the trip may
-          cost, how much walking is involved, whether weather changes the best choice, and how stressful the
-          option may feel.
+          PodPaiGo helps people decide how to get there - not just where to park. Airport trips
+          are the first deep use case, but the same decision engine also works for downtown trips,
+          events, errands, pickups, and point-to-point travel.
         </p>
 
         <TravelCard className="mt-10 space-y-6">
           <section>
             <h2 className="text-xl font-semibold text-foreground">Why it exists</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
-              Airport planning is fragmented. Parking sites, map apps, transit apps, rideshare apps, airport
-              pages, and weather forecasts all answer different parts of the same question. PodPaiGo brings
-              those signals together so travelers can make a clearer choice.
+              Trip planning is fragmented. Parking sites, map apps, transit apps, rideshare apps,
+              airport pages, and weather forecasts all answer different parts of the same question.
+              PodPaiGo brings those signals together so travelers can make a clearer choice.
             </p>
           </section>
 
           <section>
             <h2 className="text-xl font-semibold text-foreground">What it focuses on</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
-              The first public draft focuses on a primary airport while the product framework is designed to
-              expand to more airports.
+              Airport trips cover airport parking, leave-by timing, TSA/checklist details, rideshare,
+              transit, and airport companion context. City and destination trips cover drive time,
+              garages and lots, street or meter parking outlook, rideshare, transit, and Park & Ride
+              backups where available.
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-foreground">Current stage</h2>
+            <h2 className="text-xl font-semibold text-foreground">Trust model</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
               PodPaiGo is an early draft. Some data may be live or verified, while other details are
-              estimated or used as fallback logic. The goal is to make those differences clear.
+              estimated, cached, or used as fallback logic. Street parking rules vary by block,
+              posted signs always win, and provider prices or availability should be verified before
+              you park or travel.
             </p>
           </section>
         </TravelCard>

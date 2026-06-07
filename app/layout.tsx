@@ -6,11 +6,11 @@ import { themeInitScript } from '../lib/theme/themeStorage';
 
 export const metadata: Metadata = {
   title: {
-    default: 'PodPaiGo - Airport Parking, Rideshare & Transit Planner',
+    default: 'PodPaiGo - Airport Trips & City Parking Planner',
     template: '%s | PodPaiGo',
   },
   description:
-    'Compare airport parking, rideshare, and transit with leave-by timing, estimated total cost, weather impact, walking burden, and trip stress.',
+    'Plan airport trips and city parking in one clean dashboard. Compare drive time, parking, street or meter rules, rideshare, transit, and airport-day details.',
 };
 
 export default function RootLayout({

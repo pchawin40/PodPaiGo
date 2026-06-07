@@ -8,63 +8,42 @@ import TravelCard from '../components/ui/TravelCard';
 export const metadata: Metadata = {
   title: 'Current Features and Roadmap',
   description:
-    'What PodPaiGo currently supports and the planned roadmap for airport planning, accounts, AI assistance, and broader travel coverage.',
+    'What PodPaiGo currently supports and the planned roadmap for airport trips, city parking, accounts, AI assistance, and broader travel coverage.',
 };
 
-const currentFeatures = [
-  'National U.S. airport search in trip and edit-trip forms',
-  'Airport trip planning with parking, rideshare, taxi, and transit comparison',
-  'Leave-by timing using traffic, airport buffer, and trip details',
-  'Trip-level transit pricing when a return leg is implied',
-  'Parking duration with total and per-day price display',
-  'Safe-mode Google API quota protection for local development',
-  'Google Places and live parking discovery disabled by default in local dev',
-  'Supabase account foundation with email/password and Google sign-in',
-  'Saved trips on your account page',
-  'Monetization-ready provider CTAs with outbound click tracking',
-  'Pricing page placeholder for future Pro features (no billing yet)',
-  'AI trip assistant with mock default and optional live OpenAI parsing',
-  'Airport trip card with airline lookup and airport guidance',
-  'Weather-aware scoring for parking comfort and walking exposure',
-  'Confidence labels for live, verified, estimated, and fallback data',
-];
-
-const futurePlans = [
+const roadmapGroups = [
   {
-    title: 'Live AI trip assistant providers',
-    body: 'Move beyond mock parsing to optional live LLM providers with the same confirm-before-search safety flow.',
+    title: 'Now',
+    items: [
+      'Airport trip planner with parking, rideshare, taxi, transit, leave-by timing, TSA/checklist context, and airport guidance',
+      'Quick Go city trips for point-to-point drive time, destination parking, rideshare, transit, and Park & Ride backups',
+      'Destination parking cards for garages and lots',
+      'Street/meter parking outlook with explicit Seattle Sunday, holiday, evening, and event-zone warnings',
+      'Cached parking fallback when live refresh is paused or budget-limited',
+      'Account sign-in, saved trips, provider CTAs, and confidence labels for live, verified, cached, estimated, and fallback data',
+    ],
   },
   {
-    title: 'More OAuth providers',
-    body: 'Add Apple and Microsoft sign-in through Supabase Auth once provider setup is complete.',
+    title: 'Next',
+    items: [
+      'Supabase destination parking inventory near any destination coordinates',
+      'More U.S. city street parking rule modules beyond Seattle',
+      'Event parking warnings for major venues and special districts',
+      'Better Park & Ride ranking for city trips and airport access',
+      'Weather forecast reliability for city/general trips',
+      'Better rideshare deep links and clearer live-price fallback states',
+    ],
   },
   {
-    title: 'National airport coverage',
-    body: 'Move from Washington airports to major U.S. airports, then broaden coverage as the data model and provider links become more reliable.',
-  },
-  {
-    title: 'Point A to point B planning',
-    body: 'Grow beyond airport-only trips so users can compare transportation choices for general destinations, not just airport arrivals and departures.',
-  },
-  {
-    title: 'Saved preferences',
-    body: 'Let users save what they care about, such as lower cost, covered parking, fewer transfers, shorter walks, rideshare preference, luggage needs, and typical departure buffers.',
-  },
-  {
-    title: 'Favorite trips and saved routes',
-    body: 'Expand saved-trip workflows with tags, recurring airport routes, and faster reopen flows.',
-  },
-  {
-    title: 'Favorite parking lots',
-    body: 'Bookmark trusted lots and reopen them quickly on future trips to the same airport.',
-  },
-  {
-    title: 'Business traveler mode',
-    body: 'A profile tuned for expensed work travel with faster defaults, clearer receipts-oriented summaries, and fewer leisure-oriented distractions.',
-  },
-  {
-    title: 'Hotel and flight integrations (future expansion)',
-    body: 'Later connect hotel stays and flight details for richer trip context. This is future expansion, not current core PodPaiGo scope.',
+    title: 'Later',
+    items: [
+      'Saved places, saved preferences, favorite trips, and favorite parking lots',
+      'Calendar integrations for flights, returns, events, errands, and recurring trips',
+      'Flight tracking auto-adjust and price/availability alerts',
+      'User-submitted parking notes and validation signals',
+      'More airports, more city coverage, and a native mobile app',
+      'Business traveler mode and richer hotel/flight integrations',
+    ],
   },
 ];
 
@@ -81,35 +60,36 @@ export default function RoadmapPage() {
         <SectionHeader
           eyebrow="Product status"
           title="What PodPaiGo has now and what comes next"
-          description="PodPaiGo helps travelers compare airport parking, rideshare, transit, timing, cost, weather, and trip effort. Recent work added account sign-in, saved trips, safe-mode API protection, and an AI trip assistant foundation while keeping Google Places disabled by default in local dev."
+          description="PodPaiGo helps travelers compare airport trips and city parking choices: drive time, destination garages/lots, street or meter outlook, rideshare, transit, Park & Ride backups, timing, cost, weather, and trip effort."
           className="mt-8"
         />
 
-        <TravelCard className="mt-10">
-          <h2 className="text-2xl font-semibold text-foreground">Implemented now</h2>
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
-            {currentFeatures.map((feature) => (
-              <div
-                key={feature}
-                className="rounded-2xl border border-border bg-muted/60 p-4 text-sm leading-6 text-muted-foreground"
-              >
-                {feature}
+        <section className="mt-10 grid gap-6 lg:grid-cols-3">
+          {roadmapGroups.map((group) => (
+            <TravelCard key={group.title}>
+              <h2 className="text-2xl font-semibold text-foreground">{group.title}</h2>
+              <div className="mt-5 space-y-3">
+                {group.items.map((item) => (
+                  <div
+                    key={item}
+                    className="rounded-2xl border border-border bg-muted/60 p-4 text-sm leading-6 text-muted-foreground"
+                  >
+                    {item}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </TravelCard>
-
-        <section className="mt-8">
-          <h2 className="text-2xl font-semibold text-foreground">Future implementation</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {futurePlans.map((plan) => (
-              <TravelCard key={plan.title}>
-                <h3 className="text-lg font-semibold text-foreground">{plan.title}</h3>
-                <p className="mt-3 leading-7 text-muted-foreground">{plan.body}</p>
-              </TravelCard>
-            ))}
-          </div>
+            </TravelCard>
+          ))}
         </section>
+
+        <TravelCard className="mt-8">
+          <h2 className="text-2xl font-semibold text-foreground">Data policy direction</h2>
+          <p className="mt-3 leading-7 text-muted-foreground">
+            PodPaiGo will keep labeling estimates, cached options, provider errors, and live-refresh
+            limits. Street parking rules vary by city and block, so posted signs and provider rules
+            remain the final source of truth.
+          </p>
+        </TravelCard>
 
         <PrimaryButton href="/trip" className="mt-10">
           Open planner

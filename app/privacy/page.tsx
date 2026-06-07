@@ -4,7 +4,7 @@ import SiteHeader from "../components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "Privacy",
-  description: "How PodPaiGo handles account data, saved trips, OAuth, API usage, and third-party services.",
+  description: "How PodPaiGo handles trip planning data, account data, saved trips, OAuth, API usage, and third-party services.",
 };
 
 export default function PrivacyPage() {
@@ -18,8 +18,8 @@ export default function PrivacyPage() {
 
         <h1 className="mt-8 text-4xl font-bold tracking-tight">Privacy</h1>
         <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-          PodPaiGo is an airport planning tool. This page describes what data the
-          app uses today and how it is handled.
+          PodPaiGo is a trip planning tool for airport days and point-to-point trips.
+          This page describes what data the app uses today and how it is handled.
         </p>
 
         <div className="mt-8 space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -27,10 +27,20 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold">Trip planning data</h2>
             <p className="mt-2 leading-7 text-slate-600">
               When you plan a trip, PodPaiGo uses inputs such as origin,
-              destination, airport, dates, transportation preferences, and timing
-              choices to generate recommendations. Trip details may be sent to
-              connected services for routes, weather, parking, rideshare, transit,
-              or airport-related information when those features are enabled.
+              destination, airport when applicable, dates, transportation preferences,
+              parking preferences, and timing choices to generate recommendations.
+              Trip details may be sent to connected services for routes, weather,
+              parking, rideshare, transit, destination search, or airport-related
+              information when those features are enabled.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold">Location access</h2>
+            <p className="mt-2 leading-7 text-slate-600">
+              PodPaiGo uses your device location only if you grant browser location access.
+              You can also type an origin manually. Location may be used to estimate routes,
+              nearby parking, and point-to-point trip options.
             </p>
           </section>
 
@@ -74,7 +84,9 @@ export default function PrivacyPage() {
               repeated external API calls and control cost. Local development defaults
               include safe-mode quota protection and disabled Google Places / live
               parking discovery unless you explicitly enable them. API usage counters
-              and cached snapshots help the app avoid unnecessary paid requests.
+              and cached snapshots help the app avoid unnecessary paid requests. Cached
+              or saved parking options may be shown when live refresh is paused or
+              rate-limited.
             </p>
           </section>
 
@@ -107,10 +119,10 @@ export default function PrivacyPage() {
             </p>
             <p className="mt-2 leading-7 text-slate-600">
               Event properties are limited to coarse fields such as airport code, destination category,
-              transport preference, and provider name. Raw home or work addresses, email, phone numbers,
-              and API keys are stripped before storage. Signed-in users may be linked by account id for
-              product improvement; analytics rows are not readable from the client and are intended for
-              admin review only.
+              transport preference, provider name, and whether live or cached data was used. Raw home
+              or work addresses, email, phone numbers, and API keys are stripped before storage.
+              Signed-in users may be linked by account id for product improvement; analytics rows are
+              not readable from the client and are intended for admin review only.
             </p>
           </section>
 
@@ -118,8 +130,9 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold">Outbound clicks and partner links</h2>
             <p className="mt-2 leading-7 text-slate-600">
               When you click provider booking or directions links, PodPaiGo may record a lightweight
-              outbound click event (provider, airport, lot, destination URL, and optional trip id).
-              Some links may become partner links in the future. We do not sell your personal data.
+              outbound click event (provider, airport or destination category, lot, destination URL,
+              and optional trip id). Some links may become partner links in the future. We do not sell
+              your personal data.
             </p>
           </section>
 
@@ -146,8 +159,10 @@ export default function PrivacyPage() {
             <h2 className="text-xl font-semibold">Confirm important details</h2>
             <p className="mt-2 leading-7 text-slate-600">
               Prices, availability, traffic, weather, TSA estimates, shuttle timing,
-              and transit details may change. Confirm important details directly with
-              your airline, parking provider, or transportation service before travel.
+              street or meter rules, and transit details may change. Street parking rules
+              vary by block and posted signs always win. Confirm important details directly
+              with your airline, parking provider, posted signs, or transportation service
+              before travel.
             </p>
           </section>
         </div>
