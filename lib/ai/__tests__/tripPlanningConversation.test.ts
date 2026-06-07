@@ -424,10 +424,7 @@ describe('AI trip planner conversation state machine', () => {
     expect(turn.phase).toBe('ready_to_plan');
     expect(turn.headline).toBe('Ready to plan');
     expect(turn.summary.some((item) => item.label === 'From')).toBe(true);
-    expect(turn.quickReplies.map((reply) => reply.label)).toEqual([
-      'Plan trip',
-      'Edit details',
-    ]);
+    expect(turn.quickReplies.map((reply) => reply.label)).toEqual(['Plan trip']);
   });
 
   test('No enters awaiting_origin_input with reject copy', () => {
@@ -544,7 +541,7 @@ describe('AI trip planner conversation state machine', () => {
         nextField: readyTurn.nextField,
         status: readyTurn.status,
       }),
-    ).toBe('Ask a change, or tap Plan trip…');
+    ).toBe('Ask for a change, or tap Plan trip…');
 
     expect(
       getTripPlanningPlaceholder({
@@ -578,5 +575,102 @@ describe('AI trip planner conversation state machine', () => {
     expect(updated.destinationText).toBe('Pike Place Market');
     expect(turn.summary.find((item) => item.label === 'To')?.value).toBe('Pike Place Market');
     expect(turn.summary.find((item) => item.label === 'From')?.value).toBe('Bellevue');
+  });
+
+  test('ready summary includes all editable trip detail rows', () => {
+    const complete = reprocessParsedTrip(
+      parseTripTextMock(
+        [
+          'I am going to Pike Place Market tomorrow. Plan commute for me.',
+          'From Monroe, arrive by 9 AM, compare all, park for 8 hours.',
+        ].join('\n'),
+        NOW,
+      ),
+      {},
+      NOW,
+    );
+    const turn = buildTripPlanningTurn(complete, locationContext);
+
+    expect(turn.summary.map((item) => item.label)).toEqual([
+      'From',
+      'To',
+      'When',
+      'Compare',
+      'Parking',
+    ]);
+    expect(turn.summary.every((item) => item.field)).toBe(true);
+  });
+
+  test('inline edit placeholders follow active field', () => {
+    expect(
+      getTripPlanningPlaceholder({
+        phase: 'ready_to_plan',
+        nextField: null,
+        status: 'ready_for_review',
+        editingField: 'originText',
+      }),
+    ).toBe('Enter a starting address…');
+
+    expect(
+      getTripPlanningPlaceholder({
+        phase: 'ready_to_plan',
+        nextField: null,
+        status: 'ready_for_review',
+        editingField: 'destinationText',
+      }),
+    ).toBe('Where are you going?');
+
+    expect(
+      getTripPlanningPlaceholder({
+        phase: 'ready_to_plan',
+        nextField: null,
+        status: 'ready_for_review',
+        editingField: 'targetTime',
+      }),
+    ).toBe('When are you going?');
+  });
+
+  test('field patch via reprocessParsedTrip does not require parse-trip', () => {
+    const complete = reprocessParsedTrip(
+      parseTripTextMock(
+        [
+          'I am going to Pike Place Market tomorrow. Plan commute for me.',
+          'From Monroe, arrive by 9 AM, compare all, park for 8 hours.',
+        ].join('\n'),
+        NOW,
+      ),
+      {},
+      NOW,
+    );
+
+    const patched = reprocessParsedTrip(complete, { originText: 'Bellevue' }, NOW);
+
+    expect(patched.originText).toBe('Bellevue');
+    expect(patched.status).toBe('ready_for_review');
+    expect(patched.destinationText).toBe('Pike Place Market');
+  });
+
+  test('shouldAppendPlanningTurn suppresses duplicate ready cards after field patch', () => {
+    const complete = reprocessParsedTrip(
+      parseTripTextMock(
+        [
+          'I am going to Pike Place Market tomorrow. Plan commute for me.',
+          'From Monroe, arrive by 9 AM, compare all, park for 8 hours.',
+        ].join('\n'),
+        NOW,
+      ),
+      {},
+      NOW,
+    );
+    const readyTurn = buildTripPlanningTurn(complete, locationContext);
+    const patched = reprocessParsedTrip(complete, { originText: 'Bellevue' }, NOW);
+    const patchedTurn = buildTripPlanningTurn(patched, locationContext);
+
+    expect(
+      shouldAppendPlanningTurn(readyTurn, patchedTurn, complete, patched),
+    ).toBe(true);
+    expect(
+      shouldAppendPlanningTurn(patchedTurn, patchedTurn, patched, patched),
+    ).toBe(false);
   });
 });

@@ -191,7 +191,8 @@ describe('PodPaiGoAssistant', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Ready to plan')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Plan Trip' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Plan trip' })).toBeInTheDocument();
+      expect(screen.queryByText('Trip details')).not.toBeInTheDocument();
     });
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ai/parse-trip'))).toBe(
@@ -270,8 +271,10 @@ describe('PodPaiGoAssistant', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Ready to plan')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Plan Trip' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Plan trip' })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Change' }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Plan Trip' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Change start' })).not.toBeInTheDocument();
     });
 
@@ -422,7 +425,7 @@ describe('PodPaiGoAssistant', () => {
     expect(parseCallsAfterNo).toBe(parseCallsBeforeNo);
   });
 
-  test('Edit details opens compact review panel', async () => {
+  test('inline Change opens field editor inside ready card', async () => {
     mockSignedInAuth();
     jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
@@ -482,17 +485,18 @@ describe('PodPaiGoAssistant', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Change' }).length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change' })[0]);
 
     await waitFor(() => {
-      expect(screen.getByText('Trip details')).toBeInTheDocument();
-      expect(screen.getAllByRole('button', { name: 'Change' }).length).toBeGreaterThan(0);
+      expect(screen.getByRole('textbox', { name: 'From address' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Use current location' })).toBeInTheDocument();
+      expect(screen.queryByText('Trip details')).not.toBeInTheDocument();
       expect(screen.getByLabelText('Message PodPaiGo assistant')).toHaveAttribute(
         'placeholder',
-        'Update a field above, or tap Plan trip…',
+        'Enter a starting address…',
       );
     });
   });
@@ -534,9 +538,99 @@ describe('PodPaiGoAssistant', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Message PodPaiGo assistant')).toHaveAttribute(
         'placeholder',
-        'Ask a change, or tap Plan trip…',
+        'Ask for a change, or tap Plan trip…',
       );
+      expect(screen.getAllByRole('button', { name: 'Change' }).length).toBeGreaterThan(0);
+      expect(screen.queryByRole('button', { name: 'Plan Trip' })).not.toBeInTheDocument();
     });
+  });
+
+  test('inline To edit updates summary without another parse call', async () => {
+    mockSignedInAuth();
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            mode: 'quick_go',
+            destinationText: 'Pike Place Market',
+            originSource: 'current_location',
+            destinationCategory: 'general',
+            originText: null,
+            airportCode: null,
+            destinationCity: null,
+            airlineText: null,
+            departureDate: '2026-06-06',
+            departureTime: '09:00',
+            timeAnchor: 'arrive_by',
+            returnDate: null,
+            returnTime: null,
+            transportAvailability: 'all',
+            parkingPreference: 'nearby',
+            tripType: 'quick-go',
+            needsParking: true,
+            needsLeaveTime: true,
+            missingFields: [],
+            confidence: 'medium',
+            parser: 'mock',
+            status: 'ready_for_review',
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: { value: 'I am going to Pike Place Market tomorrow. Plan commute for me.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('To')).toBeInTheDocument();
+    });
+
+    const parseCallsBeforeEdit = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+
+    const changeButtons = screen.getAllByRole('button', { name: 'Change' });
+    fireEvent.click(changeButtons[1]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'To destination' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'To destination' }), {
+      target: { value: 'Space Needle' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Space Needle')).toBeInTheDocument();
+      expect(screen.getAllByText('Ready to plan')).toHaveLength(1);
+    });
+
+    const parseCallsAfterEdit = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+    expect(parseCallsAfterEdit).toBe(parseCallsBeforeEdit);
   });
 
   test('results explanation uses existing recommendation data', async () => {

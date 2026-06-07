@@ -67,12 +67,15 @@ export type TripPlanningBuildOptions = {
   phase?: TripPlanningPhase;
 };
 
+export type TripPlanningEditingField = TripPlanningSummaryItem['field'];
+
 export type TripPlanningPlaceholderInput = {
   phase: TripPlanningPhase;
   nextField: string | null;
   status: 'needs_clarification' | 'ready_for_review';
   originInputMode?: boolean;
   reviewMode?: boolean;
+  editingField?: TripPlanningEditingField | null;
   page?: 'home' | 'trip' | 'results';
 };
 
@@ -521,12 +524,6 @@ function buildReadyQuickReplies(): TripPlanningQuickReply[] {
       value: '',
       action: 'plan_trip',
     },
-    {
-      id: 'edit-details',
-      label: 'Edit details',
-      value: '',
-      action: 'edit_details',
-    },
   ];
 }
 
@@ -777,6 +774,23 @@ function buildTurnFromProcessed(
   };
 }
 
+function editingFieldPlaceholder(field: TripPlanningEditingField): string {
+  switch (field) {
+    case 'originText':
+      return 'Enter a starting address…';
+    case 'destinationText':
+      return 'Where are you going?';
+    case 'targetTime':
+      return 'When are you going?';
+    case 'transportAvailability':
+      return 'Choose how to compare options…';
+    case 'parkingPreference':
+      return 'Choose parking preference…';
+    default:
+      return 'Ask for a change, or tap Plan trip…';
+  }
+}
+
 export function getTripPlanningPlaceholder(
   input: TripPlanningPlaceholderInput,
 ): string {
@@ -784,8 +798,8 @@ export function getTripPlanningPlaceholder(
     return 'Ask about leave time, parking, TSA, or weather…';
   }
 
-  if (input.reviewMode) {
-    return 'Update a field above, or tap Plan trip…';
+  if (input.editingField) {
+    return editingFieldPlaceholder(input.editingField);
   }
 
   if (input.originInputMode || input.phase === 'awaiting_origin_input') {
@@ -793,7 +807,7 @@ export function getTripPlanningPlaceholder(
   }
 
   if (input.status === 'ready_for_review' || input.phase === 'ready_to_plan') {
-    return 'Ask a change, or tap Plan trip…';
+    return 'Ask for a change, or tap Plan trip…';
   }
 
   if (input.nextField === 'destinationText') {
