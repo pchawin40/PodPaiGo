@@ -590,6 +590,22 @@ export type TransitJourney = TransitOption & {
   transfers: number; // number of transfers
 };
 
+export type TripRouteStatus =
+  | 'idle'
+  | 'resolving_coordinates'
+  | 'google_loading'
+  | 'mapbox_loading'
+  | 'fallback_loading'
+  | 'ready'
+  | 'unavailable';
+
+export type TripRouteSource =
+  | 'google_live'
+  | 'google_cached'
+  | 'mapbox'
+  | 'coordinate_fallback'
+  | 'unavailable';
+
 export type TrafficEstimate = {
   route: string;
   duration: number; // duration in minutes (traffic-aware)
@@ -599,6 +615,8 @@ export type TrafficEstimate = {
   trustStatus: TrustStatus;
   routeUnavailable?: boolean;
   routeUnavailableReason?: string;
+  routeStatus?: TripRouteStatus;
+  routeSource?: TripRouteSource;
   sourceName: string;
   lastUpdated: string;
   assumptions: string[];

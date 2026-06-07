@@ -44,7 +44,11 @@ import {
   type TripTravelPreferences,
 } from '../../lib/trip/travelPreferences';
 import TravelPreferencesPanel from '../components/TravelPreferencesPanel';
-import { isQuickGoMode, mergeStoredTripSearchParams } from '../../lib/trip/quickGo';
+import {
+  isQuickGoMode,
+  mergeStoredTripSearchParams,
+  resolveQuickGoDriveTime,
+} from '../../lib/trip/quickGo';
 import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
@@ -3986,6 +3990,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const recommendationsLoadedKeyRef = useRef('');
   const liveRefreshInFlightKeyRef = useRef('');
   const liveRefreshLoadedKeyRef = useRef('');
+  const priorQuickGoDriveMinutesRef = useRef<number | null>(null);
 
   function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
     const normalize = (value: string | null | undefined) =>
@@ -4402,6 +4407,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   };
 
   useEffect(() => {
+    if (!isQuickGoMode(searchParams) || !recommendation?.trafficEstimate) return;
+
+    const resolvedDrive = resolveQuickGoDriveTime(recommendation.trafficEstimate);
+    if (resolvedDrive.minutes != null && !resolvedDrive.unavailable) {
+      priorQuickGoDriveMinutesRef.current = resolvedDrive.minutes;
+    }
+  }, [searchParams, recommendation?.trafficEstimate]);
+
+  useEffect(() => {
     if (!showMapModal) return;
 
     const previousOverflow = document.body.style.overflow;
@@ -4490,8 +4504,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setIsRecalculating(true);
       }
       setShowTooLate(false);
-      setRecommendation(null);
-      setRankedOptions([]);
+      const preserveQuickGoSnapshot =
+        isQuickGoMode(searchParams) && Boolean(recommendation);
+      if (!preserveQuickGoSnapshot) {
+        setRecommendation(null);
+        setRankedOptions([]);
+      }
 
       logRecommendationsFetch('start', requestKey);
 
@@ -5334,6 +5352,39 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     googleEnrichedParking,
   ]);
 
+  const quickGoTripDataFromParams = parseTripDataFromSearchParams(searchParams);
+  const quickGoActive = isQuickGoMode(searchParams);
+
+  if (loading && quickGoActive && quickGoTripDataFromParams) {
+    const placeholderRecommendation: Recommendation =
+      recommendation ?? {
+        parking: [],
+        rideshare: [],
+        transit: [],
+        tsaEstimate: {
+          destination: quickGoTripDataFromParams.destination,
+          waitTime: 0,
+          status: 'estimated',
+          sourceName: 'Quick Go',
+          trustStatus: 'estimated',
+          lastUpdated: new Date().toISOString(),
+          assumptions: [],
+        },
+      };
+
+    return (
+      <QuickGoResultsView
+        tripData={quickGoTripDataFromParams}
+        recommendation={placeholderRecommendation}
+        rankedOptions={rankedOptions}
+        searchParams={searchParams}
+        routeLoading
+        routeRefreshing={isRecalculating && priorQuickGoDriveMinutesRef.current != null}
+        priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
@@ -5367,13 +5418,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     );
   }
 
-  if (isQuickGoMode(searchParams)) {
+  if (quickGoActive) {
     return (
       <QuickGoResultsView
         tripData={tripData}
         recommendation={recommendation}
         rankedOptions={sortedOptions}
         searchParams={searchParams}
+        routeRefreshing={isRecalculating}
+        priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
       />
     );
   }

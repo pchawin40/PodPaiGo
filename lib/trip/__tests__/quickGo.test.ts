@@ -8,6 +8,7 @@ import {
   quickGoParkingExpectationLabel,
   quickGoClassificationForTrip,
   resolveQuickGoBestWay,
+  resolveQuickGoDriveTime,
   resolveQuickGoLocalParkingWalkBufferMinutes,
   resolveQuickGoLocalTripTiming,
   readQuickGoOriginFromSearchParams,
@@ -412,6 +413,28 @@ describe('quickGo', () => {
     expect(timing.driveMinutes).toBe(6);
     expect(timing.totalMinutes).toBe(timing.driveMinutes + timing.bufferMinutes);
     expect(timing.breakdownDetail).toContain('~6 min drive');
+  });
+
+  test('total trip breakdown waits until route loading finishes', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: "Jeno's Cafe, Monroe, WA",
+    });
+
+    const loading = resolveQuickGoDriveTime({
+      traffic: { duration: 4, trustStatus: 'live', sourceName: 'Google Routes API' },
+      routeLoading: true,
+    });
+    expect(loading.loading).toBe(true);
+    expect(loading.unavailable).toBe(false);
+
+    const ready = resolveQuickGoDriveTime({
+      traffic: { duration: 4, trustStatus: 'live', sourceName: 'Google Routes API' },
+    });
+    const timing = resolveQuickGoLocalTripTiming({
+      driveMinutes: ready.minutes!,
+      classification,
+    });
+    expect(timing.totalMinutes).toBe(timing.driveMinutes + timing.bufferMinutes);
   });
 
   test('mergeStoredTripSearchParams keeps stored quick-go origin when route has stale params', () => {

@@ -15,6 +15,10 @@ import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
 import { getAirportTsaEstimate } from './airports/tsa/provider';
 import { DEFAULT_ROUTE_UNAVAILABLE_REASON } from './parking/routeStatus';
+import {
+  attachTrafficRouteMetadata,
+  type QuickGoRouteStatus,
+} from './trip/quickGo';
 import { debugLog } from './utils/debug';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
 import {
@@ -597,6 +601,10 @@ function isDisplayedQuickGoMainRoute(routeContext?: RouteRequestContext): boolea
   );
 }
 
+function isMainDestinationRoute(routeContext?: RouteRequestContext): boolean {
+  return routeContext?.routePurpose === 'main_to_destination';
+}
+
 function routeDebugPayload(args: {
   routeKey: string;
   cacheKey: string;
@@ -869,10 +877,12 @@ export class LiveTrafficProvider implements TrafficProvider {
     destinationLatLng?: RouteLatLng | null;
     unavailableReason: string;
     routeContext?: RouteRequestContext;
+    onRouteStatus?: (status: QuickGoRouteStatus) => void;
   }): Promise<TrafficEstimate> {
     const allowMapbox = true;
 
     if (allowMapbox) {
+      args.onRouteStatus?.('mapbox_loading');
       const mapbox = await this.mapboxRouteEstimate({
         routeKey: args.routeKey,
         cacheKey: args.cacheKey,
@@ -895,6 +905,7 @@ export class LiveTrafficProvider implements TrafficProvider {
       }));
     }
 
+    args.onRouteStatus?.('fallback_loading');
     const coordinateFallback = coordinateFallbackTrafficEstimate(
       args.routeKey,
       args.originLatLng,
@@ -954,6 +965,23 @@ export class LiveTrafficProvider implements TrafficProvider {
     const routeKey = normalizeTrafficRoute(origin, destination);
     const routeLabel = routeKey === 'home-airport' || routeKey === 'airport-home' ? routeKey : 'custom';
     const requestKey = shortRequestKey(cacheKey);
+    const routeStartedAt = Date.now();
+    let routeStatus: QuickGoRouteStatus = 'idle';
+    const setRouteStatus = (next: QuickGoRouteStatus, extra: Record<string, unknown> = {}) => {
+      if (next === routeStatus) return;
+      const previous = routeStatus;
+      routeStatus = next;
+      if (isMainDestinationRoute(routeContext)) {
+        debugLog('quickgo_route_status_change', {
+          from: previous,
+          to: next,
+          route: routeKey,
+          origin: originKey,
+          destination: destinationKey,
+          ...extra,
+        });
+      }
+    };
     const logRouteEvent = (
       event: string,
       extra: Record<string, unknown> = {},
@@ -977,12 +1005,34 @@ export class LiveTrafficProvider implements TrafficProvider {
       originLatLng: RouteLatLng | null | undefined = resolvedOriginLatLngForFallback,
       destinationRouteLatLng: RouteLatLng | null | undefined = resolvedDestinationLatLngForFallback,
     ): TrafficEstimate => {
-      if (isDisplayedQuickGoMainRoute(routeContext)) {
-        logRouteEvent('quickgo_main_route_final', { stage }, estimate, originLatLng, destinationRouteLatLng);
+      const enriched = attachTrafficRouteMetadata(estimate);
+      setRouteStatus(enriched.routeStatus ?? (enriched.routeUnavailable ? 'unavailable' : 'ready'));
+      if (isMainDestinationRoute(routeContext)) {
+        logRouteEvent(
+          'route_final',
+          {
+            stage,
+            elapsedMs: Date.now() - routeStartedAt,
+            source: enriched.routeSource,
+            routeStatus: enriched.routeStatus,
+            reason: enriched.routeUnavailableReason ?? null,
+          },
+          enriched,
+          originLatLng,
+          destinationRouteLatLng,
+        );
       }
-      return estimate;
+      if (isDisplayedQuickGoMainRoute(routeContext)) {
+        logRouteEvent('quickgo_main_route_final', { stage }, enriched, originLatLng, destinationRouteLatLng);
+      }
+      return enriched;
     };
 
+    setRouteStatus(
+      providedOriginLatLng && providedDestinationLatLng
+        ? 'google_loading'
+        : 'resolving_coordinates',
+    );
     if (isDisplayedQuickGoMainRoute(routeContext)) {
       logRouteEvent('quickgo_main_route_start', {
         requestKey,
@@ -1054,6 +1104,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             destinationLatLng: providedDestinationLatLng,
             unavailableReason: 'Live routing disabled; using cached or estimated timing only.',
             routeContext,
+            onRouteStatus: setRouteStatus,
           }),
           'backup_after_kill_switch',
         );
@@ -1156,6 +1207,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             destinationLatLng: providedDestinationLatLng,
             unavailableReason: 'Route budget exceeded; open map directions to confirm drive time.',
             routeContext,
+            onRouteStatus: setRouteStatus,
           });
         }
 
@@ -1345,6 +1397,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             unavailableReason:
               'Google Routes could not calculate a driving route for this origin and destination.',
             routeContext,
+            onRouteStatus: setRouteStatus,
           });
         }
 
@@ -1498,6 +1551,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           destinationLatLng: resolvedDestinationLatLngForFallback,
           unavailableReason: routeUnavailableReasonForContext(routeContext),
           routeContext,
+          onRouteStatus: setRouteStatus,
         }),
         'backup_after_google_failure',
       );

@@ -27,6 +27,9 @@ type QuickGoResultsViewProps = {
   recommendation: Recommendation;
   rankedOptions: RankedRecommendation[];
   searchParams: URLSearchParams;
+  routeLoading?: boolean;
+  routeRefreshing?: boolean;
+  priorDriveMinutes?: number | null;
 };
 
 export default function QuickGoResultsView({
@@ -34,6 +37,9 @@ export default function QuickGoResultsView({
   recommendation,
   rankedOptions,
   searchParams,
+  routeLoading = false,
+  routeRefreshing = false,
+  priorDriveMinutes = null,
 }: QuickGoResultsViewProps) {
   const router = useRouter();
   const detectedAirportCode = searchParams.get('detectedAirportCode');
@@ -47,7 +53,21 @@ export default function QuickGoResultsView({
     detectedAirportCode,
   });
 
-  const driveTime = resolveQuickGoDriveTime(recommendation.trafficEstimate ?? null);
+  const resolvingCoordinates =
+    routeLoading &&
+    !(
+      typeof tripData.originLat === 'number' &&
+      typeof tripData.originLng === 'number' &&
+      typeof tripData.destinationLat === 'number' &&
+      typeof tripData.destinationLng === 'number'
+    );
+  const driveTime = resolveQuickGoDriveTime({
+    traffic: recommendation.trafficEstimate ?? null,
+    routeLoading,
+    routeRefreshing,
+    resolvingCoordinates,
+    priorMinutes: priorDriveMinutes,
+  });
   const driveMinutes = driveTime.minutes;
   const preference: RecommendationSortMode =
     searchParams.get('quickGoPreference') === 'cheapest'
@@ -135,6 +155,7 @@ export default function QuickGoResultsView({
           weatherImpact={recommendation.weatherImpact}
           driveTimeTrustStatus={recommendation.trafficEstimate?.trustStatus}
           driveTimeSourceName={recommendation.trafficEstimate?.sourceName}
+          driveTime={driveTime}
           driveTimeUnavailable={driveTime.unavailable}
           fullDetailsHref={fullDetailsHref}
         />

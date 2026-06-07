@@ -13,8 +13,11 @@ import {
   quickGoParkingConfidenceLabel,
   quickGoParkingExpectationLabel,
   quickGoParkingHeadline,
+  quickGoRouteLoadingBody,
   quickGoStressLabel,
   resolveQuickGoLocalTripTiming,
+  type QuickGoDriveTime,
+  type QuickGoRouteStatus,
 } from '../../lib/trip/quickGo';
 import type { ParkingOption, TripData, TrustStatus } from '../../lib/types';
 import type { WeatherImpact } from '../../lib/weather/types';
@@ -37,6 +40,7 @@ type QuickGoResultsCardProps = {
   weatherImpact?: WeatherImpact | null;
   driveTimeTrustStatus?: TrustStatus | string | null;
   driveTimeSourceName?: string | null;
+  driveTime?: QuickGoDriveTime;
   driveTimeUnavailable?: boolean;
   fullDetailsHref?: string;
   className?: string;
@@ -175,6 +179,7 @@ export default function QuickGoResultsCard({
   weatherImpact = null,
   driveTimeTrustStatus,
   driveTimeSourceName,
+  driveTime,
   driveTimeUnavailable = false,
   className = '',
 }: QuickGoResultsCardProps) {
@@ -203,9 +208,14 @@ export default function QuickGoResultsCard({
     classification,
     destinationKind: tripData.destinationKind,
   });
+  const routeStatus: QuickGoRouteStatus = driveTime?.routeStatus ?? 'idle';
+  const routeLoading = driveTime?.loading ?? false;
+  const routeRefreshing = driveTime?.refreshing ?? false;
+  const showDriveUnavailable = driveTimeUnavailable && !routeLoading;
   const localTripTiming =
     !airportTrip &&
-    !driveTimeUnavailable &&
+    !showDriveUnavailable &&
+    !routeLoading &&
     driveMinutes != null &&
     Number.isFinite(driveMinutes)
       ? resolveQuickGoLocalTripTiming({ driveMinutes, classification })
@@ -229,6 +239,8 @@ export default function QuickGoResultsCard({
         totalBreakdown.total > driveMinutes + 1
       : localTripTiming != null && localTripTiming.bufferMinutes > 0),
   );
+  const showTotalTripCard =
+    routeLoading || showTotalBreakdown || (showDriveUnavailable && !airportTrip);
 
   return (
     <TravelCard className={className}>
@@ -262,17 +274,42 @@ export default function QuickGoResultsCard({
           <dd className="mt-2 text-lg font-semibold text-foreground">{bestWayLabel}</dd>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card/80 p-4">
+        <div
+          className="rounded-2xl border border-border bg-card/80 p-4"
+          aria-busy={routeLoading ? 'true' : undefined}
+        >
           <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Drive time
           </dt>
-          {driveTimeUnavailable ? (
+          {routeLoading ? (
+            <div role="status" aria-live="polite">
+              <dd className="mt-2 flex items-center gap-2 text-lg font-semibold text-foreground">
+                <span
+                  className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground"
+                  aria-hidden="true"
+                />
+                {routeRefreshing ? 'Refreshing…' : 'Calculating drive time…'}
+              </dd>
+              <dd className="mt-1 text-sm text-muted-foreground">
+                {routeRefreshing
+                  ? 'Updating live route estimate.'
+                  : quickGoRouteLoadingBody(routeStatus)}
+              </dd>
+              {routeRefreshing && driveMinutes != null ? (
+                <dd className="mt-2 text-sm text-muted-foreground">
+                  Previous estimate: {formatMinutesLabel(driveMinutes)}
+                </dd>
+              ) : (
+                <dd className="mt-2 h-4 w-28 animate-pulse rounded bg-muted/60" aria-hidden="true" />
+              )}
+            </div>
+          ) : showDriveUnavailable ? (
             <>
               <dd className="mt-2 text-lg font-semibold text-foreground">
                 Drive time unavailable
               </dd>
               <dd className="mt-1 text-sm text-muted-foreground">
-                Open directions to confirm drive time
+                Open directions to confirm drive time.
               </dd>
             </>
           ) : (
@@ -287,19 +324,37 @@ export default function QuickGoResultsCard({
           )}
         </div>
 
-        {showTotalBreakdown && totalBreakdown ? (
+        {showTotalTripCard ? (
           <div className="rounded-2xl border border-border bg-card/80 p-4">
             <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Total trip time
             </dt>
-            <dd className="mt-2 text-lg font-semibold text-foreground">
-              {totalBreakdown.totalLabel ?? formatMinutesLabel(totalBreakdown.total)}
-            </dd>
-            <dd className="mt-1 text-sm text-muted-foreground">
-              {totalBreakdown.detail}
-            </dd>
-            {totalBreakdown.guidance ? (
-              <dd className="mt-1 text-sm text-muted-foreground">{totalBreakdown.guidance}</dd>
+            {routeLoading ? (
+              <div role="status" aria-live="polite">
+                <dd className="mt-2 text-lg font-semibold text-foreground">Calculating…</dd>
+                <dd className="mt-1 text-sm text-muted-foreground">
+                  Waiting for drive time before adding parking/walk buffer.
+                </dd>
+              </div>
+            ) : showTotalBreakdown && totalBreakdown ? (
+              <>
+                <dd className="mt-2 text-lg font-semibold text-foreground">
+                  {totalBreakdown.totalLabel ?? formatMinutesLabel(totalBreakdown.total)}
+                </dd>
+                <dd className="mt-1 text-sm text-muted-foreground">
+                  {totalBreakdown.detail}
+                </dd>
+                {totalBreakdown.guidance ? (
+                  <dd className="mt-1 text-sm text-muted-foreground">{totalBreakdown.guidance}</dd>
+                ) : null}
+              </>
+            ) : showDriveUnavailable ? (
+              <>
+                <dd className="mt-2 text-lg font-semibold text-foreground">Open directions to confirm</dd>
+                <dd className="mt-1 text-sm text-muted-foreground">
+                  Total trip time needs a drive estimate first.
+                </dd>
+              </>
             ) : null}
           </div>
         ) : null}

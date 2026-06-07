@@ -42,6 +42,7 @@ import {
   buildTransitTransferLegs,
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
+import { attachTrafficRouteMetadata } from './trip/quickGo';
 import { getAirportById } from './airports/catalog';
 import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
 import {
@@ -252,7 +253,7 @@ function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): Traffic
       ? 0
       : estimateDriveMinutesFromStraightLineMiles(straightLineMiles);
 
-    return {
+    return attachTrafficRouteMetadata({
       route,
       duration,
       distanceMeters: samePlace ? 0 : Math.max(1, Math.round(straightLineMiles * 1609.34)),
@@ -266,10 +267,10 @@ function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): Traffic
           ? 'Live route data timed out; estimated from straight-line distance. Open directions to confirm.'
           : 'Live route data unavailable; estimated from straight-line distance. Open directions to confirm.',
       ],
-    };
+    });
   }
 
-  return {
+  return attachTrafficRouteMetadata({
     route,
     duration: 0,
     congestion: 'high',
@@ -283,7 +284,7 @@ function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): Traffic
         ? 'Live route data is still updating; open directions to confirm current traffic.'
         : 'Live route data unavailable; using fallback route timing.',
     ],
-  };
+  });
 }
 
 type TripDataWithTransport = TripData & {
@@ -826,18 +827,15 @@ export class RecommendationEngine {
         : Promise.resolve(null),
     ]);
 
+    const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimate);
+
     debugLog('quickgo_route_timing_result', {
       destinationText: tripData.destination,
-      timingSource: trafficEstimate.routeUnavailable
-        ? 'unavailable'
-        : trafficEstimate.sourceName === 'Estimated from coordinates'
-          ? 'fallback'
-          : trafficEstimate.trustStatus === 'live'
-            ? 'live'
-            : 'cached',
-      duration: trafficEstimate.duration,
-      routeUnavailable: trafficEstimate.routeUnavailable ?? false,
-      reason: trafficEstimate.routeUnavailableReason,
+      timingSource: effectiveTrafficEstimate.routeSource,
+      routeStatus: effectiveTrafficEstimate.routeStatus,
+      duration: effectiveTrafficEstimate.duration,
+      routeUnavailable: effectiveTrafficEstimate.routeUnavailable ?? false,
+      reason: effectiveTrafficEstimate.routeUnavailableReason,
     });
 
     const resolvedTsaEstimate = resolveSelectedTsaEstimate(tripData, tsaEstimate);
@@ -898,7 +896,7 @@ export class RecommendationEngine {
           parking = genericParkingFallback(airportCode, tripData.destination);
         }
 
-        if (allowRideshare && rideshare.length === 0 && !trafficEstimate.routeUnavailable) {
+        if (allowRideshare && rideshare.length === 0 && !effectiveTrafficEstimate.routeUnavailable) {
           rideshare = genericRideshareFallback();
         }
 
@@ -1107,11 +1105,11 @@ export class RecommendationEngine {
         ? airportReadiness?.bufferMinutes ?? 75
         : 0;
 
-    const leaveByTime = isDepartureLeg(tripData) && !trafficEstimate.routeUnavailable
+    const leaveByTime = isDepartureLeg(tripData) && !effectiveTrafficEstimate.routeUnavailable
       ? calculateLeaveByTime(
         tripData,
         resolvedTsaEstimate,
-        trafficEstimate.duration,
+        effectiveTrafficEstimate.duration,
         airportReadinessBufferMinutes + weatherBufferMinutes
       )
       : null;
@@ -1144,7 +1142,7 @@ export class RecommendationEngine {
 
     const curatedAccessOptions =
       isAirportTrip && airportCode === 'SEA'
-        ? buildSeaCuratedAccessOptions(tripData, airportCode, trafficEstimate)
+        ? buildSeaCuratedAccessOptions(tripData, airportCode, effectiveTrafficEstimate)
         : [];
 
     const discoveredParkAndRideAccess =
@@ -1153,7 +1151,7 @@ export class RecommendationEngine {
           parkAndRideParking,
           tripData,
           airportCode,
-          trafficEstimate,
+          effectiveTrafficEstimate,
         )
         : [];
 
@@ -1186,7 +1184,7 @@ export class RecommendationEngine {
           ? 'parking_timeout'
           : 'parking_failed'
         : null,
-      trafficEstimate.trustStatus === 'fallback' ? 'traffic_fallback' : null,
+      effectiveTrafficEstimate.trustStatus === 'fallback' ? 'traffic_fallback' : null,
       allowRideshare && finalRideshare.length === 0 ? 'rideshare_unavailable' : null,
       allowTransit && finalTransit.length === 0 ? 'transit_unavailable' : null,
       isAirportTrip && !flightInfo ? 'flight_info_unavailable' : null,
@@ -1197,7 +1195,7 @@ export class RecommendationEngine {
       debugLog('results_partial_data', {
         reasons: partialDataReasons,
         parkingDataStatus,
-        trafficTrustStatus: trafficEstimate.trustStatus,
+        trafficTrustStatus: effectiveTrafficEstimate.trustStatus,
       });
     }
 
@@ -1207,7 +1205,7 @@ export class RecommendationEngine {
       parkingDataStatus,
       rideshareCount: finalRideshare.length,
       transitCount: finalTransit.length,
-      routeUnavailable: Boolean(trafficEstimate.routeUnavailable),
+      routeUnavailable: Boolean(effectiveTrafficEstimate.routeUnavailable),
       partialDataReasons,
     });
 
@@ -1225,15 +1223,15 @@ export class RecommendationEngine {
               : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
           : undefined,
       tsaEstimate: resolvedTsaEstimate,
-      airportRouteUnavailable: Boolean(trafficEstimate.routeUnavailable),
-      airportRouteUnavailableReason: trafficEstimate.routeUnavailableReason,
+      airportRouteUnavailable: Boolean(effectiveTrafficEstimate.routeUnavailable),
+      airportRouteUnavailableReason: effectiveTrafficEstimate.routeUnavailableReason,
       weatherImpact,
       weatherContext: weatherResult.context,
       weatherForecastRangeStart: weatherResult.forecastRangeStart,
       weatherForecastRangeEnd: weatherResult.forecastRangeEnd,
       leaveByTime,
       tripDuration,
-      trafficEstimate,
+      trafficEstimate: effectiveTrafficEstimate,
       flightInfo: flightInfo ?? undefined,
       locationInfo: locationInfo ?? undefined,
       parkingDataStatus,

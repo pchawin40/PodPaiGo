@@ -734,6 +734,56 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(recommendation.leaveByTime).toMatch(/^\d{2}:\d{2}$/);
   });
 
+  test('Pike Place local Quick Go accepts Mapbox main-route estimate', async () => {
+    const mapboxTraffic: TrafficEstimate = {
+      route: 'custom',
+      duration: 18,
+      congestion: 'medium',
+      trustStatus: 'live',
+      routeUnavailable: false,
+      sourceName: 'Mapbox Directions',
+      routeSource: 'mapbox',
+      routeStatus: 'ready',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Backup route timing from Mapbox Directions (Google Routes unavailable).'],
+    };
+
+    const trafficSpy = jest.fn(async () => mapboxTraffic);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin: 'Monroe, WA',
+      originLat: 47.855,
+      originLng: -121.97,
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      destinationLat: 47.6097,
+      destinationLng: -122.3425,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Mapbox Directions');
+    expect(recommendation.trafficEstimate?.routeSource).toBe('mapbox');
+    expect(recommendation.trafficEstimate?.routeStatus).toBe('ready');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+  });
+
   test('airport route stays unavailable only when no usable fallback coordinates exist', async () => {
     process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
 

@@ -6,7 +6,7 @@ import {
   type DestinationParkingClassification,
 } from '../parking/destinationParkingClassifier';
 import type { RankedRecommendation } from '../domain';
-import type { DestinationKind, TransportAvailability, TripData } from '../types';
+import type { DestinationKind, TrafficEstimate, TransportAvailability, TripData } from '../types';
 import { buildResultsPathFromSearchParams } from './searchParams';
 import { deriveParkingWindowFromArrival } from './parkingWindow';
 
@@ -644,11 +644,30 @@ function formatRankedOptionLabel(option: RankedRecommendation | null): string | 
   return 'Transit';
 }
 
+export type QuickGoRouteStatus =
+  | 'idle'
+  | 'resolving_coordinates'
+  | 'google_loading'
+  | 'mapbox_loading'
+  | 'fallback_loading'
+  | 'ready'
+  | 'unavailable';
+
+export type QuickGoRouteSource =
+  | 'google_live'
+  | 'google_cached'
+  | 'mapbox'
+  | 'coordinate_fallback'
+  | 'unavailable';
+
 export type QuickGoDriveTimeInput = {
   duration?: number | null;
   routeUnavailable?: boolean;
   trustStatus?: string;
   distanceMeters?: number;
+  sourceName?: string | null;
+  routeStatus?: QuickGoRouteStatus;
+  routeSource?: QuickGoRouteSource;
 } | null | undefined;
 
 export type QuickGoDriveTime = {
@@ -656,15 +675,122 @@ export type QuickGoDriveTime = {
   minutes: number | null;
   /** True when the UI should show a "drive time unavailable" message. */
   unavailable: boolean;
+  /** True while a route request is still in flight (never treat as unavailable). */
+  loading: boolean;
+  /** True when refreshing an existing route estimate. */
+  refreshing: boolean;
+  routeStatus: QuickGoRouteStatus;
+  routeSource: QuickGoRouteSource | null;
 };
 
-/**
- * Resolve the drive time to display for a Quick Go trip. A bare `duration === 0`
- * is NOT a valid drive time (Google Routes returns 0 on the fallback path); it is
- * only treated as a real "you're already there" time when there is an explicit
- * same-place signal (zero distance on a real, non-fallback route).
- */
-export function resolveQuickGoDriveTime(traffic: QuickGoDriveTimeInput): QuickGoDriveTime {
+const QUICK_GO_ROUTE_LOADING_STATUSES = new Set<QuickGoRouteStatus>([
+  'resolving_coordinates',
+  'google_loading',
+  'mapbox_loading',
+  'fallback_loading',
+]);
+
+export function isQuickGoRouteLoading(status: QuickGoRouteStatus): boolean {
+  return QUICK_GO_ROUTE_LOADING_STATUSES.has(status);
+}
+
+export function deriveQuickGoRouteSource(
+  traffic: QuickGoDriveTimeInput,
+): QuickGoRouteSource | null {
+  if (!traffic) return null;
+
+  if (traffic.routeSource) {
+    return traffic.routeSource;
+  }
+
+  if (traffic.routeUnavailable === true) {
+    return 'unavailable';
+  }
+
+  const sourceName = String(traffic.sourceName || '').trim();
+
+  if (sourceName === 'Mapbox Directions') {
+    return 'mapbox';
+  }
+
+  if (sourceName === 'Estimated from coordinates') {
+    return 'coordinate_fallback';
+  }
+
+  if (sourceName.startsWith('Cached route snapshot')) {
+    return 'google_cached';
+  }
+
+  if (sourceName === 'Google Routes API') {
+    return traffic.trustStatus === 'live' ? 'google_live' : 'google_cached';
+  }
+
+  return null;
+}
+
+export function quickGoRouteLoadingBody(status: QuickGoRouteStatus): string {
+  switch (status) {
+    case 'resolving_coordinates':
+      return 'Finding your start and destination…';
+    case 'mapbox_loading':
+      return 'Trying backup routing source…';
+    case 'fallback_loading':
+      return 'Estimating from coordinates…';
+    case 'google_loading':
+    default:
+      return 'Checking live route timing…';
+  }
+}
+
+export function resolveQuickGoRouteStatus(input: {
+  traffic?: QuickGoDriveTimeInput;
+  routeLoading?: boolean;
+  routeRefreshing?: boolean;
+  resolvingCoordinates?: boolean;
+  hasPriorRoute?: boolean;
+}): QuickGoRouteStatus {
+  if (input.resolvingCoordinates) {
+    return 'resolving_coordinates';
+  }
+
+  if (
+    input.traffic?.routeStatus &&
+    isQuickGoRouteLoading(input.traffic.routeStatus)
+  ) {
+    return input.traffic.routeStatus;
+  }
+
+  if (input.routeLoading || input.routeRefreshing) {
+    return 'google_loading';
+  }
+
+  if (input.traffic?.routeStatus) {
+    if (input.traffic.routeStatus === 'ready' || input.traffic.routeStatus === 'unavailable') {
+      return input.traffic.routeStatus;
+    }
+  }
+
+  const resolved = resolveQuickGoDriveMinutes(input.traffic ?? null);
+
+  if (resolved.minutes != null && !resolved.unavailable) {
+    return 'ready';
+  }
+
+  if (resolved.unavailable) {
+    return 'unavailable';
+  }
+
+  if (!input.traffic) {
+    return 'idle';
+  }
+
+  return 'idle';
+}
+
+function resolveQuickGoDriveMinutes(traffic: QuickGoDriveTimeInput): {
+  minutes: number | null;
+  unavailable: boolean;
+} {
   if (!traffic) return { minutes: null, unavailable: true };
 
   if (traffic.routeUnavailable === true) {
@@ -687,6 +813,96 @@ export function resolveQuickGoDriveTime(traffic: QuickGoDriveTimeInput): QuickGo
   }
 
   return { minutes: null, unavailable: true };
+}
+
+export type ResolveQuickGoDriveTimeInput = {
+  traffic?: QuickGoDriveTimeInput;
+  routeLoading?: boolean;
+  routeRefreshing?: boolean;
+  resolvingCoordinates?: boolean;
+  priorMinutes?: number | null;
+};
+
+/**
+ * Resolve the drive time to display for a Quick Go trip. A bare `duration === 0`
+ * is NOT a valid drive time (Google Routes returns 0 on the fallback path); it is
+ * only treated as a real "you're already there" time when there is an explicit
+ * same-place signal (zero distance on a real, non-fallback route).
+ *
+ * Loading and refresh states never collapse into unavailable.
+ */
+export function resolveQuickGoDriveTime(
+  trafficOrInput: QuickGoDriveTimeInput | ResolveQuickGoDriveTimeInput,
+): QuickGoDriveTime {
+  const input: ResolveQuickGoDriveTimeInput =
+    trafficOrInput &&
+    typeof trafficOrInput === 'object' &&
+    ('routeLoading' in trafficOrInput ||
+      'routeRefreshing' in trafficOrInput ||
+      'resolvingCoordinates' in trafficOrInput ||
+      'priorMinutes' in trafficOrInput ||
+      'traffic' in trafficOrInput)
+      ? (trafficOrInput as ResolveQuickGoDriveTimeInput)
+      : { traffic: trafficOrInput as QuickGoDriveTimeInput };
+
+  const traffic = input.traffic ?? null;
+  const priorMinutes =
+    typeof input.priorMinutes === 'number' && Number.isFinite(input.priorMinutes)
+      ? input.priorMinutes
+      : null;
+  const hasPriorRoute = priorMinutes != null;
+  const routeStatus = resolveQuickGoRouteStatus({
+    traffic,
+    routeLoading: input.routeLoading,
+    routeRefreshing: input.routeRefreshing,
+    resolvingCoordinates: input.resolvingCoordinates,
+    hasPriorRoute,
+  });
+  const loading = isQuickGoRouteLoading(routeStatus);
+  const refreshing = Boolean(input.routeRefreshing && hasPriorRoute);
+  const resolved = resolveQuickGoDriveMinutes(traffic);
+
+  if (loading) {
+    return {
+      minutes: refreshing ? priorMinutes : null,
+      unavailable: false,
+      loading: true,
+      refreshing,
+      routeStatus,
+      routeSource: deriveQuickGoRouteSource(traffic),
+    };
+  }
+
+  if (resolved.minutes != null && !resolved.unavailable) {
+    return {
+      minutes: resolved.minutes,
+      unavailable: false,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'ready',
+      routeSource: deriveQuickGoRouteSource(traffic),
+    };
+  }
+
+  return {
+    minutes: null,
+    unavailable: true,
+    loading: false,
+    refreshing: false,
+    routeStatus: 'unavailable',
+    routeSource: deriveQuickGoRouteSource(traffic),
+  };
+}
+
+export function attachTrafficRouteMetadata(estimate: TrafficEstimate): TrafficEstimate {
+  const resolved = resolveQuickGoDriveMinutes(estimate);
+  const routeSource = deriveQuickGoRouteSource(estimate) ?? 'unavailable';
+
+  return {
+    ...estimate,
+    routeSource,
+    routeStatus: resolved.unavailable ? 'unavailable' : 'ready',
+  };
 }
 
 export function resolveQuickGoBestWay(input: {

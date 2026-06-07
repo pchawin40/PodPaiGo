@@ -44,7 +44,12 @@ const recommendation = {
   }),
 } satisfies Recommendation;
 
-function trafficEstimate(overrides: Partial<TrafficEstimate>): TrafficEstimate {
+function trafficEstimate(
+  overrides: Partial<TrafficEstimate> & {
+    routeStatus?: TrafficEstimate['routeStatus'];
+    routeSource?: TrafficEstimate['routeSource'];
+  },
+): TrafficEstimate {
   return {
     route: 'origin-to-destination',
     duration: 24,
@@ -252,7 +257,7 @@ describe('QuickGoResultsView', () => {
 
     expect(screen.queryByText('0 min')).not.toBeInTheDocument();
     expect(screen.getByText('Drive time unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Open directions to confirm drive time')).toBeInTheDocument();
+    expect(screen.getByText('Open directions to confirm drive time.')).toBeInTheDocument();
   });
 
   test('shows fallback text when a fallback estimate returns 0 duration', () => {
@@ -507,6 +512,111 @@ describe('QuickGoResultsView', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 min drive/i)).not.toBeInTheDocument();
     expect(screen.queryByText('16 min')).not.toBeInTheDocument();
+  });
+
+  test('shows calculating drive time while route is loading', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Grocery store',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={tripData}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: undefined,
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeLoading
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.getByText('Finding your start and destination…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Calculating…')).toBeInTheDocument();
+    expect(screen.getByText('Drive time')).toBeInTheDocument();
+  });
+
+  test('keeps prior drive time visible while refreshing', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 4,
+            trustStatus: 'live',
+            sourceName: 'Google Routes API',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeRefreshing
+        priorDriveMinutes={4}
+      />,
+    );
+
+    expect(screen.getByText('Refreshing…')).toBeInTheDocument();
+    expect(screen.getByText('Previous estimate: 4 min')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('marks drive time card as busy while loading', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Pike Place Market, Seattle, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    const { container } = render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Pike Place Market, Seattle, WA',
+          destinationName: 'Pike Place Market',
+          destinationKind: 'downtown',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 4,
+            trustStatus: 'live',
+            sourceName: 'Mapbox Directions',
+            routeSource: 'mapbox',
+            routeStatus: 'ready',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeLoading
+      />,
+    );
+
+    expect(container.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    expect(screen.getAllByRole('status').length).toBeGreaterThan(0);
   });
 
   test('shows backup route estimate label without foregrounding Mapbox', () => {
