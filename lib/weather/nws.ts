@@ -67,6 +67,120 @@ function buildWeatherImpact(period: NwsHourlyPeriod): WeatherImpact {
   };
 }
 
+const EXPLICIT_TIME_ZONE_PATTERN = /(?:z|[+-]\d{2}:?\d{2})$/i;
+
+function parseLocalDateTimeParts(value: string):
+  | {
+      year: number;
+      month: number;
+      day: number;
+      hour: number;
+      minute: number;
+      second: number;
+    }
+  | null {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second] = match;
+  const parts = {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour: Number(hour),
+    minute: Number(minute),
+    second: Number(second || '0'),
+  };
+
+  if (
+    !Number.isInteger(parts.year) ||
+    !Number.isInteger(parts.month) ||
+    !Number.isInteger(parts.day) ||
+    !Number.isInteger(parts.hour) ||
+    !Number.isInteger(parts.minute) ||
+    !Number.isInteger(parts.second)
+  ) {
+    return null;
+  }
+
+  return parts;
+}
+
+function timeZoneOffsetMs(timeZone: string, date: Date): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  const values = new Map(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  );
+
+  const asUtc = Date.UTC(
+    values.get('year') ?? date.getUTCFullYear(),
+    (values.get('month') ?? date.getUTCMonth() + 1) - 1,
+    values.get('day') ?? date.getUTCDate(),
+    values.get('hour') ?? date.getUTCHours(),
+    values.get('minute') ?? date.getUTCMinutes(),
+    values.get('second') ?? date.getUTCSeconds(),
+  );
+
+  return asUtc - date.getTime();
+}
+
+function zonedLocalDateTimeToUtcMs(
+  parts: NonNullable<ReturnType<typeof parseLocalDateTimeParts>>,
+  timeZone: string,
+): number {
+  const localAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+
+  let utc = localAsUtc;
+  for (let i = 0; i < 3; i += 1) {
+    const offset = timeZoneOffsetMs(timeZone, new Date(utc));
+    utc = localAsUtc - offset;
+  }
+
+  return utc;
+}
+
+function parseTargetDateTimeMs(
+  targetDateTime: string,
+  timeZone?: string,
+): number {
+  if (EXPLICIT_TIME_ZONE_PATTERN.test(targetDateTime)) {
+    return new Date(targetDateTime).getTime();
+  }
+
+  const localParts = parseLocalDateTimeParts(targetDateTime);
+  if (localParts && timeZone) {
+    try {
+      return zonedLocalDateTimeToUtcMs(localParts, timeZone);
+    } catch {
+      return new Date(targetDateTime).getTime();
+    }
+  }
+
+  return new Date(targetDateTime).getTime();
+}
+
 function findFirstPeriodAtOrAfter(
   periods: NwsHourlyPeriod[],
   targetTime: number
@@ -114,6 +228,10 @@ export async function getWeatherForAirport(args: {
 
     const pointData = await pointRes.json();
     const hourlyUrl = pointData.properties?.forecastHourly;
+    const timeZone =
+      typeof pointData.properties?.timeZone === 'string'
+        ? pointData.properties.timeZone
+        : undefined;
 
     if (!hourlyUrl) {
       return {
@@ -158,7 +276,7 @@ export async function getWeatherForAirport(args: {
     }
 
     if (args.targetDateTime) {
-      const targetTime = new Date(args.targetDateTime).getTime();
+      const targetTime = parseTargetDateTimeMs(args.targetDateTime, timeZone);
       if (!Number.isFinite(targetTime)) {
         return {
           weatherImpact: null,
@@ -251,6 +369,10 @@ export async function getWeatherForPoint(args: {
 
     const pointData = await pointRes.json();
     const hourlyUrl = pointData.properties?.forecastHourly;
+    const timeZone =
+      typeof pointData.properties?.timeZone === 'string'
+        ? pointData.properties.timeZone
+        : undefined;
 
     if (!hourlyUrl) {
       return {
@@ -295,7 +417,7 @@ export async function getWeatherForPoint(args: {
     }
 
     if (args.targetDateTime) {
-      const targetTime = new Date(args.targetDateTime).getTime();
+      const targetTime = parseTargetDateTimeMs(args.targetDateTime, timeZone);
       if (!Number.isFinite(targetTime)) {
         return {
           weatherImpact: null,

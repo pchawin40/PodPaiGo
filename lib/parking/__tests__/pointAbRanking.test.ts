@@ -1,4 +1,4 @@
-import type { ParkingOption } from '../types';
+import type { ParkingOption } from '../../types';
 import {
   computePointAbPreferenceBoost,
   formatPointAbRideshareCost,
@@ -201,7 +201,7 @@ describe('pointAbRanking', () => {
     });
 
     expect(signal.freeLikely).toBe(true);
-    expect(signal.headline).toBe('Free street parking may be available today');
+    expect(signal.headline).toBe('Likely free street parking');
   });
 
   test('airport trips exclude street parking through local rules penalty', () => {
@@ -242,6 +242,10 @@ describe('pointAbRanking', () => {
   test('high rideshare fares show a convenience/high-cost note', () => {
     expect(formatPointAbRideshareCost(112).note).toBe('High cost');
     expect(formatPointAbRideshareCost(52).note).toBe('Convenience option');
+    expect(formatPointAbRideshareCost(null)).toEqual({
+      primary: 'Open app for live price',
+      note: 'Fare estimate unavailable',
+    });
   });
 
   test('RecommendationStatusBadge labels stay short and consistent', () => {

@@ -14,9 +14,10 @@ describe('googleParkingOptionsSignals', () => {
     });
 
     expect(bundle.hints.map((hint) => hint.label)).toEqual([
-      'Paid parking likely',
+      'Paid garage or lot parking likely',
       'Metered street parking may be nearby',
     ]);
+    expect(bundle.hints.map((hint) => hint.category)).toEqual(['garage_paid', 'street']);
   });
 
   test('builds customer lot and street hints for local trips', () => {
@@ -32,9 +33,21 @@ describe('googleParkingOptionsSignals', () => {
     expect(bundle.hints.map((hint) => hint.label)).toEqual([
       'Free customer parking likely',
       'Free street parking may be available nearby',
-      'Paid parking likely',
+      'Paid garage or lot parking likely',
     ]);
     expect(bundle.verifyNotice).toContain('Verify posted signs');
+  });
+
+  test('free garage parking remains provider-reported free parking', () => {
+    const bundle = buildParkingOptionsHints({ freeGarageParking: true });
+
+    expect(inferParkingCategoryFromSignals({ freeGarageParking: true })).toBe('customer_lot');
+    expect(bundle.hints).toEqual([
+      expect.objectContaining({
+        category: 'customer_lot',
+        label: 'Free garage parking reported',
+      }),
+    ]);
   });
 
   test('does not recommend street parking hints for airport trips', () => {

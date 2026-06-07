@@ -12,6 +12,13 @@ import {
 } from './googleParkingOptionsSignals';
 import { evaluateLocalStreetParkingRules } from './localParkingRules';
 import { matchCuratedLocalParkingZone } from './localParkingZones';
+import {
+  seattleStreetParkingExpectationLabel,
+} from './seattleStreetParkingRules';
+import {
+  CITY_STREET_PARKING_SPECIAL_SIGNAL_LABELS,
+  type CityStreetParkingSpecialSignal,
+} from './cityStreetParkingRules';
 
 export type ParkingOutlookStatus =
   | 'free_customer_likely'
@@ -24,6 +31,7 @@ export type ParkingOutlookSource =
   | 'google_parking_options'
   | 'curated_local_rule'
   | 'city_rule'
+  | 'generic_us_city_rule'
   | 'destination_type_inference'
   | 'unknown';
 
@@ -43,6 +51,7 @@ export type ParkingOutlook = {
   caveat: string;
   appliesToday?: boolean;
   ruleDetails?: ParkingOutlookRuleDetails;
+  specialSignals?: CityStreetParkingSpecialSignal[];
 };
 
 export type ParkingOutlookDiagnostics = {
@@ -65,11 +74,31 @@ const VERIFY_CAVEAT = 'Verify posted signs and lot rules before you park.';
 
 const STATUS_HEADLINES: Record<ParkingOutlookStatus, string> = {
   free_customer_likely: 'Free customer parking likely',
-  free_street_possible: 'Free street parking may be available nearby',
-  paid_parking_likely: 'Paid parking likely',
+  free_street_possible: 'Likely free street parking',
+  paid_parking_likely: 'Likely paid street parking',
   parking_not_confirmed: 'Parking not confirmed yet',
   no_parking_needed: 'No parking needed',
 };
+
+function seattleStreetOutlookStatus(
+  paymentExpectation: 'likely_free' | 'likely_paid' | 'check_signs' | undefined,
+): ParkingOutlookStatus {
+  switch (paymentExpectation) {
+    case 'likely_free':
+      return 'free_street_possible';
+    case 'likely_paid':
+      return 'paid_parking_likely';
+    case 'check_signs':
+      return 'parking_not_confirmed';
+    default:
+      return 'parking_not_confirmed';
+  }
+}
+
+function appendStreetRuleSubtext(reason: string, supplementalText?: string): string {
+  if (!supplementalText) return reason;
+  return `${reason} ${supplementalText}`;
+}
 
 function consumerConfidenceLabel(
   confidence: DestinationParkingClassification['confidence'] | ParkingOutlook['confidence'],
@@ -103,6 +132,8 @@ function sourceChip(source: ParkingOutlookSource): string | null {
       return 'Google signal';
     case 'city_rule':
       return 'Seattle rule';
+    case 'generic_us_city_rule':
+      return 'City estimate';
     case 'curated_local_rule':
       return 'Local rule';
     case 'destination_type_inference':
@@ -162,6 +193,18 @@ function resolveGeneralParkingOutlook(input: {
     destinationKind: input.destinationKind,
   });
 
+  if (signals?.freeGarageParking) {
+    return {
+      status: 'free_customer_likely',
+      headline: STATUS_HEADLINES.free_customer_likely,
+      reason:
+        'Google Places reports free garage parking at this destination. Verify the garage rules before parking.',
+      source: 'google_parking_options',
+      confidence: 'high',
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
   if (signals?.freeParkingLot && !denseUrban) {
     return {
       status: 'free_customer_likely',
@@ -185,29 +228,28 @@ function resolveGeneralParkingOutlook(input: {
     };
   }
 
-  if (localRules.paidLikely && localRules.detail) {
+  if (
+    localRules.detail &&
+    localRules.paymentExpectation &&
+    !(localRules.rulesSource === 'us_city_fallback' && googleHasPaidSignals(signals)) &&
+    (localRules.freeLikely || localRules.paidLikely || localRules.paymentExpectation === 'check_signs')
+  ) {
+    const status = seattleStreetOutlookStatus(localRules.paymentExpectation);
+    const headline =
+      localRules.headline ||
+      seattleStreetParkingExpectationLabel(localRules.paymentExpectation);
+    const source: ParkingOutlookSource =
+      localRules.rulesSource === 'seattle' ? 'city_rule' : 'generic_us_city_rule';
     return {
-      status: 'paid_parking_likely',
-      headline: STATUS_HEADLINES.paid_parking_likely,
-      reason: localRules.detail,
-      source: 'city_rule',
-      confidence: 'medium',
+      status,
+      headline,
+      reason: appendStreetRuleSubtext(localRules.detail, localRules.supplementalText),
+      source,
+      confidence: localRules.confidence ?? 'medium',
       caveat: VERIFY_CAVEAT,
       appliesToday: localRules.appliesToday,
       ruleDetails: localRules.ruleDetails,
-    };
-  }
-
-  if (localRules.freeLikely && localRules.appliesToday && localRules.detail) {
-    return {
-      status: 'free_street_possible',
-      headline: 'Free street parking may be available today',
-      reason: localRules.detail,
-      source: 'city_rule',
-      confidence: 'medium',
-      caveat: VERIFY_CAVEAT,
-      appliesToday: true,
-      ruleDetails: localRules.ruleDetails,
+      specialSignals: localRules.specialSignals,
     };
   }
 
@@ -262,7 +304,7 @@ function resolveGeneralParkingOutlook(input: {
     };
   }
 
-  if (denseUrban) {
+  if (denseUrban && !localRules.paymentExpectation) {
     return {
       status: 'paid_parking_likely',
       headline: STATUS_HEADLINES.paid_parking_likely,
@@ -321,6 +363,11 @@ function collectExtraHints(input: {
 
   if (localRules.detail?.includes('longer than the posted limit')) {
     hints.push('Your stay may exceed posted street limits');
+  }
+
+  for (const signal of localRules.specialSignals || []) {
+    const label = CITY_STREET_PARKING_SPECIAL_SIGNAL_LABELS[signal];
+    if (label) hints.push(label);
   }
 
   if (input.googleParkingOptions?.valetParking) {

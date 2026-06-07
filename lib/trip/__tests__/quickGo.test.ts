@@ -6,6 +6,7 @@ import {
   isQuickGoMode,
   mergeStoredTripSearchParams,
   quickGoParkingExpectationLabel,
+  quickGoParkingHeadline,
   quickGoClassificationForTrip,
   deriveQuickGoDisplayRouteState,
   quickGoRouteHydrationStateForFinalResult,
@@ -339,6 +340,112 @@ describe('quickGo', () => {
     });
 
     expect(quickGoParkingExpectationLabel(classification)).toMatch(/Restricted/);
+  });
+
+  test('Seattle weekday downtown uses time-aware paid street label', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+    });
+    const context = {
+      destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+      arrivalDate: '2026-06-02',
+      arrivalTime: '10:00',
+    };
+
+    expect(quickGoParkingExpectationLabel(classification, context)).toBe(
+      'Likely paid street parking',
+    );
+    expect(quickGoParkingHeadline(classification, context)).toMatch(
+      /Seattle payment hours/i,
+    );
+  });
+
+  test('Pike Place Sunday evening is not always likely paid in Quick Go', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Pike Place Market, Seattle, WA',
+    });
+    const context = {
+      destination: 'Pike Place Market, Seattle, WA',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '19:30',
+    };
+
+    expect(classification.mode).toBe('paid_likely');
+    expect(quickGoParkingExpectationLabel(classification, context)).toBe(
+      'Likely free street parking',
+    );
+    expect(quickGoParkingHeadline(classification, context)).toContain(
+      'Street parking estimate based on Seattle payment hours. Garages/lots may still charge.',
+    );
+  });
+
+  test('Seattle weekday 9 PM Quick Go asks users to check signs', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Capitol Hill, Seattle, WA',
+    });
+    const context = {
+      destination: 'Capitol Hill, Seattle, WA',
+      arrivalDate: '2026-06-03',
+      arrivalTime: '21:00',
+    };
+
+    expect(quickGoParkingExpectationLabel(classification, context)).toBe(
+      'Check signs / special rules possible',
+    );
+    expect(quickGoParkingHeadline(classification, context)).toMatch(/8 PM and 10 PM/i);
+  });
+
+  test('non-Seattle U.S. city Sunday Quick Go checks signs instead of assuming free', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Downtown Manhattan, New York, NY',
+      destinationKind: 'downtown',
+    });
+    const context = {
+      destination: 'Downtown Manhattan, New York, NY',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '14:00',
+    };
+
+    expect(quickGoParkingExpectationLabel(classification, context)).toBe(
+      'Check signs / special rules possible',
+    );
+    expect(quickGoParkingHeadline(classification, context)).toMatch(
+      /Sunday street parking payment rules vary by U\.S\. city/i,
+    );
+    expect(quickGoParkingHeadline(classification, context)).not.toMatch(
+      /Seattle payment hours/i,
+    );
+  });
+
+  test('non-Seattle U.S. city evening Quick Go stays conservative', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Downtown Chicago, IL',
+      destinationKind: 'downtown',
+    });
+    const context = {
+      destination: 'Downtown Chicago, IL',
+      arrivalDate: '2026-06-03',
+      arrivalTime: '21:00',
+    };
+
+    expect(quickGoParkingExpectationLabel(classification, context)).toBe(
+      'Check signs / special rules possible',
+    );
+    expect(quickGoParkingHeadline(classification, context)).toMatch(
+      /Some districts charge until 10 PM or during special events/i,
+    );
+  });
+
+  test('Seattle grocery stores keep free customer parking label', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Safeway, Seattle, WA',
+    });
+
+    expect(quickGoParkingExpectationLabel(classification, {
+      destination: 'Safeway, Seattle, WA',
+      arrivalDate: '2026-06-02',
+      arrivalTime: '10:00',
+    })).toBe('Free customer parking likely');
   });
 
   test('airport destination is detected for Quick Go', () => {

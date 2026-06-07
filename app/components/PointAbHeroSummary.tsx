@@ -59,8 +59,14 @@ export default function PointAbHeroSummary({
   const cheapest = ranking.cheapestMode;
   const fastest = ranking.fastestMode;
 
+  const bestModeHasSpecificTime =
+    bestMode?.time &&
+    bestMode.time !== 'Check route' &&
+    bestMode.time !== 'Check app' &&
+    bestMode.time !== 'Open app';
+
   const bestDetail = bestMode
-    ? `${bestMode.cost}${bestMode.time !== 'Check route' && bestMode.time !== 'Check app' ? ` · ${bestMode.time}` : ''}`
+    ? `${bestMode.cost}${bestModeHasSpecificTime ? ` · ${bestMode.time}` : ''}`
     : driveTimeLabel
       ? `Compare modes · drive ~${driveTimeLabel}`
       : 'Open details below to compare modes';

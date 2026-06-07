@@ -15,8 +15,10 @@ import {
   quickGoParkingHeadline,
   quickGoRouteLoadingBody,
   quickGoStressLabel,
+  resolveQuickGoStreetParkingSignal,
   resolveQuickGoLocalTripTiming,
   type QuickGoDriveTime,
+  type QuickGoParkingExpectationContext,
   type QuickGoRouteStatus,
 } from '../../lib/trip/quickGo';
 import type { ParkingOption, TripData, TrustStatus } from '../../lib/types';
@@ -165,6 +167,24 @@ function parkingTotalBreakdown(
   };
 }
 
+function quickGoParkingContextForTrip(
+  tripData: TripData,
+  destination: string,
+): QuickGoParkingExpectationContext {
+  const isGeneralTrip = tripData.type === 'general-trip';
+  return {
+    destination: tripData.destination || destination,
+    destinationLat: tripData.destinationLat,
+    destinationLng: tripData.destinationLng,
+    arrivalDate: isGeneralTrip
+      ? tripData.parkingCheckInDate || tripData.arrivalDate
+      : undefined,
+    arrivalTime: isGeneralTrip
+      ? tripData.parkingCheckInTime || tripData.arrivalTime
+      : undefined,
+  };
+}
+
 export default function QuickGoResultsCard({
   tripData,
   originDisplayLabel,
@@ -189,7 +209,21 @@ export default function QuickGoResultsCard({
     quickGoClassificationForTrip({
       destination,
       destinationKind: tripData.destinationKind,
-    });
+  });
+  const parkingExpectationContext = quickGoParkingContextForTrip(tripData, destination);
+  const streetParkingSignal =
+    resolveQuickGoStreetParkingSignal(parkingExpectationContext);
+  const parkingExpectationLabel =
+    quickGoParkingExpectationLabel(classification, parkingExpectationContext);
+  const parkingExpectationHeadline =
+    quickGoParkingHeadline(classification, parkingExpectationContext);
+  const usingStreetParkingSignal =
+    Boolean(streetParkingSignal?.headline) &&
+    parkingExpectationLabel === streetParkingSignal?.headline;
+  const parkingConfidence =
+    usingStreetParkingSignal
+      ? streetParkingSignal?.confidence ?? classification.confidence
+      : classification.confidence;
 
   const directionsUrl =
     tripData.origin && destination
@@ -364,10 +398,10 @@ export default function QuickGoResultsCard({
             Parking expectation
           </dt>
           <dd className="mt-2 text-lg font-semibold text-foreground">
-            {quickGoParkingExpectationLabel(classification)}
+            {parkingExpectationLabel}
           </dd>
           <dd className="mt-1 text-sm text-muted-foreground">
-            {quickGoParkingHeadline(classification)}
+            {parkingExpectationHeadline}
           </dd>
         </div>
 
@@ -376,7 +410,7 @@ export default function QuickGoResultsCard({
             Parking confidence
           </dt>
           <dd className="mt-2 text-lg font-semibold text-foreground">
-            {quickGoParkingConfidenceLabel(classification.confidence)}
+            {quickGoParkingConfidenceLabel(parkingConfidence)}
           </dd>
         </div>
 

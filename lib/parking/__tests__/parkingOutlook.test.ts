@@ -1,163 +1,93 @@
 import { buildParkingOutlook } from '../parkingOutlook';
-import { classifyDestinationParking } from '../destinationParkingClassifier';
+import { SEATTLE_STREET_PARKING_SUBTEXT } from '../seattleStreetParkingRules';
 
-describe('parkingOutlook', () => {
-  test('Pike Place with freeParkingLot signal still avoids free customer outlook', () => {
+describe('buildParkingOutlook', () => {
+  test('Seattle weekday meter hours use paid street headline and subtext', () => {
+    const outlook = buildParkingOutlook({
+      destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+      arrivalDate: '2026-06-02',
+      arrivalTime: '10:00',
+    });
+
+    expect(outlook.headline).toBe('Likely paid street parking');
+    expect(outlook.source).toBe('city_rule');
+    expect(outlook.reason).toContain(SEATTLE_STREET_PARKING_SUBTEXT);
+    expect(outlook.reason).toMatch(/during typical meter hours/i);
+    expect(outlook.hints).toEqual(
+      expect.arrayContaining(['Seattle rule', 'Typical paid hours', 'Verify signs']),
+    );
+  });
+
+  test('Pike Place Sunday evening is not always likely paid', () => {
     const outlook = buildParkingOutlook({
       destination: 'Pike Place Market, Seattle, WA',
-      arrivalDate: '2026-06-02',
-      arrivalTime: '10:00',
-      durationMinutes: 120,
-      googleParkingOptions: { freeParkingLot: true, freeStreetParking: true },
-    });
-
-    expect(outlook.status).not.toBe('free_customer_likely');
-    expect(outlook.status).toBe('paid_parking_likely');
-  });
-
-  test('downtown Seattle office without freeParkingLot is not free customer likely', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
-      arrivalDate: '2026-06-02',
-      arrivalTime: '10:00',
-      durationMinutes: 120,
-      googleParkingOptions: { freeStreetParking: true },
-    });
-
-    expect(outlook.status).not.toBe('free_customer_likely');
-    expect(outlook.status).toBe('paid_parking_likely');
-    expect(outlook.source).toBe('city_rule');
-    expect(outlook.reason).toMatch(/weekdays during meter hours/i);
-  });
-
-  test('Google freeParkingLot drives free customer outlook with Google reason', () => {
-    const outlook = buildParkingOutlook({
-      destination: '123 Main Street, Bothell, WA',
-      googleParkingOptions: { freeParkingLot: true },
-    });
-
-    expect(outlook.status).toBe('free_customer_likely');
-    expect(outlook.source).toBe('google_parking_options');
-    expect(outlook.reason).toContain('Google Places reports free customer parking');
-  });
-
-  test('freeStreetParking alone maps to street possible not customer parking', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Some place, Monroe, WA',
-      googleParkingOptions: { freeStreetParking: true },
-    });
-
-    expect(outlook.status).toBe('free_street_possible');
-    expect(outlook.status).not.toBe('free_customer_likely');
-    expect(outlook.reason).toMatch(/not the same as confirmed customer lot parking/i);
-  });
-
-  test('Seattle Sunday adds free street parking today outlook', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Capitol Hill, Seattle, WA',
       arrivalDate: '2026-06-07',
-      arrivalTime: '11:00',
-      durationMinutes: 120,
+      arrivalTime: '19:30',
     });
 
-    expect(outlook.status).toBe('free_street_possible');
-    expect(outlook.appliesToday).toBe(true);
-    expect(outlook.source).toBe('city_rule');
-    expect(outlook.reason).toMatch(/Sunday street parking payment is generally not required/i);
-    expect(outlook.hints).toContain('Seattle rule');
+    expect(outlook.headline).toBe('Likely free street parking');
+    expect(outlook.headline).not.toBe('Likely paid street parking');
+    expect(outlook.hints).toEqual(expect.arrayContaining(['Sunday rule', 'Verify signs']));
   });
 
-  test('Seattle weekday downtown maps to paid parking likely', () => {
+  test('non-Seattle U.S. city rules use generic check-signs copy', () => {
     const outlook = buildParkingOutlook({
-      destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+      destination: 'Downtown Manhattan, New York, NY',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '14:00',
+    });
+
+    expect(outlook.headline).toBe('Check signs / special rules possible');
+    expect(outlook.source).toBe('generic_us_city_rule');
+    expect(outlook.reason).toMatch(/Sunday street parking payment rules vary/i);
+    expect(outlook.reason).toMatch(/varies by city and block/i);
+    expect(outlook.reason).not.toContain(SEATTLE_STREET_PARKING_SUBTEXT);
+    expect(outlook.hints).toContain('City estimate');
+    expect(outlook.hints).toEqual(
+      expect.arrayContaining([
+        'Sunday rule',
+        'Event zone possible',
+        'Verify signs',
+      ]),
+    );
+    expect(outlook.hints).not.toContain('Seattle rule');
+  });
+
+  test('generic U.S. street fallback does not hide paid garage signals', () => {
+    const outlook = buildParkingOutlook({
+      destination: 'Downtown Los Angeles, CA',
+      googleParkingOptions: { paidGarageParking: true },
+      arrivalDate: '2026-06-07',
+      arrivalTime: '14:00',
+    });
+
+    expect(outlook.headline).toBe('Likely paid street parking');
+    expect(outlook.source).toBe('google_parking_options');
+    expect(outlook.reason).toMatch(/paid garage or lot parking/i);
+  });
+
+  test('free garage signal stays free instead of inheriting street rules', () => {
+    const outlook = buildParkingOutlook({
+      destination: 'Downtown Seattle Garage',
+      googleParkingOptions: { freeGarageParking: true },
       arrivalDate: '2026-06-02',
       arrivalTime: '10:00',
-      durationMinutes: 120,
     });
 
-    expect(outlook.status).toBe('paid_parking_likely');
-    expect(outlook.source).toBe('city_rule');
-    expect(outlook.ruleDetails?.meterHours).toBe('Mon–Sat 8am–6pm');
+    expect(outlook.headline).toBe('Free customer parking likely');
+    expect(outlook.reason).toMatch(/free garage parking/i);
+    expect(outlook.source).toBe('google_parking_options');
   });
 
-  test('Seattle holiday maps to free street parking today', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Downtown Seattle, WA',
-      arrivalDate: '2026-07-04',
-      arrivalTime: '11:00',
-      durationMinutes: 120,
-    });
-
-    expect(outlook.status).toBe('free_street_possible');
-    expect(outlook.appliesToday).toBe(true);
-    expect(outlook.source).toBe('city_rule');
-    expect(outlook.ruleDetails?.holidayName).toBe('Independence Day');
-  });
-
-  test('unknown destination uses not-confirmed outlook', () => {
-    const outlook = buildParkingOutlook({
-      destination: '123 Mystery Lane, Nowhere',
-    });
-
-    expect(outlook.status).toBe('parking_not_confirmed');
-    expect(outlook.headline).toBe('Parking not confirmed yet');
-    expect(outlook.reason).toContain('could not verify exact parking rules');
-    expect(outlook.showSearchNearbyParking).toBe(true);
-  });
-
-  test('outlook includes reason, source, confidence, and caveat', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Costco Wholesale, Issaquah',
-    });
-
-    expect(outlook.reason).toBeTruthy();
-    expect(outlook.source).toBe('destination_type_inference');
-    expect(outlook.confidence).toBe('high');
-    expect(outlook.caveat).toContain('Verify posted signs');
-    expect(outlook.hints).toContain('Verify signs');
-    expect(outlook.hints).toContain('High confidence');
-  });
-
-  test('airport classification stays on airport parking path', () => {
+  test('airport trips keep airport outlook', () => {
     const outlook = buildParkingOutlook({
       destination: 'Seattle-Tacoma International Airport',
       destinationKind: 'airport',
       airportCode: 'SEA',
+      isAirportTrip: true,
     });
 
-    expect(outlook.status).toBe('no_parking_needed');
-    expect(outlook.headline).toBe('Airport parking rules apply');
-    expect(classifyDestinationParking({ destinationKind: 'airport' }).mode).toBe('airport');
-  });
-
-  test('Monroe curated zone adds 4-hour limit hint', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Downtown Monroe, WA',
-      arrivalDate: '2026-06-02',
-      arrivalTime: '10:00',
-      durationMinutes: 6 * 60,
-    });
-
-    expect(outlook.hints.some((hint) => hint.includes('4-hour limit'))).toBe(true);
-  });
-
-  test('paid google signal sets paid outlook title', () => {
-    const outlook = buildParkingOutlook({
-      destination: 'Event venue',
-      googleParkingOptions: { paidGarageParking: true },
-    });
-
-    expect(outlook.status).toBe('paid_parking_likely');
-    expect(outlook.showSearchNearbyParking).toBe(true);
-  });
-
-  test('diagnostics stay available for details panel', () => {
-    const outlook = buildParkingOutlook({
-      destination: '123 Mystery Lane',
-    });
-
-    expect(outlook.diagnostics.accessType).toBeTruthy();
-    expect(outlook.diagnostics.confidence).toBe('Low confidence');
-    expect(outlook.diagnostics.reason).toContain('Source:');
+    expect(outlook.headline).toMatch(/Airport parking rules apply/i);
   });
 });

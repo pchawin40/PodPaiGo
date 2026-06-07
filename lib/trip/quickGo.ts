@@ -5,6 +5,7 @@ import {
   isRetailOrGroceryDestination,
   type DestinationParkingClassification,
 } from '../parking/destinationParkingClassifier';
+import { evaluateLocalStreetParkingRules } from '../parking/localParkingRules';
 import type { RankedRecommendation } from '../domain';
 import type { DestinationKind, TrafficEstimate, TransportAvailability, TripData } from '../types';
 import { debugLog } from '../utils/debug';
@@ -555,14 +556,70 @@ export function buildFullAirportPlannerPath(input: {
   return buildResultsPathFromSearchParams(buildFullAirportPlannerSearchParams(input));
 }
 
+export type QuickGoParkingExpectationContext = {
+  destination: string;
+  destinationLat?: number;
+  destinationLng?: number;
+  destinationCity?: string | null;
+  arrivalDate?: string | null;
+  arrivalTime?: string | null;
+};
+
+function shouldUseStreetParkingOutlook(
+  classification: DestinationParkingClassification,
+): boolean {
+  if (classification.mode === 'airport') return false;
+  if (classification.mode === 'restricted_possible') return false;
+  if (
+    classification.mode === 'free_likely' &&
+    classification.accessType === 'customer_only'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function resolveQuickGoStreetParkingSignal(
+  context?: QuickGoParkingExpectationContext | null,
+) {
+  if (!context?.destination?.trim()) return null;
+
+  const localRules = evaluateLocalStreetParkingRules({
+    destination: context.destination,
+    destinationLat: context.destinationLat,
+    destinationLng: context.destinationLng,
+    destinationCity: context.destinationCity,
+    arrivalDate: context.arrivalDate,
+    arrivalTime: context.arrivalTime,
+    durationMinutes: 120,
+    isAirportTrip: false,
+    parkingType: 'street',
+  });
+
+  if (!localRules.paymentExpectation || !localRules.headline) return null;
+  return localRules;
+}
+
+export function resolveQuickGoSeattleStreetParkingSignal(
+  context?: QuickGoParkingExpectationContext | null,
+) {
+  return resolveQuickGoStreetParkingSignal(context);
+}
+
 export function quickGoParkingExpectationLabel(
   classification: DestinationParkingClassification,
+  context?: QuickGoParkingExpectationContext | null,
 ): string {
+  if (shouldUseStreetParkingOutlook(classification)) {
+    const street = resolveQuickGoStreetParkingSignal(context);
+    if (street?.headline) return street.headline;
+  }
+
   switch (classification.mode) {
     case 'free_likely':
       return 'Free customer parking likely';
     case 'paid_likely':
-      return 'Likely paid';
+      return 'Likely paid street parking';
     case 'restricted_possible':
       return 'Restricted / employee only';
     case 'validated_possible':
@@ -574,6 +631,19 @@ export function quickGoParkingExpectationLabel(
     default:
       return 'Unknown';
   }
+}
+
+export function quickGoParkingExpectationSubtext(
+  classification: DestinationParkingClassification,
+  context?: QuickGoParkingExpectationContext | null,
+): string | null {
+  if (shouldUseStreetParkingOutlook(classification)) {
+    const street = resolveQuickGoStreetParkingSignal(context);
+    if (street?.detail) {
+      return [street.detail, street.supplementalText].filter(Boolean).join(' ');
+    }
+  }
+  return null;
 }
 
 export function quickGoParkingConfidenceLabel(
@@ -1547,7 +1617,12 @@ export function resolveQuickGoBestWay(input: {
   };
 }
 
-export function quickGoParkingHeadline(classification: DestinationParkingClassification): string {
+export function quickGoParkingHeadline(
+  classification: DestinationParkingClassification,
+  context?: QuickGoParkingExpectationContext | null,
+): string {
+  const streetSubtext = quickGoParkingExpectationSubtext(classification, context);
+  if (streetSubtext) return streetSubtext;
   return destinationParkingHeadline(classification.mode);
 }
 

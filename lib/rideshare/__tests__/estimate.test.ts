@@ -2,6 +2,7 @@ import {
   RIDESHARE_ESTIMATE_DISCLAIMER,
   buildRideshareEstimateOptions,
   estimateFareRange,
+  formatRidesharePriceDisplay,
   timeOfDayMultiplier,
 } from '../estimate';
 import type { TrafficEstimate } from '../../types';
@@ -162,5 +163,17 @@ describe('rideshare estimate v1', () => {
 
   test('exports a stable disclaimer constant for UI reuse', () => {
     expect(RIDESHARE_ESTIMATE_DISCLAIMER).toBe('Not a live Uber/Lyft quote.');
+  });
+
+  test('provider-only rideshare links ask users to open the app for live price', () => {
+    expect(formatRidesharePriceDisplay({ priceDisplay: 'check-live' })).toEqual({
+      primary: 'Open app for live price',
+      secondary: 'PodPaiGo does not have a live Uber/Lyft quote.',
+    });
+
+    expect(formatRidesharePriceDisplay({ rideshareEstimateConfidence: 'unavailable' })).toEqual({
+      primary: 'Fare estimate unavailable',
+      secondary: 'Open the rideshare app for current pricing.',
+    });
   });
 });

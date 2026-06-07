@@ -47,6 +47,28 @@ export type ParkAndRideDetailsSection = {
   lines: string[];
 };
 
+export type ParkAndRideRulesLinkLabel = 'Open lot rules' | 'Search lot rules';
+
+export type ParkAndRideLotCard = {
+  id: string;
+  lotName: string;
+  provider: string;
+  address: string;
+  parkingRuleSummary: string;
+  costDisplay: string;
+  transitTimeDisplay: string;
+  totalTimeDisplay: string;
+  confidence: ParkAndRideLotConfidence;
+  confidenceLabel: string;
+  statusLabel: string;
+  rulesUrl: string;
+  rulesLinkLabel: ParkAndRideRulesLinkLabel;
+  directionsToLotUrl?: string;
+  transitRouteUrl?: string;
+  unavailableReason?: string;
+  warnings: string[];
+};
+
 export type ParkAndRideDetailsPanel = {
   lotName: string;
   operator: string;
@@ -66,6 +88,7 @@ export type ParkAndRideDetailsPanel = {
   selectionReason?: string;
   unavailableReason?: string;
   warnings: string[];
+  lots: ParkAndRideLotCard[];
   sections: ParkAndRideDetailsSection[];
 };
 

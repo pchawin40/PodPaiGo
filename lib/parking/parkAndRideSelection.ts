@@ -1,6 +1,14 @@
 import { googleMapsDirectionsLink } from '../maps';
 import { PARK_AND_RIDE_UI_COPY } from '../access/parkAndRideAccess';
-import { buildParkAndRideDetailsPanel } from './parkAndRideDetails';
+import {
+  buildParkAndRideDetailsPanel,
+  buildParkAndRideLotCards,
+} from './parkAndRideDetails';
+import {
+  resolveParkAndRideRulesUrl,
+  SOUND_TRANSIT_PARKING_URL,
+  SOUND_TRANSIT_TRIP_PLANNER_URL,
+} from './parkAndRideLinks';
 import {
   getSeattleRegionParkAndRideLots,
   VERIFY_SIGNS_WARNING,
@@ -20,7 +28,6 @@ import {
 const OVERNIGHT_THRESHOLD_MINUTES = 18 * 60;
 const MAX_DRIVE_TO_LOT_MINUTES = 45;
 const MAX_TOTAL_TRIP_MINUTES = 120;
-const SOUND_TRANSIT_PLANNER_URL = 'https://www.soundtransit.org/';
 
 type ResolvedCoords = { lat: number; lng: number } | null;
 
@@ -209,6 +216,18 @@ function scoreLotCandidate(args: {
 
   const directionsToLotUrl = googleMapsDirectionsLink(origin, seed.address, 'driving');
   const transitRouteUrl = googleMapsDirectionsLink(seed.address, destination, 'transit');
+  const rulesUrl = resolveParkAndRideRulesUrl({
+    id: seed.id,
+    lotName: seed.lotName,
+    operator: seed.operator,
+    rulesUrl: seed.rulesUrl,
+  });
+  const sourceUrl = resolveParkAndRideRulesUrl({
+    id: seed.id,
+    lotName: seed.lotName,
+    operator: seed.operator,
+    rulesUrl: seed.sourceUrl,
+  });
 
   const warnings = [...seed.warnings, VERIFY_SIGNS_WARNING];
   const selectionReason = viable
@@ -226,8 +245,8 @@ function scoreLotCandidate(args: {
     routesServed: seed.routesServed,
     maxParkingDuration: seed.maxParkingDuration,
     permitInfo: seed.permitInfo,
-    rulesUrl: seed.rulesUrl,
-    sourceUrl: seed.sourceUrl,
+    rulesUrl,
+    sourceUrl,
     directionsToLotUrl,
     transitRouteUrl,
     totalTimeMinutes,
@@ -324,12 +343,12 @@ export function toPointAbParkRidePresentation(
       pros: [],
       cons: [selection.notUsefulReason || 'No viable Park & Ride route for this trip.'],
       warnings: [VERIFY_SIGNS_WARNING],
-      rulesUrl: 'https://www.soundtransit.org/ride-with-us/how-to-ride/park-and-ride',
+      rulesUrl: SOUND_TRANSIT_PARKING_URL,
       details: {
         lotName: 'Park & Ride unavailable',
         operator: '—',
         address: '—',
-        rulesUrl: 'https://www.soundtransit.org/ride-with-us/how-to-ride/park-and-ride',
+        rulesUrl: SOUND_TRANSIT_PARKING_URL,
         routesServed: [],
         parkingRuleSummary: 'Verify posted signs and lot rules.',
         verifySignsWarning: VERIFY_SIGNS_WARNING,
@@ -342,6 +361,7 @@ export function toPointAbParkRidePresentation(
         },
         unavailableReason: selection.notUsefulReason,
         warnings: [VERIFY_SIGNS_WARNING],
+        lots: buildParkAndRideLotCards(selection.candidates),
         sections: [
           {
             title: 'Why unavailable',
@@ -353,7 +373,7 @@ export function toPointAbParkRidePresentation(
   }
 
   const seed = getSeattleRegionParkAndRideLots().find((lot) => lot.id === option.id);
-  const details = buildParkAndRideDetailsPanel(option, seed);
+  const details = buildParkAndRideDetailsPanel(option, seed, selection.candidates);
 
   return {
     lotName: option.lotName,
@@ -371,10 +391,10 @@ export function toPointAbParkRidePresentation(
     pros: ['Lower parking cost than downtown garages', 'Useful when destination parking is expensive'],
     cons: [...option.warnings, VERIFY_SIGNS_WARNING],
     warnings: option.warnings,
-    rulesUrl: option.rulesUrl,
+    rulesUrl: details.rulesUrl,
     directionsToLotUrl: option.directionsToLotUrl,
     transitRouteUrl: option.transitRouteUrl,
-    transitPlannerUrl: SOUND_TRANSIT_PLANNER_URL,
+    transitPlannerUrl: SOUND_TRANSIT_TRIP_PLANNER_URL,
     details,
   };
 }

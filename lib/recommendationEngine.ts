@@ -873,10 +873,10 @@ export class RecommendationEngine {
         weatherImpact: null,
         context: 'unavailable' as const,
       }))
-      : typeof tripData.destinationLat === 'number' && typeof tripData.destinationLng === 'number'
+      : mainDestinationLatLng
         ? await getWeatherForPoint({
-          lat: tripData.destinationLat,
-          lng: tripData.destinationLng,
+          lat: mainDestinationLatLng.lat,
+          lng: mainDestinationLatLng.lng,
           targetDateTime: tripDateTime,
           currentContext: 'current-destination-weather',
         }).catch((): WeatherLookupResult => ({
@@ -887,6 +887,22 @@ export class RecommendationEngine {
           weatherImpact: null,
           context: 'forecast-unavailable' as const,
         };
+
+    debugLog('weather_lookup_result', {
+      type: tripData.type,
+      destinationText: tripData.destination,
+      isAirportTrip,
+      targetDateTime: isAirportTrip
+        ? routeTiming.targetTerminalArrivalIso || tripDateTime
+        : tripDateTime,
+      destinationCoordsPresent: Boolean(mainDestinationLatLng),
+      destinationResolvedViaGeocode:
+        Boolean(resolvedDestinationCoords) && typeof tripData.destinationLat !== 'number',
+      context: weatherResult.context,
+      hasWeatherImpact: Boolean(weatherResult.weatherImpact),
+      forecastRangeStart: weatherResult.forecastRangeStart,
+      forecastRangeEnd: weatherResult.forecastRangeEnd,
+    });
 
     const weatherImpact = weatherResult.weatherImpact;
 

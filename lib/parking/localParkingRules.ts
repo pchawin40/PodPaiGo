@@ -1,5 +1,13 @@
-import { isDenseUrbanDestination } from './destinationParkingClassifier';
 import { matchCuratedLocalParkingZone } from './localParkingZones';
+import type { CityStreetParkingSpecialSignal } from './cityStreetParkingRules';
+import {
+  buildTripDateTime,
+  evaluateSeattleStreetParkingRules,
+  SEATTLE_STREET_PARKING_SUBTEXT,
+  seattleStreetParkingExpectationLabel,
+  type SeattleParkingPaymentExpectation,
+} from './seattleStreetParkingRules';
+import { evaluateUsCityStreetParkingRules } from './usCityStreetParkingRules';
 
 export type LocalParkingRuleDetails = {
   dayOfWeek?: string;
@@ -17,64 +25,50 @@ export type LocalStreetParkingSignal = {
   verifyRequired: boolean;
   appliesToday?: boolean;
   ruleDetails?: LocalParkingRuleDetails;
-};
-
-const US_FIXED_HOLIDAYS: Record<string, string> = {
-  '01-01': "New Year's Day",
-  '07-04': 'Independence Day',
-  '11-11': 'Veterans Day',
-  '12-25': 'Christmas Day',
+  paymentExpectation?: SeattleParkingPaymentExpectation;
+  confidence?: 'low' | 'medium' | 'high';
+  rulesSource?: 'seattle' | 'us_city_fallback';
+  cityRuleId?: string;
+  jurisdictionName?: string;
+  sourceLabel?: string;
+  specialSignals?: CityStreetParkingSpecialSignal[];
+  supplementalText?: string;
 };
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-function dateKey(date: Date): string {
-  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function mapExpectationToSignal(
+  expectation: SeattleParkingPaymentExpectation,
+): Pick<LocalStreetParkingSignal, 'freeLikely' | 'paidLikely' | 'penalty'> {
+  switch (expectation) {
+    case 'likely_free':
+      return { freeLikely: true, paidLikely: false, penalty: 0 };
+    case 'likely_paid':
+      return { freeLikely: false, paidLikely: true, penalty: 0 };
+    case 'check_signs':
+      return { freeLikely: false, paidLikely: false, penalty: 8 };
+  }
 }
 
-function holidayNameForDate(date: Date): string | undefined {
-  const fixed = US_FIXED_HOLIDAYS[dateKey(date)];
-  if (fixed) return fixed;
-
-  const month = date.getMonth();
-  const day = date.getDate();
-  const dayOfWeek = date.getDay();
-
-  if (month === 4 && dayOfWeek === 1 && day >= 25) return 'Memorial Day';
-  if (month === 8 && dayOfWeek === 1 && day <= 7) return 'Labor Day';
-  if (month === 10 && dayOfWeek === 4 && day >= 22 && day <= 28) return 'Thanksgiving';
-
-  return undefined;
+function inferParkingType(
+  destination: string,
+  explicit?: 'street' | 'garage' | 'unknown',
+): 'street' | 'garage' | 'unknown' {
+  if (explicit) return explicit;
+  if (/\b(?:parking\s+)?(?:garage|lot|deck)\b/i.test(destination)) return 'garage';
+  return 'street';
 }
-
-function isLikelyUsHoliday(date: Date): boolean {
-  return Boolean(holidayNameForDate(date));
-}
-
-function buildArrivalDate(
-  arrivalDate?: string | null,
-  arrivalTime?: string | null,
-): Date | null {
-  if (!arrivalDate) return null;
-  const time = arrivalTime && /^\d{1,2}:\d{2}$/.test(arrivalTime) ? arrivalTime : '12:00';
-  const parsed = new Date(`${arrivalDate}T${time}`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function isSeattleDestination(destination: string): boolean {
-  return /\bseattle\b/i.test(destination);
-}
-
-const SEATTLE_DOWNTOWN_METER_HOURS = 'Mon–Sat 8am–6pm';
-const SEATTLE_DOWNTOWN_PAID_START_HOUR = 8;
-const SEATTLE_DOWNTOWN_PAID_END_HOUR = 18;
 
 export function evaluateLocalStreetParkingRules(input: {
   destination: string;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
+  destinationCity?: string | null;
   arrivalDate?: string | null;
   arrivalTime?: string | null;
   durationMinutes: number;
   isAirportTrip?: boolean;
+  parkingType?: 'street' | 'garage' | 'unknown';
 }): LocalStreetParkingSignal {
   if (input.isAirportTrip) {
     return {
@@ -87,66 +81,102 @@ export function evaluateLocalStreetParkingRules(input: {
     };
   }
 
-  const arrival = buildArrivalDate(input.arrivalDate, input.arrivalTime);
+  const arrival = buildTripDateTime(input.arrivalDate, input.arrivalTime);
+  const parkingType = inferParkingType(input.destination, input.parkingType);
   const durationHours = Math.max(0, input.durationMinutes) / 60;
   const curatedZone = matchCuratedLocalParkingZone(input.destination);
   let penalty = 0;
-  let freeLikely = false;
-  let paidLikely = false;
   let headline: string | undefined;
   let detail: string | undefined;
   let appliesToday: boolean | undefined;
   let ruleDetails: LocalParkingRuleDetails | undefined;
+  let freeLikely = false;
+  let paidLikely = false;
+  let paymentExpectation: SeattleParkingPaymentExpectation | undefined;
+  let confidence: 'low' | 'medium' | 'high' | undefined;
+  let rulesSource: LocalStreetParkingSignal['rulesSource'];
+  let cityRuleId: string | undefined;
+  let jurisdictionName: string | undefined;
+  let sourceLabel: string | undefined;
+  let specialSignals: CityStreetParkingSpecialSignal[] | undefined;
+  let supplementalText: string | undefined;
 
-  if (isSeattleDestination(input.destination) && arrival) {
-    const dayOfWeek = arrival.getDay();
-    const hour = arrival.getHours();
-    const isSunday = dayOfWeek === 0;
-    const holidayName = holidayNameForDate(arrival);
-    const isHoliday = Boolean(holidayName);
-    const isDowntown = isDenseUrbanDestination(input.destination);
+  if (arrival) {
+    const seattleRules = evaluateSeattleStreetParkingRules({
+      destination: input.destination,
+      destinationLat: input.destinationLat,
+      destinationLng: input.destinationLng,
+      destinationCity: input.destinationCity,
+      tripDateTime: arrival,
+      parkingType,
+    });
 
-    if (isSunday || isHoliday) {
-      freeLikely = true;
+    if (seattleRules) {
+      const mapped = mapExpectationToSignal(seattleRules.paymentExpectation);
+      freeLikely = mapped.freeLikely;
+      paidLikely = mapped.paidLikely;
+      penalty += mapped.penalty;
+      paymentExpectation = seattleRules.paymentExpectation;
+      confidence = seattleRules.confidence;
+      headline = seattleStreetParkingExpectationLabel(seattleRules.paymentExpectation);
+      detail = seattleRules.reason;
+      rulesSource = 'seattle';
+      cityRuleId = seattleRules.cityRuleId;
+      jurisdictionName = seattleRules.jurisdictionName;
+      sourceLabel = seattleRules.sourceLabel;
+      specialSignals = seattleRules.specialSignals;
+      supplementalText = SEATTLE_STREET_PARKING_SUBTEXT;
       appliesToday = true;
-      headline = 'Free street parking may be available today';
-      detail = isHoliday
-        ? 'Seattle holiday street parking payment is generally not required. Verify posted signs and time limits before leaving your car.'
-        : 'Seattle Sunday street parking payment is generally not required. Verify posted signs and time limits before leaving your car.';
       ruleDetails = {
-        dayOfWeek: DAY_NAMES[dayOfWeek],
-        holidayName,
+        dayOfWeek: DAY_NAMES[arrival.getDay()],
+        holidayName: seattleRules.holidayName,
+        meterHours:
+          seattleRules.paidStartHour != null && seattleRules.paidEndHour != null
+            ? `Mon–Sat ~${seattleRules.paidStartHour}:00–${seattleRules.paidEndHour}:00`
+            : undefined,
       };
-    } else if (isDowntown && dayOfWeek >= 1 && dayOfWeek <= 6) {
-      const duringPaidHours =
-        hour >= SEATTLE_DOWNTOWN_PAID_START_HOUR && hour < SEATTLE_DOWNTOWN_PAID_END_HOUR;
+    } else {
+      const usCityRules = evaluateUsCityStreetParkingRules({
+        destination: input.destination,
+        destinationLat: input.destinationLat,
+        destinationLng: input.destinationLng,
+        destinationCity: input.destinationCity,
+        tripDateTime: arrival,
+        parkingType,
+      });
 
-      if (duringPaidHours) {
-        paidLikely = true;
-        headline = 'Paid parking likely';
-        detail =
-          'Downtown Seattle street parking usually requires payment on weekdays during meter hours. Garages and lots are common nearby.';
-        ruleDetails = {
-          dayOfWeek: DAY_NAMES[dayOfWeek],
-          meterHours: SEATTLE_DOWNTOWN_METER_HOURS,
-        };
-      } else {
-        freeLikely = true;
+      if (usCityRules) {
+        const mapped = mapExpectationToSignal(usCityRules.paymentExpectation);
+        freeLikely = mapped.freeLikely;
+        paidLikely = mapped.paidLikely;
+        penalty += mapped.penalty;
+        paymentExpectation = usCityRules.paymentExpectation;
+        confidence = usCityRules.confidence;
+        headline = seattleStreetParkingExpectationLabel(usCityRules.paymentExpectation);
+        detail = usCityRules.reason;
+        rulesSource = 'us_city_fallback';
+        cityRuleId = usCityRules.cityRuleId;
+        jurisdictionName = usCityRules.jurisdictionName;
+        sourceLabel = usCityRules.sourceLabel;
+        specialSignals = usCityRules.specialSignals;
+        supplementalText = usCityRules.supplementalText;
         appliesToday = true;
-        headline = 'Free street parking may be available today';
-        detail =
-          'Outside typical downtown meter hours, street payment may not be required. Signs still vary by block and zone.';
         ruleDetails = {
-          dayOfWeek: DAY_NAMES[dayOfWeek],
-          meterHours: 'Evening/off-hours',
+          dayOfWeek: DAY_NAMES[arrival.getDay()],
+          holidayName: usCityRules.holidayName,
         };
       }
     }
   }
 
   if (curatedZone) {
-    headline = headline || curatedZone.headline;
-    detail = detail || curatedZone.detail;
+    if (!rulesSource || rulesSource === 'us_city_fallback') {
+      headline = curatedZone.headline;
+      detail = curatedZone.detail;
+    } else {
+      headline = headline || curatedZone.headline;
+      detail = detail || curatedZone.detail;
+    }
 
     if (curatedZone.maxStreetHours) {
       ruleDetails = {
@@ -174,5 +204,13 @@ export function evaluateLocalStreetParkingRules(input: {
     verifyRequired: true,
     appliesToday,
     ruleDetails,
+    paymentExpectation,
+    confidence,
+    rulesSource,
+    cityRuleId,
+    jurisdictionName,
+    sourceLabel,
+    specialSignals,
+    supplementalText,
   };
 }

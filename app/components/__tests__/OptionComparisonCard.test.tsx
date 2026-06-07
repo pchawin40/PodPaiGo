@@ -208,6 +208,7 @@ describe('OptionComparisonCard compact layout', () => {
           mode: 'park-ride',
           parkRideDirectionsUrl: 'https://maps.example/drive',
           parkRideTransitUrl: 'https://maps.example/transit',
+          parkRideRulesUrl: 'https://www.soundtransit.org/ride-with-us/parking',
           parkRideViable: true,
           onDetails: () => undefined,
           detailsSectionId: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
@@ -218,14 +219,24 @@ describe('OptionComparisonCard compact layout', () => {
     expect(cardContainer.querySelector('details')).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Parking rules/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Routes served/i)).not.toBeInTheDocument();
+    expect(within(cardContainer).getByRole('link', { name: 'Rules' })).toBeInTheDocument();
 
     const { container: detailsContainer } = render(
       <ParkAndRideDetailsPanel details={presentation!.details} />,
     );
 
+    expect(within(detailsContainer).getByText(/Nearby Park & Ride lots/i)).toBeInTheDocument();
     expect(within(detailsContainer).getByText(/Parking rules/i)).toBeInTheDocument();
     expect(
-      within(detailsContainer).getByRole('link', { name: 'Open lot rules' }),
-    ).toBeInTheDocument();
+      within(detailsContainer).getAllByRole('link', { name: 'Open lot rules' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(detailsContainer).getAllByRole('link', { name: 'Route to lot' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(detailsContainer).getAllByRole('link', {
+        name: 'Transit to destination',
+      }).length,
+    ).toBeGreaterThan(0);
   });
 });

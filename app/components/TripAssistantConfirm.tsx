@@ -137,8 +137,22 @@ export default function TripAssistantConfirm({
       destination: parsed.destinationText,
       destinationKind: parsed.destinationCategory || null,
     });
-    return quickGoParkingExpectationLabel(classification);
-  }, [isGeneralTrip, parsed.destinationCategory, parsed.destinationText]);
+    return quickGoParkingExpectationLabel(classification, {
+      destination: parsed.destinationText,
+      destinationCity: parsed.destinationCity,
+      arrivalDate: parsed.parkingCheckInDate || parsed.departureDate,
+      arrivalTime: parsed.parkingCheckInTime || parsed.departureTime,
+    });
+  }, [
+    isGeneralTrip,
+    parsed.departureDate,
+    parsed.departureTime,
+    parsed.destinationCategory,
+    parsed.destinationCity,
+    parsed.destinationText,
+    parsed.parkingCheckInDate,
+    parsed.parkingCheckInTime,
+  ]);
 
   const recognizedAirlineLabel = useMemo(() => {
     if (!parsed.airlineText?.trim()) return null;

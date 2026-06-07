@@ -33,6 +33,26 @@ function formatMinutesLabel(minutes: number): string {
   return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
+function freeStreetParkingPro(
+  localRules: ReturnType<typeof evaluateLocalStreetParkingRules>,
+): string {
+  const signals = localRules.specialSignals || [];
+
+  if (localRules.rulesSource === 'seattle' && signals.includes('sunday_free')) {
+    return 'Likely free now because Seattle street parking is generally free on Sundays';
+  }
+
+  if (localRules.rulesSource === 'seattle' && signals.includes('holiday_free')) {
+    return 'Likely free now because Seattle street parking payment is not required on this holiday';
+  }
+
+  if (signals.includes('off_hours')) {
+    return 'Off-hours payment may not be required';
+  }
+
+  return 'Street payment may not be required for this trip time';
+}
+
 export function buildStreetMeterParkingOption(input: {
   destination: string;
   arrivalDate?: string | null;
@@ -51,7 +71,12 @@ export function buildStreetMeterParkingOption(input: {
     isAirportTrip: false,
   });
 
-  if (!localRules.freeLikely && !localRules.paidLikely && !localRules.detail) {
+  if (
+    !localRules.freeLikely &&
+    !localRules.paidLikely &&
+    localRules.paymentExpectation !== 'check_signs' &&
+    !localRules.detail
+  ) {
     return null;
   }
 
@@ -75,9 +100,11 @@ export function buildStreetMeterParkingOption(input: {
 
   const pros: string[] = [];
   if (localRules.freeLikely && localRules.appliesToday) {
-    pros.push('Sunday/holiday or off-hours payment may not be required');
+    pros.push(freeStreetParkingPro(localRules));
   } else if (localRules.paidLikely) {
     pros.push('Often cheaper than nearby garages for short stays');
+  } else if (localRules.paymentExpectation === 'check_signs') {
+    pros.push('Evening and event-area blocks may still have open stalls');
   } else {
     pros.push('May avoid garage fees when a legal stall is open');
   }

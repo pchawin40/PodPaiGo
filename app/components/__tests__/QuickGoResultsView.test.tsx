@@ -195,6 +195,85 @@ describe('QuickGoResultsView', () => {
     expect(screen.getByText('Rideshare / taxi')).toBeInTheDocument();
   });
 
+  test('Pike Place Sunday evening shows time-aware Seattle street parking copy', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Pike Place Market, Seattle, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Pike Place Market, Seattle, WA',
+          destinationName: 'Pike Place Market',
+          destinationKind: 'downtown',
+          arrivalDate: '2026-06-07',
+          arrivalTime: '19:30',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({ duration: 18, trustStatus: 'estimated' }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Likely free street parking')).toBeInTheDocument();
+    expect(screen.queryByText('Likely paid street parking')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Seattle street parking is generally free on Sundays/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Street parking estimate based on Seattle payment hours/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('High confidence').length).toBeGreaterThan(0);
+  });
+
+  test('non-Seattle U.S. city Sunday street parking stays check-signs', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Downtown Manhattan, New York, NY',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Downtown Manhattan, New York, NY',
+          destinationName: 'Downtown Manhattan',
+          destinationKind: 'downtown',
+          arrivalDate: '2026-06-07',
+          arrivalTime: '14:00',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({ duration: 18, trustStatus: 'estimated' }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Check signs / special rules possible')).toBeInTheDocument();
+    expect(screen.queryByText('Likely free street parking')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Sunday street parking payment rules vary by U\.S\. city/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Street parking estimate based on Seattle payment hours/i),
+    ).not.toBeInTheDocument();
+  });
+
   test('shows airport planner prompt when airport was detected', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'SEA Airport',

@@ -1410,16 +1410,18 @@ function PricingLinksSection({
                     </div>
 
                     <p className="text-xs leading-relaxed text-zinc-500">
-                      {RIDESHARE_ESTIMATE_DISCLAIMER}
+                      {ridesharePricing?.primary === 'Open app for live price'
+                        ? 'Live Uber/Lyft fares are not available in PodPaiGo. Open the provider app for current pricing.'
+                        : RIDESHARE_ESTIMATE_DISCLAIMER}
                     </p>
 
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
                       {it.mapLink && !sourceAndMapSame && (
                         <a
                           href={it.mapLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-center text-sm font-medium leading-none text-zinc-800 hover:bg-zinc-50"
                         >
                           View route
                         </a>
@@ -1430,7 +1432,7 @@ function PricingLinksSection({
                           href={link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-semibold leading-none text-white hover:bg-blue-700"
                         >
                           {primaryCta}
                         </a>
@@ -3947,6 +3949,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [clientRouteRefreshPending, setClientRouteRefreshPending] = useState(false);
   const [routeHydrationState, setRouteHydrationState] =
     useState<QuickGoRouteHydrationState>('not_started');
+  const [recommendationsLoadedKey, setRecommendationsLoadedKey] = useState('');
+  const [priorQuickGoDriveMinutes, setPriorQuickGoDriveMinutes] = useState<number | null>(null);
   const [invalidTripMessage, setInvalidTripMessage] = useState<string | null>(null);
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
@@ -4417,15 +4421,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   };
 
   useEffect(() => {
-    if (!isQuickGoMode(searchParams) || !recommendation?.trafficEstimate) return;
-
-    const resolvedDrive = resolveQuickGoDriveTime(recommendation.trafficEstimate);
-    if (resolvedDrive.minutes != null && !resolvedDrive.unavailable) {
-      priorQuickGoDriveMinutesRef.current = resolvedDrive.minutes;
-    }
-  }, [searchParams, recommendation?.trafficEstimate]);
-
-  useEffect(() => {
     if (!showMapModal) return;
 
     const previousOverflow = document.body.style.overflow;
@@ -4476,6 +4471,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         liveRefreshLoadedKeyRef.current = '';
         liveRefreshInFlightKeyRef.current = '';
         setRouteHydrationState('not_started');
+        priorQuickGoDriveMinutesRef.current = null;
+        setPriorQuickGoDriveMinutes(null);
       }
 
       if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
@@ -4587,6 +4584,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           }
 
           recommendationsLoadedKeyRef.current = requestKey;
+          setRecommendationsLoadedKey(requestKey);
           if (lastRecalcTrackedKey.current !== requestKey) {
             lastRecalcTrackedKey.current = requestKey;
             trackEvent('recommendation_recalculated', {
@@ -4621,6 +4619,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           setRankedOptions(ranked);
           if (quickGoRequest) {
             const serverState = rec.trafficEstimate;
+            const resolvedDrive = resolveQuickGoDriveTime(serverState);
+            if (resolvedDrive.minutes != null && !resolvedDrive.unavailable) {
+              priorQuickGoDriveMinutesRef.current = resolvedDrive.minutes;
+              setPriorQuickGoDriveMinutes(resolvedDrive.minutes);
+            }
             const nextRouteHydrationState = quickGoRouteHydrationStateForFinalResult({
               isQuickGo: true,
               tripData: data,
@@ -4749,6 +4752,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     } else {
       recommendationsRequestRef.current?.controller.abort();
       recommendationsLoadedKeyRef.current = '';
+      setRecommendationsLoadedKey('');
       setRouteHydrationState('not_started');
       setInvalidTripMessage(
         'This trip is missing required details. Start a new trip to see live results.'
@@ -5446,7 +5450,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const effectiveRouteHydrationState =
     quickGoActive &&
     quickGoRouteRequestKeyForRender &&
-    recommendationsLoadedKeyRef.current !== quickGoRouteRequestKeyForRender
+    recommendationsLoadedKey !== quickGoRouteRequestKeyForRender
       ? 'not_started'
       : routeHydrationState;
   const quickGoNeedsInitialRouteRefresh =
@@ -5486,8 +5490,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         rankedOptions={rankedOptions}
         searchParams={searchParams}
         routeLoading={quickGoRoutePending}
-        routeRefreshing={isRecalculating && priorQuickGoDriveMinutesRef.current != null}
-        priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
+        routeRefreshing={isRecalculating && priorQuickGoDriveMinutes != null}
+        priorDriveMinutes={priorQuickGoDriveMinutes}
         clientRouteRefreshPending={clientRouteRefreshPending || quickGoNeedsInitialRouteRefresh}
         routeHydrationState={effectiveRouteHydrationState}
       />
@@ -5536,7 +5540,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         searchParams={searchParams}
         routeLoading={quickGoRoutePending}
         routeRefreshing={isRecalculating}
-        priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
+        priorDriveMinutes={priorQuickGoDriveMinutes}
         clientRouteRefreshPending={clientRouteRefreshPending || quickGoNeedsInitialRouteRefresh}
         routeHydrationState={effectiveRouteHydrationState}
       />
@@ -5776,7 +5780,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           durationMinutes: tripData.parkingDuration ?? undefined,
         })
       : null;
-  const cityTripParkRideSelection = useMemo(() => {
+  const cityTripParkRideSelection = (() => {
     if (!isCityTrip || !tripData) return null;
 
     const parkingTotal = visibleSmartPickOption
@@ -5798,18 +5802,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       parkingTotal,
       weatherRisk: recommendation?.weatherImpact?.riskLevel,
     });
-  }, [
-    isCityTrip,
-    tripData,
-    cityDestinationText,
-    sort,
-    visibleSmartPickOption,
-    recommendation?.weatherImpact?.riskLevel,
-  ]);
-  const cityTripParkRide = useMemo(() => {
+  })();
+  const cityTripParkRide = (() => {
     if (!cityTripParkRideSelection) return null;
     return toPointAbParkRidePresentation(cityTripParkRideSelection);
-  }, [cityTripParkRideSelection]);
+  })();
   const cityTripParkRideModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'park-ride',
   );
@@ -6783,8 +6780,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 key: 'rideshare',
                 label: 'Rideshare',
                 name: bestRideOption?.name || 'Uber / Lyft',
-                cost: ridePrice !== null ? `$${Math.round(ridePrice)}` : 'Check app',
-                time: rideDuration !== null ? formatMinutes(rideDuration) : 'Check app',
+                cost: ridePrice !== null ? `$${Math.round(ridePrice)}` : 'Open app for live price',
+                time: rideDuration !== null ? formatMinutes(rideDuration) : 'Open app',
                 confidence: bestRide ? (bestRideOption?.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
                 pros: ['No parking required', 'Lowest walking burden'],
                 cons: [
@@ -7224,6 +7221,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     isSubmitting={isRecalculating || loading}
                     onSubmit={(data) => {
                       recommendationsLoadedKeyRef.current = '';
+                      setRecommendationsLoadedKey('');
                       setFetchError(null);
                       setIsRecalculating(true);
                       setLoading(true);

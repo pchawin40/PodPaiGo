@@ -33,13 +33,51 @@ const okTraffic: TrafficEstimate = {
   assumptions: [],
 };
 
+function mockWeatherFetch(periods = [
+  { startTime: '2026-06-01T10:00:00-07:00', shortForecast: 'Sunny' },
+]) {
+  const fetchMock = jest.fn(async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    return {
+      ok: true,
+      json: async () =>
+        textUrl.includes('/points/')
+          ? {
+              properties: {
+                forecastHourly: 'https://api.weather.gov/gridpoints/SEW/124,67/forecast/hourly',
+                timeZone: 'America/Los_Angeles',
+              },
+            }
+          : {
+              properties: {
+                periods: periods.map((period) => ({
+                  temperature: 62,
+                  windSpeed: '5 mph',
+                  probabilityOfPrecipitation: { value: 10 },
+                  ...period,
+                })),
+              },
+            },
+    } as Response;
+  });
+
+  global.fetch = fetchMock as unknown as typeof fetch;
+  return fetchMock;
+}
+
 describe('RecommendationEngine passes destination coordinates to getTrafficEstimate', () => {
   const originalProvider = RecommendationEngine.provider;
   const originalParkingTimeout = process.env.PARKING_FETCH_TIMEOUT_MS;
   const originalRouteTimeout = process.env.ROUTE_FETCH_TIMEOUT_MS;
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    mockWeatherFetch();
+  });
 
   afterEach(() => {
     RecommendationEngine.setDataProvider(originalProvider);
+    global.fetch = originalFetch;
     if (originalParkingTimeout == null) {
       delete process.env.PARKING_FETCH_TIMEOUT_MS;
     } else {
@@ -382,6 +420,49 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(mainCall?.[4]).toEqual(
       expect.objectContaining({ originLatLng: { lat: 47.8508, lng: -121.987 } }),
     );
+  });
+
+  test('general trip weather uses geocoded destination coordinates for tomorrow forecast', async () => {
+    const trafficSpy = jest.fn(async () => okTraffic);
+    const geocodeSpy = jest.fn(async (address: string) => {
+      if (/pike place/i.test(address)) return { lat: 47.6097, lng: -122.3425 };
+      if (/monroe/i.test(address)) return { lat: 47.855, lng: -121.97 };
+      return null;
+    });
+    const fetchMock = mockWeatherFetch([
+      { startTime: '2026-06-07T09:00:00-07:00', shortForecast: 'Seattle morning forecast' },
+    ]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: geocodeSpy,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '09:00',
+      transportAvailability: 'all',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.weather.gov/points/47.6097,-122.3425',
+      expect.any(Object),
+    );
+    expect(recommendation.weatherContext).toBe('travel-time-forecast');
+    expect(recommendation.weatherImpact?.summary).toBe('Seattle morning forecast');
   });
 
   test('Monroe -> Fred Meyer with geocoded coords falls back to a small straight-line time (not unknown, not 35)', async () => {

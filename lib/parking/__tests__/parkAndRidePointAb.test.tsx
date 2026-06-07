@@ -13,6 +13,11 @@ import {
 } from '../parkAndRideSelection';
 import { buildPointAbModeActions } from '../pointAbModeActions';
 import { rankPointAbModes } from '../pointAbRanking';
+import {
+  SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
+  SOUND_TRANSIT_PARKING_URL,
+  SOUND_TRANSIT_TRIP_PLANNER_URL,
+} from '../parkAndRideLinks';
 import type { TripData } from '../../types';
 
 function generalTrip(overrides: Partial<TripData> = {}): TripData {
@@ -47,6 +52,11 @@ describe('Point A→B Park & Ride provider', () => {
       ]),
     );
     expect(lots.every((lot) => lot.rulesUrl.startsWith('http'))).toBe(true);
+    expect(
+      lots.some((lot) =>
+        lot.rulesUrl.includes('how-to-ride/park-and-ride'),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -123,13 +133,15 @@ describe('Point A→B Park & Ride URLs and actions', () => {
     expect(result.best!.directionsToLotUrl).toMatch(/travelmode=driving/);
     expect(result.best!.transitRouteUrl).toMatch(/google\.com\/maps\/dir/);
     expect(result.best!.transitRouteUrl).toMatch(/travelmode=transit/);
+    expect(result.best!.rulesUrl).not.toMatch(/how-to-ride\/park-and-ride/);
   });
 
-  test('viable Park & Ride actions use route and transit buttons', () => {
+  test('viable Park & Ride actions use route, transit, and rules buttons', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideDirectionsUrl: 'https://maps.example/drive',
       parkRideTransitUrl: 'https://maps.example/transit',
+      parkRideRulesUrl: SOUND_TRANSIT_PARKING_URL,
       parkRideViable: true,
       onDetails: () => undefined,
     });
@@ -139,15 +151,17 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       label: 'Transit to destination',
       href: 'https://maps.example/transit',
     });
-    expect(actions[2].label).toBe('Details');
-    expect(actions[2].ariaControls).toBeUndefined();
+    expect(actions[2]).toEqual({
+      label: 'Rules',
+      href: SOUND_TRANSIT_PARKING_URL,
+    });
   });
 
   test('unavailable Park & Ride actions open rules and why-unavailable details', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideRulesUrl: 'https://soundtransit.org/rules',
-      parkRideTransitPlannerUrl: 'https://soundtransit.org/',
+      parkRideTransitPlannerUrl: SOUND_TRANSIT_TRIP_PLANNER_URL,
       parkRideViable: false,
       onDetails: () => undefined,
     });
@@ -160,7 +174,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
     expect(actions[1].ariaControls).toBeUndefined();
     expect(actions[2]).toEqual({
       label: 'Open transit planner',
-      href: 'https://soundtransit.org/',
+      href: SOUND_TRANSIT_TRIP_PLANNER_URL,
     });
   });
 });
@@ -186,6 +200,8 @@ describe('Point A→B Park & Ride details and ranking', () => {
     expect(details.parkingRuleSummary).toMatch(/Verify|overnight|same-day|48-hour|FCFS/i);
     expect(details.routeBreakdown.totalMinutes).toBeGreaterThan(0);
     expect(details.verifySignsWarning).toMatch(/Verify posted signs/i);
+    expect(details.lots.length).toBeGreaterThan(0);
+    expect(details.lots[0]?.rulesUrl).not.toMatch(/how-to-ride\/park-and-ride/);
   });
 
   test('rankPointAbModes uses curated Park & Ride presentation for city trips', () => {
@@ -305,8 +321,25 @@ describe('OptionComparisonCard layout', () => {
 
     render(<ParkAndRideDetailsPanel details={presentation!.details} />);
 
+    expect(screen.getByText(/Nearby Park & Ride lots/i)).toBeInTheDocument();
     expect(screen.getByText(/Routes served/i)).toBeInTheDocument();
     expect(screen.getByText(/Parking rules/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open lot rules' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Open lot rules' }).length).toBeGreaterThan(0);
+  });
+
+  test('Mercer Island uses the official lot-specific rules URL', () => {
+    const result = selectBestParkAndRideForPointAb({
+      origin: 'Bellevue, WA',
+      originLat: 47.6101,
+      originLng: -122.2015,
+      destination: 'Downtown Seattle, WA',
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+      parkingDurationMinutes: 6 * 60,
+      isAirportTrip: false,
+    });
+
+    const mercer = result.candidates.find((lot) => lot.id === 'mercer-island-park-and-ride');
+    expect(mercer?.rulesUrl).toBe(SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL);
   });
 });

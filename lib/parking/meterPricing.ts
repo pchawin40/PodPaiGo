@@ -25,16 +25,6 @@ function isDowntownSeattle(destination: string): boolean {
   );
 }
 
-function buildArrivalDate(
-  arrivalDate?: string | null,
-  arrivalTime?: string | null,
-): Date | null {
-  if (!arrivalDate) return null;
-  const time = arrivalTime && /^\d{1,2}:\d{2}$/.test(arrivalTime) ? arrivalTime : '12:00';
-  const parsed = new Date(`${arrivalDate}T${time}`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
 function formatMoney(value: number): string {
   return `$${Math.round(value)}`;
 }
@@ -59,7 +49,13 @@ export function estimateSeattleStreetMeterPricing(input: {
     isAirportTrip: false,
   });
 
-  if (!localRules.freeLikely && !localRules.paidLikely) return null;
+  if (
+    !localRules.freeLikely &&
+    !localRules.paidLikely &&
+    localRules.paymentExpectation !== 'check_signs'
+  ) {
+    return null;
+  }
 
   const warnings = [
     'Confirm posted signs, time limits, and payment hours before parking.',
@@ -82,26 +78,6 @@ export function estimateSeattleStreetMeterPricing(input: {
   }
 
   if (localRules.paidLikely) {
-    const arrival = buildArrivalDate(input.arrivalDate, input.arrivalTime);
-    const duringPaidHours =
-      arrival &&
-      arrival.getDay() >= 1 &&
-      arrival.getDay() <= 6 &&
-      arrival.getHours() >= 8 &&
-      arrival.getHours() < 18;
-
-    if (!duringPaidHours) {
-      return {
-        total: 0,
-        costDisplay: 'Free',
-        costNote: 'Outside typical meter hours — verify signs.',
-        sourceLabel: 'Seattle street rule (conservative)',
-        confidence: 'low',
-        warnings,
-        pricingKind: 'street_meter',
-      };
-    }
-
     const hourlyRate = isDowntownSeattle(input.destination)
       ? SEATTLE_DOWNTOWN_METER_RATE_PER_HOUR
       : SEATTLE_NEIGHBORHOOD_METER_RATE_PER_HOUR;

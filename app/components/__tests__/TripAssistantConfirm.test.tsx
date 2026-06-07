@@ -73,6 +73,29 @@ describe('TripAssistantConfirm quick go', () => {
     expect(html).toContain('Transport preference');
     expect(html).not.toContain('Airport code');
   });
+
+  test('shows time-aware Seattle street parking expectation', () => {
+    const parsed = {
+      ...buildQuickGoParsed(),
+      destinationText: 'Pike Place Market',
+      destinationCategory: 'general',
+      destinationCity: 'Seattle',
+      departureDate: '2026-06-07',
+      departureTime: '19:30',
+    } satisfies ParsedTripAssistantResult;
+
+    const html = renderToStaticMarkup(
+      React.createElement(TripAssistantConfirm, {
+        parsed,
+        onChange: () => undefined,
+        onConfirm: () => undefined,
+        onCancel: () => undefined,
+      }),
+    );
+
+    expect(html).toContain('Likely free street parking');
+    expect(html).not.toContain('Likely paid street parking');
+  });
 });
 
 describe('TripAssistantConfirm airline hint', () => {

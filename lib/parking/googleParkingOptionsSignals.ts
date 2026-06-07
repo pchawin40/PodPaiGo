@@ -50,11 +50,15 @@ export function inferParkingCategoryFromSignals(
   signals: GoogleParkingOptionsSignals | null | undefined,
 ): ParkingOptionsHint['category'] {
   if (!signals) return 'unknown';
-  if (signals.freeParkingLot) return 'customer_lot';
+  if (signals.freeParkingLot || signals.freeGarageParking) return 'customer_lot';
   if (signals.freeStreetParking) return 'street';
-  if (signals.paidGarageParking || signals.paidParkingLot || signals.paidStreetParking) {
+  if (signals.paidStreetParking && !signals.paidGarageParking && !signals.paidParkingLot) {
+    return 'street';
+  }
+  if (signals.paidGarageParking || signals.paidParkingLot) {
     return 'garage_paid';
   }
+  if (signals.paidStreetParking) return 'street';
   if (signals.valetParking) return 'valet';
   return 'unknown';
 }
@@ -66,7 +70,13 @@ export function buildParkingOptionsHints(
   const hints: ParkingOptionsHint[] = [];
   const denseUrban = isDenseUrbanDestination(options?.destination);
 
-  if (signals?.freeParkingLot && !denseUrban) {
+  if (signals?.freeGarageParking) {
+    hints.push({
+      category: 'customer_lot',
+      label: 'Free garage parking reported',
+      detail: 'Garage free-parking signal comes from provider data; verify lot rules on arrival.',
+    });
+  } else if (signals?.freeParkingLot && !denseUrban) {
     hints.push({
       category: 'customer_lot',
       label: 'Free customer parking likely',
@@ -89,13 +99,14 @@ export function buildParkingOptionsHints(
   if (signals?.paidGarageParking || signals?.paidParkingLot) {
     hints.push({
       category: 'garage_paid',
-      label: 'Paid parking likely',
+      label: 'Paid garage or lot parking likely',
+      detail: 'Garage and lot rates come from the provider; street free-hour rules do not apply.',
     });
   }
 
   if (signals?.paidStreetParking) {
     hints.push({
-      category: 'garage_paid',
+      category: 'street',
       label: 'Metered street parking may be nearby',
     });
   }

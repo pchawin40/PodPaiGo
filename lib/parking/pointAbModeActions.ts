@@ -98,7 +98,9 @@ export function buildPointAbModeActions(input: {
           input.parkRideTransitUrl
             ? { label: 'Transit to destination', href: input.parkRideTransitUrl }
             : { label: 'Transit to destination', disabled: true },
-          detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+          input.parkRideRulesUrl
+            ? { label: 'Rules', href: input.parkRideRulesUrl }
+            : detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
         ];
       }
 

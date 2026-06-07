@@ -105,10 +105,13 @@ describe('DestinationParkingSummary', () => {
       />,
     );
 
-    expect(screen.getByText('Paid parking likely')).toBeInTheDocument();
-    expect(screen.getAllByText(/weekdays during meter hours/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Likely paid street parking')).toBeInTheDocument();
+    expect(screen.getAllByText(/during typical meter hours/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Street parking estimate based on Seattle payment hours/i).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText('Seattle rule')).toBeInTheDocument();
-    expect(screen.getAllByText('Medium confidence').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('High confidence').length).toBeGreaterThan(0);
     expect(screen.getByText(/Verify posted signs and lot rules/)).toBeInTheDocument();
   });
 

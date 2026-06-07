@@ -201,7 +201,9 @@ function parkingGoogleSignalsBonus(parking: ParkingOption | null): number {
   const hints = buildParkingOptionsHints(parking.googleParkingOptions, { airportTrip: false });
   let bonus = 0;
 
-  if (parking.googleParkingOptions.freeParkingLot) bonus += 16;
+  if (parking.googleParkingOptions.freeParkingLot || parking.googleParkingOptions.freeGarageParking) {
+    bonus += 16;
+  }
   if (parking.googleParkingOptions.freeStreetParking) bonus += 8;
   if (hints.hints.some((hint) => hint.category === 'garage_paid')) bonus -= 4;
 
@@ -277,7 +279,10 @@ export function formatPointAbRideshareCost(price: number | null): {
   note?: string;
 } {
   if (price == null) {
-    return { primary: 'Check app' };
+    return {
+      primary: 'Open app for live price',
+      note: 'Fare estimate unavailable',
+    };
   }
 
   if (price >= 80) {
@@ -557,7 +562,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       name: input.bestRideOption?.name || 'Uber / Lyft',
       cost: rideshareCost.primary,
       costNote: rideshareCost.note,
-      time: input.rideDuration != null ? formatMinutesLabel(input.rideDuration) : 'Check app',
+      time: input.rideDuration != null ? formatMinutesLabel(input.rideDuration) : 'Open app',
       confidence: input.bestRideOption ? (input.bestRideOption.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
       pros: ['No parking required', 'Lowest walking burden'],
       cons: ['Surge pricing can change', rideshareCost.note ? 'Higher total cost than driving' : ''].filter(Boolean),

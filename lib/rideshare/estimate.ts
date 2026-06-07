@@ -174,6 +174,8 @@ export function formatRidesharePriceDisplay(
     | 'oneWayPriceMax'
     | 'rideshareTripScope'
     | 'priceRangeLabel'
+    | 'priceDisplay'
+    | 'rideshareEstimateConfidence'
   > & {
     price?: number;
   },
@@ -212,9 +214,23 @@ export function formatRidesharePriceDisplay(
     };
   }
 
+  if (option.priceDisplay === 'check-live') {
+    return {
+      primary: 'Open app for live price',
+      secondary: 'PodPaiGo does not have a live Uber/Lyft quote.',
+    };
+  }
+
+  if (option.rideshareEstimateConfidence === 'unavailable') {
+    return {
+      primary: 'Fare estimate unavailable',
+      secondary: 'Open the rideshare app for current pricing.',
+    };
+  }
+
   return {
-    primary: 'Estimated fare unavailable',
-    secondary: null,
+    primary: 'Fare estimate unavailable',
+    secondary: 'Open app for live price.',
   };
 }
 
