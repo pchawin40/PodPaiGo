@@ -30,6 +30,7 @@ function toSearchContext(args: AggregateAirportParkingArgs): ParkingSearchContex
     airportCode,
     airportCoordinates: args.airportCoordinates ?? airport?.geoLocation,
     destination: args.destination,
+    destinationKind: 'airport',
     checkInDate: args.checkInDate,
     checkOutDate: args.checkOutDate,
     checkInAt: args.checkInAt,

@@ -25,6 +25,7 @@ export class ParkWhizParkingProvider implements ParkingProvider {
   }
 
   async search(context: ParkingSearchContext): Promise<ParkingOption[]> {
+    if (!context.airportCode) return [];
     const airportCode = context.airportCode.toUpperCase();
     const options = await getParkWhizParkingOptions({
       airportCode,

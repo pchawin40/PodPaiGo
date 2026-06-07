@@ -61,6 +61,7 @@ import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import OptionComparisonCard from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
+import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { buildPointAbModeActions } from './DestinationModeActions';
 import { rankPointAbModes } from '../../lib/parking/pointAbRanking';
 import {
@@ -2572,6 +2573,14 @@ function OptionCard({
               tripContext={parkingTripContext}
             />
           )}
+
+          {item.type === 'parking' &&
+          displayParkingOption &&
+          isCachedParkingOption(displayParkingOption) ? (
+            <div className="mt-4">
+              <CachedParkingNotice option={displayParkingOption} compact={compact} />
+            </div>
+          ) : null}
 
           {item.type === 'parking' && (() => {
             const parking = opt as ParkingOption;
@@ -5852,6 +5861,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     recommendation.parkingDataStatus === 'unavailable'
       ? 'border-amber-200 bg-amber-50 text-amber-950'
       : 'border-sky-200 bg-sky-50 text-sky-950';
+  const nearbyParkingSearchUrl = googleMapsSearchLink(
+    `parking near ${isCityTrip ? displayDestination : currentAirport.label}`,
+  );
 
   const reachableParkingDisplayOptions = parkingDisplayOptions;
 
@@ -7322,7 +7334,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         {
           showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !routeUnavailableBlocksParking && (
             <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
-              {parkingEmptyStateMessage}
+              <div>{parkingEmptyStateMessage}</div>
+              <a
+                href={nearbyParkingSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+              >
+                Search nearby parking
+              </a>
             </div>
           )
         }

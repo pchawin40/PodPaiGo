@@ -201,3 +201,111 @@ export async function getParkingLotsByAirport(
         return [];
     }
 }
+
+export async function getParkingLotsNearPoint(args: {
+    lat?: number | null;
+    lng?: number | null;
+    limit?: number;
+    radiusMiles?: number;
+    destinationKind?: string | null;
+}): Promise<ParkingLotInventoryRow[]> {
+    const latitude = args.lat;
+    const longitude = args.lng;
+
+    if (
+        typeof latitude !== 'number' ||
+        !Number.isFinite(latitude) ||
+        typeof longitude !== 'number' ||
+        !Number.isFinite(longitude)
+    ) {
+        return [];
+    }
+
+    if (parkingDbCacheDisabled()) return [];
+
+    const limit = Number.isFinite(args.limit) && args.limit && args.limit > 0
+        ? Math.floor(args.limit)
+        : 20;
+    const radiusMiles = Number.isFinite(args.radiusMiles) && args.radiusMiles && args.radiusMiles > 0
+        ? args.radiusMiles
+        : 2.5;
+
+    try {
+        const result = await withTimeout(
+            db.query(
+                `
+    with destination as (
+      select
+        $1::float8 as destination_lat,
+        $2::float8 as destination_lng
+    ),
+    lots_with_distance as (
+      select
+        id,
+        airport_code as "airportCode",
+        name,
+        normalized_name as "normalizedName",
+        address,
+        latitude,
+        longitude,
+        source,
+        source_id as "sourceId",
+        source_url as "sourceUrl",
+        is_official as "isOfficial",
+        confidence,
+        created_at::text as "createdAt",
+        updated_at::text as "updatedAt",
+        (
+          3958.8 * acos(
+            least(
+              1,
+              cos(radians((select destination_lat from destination)))
+              * cos(radians(latitude))
+              * cos(radians(longitude) - radians((select destination_lng from destination)))
+              + sin(radians((select destination_lat from destination)))
+              * sin(radians(latitude))
+            )
+          )
+        ) as "distanceMiles"
+      from parking_lots
+      where latitude is not null
+        and longitude is not null
+    )
+    select *
+    from lots_with_distance
+    where "distanceMiles" <= $3
+    order by
+      "distanceMiles" asc,
+      confidence desc,
+      "updatedAt" desc,
+      name asc
+    limit $4
+    `,
+                [latitude, longitude, radiusMiles, limit],
+            ),
+            PARKING_DB_READ_TIMEOUT_MS,
+            'Destination parking inventory DB read',
+        );
+
+        return result.rows;
+    } catch (error) {
+        console.warn('Destination parking inventory DB read failed', error);
+        return [];
+    }
+}
+
+export async function getParkingLotsNearDestination(args: {
+    latitude?: number | null;
+    longitude?: number | null;
+    limit?: number;
+    radiusMiles?: number;
+    destinationKind?: string | null;
+}): Promise<ParkingLotInventoryRow[]> {
+    return getParkingLotsNearPoint({
+        lat: args.latitude,
+        lng: args.longitude,
+        limit: args.limit,
+        radiusMiles: args.radiusMiles,
+        destinationKind: args.destinationKind,
+    });
+}

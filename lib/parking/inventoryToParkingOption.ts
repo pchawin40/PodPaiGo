@@ -35,6 +35,11 @@ function estimateTransferMinutes(name: string, distanceMiles?: number): number {
     return 15;
 }
 
+function estimateWalkToDestinationMinutes(distanceMiles?: number): number {
+    if (typeof distanceMiles !== 'number' || !Number.isFinite(distanceMiles)) return 8;
+    return Math.max(3, Math.round(distanceMiles * 20));
+}
+
 export function inventoryLotToParkingOption(args: {
     lot: ParkingLotInventoryRow;
     origin: string;
@@ -118,5 +123,87 @@ export function inventoryLotToParkingOption(args: {
             covered ? 'Covered' : '',
             lot.distanceMiles != null && lot.distanceMiles <= 1 ? 'Close to airport' : '',
         ].filter(Boolean),
+    };
+}
+
+export function inventoryLotToDestinationParkingOption(args: {
+    lot: ParkingLotInventoryRow;
+    origin: string;
+    destination: string;
+}): ParkingOption {
+    const { lot, origin, destination } = args;
+    const cleanedName = cleanParkingProviderInventoryName(lot.name) || lot.name;
+    const routeDestination = lot.address || cleanedName;
+    const covered = inferCovered(lot.name);
+    const walkMinutes = estimateWalkToDestinationMinutes(lot.distanceMiles);
+    const lastChecked = lot.updatedAt;
+
+    return {
+        id: `destination-cache-${lot.id}`,
+        name: lot.name,
+        type: lot.isOfficial || covered ? 'official' : 'off-airport',
+
+        price: 30,
+        priceDisplay: 'check-live',
+        priceUnit: undefined,
+        priceNote: 'Open directions/provider site to verify price and availability.',
+        priceSource: 'marketplace-link',
+        priceConfidence: 'low',
+        bookingProvider: lot.source,
+
+        distance: walkMinutes,
+        availability: Math.round((lot.confidence ?? 0.5) * 100),
+        availabilityStatus: 'unknown',
+        isAvailable: true,
+        availabilityScore: Math.round((lot.confidence ?? 0.5) * 100),
+        trustStatus: 'estimated',
+        routeUnavailable: false,
+
+        sourceName: lot.source || 'Saved parking cache',
+        sourceLink: lot.sourceUrl ?? undefined,
+        mapLink: googleMapsDirectionsUrl(origin, routeDestination),
+
+        routeOrigin: origin,
+        routeDestination,
+        address: lot.address ?? routeDestination,
+        normalizedAddress: lot.address ?? routeDestination,
+        lat: typeof lot.latitude === 'number' ? lot.latitude : undefined,
+        lng: typeof lot.longitude === 'number' ? lot.longitude : undefined,
+        lastUpdated: lastChecked,
+
+        parkingBufferMinutes: 8,
+        transferToTerminalMinutes: walkMinutes,
+        transferType: 'walk',
+        walkingMinutes: walkMinutes,
+        covered,
+
+        reviewScore: undefined,
+        reviewCount: undefined,
+
+        assumptions: [
+            'Cached parking option.',
+            'Live availability not confirmed.',
+            'Open directions/provider site to verify price and availability.',
+            `Last checked: ${new Date(lastChecked).toLocaleString('en-US', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+            })}.`,
+            lot.distanceMiles != null
+                ? `Located about ${lot.distanceMiles.toFixed(1)} miles from ${destination}.`
+                : 'Distance to destination unavailable.',
+        ],
+
+        bestFor: [
+            'Cached parking option',
+            'Live availability not confirmed',
+            covered ? 'Covered' : '',
+            lot.distanceMiles != null && lot.distanceMiles <= 0.25 ? 'Close to destination' : '',
+        ].filter(Boolean),
+
+        providerSource: 'destination-cache',
+        fetchedAt: lastChecked,
+        priceFreshness: 'unknown',
+        parkingDiscoveryStatus: 'cache_only_budget_limited',
+        parkingDiscoveryMessage: 'Live availability not confirmed.',
     };
 }

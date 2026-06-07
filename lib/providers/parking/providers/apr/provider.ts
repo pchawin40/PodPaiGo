@@ -23,6 +23,7 @@ export class AprParkingProvider implements ParkingProvider {
   }
 
   async search(context: ParkingSearchContext): Promise<ParkingOption[]> {
+    if (!context.airportCode) return [];
     const airportCode = context.airportCode.toUpperCase();
     const options = await buildAprParkingOptions({
       airportCode,

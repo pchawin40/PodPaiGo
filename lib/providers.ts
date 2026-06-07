@@ -1,5 +1,6 @@
 import {
   DestinationKind,
+  ParkingDiscoveryMetadata,
   ParkingOption,
   RideshareOption,
   TransitJourney,
@@ -366,10 +367,16 @@ function resolveParkingTransferMeta(option: ParkingOption): {
 type ParkingOptionsRequestContext = {
   destinationKind?: DestinationKind;
   airportCode?: string;
+  destinationCoordinates?: RouteLatLng | null;
   destinationLat?: number;
   destinationLng?: number;
   routeDepartureTime?: string;
   targetTerminalArrivalTime?: string;
+};
+
+type ParkingOptionsResult = {
+  options: ParkingOption[];
+  metadata?: ParkingDiscoveryMetadata;
 };
 
 type RouteLatLng = { lat: number; lng: number };
@@ -402,6 +409,13 @@ export interface ParkingProvider {
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]>;
+  getParkingOptionsWithMetadata?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult>;
 }
 
 export interface FlightProvider {
@@ -435,6 +449,13 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]>;
+  getParkingOptionsWithMetadata?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult>;
   /**
    * Optional address → coordinates resolver (budget-guarded + cached). Used to
    * resolve trip origin/destination coordinates before route timing so live and
@@ -1881,6 +1902,23 @@ export class MockProvider implements DataProvider {
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]> {
+    const result = await this.getParkingOptionsWithMetadata(
+      origin,
+      destination,
+      dateTime,
+      parkingDurationMinutes,
+      context,
+    );
+    return result.options;
+  }
+
+  async getParkingOptionsWithMetadata(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult> {
     const parkingOptionsStartedAt = Date.now();
     const routeOrigins = origin;
 
@@ -1905,15 +1943,22 @@ export class MockProvider implements DataProvider {
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
-    const destinationCoords =
+    const contextDestinationCoords =
       typeof context?.destinationLat === 'number' &&
       typeof context?.destinationLng === 'number'
         ? { lat: context.destinationLat, lng: context.destinationLng }
-        : !isAirportDestination
-          ? await this.geocodeLatLng(destination)
-          : undefined;
+        : null;
+    const destinationCoords =
+      resolveRouteLatLng(context?.destinationCoordinates) ??
+      contextDestinationCoords ??
+      (!isAirportDestination ? await this.geocodeLatLng(destination) : undefined);
 
-    const { getLiveParkingOptions, getDestinationParkingOptions } = await import('./providers/parkingAggregator');
+    const {
+      getLiveParkingOptions,
+      getDestinationParkingOptions,
+      getDestinationParkingOptionsWithMetadata,
+    } = await import('./providers/parkingAggregator');
+    let parkingDiscoveryMetadata: ParkingDiscoveryMetadata | undefined;
     const liveParkingOptions = isAirportDestination
       ? await getLiveParkingOptions({
         airportCode: airportCode!,
@@ -1924,22 +1969,43 @@ export class MockProvider implements DataProvider {
         checkInAt: parkingDates.checkInAt,
         checkOutAt: parkingDates.checkOutAt,
       })
-      : await getDestinationParkingOptions({
-        origin,
-        destination,
-        dateTime,
-        parkingDurationMinutes,
-        destinationLat: destinationCoords?.lat ?? context?.destinationLat,
-        destinationLng: destinationCoords?.lng ?? context?.destinationLng,
-        checkInDate: parkingDates.checkInDate,
-        checkOutDate: parkingDates.checkOutDate,
-        checkInAt: parkingDates.checkInAt,
-        checkOutAt: parkingDates.checkOutAt,
-      });
+      : getDestinationParkingOptionsWithMetadata
+        ? await getDestinationParkingOptionsWithMetadata({
+            origin,
+            destination,
+            dateTime,
+            parkingDurationMinutes,
+            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+            checkInDate: parkingDates.checkInDate,
+            checkOutDate: parkingDates.checkOutDate,
+            checkInAt: parkingDates.checkInAt,
+            checkOutAt: parkingDates.checkOutAt,
+          }).then((result) => {
+            parkingDiscoveryMetadata = result.metadata;
+            return result.options;
+          })
+        : await getDestinationParkingOptions({
+            origin,
+            destination,
+            dateTime,
+            parkingDurationMinutes,
+            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+            checkInDate: parkingDates.checkInDate,
+            checkOutDate: parkingDates.checkOutDate,
+            checkInAt: parkingDates.checkInAt,
+            checkOutAt: parkingDates.checkOutAt,
+          });
 
-    if (liveParkingOptions.length === 0) return [];
+    if (liveParkingOptions.length === 0) {
+      return { options: [], metadata: parkingDiscoveryMetadata };
+    }
     if (remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
-      return withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout');
+      return {
+        options: withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout'),
+        metadata: parkingDiscoveryMetadata,
+      };
     }
 
     const { value: parkingSource, timedOut: canonicalTimedOut } = await withParkingStepFallback(
@@ -1962,7 +2028,10 @@ export class MockProvider implements DataProvider {
     );
 
     if (canonicalTimedOut && remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
-      return withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout');
+      return {
+        options: withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout'),
+        metadata: parkingDiscoveryMetadata,
+      };
     }
 
     const routeDestination = isAirportDestination
@@ -2450,7 +2519,7 @@ export class MockProvider implements DataProvider {
       readPositiveTimeoutMs('PARKING_ROUTE_ENRICH_TIMEOUT_MS', 1600),
     );
 
-    return enriched;
+    return { options: enriched, metadata: parkingDiscoveryMetadata };
   }
 
   async getRideshareOptions(

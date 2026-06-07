@@ -34,6 +34,7 @@ import {
 } from '../../lib/parking/providerHandoff';
 import { resolveOfficialSeaGarageCtas } from '../../lib/parking/officialAirportGarageGroup';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
+import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
 // import ParkingBookingSources from './ParkingBookSources';
 import ParkingLotVisual from './ParkingLotVisual';
@@ -843,6 +844,12 @@ export default function ParkingSmartPick({
           {routeTimingUnavailable ? (
             <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm font-medium text-foreground">
               Showing best available parking estimate. Open directions to confirm route timing.
+            </div>
+          ) : null}
+
+          {isCachedParkingOption(best) ? (
+            <div className="mt-3">
+              <CachedParkingNotice option={best} />
             </div>
           ) : null}
 

@@ -239,6 +239,23 @@ export type ParkAndRideParkingRules = {
   ruleNote?: string;
 };
 
+export type ParkingDiscoveryStatus =
+  | 'live_refreshed'
+  | 'cache_only_budget_limited'
+  | 'cache_only_quota_limited'
+  | 'cache_empty'
+  | 'provider_error';
+
+export type ParkingDiscoveryMetadata = {
+  status: ParkingDiscoveryStatus;
+  cachedCount?: number;
+  liveCount?: number;
+  providerErrors?: string[];
+  liveRefreshPaused?: boolean;
+  lastChecked?: string;
+  message?: string;
+};
+
 export type ParkingOption = {
   id: string;
   name: string;
@@ -386,6 +403,10 @@ export type ParkingOption = {
   fetchedAt?: string;
   /** How fresh the displayed price is. */
   priceFreshness?: 'live' | 'recent' | 'estimated' | 'unknown';
+  /** How this parking option was discovered for this request. */
+  parkingDiscoveryStatus?: ParkingDiscoveryStatus;
+  /** Human-readable parking discovery context for UI/debug logs. */
+  parkingDiscoveryMessage?: string;
 
   walkingBurdenScore?: number;
   walkingBurdenLabel?: string;
@@ -698,6 +719,8 @@ export type Recommendation = {
   flightInfo?: FlightInfo;
   locationInfo?: LocationInfo;
   parkingDiscoveryNotice?: string;
+  parkingDiscoveryStatus?: ParkingDiscoveryStatus;
+  parkingDiscoveryMetadata?: ParkingDiscoveryMetadata;
   parkingDataStatus?: 'not_requested' | 'available' | 'empty' | 'unavailable';
   parkingDataMessage?: string;
 };

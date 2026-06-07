@@ -1,4 +1,17 @@
-import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate, TrafficEstimate, FlightInfo, LocationInfo } from './types';
+import {
+  TransportAvailability,
+  TripData,
+  Recommendation,
+  ParkingDiscoveryMetadata,
+  ParkingOption,
+  RideshareOption,
+  TransitOption,
+  TransitJourney,
+  TsaEstimate,
+  TrafficEstimate,
+  FlightInfo,
+  LocationInfo,
+} from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
@@ -662,25 +675,41 @@ export class RecommendationEngine {
       ? providerFetch(
           'parking',
           async () => {
-            const options = await this.provider.getParkingOptions(
-              tripData.origin,
-              tripData.destination,
-              buildParkingCheckInDateTime(tripData),
-              calculateParkingDuration(tripData),
-              {
-                destinationKind: tripData.destinationKind ?? 'airport',
-                airportCode: isAirportTrip
-                  ? ((tripData as TripDataWithTransport).airportCode || undefined)
-                  : undefined,
-                destinationLat: tripData.destinationLat,
-                destinationLng: tripData.destinationLng,
-                routeDepartureTime: parkingRouteDepartureIso,
-                targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
-              },
-            );
+            const parkingContext = {
+              destinationKind: tripData.destinationKind ?? 'airport',
+              airportCode: isAirportTrip
+                ? ((tripData as TripDataWithTransport).airportCode || undefined)
+                : undefined,
+              destinationLat: effectiveDestinationLat,
+              destinationLng: effectiveDestinationLng,
+              destinationCoordinates: mainDestinationLatLng,
+              routeDepartureTime: parkingRouteDepartureIso,
+              targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+            };
+            const checkInDateTime = buildParkingCheckInDateTime(tripData);
+            const parkingDurationMinutes = calculateParkingDuration(tripData);
+            const optionsResult = this.provider.getParkingOptionsWithMetadata
+              ? await this.provider.getParkingOptionsWithMetadata(
+                  tripData.origin,
+                  tripData.destination,
+                  checkInDateTime,
+                  parkingDurationMinutes,
+                  parkingContext,
+                )
+              : {
+                  options: await this.provider.getParkingOptions(
+                    tripData.origin,
+                    tripData.destination,
+                    checkInDateTime,
+                    parkingDurationMinutes,
+                    parkingContext,
+                  ),
+                  metadata: undefined as ParkingDiscoveryMetadata | undefined,
+                };
 
             return {
-              options,
+              options: optionsResult.options,
+              metadata: optionsResult.metadata,
               failed: false,
               timedOut: false,
               message: null as string | null,
@@ -700,6 +729,13 @@ export class RecommendationEngine {
 
             return {
               options: [] as ParkingOption[],
+              metadata: {
+                status: 'provider_error',
+                providerErrors: [message],
+                message: timedOut
+                  ? 'Live parking is still updating. Showing partial results — open directions to confirm.'
+                  : 'Parking data unavailable right now. Try again or open directions.',
+              } satisfies ParkingDiscoveryMetadata,
               failed: true,
               timedOut,
               message: timedOut
@@ -711,6 +747,7 @@ export class RecommendationEngine {
         )
       : Promise.resolve({
           options: [] as ParkingOption[],
+          metadata: undefined as ParkingDiscoveryMetadata | undefined,
           failed: false,
           timedOut: false,
           message: null as string | null,
@@ -1178,6 +1215,15 @@ export class RecommendationEngine {
         ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
     const hasParkingResults = finalParking.length > 0;
+    const parkingDiscoveryMetadata =
+      parkingResult.metadata ??
+      (shouldLoadParking
+        ? {
+            status: hasParkingResults ? 'live_refreshed' : 'cache_empty',
+            cachedCount: finalParking.filter((option) => option.providerSource === 'destination-cache').length,
+            liveCount: finalParking.filter((option) => option.providerSource !== 'destination-cache').length,
+          } satisfies ParkingDiscoveryMetadata
+        : undefined);
     const parkingDataStatus =
       !shouldLoadParking
         ? 'not_requested'
@@ -1190,7 +1236,9 @@ export class RecommendationEngine {
       parkingResult.failed && !hasParkingResults
         ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
         : shouldLoadParking && !hasParkingResults
-          ? isAirportTrip
+          ? parkingDiscoveryMetadata?.status === 'cache_empty'
+            ? 'No saved parking options found near this destination yet. Search nearby parking to verify current garages and lots.'
+            : isAirportTrip
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
           : undefined;
@@ -1232,7 +1280,9 @@ export class RecommendationEngine {
       accessStrategies,
       parkingDiscoveryNotice:
         shouldLoadParking
-          ? parkingResult.timedOut && hasParkingResults
+          ? parkingDiscoveryMetadata?.liveRefreshPaused && hasParkingResults
+            ? 'Live parking refresh paused to control API cost. Showing saved parking options.'
+            : parkingResult.timedOut && hasParkingResults
             ? 'Some live parking details are still refreshing.'
             : isAirportTrip
               ? getParkingDiscoveryNotice(finalParking.length)
@@ -1252,6 +1302,8 @@ export class RecommendationEngine {
       locationInfo: locationInfo ?? undefined,
       parkingDataStatus,
       parkingDataMessage,
+      parkingDiscoveryStatus: parkingDiscoveryMetadata?.status,
+      parkingDiscoveryMetadata,
     };
   }
 

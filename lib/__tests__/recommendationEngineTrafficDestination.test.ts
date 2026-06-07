@@ -137,6 +137,52 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     );
   });
 
+  test('general trip parking uses effective destination coordinates resolved by geocode fallback', async () => {
+    const parkingSpy = jest.fn(async () => ({
+      options: [],
+      metadata: { status: 'cache_empty' as const },
+    }));
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getParkingOptionsWithMetadata: parkingSpy as unknown as DataProvider['getParkingOptionsWithMetadata'],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: async (address: string) => {
+        if (address === 'Monroe, WA') return { lat: 47.855, lng: -121.97 };
+        if (address === 'Pike Place Market') return { lat: 47.6097, lng: -122.3425 };
+        return null;
+      },
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Pike Place Market',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).toHaveBeenCalled();
+    expect(parkingSpy.mock.calls[0]?.[4]).toEqual(
+      expect.objectContaining({
+        destinationKind: 'downtown',
+        destinationLat: 47.6097,
+        destinationLng: -122.3425,
+        destinationCoordinates: { lat: 47.6097, lng: -122.3425 },
+      }),
+    );
+  });
+
   test('general arrival-time trip sends an arrival-aware route departure', async () => {
     const trafficSpy = jest.fn(async () => okTraffic);
 

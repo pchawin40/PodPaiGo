@@ -9,9 +9,10 @@ export interface AirportCoordinates {
 }
 
 export interface ParkingSearchContext {
-  airportCode: string;
+  airportCode?: string;
   airportCoordinates?: AirportCoordinates;
   destination: string;
+  destinationCoordinates?: AirportCoordinates;
   origin?: string;
   checkInDate?: string;
   checkOutDate?: string;

@@ -2,7 +2,10 @@ import { ParkingOption } from '../types';
 import { aggregateAirportParkingOptions } from './parking/aggregator';
 import { applyLegacyDisplayOrder } from './parking/displayOrder';
 
-export { getDestinationParkingOptions } from './parking/providers/googlePlaces/destinationSearch';
+export {
+  getDestinationParkingOptions,
+  getDestinationParkingOptionsWithMetadata,
+} from './parking/providers/googlePlaces/destinationSearch';
 
 export async function getLiveParkingOptions(args: {
   airportCode?: string;
