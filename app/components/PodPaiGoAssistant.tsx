@@ -336,7 +336,9 @@ export default function PodPaiGoAssistant({
             onClick={() => setOpen(false)}
           />
 
-          <div className="relative flex h-[min(88vh,720px)] w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-sky-100 bg-white shadow-2xl sm:rounded-3xl">
+          <div className="relative flex h-[min(88vh,720px)] w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-sky-100 bg-white shadow-2xl sm:rounded-3xl dark:border-slate-700 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-sky-100 px-4 py-3">
               <div>
                 <div className="text-sm font-semibold text-slate-950">PodPaiGo Assistant</div>

@@ -6,7 +6,11 @@ import {
   getCachedPhotoMedia,
 } from '@/lib/parking/placeMediaCache';
 import { canMakeLivePhotoMediaCall } from '@/lib/parking/googlePlacesGuard';
-import { runWithPlacesRequestBudget } from '@/lib/apiUsage/placesRequestBudget';
+import {
+  hasPhotoMediaBeenRequestedThisRequest,
+  markPhotoMediaRequestedThisRequest,
+  runWithPlacesRequestBudget,
+} from '@/lib/apiUsage/placesRequestBudget';
 
 function googleMapsApiKey(): string | null {
   return getGoogleMapsServerApiKey() ?? null;
@@ -59,6 +63,19 @@ export async function GET(req: NextRequest) {
   }
 
   return runWithPlacesRequestBudget(`google-place-photo:${name}`, async () => {
+    if (hasPhotoMediaBeenRequestedThisRequest(name)) {
+      const deduped = getCachedPhotoMedia(name, maxWidthPx);
+      if (deduped) {
+        const headers = new Headers();
+        headers.set('Content-Type', deduped.contentType);
+        headers.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+        headers.set('X-Place-Photo-Cache', 'deduped');
+        return new Response(deduped.body, { status: 200, headers });
+      }
+    }
+
+    markPhotoMediaRequestedThisRequest(name);
+
     if (
       !canMakeLivePhotoMediaCall({
         reason: 'place_photo_media',

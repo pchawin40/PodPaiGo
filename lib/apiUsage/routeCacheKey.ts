@@ -1,8 +1,33 @@
 import { bucketDepartureTime } from './departureBucket';
 import { hashRequestPart, shortRequestKey } from './hashKey';
 
-function normalizeRouteCachePart(value: string): string {
+function normalizeGenericRouteCachePart(value: string): string {
   const raw = String(value || '').trim();
+
+  return raw
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9.,+-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isCoordinateCachePart(value: string): boolean {
+  return /^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$/.test(value.trim());
+}
+
+function normalizeRouteCachePart(value: string, routePurpose?: string | null): string {
+  const raw = String(value || '').trim();
+
+  if (isCoordinateCachePart(raw)) {
+    return raw;
+  }
+
+  if (routePurpose === 'parking_origin_to_lot') {
+    return normalizeGenericRouteCachePart(raw);
+  }
+
   const lower = raw.toLowerCase();
 
   if (
@@ -15,13 +40,7 @@ function normalizeRouteCachePart(value: string): string {
     return 'sea airport';
   }
 
-  return lower
-    .replace(/&/g, ' and ')
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeGenericRouteCachePart(raw);
 }
 
 export function buildRouteEstimateCacheKey(args: {
@@ -36,12 +55,14 @@ export function buildRouteEstimateCacheKey(args: {
 }): string {
   const departureBucket = bucketDepartureTime(args.dateTime);
 
+  const routePurpose = args.routePurpose?.trim() || '';
+
   return [
     args.mode || 'DRIVE',
-    normalizeRouteCachePart(args.origin),
-    normalizeRouteCachePart(args.destination),
+    normalizeRouteCachePart(args.origin, routePurpose),
+    normalizeRouteCachePart(args.destination, routePurpose),
     departureBucket,
-    args.routePurpose?.trim() || '',
+    routePurpose,
     args.tripType?.trim() || '',
     args.airportCode?.trim().toUpperCase() || '',
     args.lotId?.trim() || '',

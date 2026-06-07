@@ -27,6 +27,16 @@ import {
   PLACE_PHOTO_SOURCE_GOOGLE,
 } from './placePhotoNameCache';
 import { logParkingPhotoReviewTrace } from './photoReviewDebug';
+import {
+  searchResultHasSufficientMetadata,
+  searchResultToDetails,
+  shouldSkipGetPlaceForSearchResult,
+} from './googlePlacesMetadataPolicy';
+import {
+  getPlaceMetadataRequestCacheHit,
+  resetPlaceMetadataRequestCacheForTests,
+  setPlaceMetadataRequestCacheHit,
+} from './placeMetadataRequestCache';
 
 const GOOGLE_PLACE_DB_READ_TIMEOUT_MS = Number(process.env.GOOGLE_PLACE_DB_READ_TIMEOUT_MS || 2500);
 const GOOGLE_PLACE_PHOTO_NAME_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -62,6 +72,10 @@ type GoogleLegacyPlaceSearchResult = {
   vicinity?: string;
   types?: string[];
   photoName?: string;
+  photoNames?: string[];
+  lat?: number;
+  lng?: number;
+  googleMapsUri?: string;
 };
 
 type GoogleLegacyPlaceDetailsResult = {
@@ -160,6 +174,11 @@ function logGooglePlaceCacheRecord(
       };
 
   logParkingPhotoReviewTrace(stage, option as Partial<ParkingOption>, extra);
+}
+
+function logPlaceMetadataCache(event: string, payload: Record<string, unknown>): void {
+  if (process.env.NODE_ENV === 'test') return;
+  console.info(event, payload);
 }
 
 const SNAPSHOT_SELECT_COLUMNS = `
@@ -842,6 +861,10 @@ async function searchGooglePlaceNew(args: {
               user_ratings_total: place.userRatingCount,
               types: place.types,
               photoName: firstGooglePhotoName(place.photos),
+              photoNames: googlePhotoNames(place.photos, 4),
+              lat: place.location?.latitude,
+              lng: place.location?.longitude,
+              googleMapsUri: place.googleMapsUri,
             } satisfies GoogleLegacyPlaceSearchResult,
             score: scoreSearchResult(
               {
@@ -852,6 +875,8 @@ async function searchGooglePlaceNew(args: {
                 user_ratings_total: place.userRatingCount,
                 types: place.types,
                 photoName: firstGooglePhotoName(place.photos),
+                lat: place.location?.latitude,
+                lng: place.location?.longitude,
               },
               args,
             ),
@@ -976,6 +1001,14 @@ async function fetchGooglePlaceDetailsLive(
     return null;
   }
 
+  logPlaceMetadataCache('google_getplace_live_called', {
+    placeId,
+    purpose,
+    cacheKey: context?.cacheKey ?? placeId,
+    lotName: context?.lotName ?? null,
+    airportCode: context?.airportCode ?? null,
+  });
+
   const apiKey = getServerApiKey();
   if (!apiKey) return null;
 
@@ -1058,6 +1091,11 @@ async function fetchGooglePlaceDetails(
 
   const cachedByPlaceId = await getCachedRecordByPlaceId(normalizedPlaceId);
   if (cachedByPlaceId && hasUsablePlaceCoords(cachedByPlaceId)) {
+    logPlaceMetadataCache('google_getplace_skipped_cache_hit', {
+      placeId: normalizedPlaceId,
+      reason: 'supabase_place_id_cache',
+      cacheKey: context?.cacheKey ?? normalizedPlaceId,
+    });
     const freshPhotoNames = getFreshPhotoNamesFromRecord(cachedByPlaceId);
     return {
       place_id: cachedByPlaceId.googlePlaceId,
@@ -1213,8 +1251,31 @@ export async function resolveParkingGooglePlace(args: {
   }
 
   const cacheKey = buildParkingGoogleCacheKey(args);
+
+  const requestCached = getPlaceMetadataRequestCacheHit(cacheKey);
+  if (requestCached !== undefined) {
+    logPlaceMetadataCache('place_metadata_cache_hit', {
+      cacheKey,
+      lotName: args.lotName,
+      hasRecord: Boolean(requestCached),
+    });
+    if (requestCached && hasUsablePlaceCoords(requestCached)) {
+      return requestCached;
+    }
+  } else {
+    logPlaceMetadataCache('place_metadata_cache_miss', {
+      cacheKey,
+      lotName: args.lotName,
+    });
+  }
+
   const freshCached = await getFreshCachedRecordByKey(cacheKey);
   if (freshCached && hasUsablePlaceCoords(freshCached)) {
+    logPlaceMetadataCache('place_metadata_supabase_hit', {
+      cacheKey,
+      lotName: args.lotName,
+      googlePlaceId: freshCached.googlePlaceId ?? null,
+    });
     const record: ParkingGooglePlaceCacheRecord = {
       ...freshCached,
       source: 'supabase-cache',
@@ -1231,11 +1292,18 @@ export async function resolveParkingGooglePlace(args: {
           ? null
           : 'supabase_record_has_no_photo_metadata',
     });
+    setPlaceMetadataRequestCacheHit(cacheKey, record);
     return record;
   }
 
   const staleCached = await getCachedRecordByKey(cacheKey);
   if (staleCached && hasUsablePlaceCoords(staleCached)) {
+    logPlaceMetadataCache('place_metadata_supabase_hit', {
+      cacheKey,
+      lotName: args.lotName,
+      googlePlaceId: staleCached.googlePlaceId ?? null,
+      stale: true,
+    });
     const record: ParkingGooglePlaceCacheRecord = {
       ...staleCached,
       source: 'stale-fallback',
@@ -1252,8 +1320,15 @@ export async function resolveParkingGooglePlace(args: {
           ? null
           : 'stale_supabase_record_has_no_photo_metadata',
     });
+    setPlaceMetadataRequestCacheHit(cacheKey, record);
     return record;
   }
+
+  logPlaceMetadataCache('place_metadata_supabase_miss', {
+    cacheKey,
+    lotName: args.lotName,
+    googlePlaceId: args.googlePlaceId ?? null,
+  });
 
   const cachedMetadata = freshCached || staleCached;
   logGooglePlaceCacheRecord('after_supabase_load_cache', cachedMetadata, {
@@ -1301,6 +1376,7 @@ export async function resolveParkingGooglePlace(args: {
             ? null
             : 'place_id_cache_record_has_no_photo_metadata',
       });
+      setPlaceMetadataRequestCacheHit(cacheKey, record);
       return record;
     }
   }
@@ -1369,7 +1445,15 @@ export async function resolveParkingGooglePlace(args: {
 
     if (matched?.place_id) {
       placeId = matched.place_id;
-      if (detailsMissingCoords) {
+      if (shouldSkipGetPlaceForSearchResult(matched)) {
+        details = searchResultToDetails(matched);
+        logPlaceMetadataCache('google_getplace_skipped_cache_hit', {
+          cacheKey,
+          placeId: matched.place_id,
+          reason: 'search_text_sufficient',
+          lotName: args.lotName,
+        });
+      } else if (detailsMissingCoords) {
         details = await fetchGooglePlaceDetails(matched.place_id, detailsContext).catch(() => null);
       }
     } else if (!placeId) {
@@ -1437,14 +1521,13 @@ export async function resolveParkingGooglePlace(args: {
       ? details.photoNames
       : details?.photoName
         ? [details.photoName]
-        : matchedPhotoName
-          ? [matchedPhotoName]
-          : cachedFreshPhotoNames;
+        : matchedSearchResult?.photoNames?.length
+          ? matchedSearchResult.photoNames
+          : matchedPhotoName
+            ? [matchedPhotoName]
+            : cachedFreshPhotoNames;
 
-  const reviews = (details?.reviews || []).slice(0, 5).map((review, index) =>
-    toReview(review, index, details?.place_id || placeId || cacheKey),
-  );
-  const resolvedReviews = reviews.length ? reviews : cachedMetadata?.reviews || [];
+  const resolvedReviews = cachedMetadata?.reviews || [];
 
   const record: ParkingGooglePlaceCacheRecord = {
     cacheKey,
@@ -1495,6 +1578,9 @@ export async function resolveParkingGooglePlace(args: {
     stageNote: 'Google Places match/details resolved parking metadata',
     cacheStatus: details ? 'live_details' : 'place_id_without_details',
     liveDetailsReturned: Boolean(details),
+    searchTextSufficient: Boolean(
+      matchedSearchResult && searchResultHasSufficientMetadata(matchedSearchResult),
+    ),
     selectedVisualSource:
       record.photoName || record.photoNames?.length
         ? 'google photo'
@@ -1505,6 +1591,7 @@ export async function resolveParkingGooglePlace(args: {
         : 'google_places_details_returned_no_photo_metadata',
   });
 
+  setPlaceMetadataRequestCacheHit(cacheKey, record);
   return record;
 }
 
@@ -1787,4 +1874,5 @@ export function resetGooglePlacesCacheForTests(): void {
   photoNameCache.clear();
   photoNameInFlight.clear();
   resetGooglePlacesCacheWriteForTests();
+  resetPlaceMetadataRequestCacheForTests();
 }

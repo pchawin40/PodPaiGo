@@ -14,10 +14,36 @@ export type SelectedParkingTimingBreakdown = {
 
 export type ParkingCheckInSource = 'user' | 'recommended';
 
+export type ParkingCheckInTimingStatus = 'early' | 'good' | 'late' | 'unknown';
+
+export type ParkingCheckInTimingMessage = {
+  status: ParkingCheckInTimingStatus;
+  title: string;
+  body: string;
+  basis: string;
+  deltaMinutes: number | null;
+  absoluteDeltaLabel: string | null;
+  recommendedCheckInTime: string | null;
+  selectedCheckInTime: string | null;
+};
+
+const PARKING_CHECK_IN_TIMING_GOOD_THRESHOLD_MINUTES = 15;
+
+export function formatParkingCheckInDeltaDuration(minutes: number): string {
+  const abs = Math.abs(Math.round(minutes));
+  if (abs < 60) return `${abs} min`;
+
+  const hours = Math.floor(abs / 60);
+  const mins = abs % 60;
+  return `${hours}h ${String(mins).padStart(2, '0')}m`;
+}
+
 export type PrimaryAirportPlan = {
   leaveByTime: string | null;
   basisText: string | null;
+  /** @deprecated Prefer parkingCheckInTiming for UI copy. */
   warningText: string | null;
+  parkingCheckInTiming: ParkingCheckInTimingMessage | null;
   parkingCheckInTime: string | null;
   parkingCheckInSource: ParkingCheckInSource | null;
   recommendedParkingCheckInTime: string | null;
@@ -117,32 +143,92 @@ export function deriveRecommendedParkingCheckIn(args: {
   return minutesToHHMM(securityTargetMin - accessAfterLot);
 }
 
+function buildUnknownParkingCheckInTimingMessage(
+  selectedCheckInTime: string | null,
+): ParkingCheckInTimingMessage {
+  return {
+    status: 'unknown',
+    title: 'Parking check-in timing unavailable',
+    body: 'PodPaiGo could not compare your parking check-in to a recommended time yet.',
+    basis: '',
+    deltaMinutes: null,
+    absoluteDeltaLabel: null,
+    recommendedCheckInTime: null,
+    selectedCheckInTime,
+  };
+}
+
+export function resolveParkingCheckInTimingMessage(args: {
+  checkInTime: string;
+  timing: SelectedParkingTimingBreakdown;
+  securityTargetTime?: string | null;
+  checkInSource?: ParkingCheckInSource | null;
+  recommendedCheckInTime?: string | null;
+}): ParkingCheckInTimingMessage | null {
+  const selectedCheckInTime = args.checkInTime?.trim() || null;
+  const recommendedCheckInTime = args.recommendedCheckInTime?.trim() || null;
+  const selectedMin = selectedCheckInTime ? parseHHMMToMinutes(selectedCheckInTime) : null;
+  const recommendedMin = recommendedCheckInTime
+    ? parseHHMMToMinutes(recommendedCheckInTime)
+    : null;
+
+  if (selectedMin == null) return null;
+
+  if (recommendedMin == null) {
+    return buildUnknownParkingCheckInTimingMessage(selectedCheckInTime);
+  }
+
+  const deltaMinutes = recommendedMin - selectedMin;
+  const absoluteDeltaLabel = formatParkingCheckInDeltaDuration(deltaMinutes);
+  const formattedSelected = formatTimeFriendly(args.checkInTime);
+
+  if (deltaMinutes >= PARKING_CHECK_IN_TIMING_GOOD_THRESHOLD_MINUTES) {
+    return {
+      status: 'early',
+      title: `You have ${absoluteDeltaLabel} extra airport cushion`,
+      body: `Your ${formattedSelected} parking check-in is earlier than PodPaiGo estimates you need. That's okay if you want a relaxed airport arrival.`,
+      basis: 'Based on your selected parking check-in.',
+      deltaMinutes,
+      absoluteDeltaLabel,
+      recommendedCheckInTime,
+      selectedCheckInTime,
+    };
+  }
+
+  if (deltaMinutes <= -PARKING_CHECK_IN_TIMING_GOOD_THRESHOLD_MINUTES) {
+    return {
+      status: 'late',
+      title: `Parking check-in may be tight by ${absoluteDeltaLabel}`,
+      body: 'Your selected parking check-in may leave less time than recommended for parking, shuttle/walk, security, and boarding.',
+      basis: 'Consider moving check-in earlier or choosing a faster parking option.',
+      deltaMinutes,
+      absoluteDeltaLabel,
+      recommendedCheckInTime,
+      selectedCheckInTime,
+    };
+  }
+
+  return {
+    status: 'good',
+    title: 'Parking time looks good',
+    body: 'Your parking check-in lines up with your flight timing and airport buffer.',
+    basis: '',
+    deltaMinutes,
+    absoluteDeltaLabel,
+    recommendedCheckInTime,
+    selectedCheckInTime,
+  };
+}
+
+/** @deprecated Use resolveParkingCheckInTimingMessage for UI copy. */
 export function parkingCheckInWarning(args: {
   checkInTime: string;
   timing: SelectedParkingTimingBreakdown;
   securityTargetTime?: string | null;
 }): string | null {
-  const checkInMin = parseHHMMToMinutes(args.checkInTime);
-  const securityTargetMin = args.securityTargetTime
-    ? parseHHMMToMinutes(args.securityTargetTime)
-    : null;
-
-  if (checkInMin == null || securityTargetMin == null) return null;
-
-  const terminalArrivalMin =
-    checkInMin +
-    (args.timing.parkingBufferMinutes ?? 0) +
-    (args.timing.shuttleWalkMinutes ?? 0);
-
-  if (terminalArrivalMin > securityTargetMin + 5) {
-    return 'Your parking check-in may be too late for this flight.';
-  }
-
-  if (terminalArrivalMin < securityTargetMin - 45) {
-    return 'Your parking check-in is earlier than needed.';
-  }
-
-  return null;
+  const message = resolveParkingCheckInTimingMessage(args);
+  if (!message || message.status === 'good') return null;
+  return message.title;
 }
 
 export const DEFAULT_FORM_PARKING_ACCESS_MINUTES = 25;
@@ -208,6 +294,7 @@ export function computePrimaryAirportPlan(args: {
     leaveByTime: fallbackLeaveByTime,
     basisText: null,
     warningText: null,
+    parkingCheckInTiming: null,
     parkingCheckInTime: null,
     parkingCheckInSource: null,
     recommendedParkingCheckInTime,
@@ -241,19 +328,27 @@ export function computePrimaryAirportPlan(args: {
             checkInMin - travelMinutes - PARKING_CHECK_IN_LEAVE_RISK_BUFFER_MINUTES,
           );
 
+    const parkingCheckInTiming =
+      selectedTiming && effectiveCheckInTime
+        ? resolveParkingCheckInTimingMessage({
+            checkInTime: effectiveCheckInTime,
+            timing: selectedTiming,
+            securityTargetTime,
+            checkInSource: 'user',
+            recommendedCheckInTime: recommendedParkingCheckInTime,
+          })
+        : null;
+
     return {
       ...base,
       leaveByTime,
       basisText: `Based on your ${formatTimeFriendly(effectiveCheckInTime)} parking check-in${
         selectedParkingName ? ` at ${selectedParkingName}` : ''
       }.`,
+      parkingCheckInTiming,
       warningText:
-        selectedTiming && effectiveCheckInTime
-          ? parkingCheckInWarning({
-              checkInTime: effectiveCheckInTime,
-              timing: selectedTiming,
-              securityTargetTime,
-            })
+        parkingCheckInTiming && parkingCheckInTiming.status !== 'good'
+          ? parkingCheckInTiming.title
           : null,
     };
   }

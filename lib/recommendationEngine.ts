@@ -558,7 +558,7 @@ export class RecommendationEngine {
     );
     const parkingRouteDepartureIso = resolveRouteDepartureIsoForPurpose(
       routeTiming,
-      'origin_to_parking',
+      'parking_origin_to_lot',
     );
     // Resolve coordinates up front so BOTH the provider's backup chain
     // (Google -> Mapbox -> coordinates) and the engine timeout fallback have

@@ -2,7 +2,10 @@ import { calculateAirportReadinessBuffer } from '../airports/airportReadiness';
 import type { TripData } from '../types';
 import { buildLocalDateTime, formatLocalYYYYMMDD } from '../tripTime';
 
-export type RouteTimingPurpose = 'main_to_destination' | 'origin_to_parking';
+export type RouteTimingPurpose = 'main_to_destination' | 'parking_origin_to_lot';
+
+/** @deprecated Use parking_origin_to_lot */
+export type LegacyRouteTimingPurpose = 'origin_to_parking';
 
 export type TripRouteTiming = {
   /** Trip anchor used for weather, parking checkout, and display. */
@@ -202,7 +205,7 @@ export function resolveRouteDepartureIsoForPurpose(
   timing: TripRouteTiming,
   purpose: RouteTimingPurpose,
 ): string {
-  if (purpose === 'origin_to_parking') {
+  if (purpose === 'parking_origin_to_lot') {
     return timing.parkingRouteDepartureIso;
   }
 

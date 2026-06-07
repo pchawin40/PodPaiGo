@@ -49,7 +49,7 @@ describe('parking route live limit', () => {
   test('limits live Google Routes calls to the initially selected parking route keys', async () => {
     const routeCalls: Array<{
       destination: string;
-      routePurpose?: 'main_to_destination' | 'origin_to_parking';
+      routePurpose?: 'main_to_destination' | 'parking_origin_to_lot';
     }> = [];
     const fakeTrafficProvider: TrafficProvider = {
       async getTrafficEstimate(
@@ -66,7 +66,7 @@ describe('parking route live limit', () => {
 
         return {
           route: `${origin}->${destination}`,
-          duration: routeContext?.routePurpose === 'origin_to_parking' ? 12 : 30,
+          duration: routeContext?.routePurpose === 'parking_origin_to_lot' ? 12 : 30,
           congestion: 'low',
           trustStatus: 'live',
           sourceName: 'Google Routes API',
@@ -90,7 +90,7 @@ describe('parking route live limit', () => {
       },
     );
 
-    const liveParkingRouteCalls = routeCalls.filter((call) => call.routePurpose === 'origin_to_parking');
+    const liveParkingRouteCalls = routeCalls.filter((call) => call.routePurpose === 'parking_origin_to_lot');
 
     expect(parking).toHaveLength(5);
     expect(liveParkingRouteCalls).toHaveLength(2);

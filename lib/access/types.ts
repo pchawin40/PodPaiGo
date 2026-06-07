@@ -144,4 +144,5 @@ export type ParkingPriceDisplayLine = {
   primary: string;
   secondary: string | null;
   confidence: PricingConfidenceLabel;
+  badge?: string | null;
 };

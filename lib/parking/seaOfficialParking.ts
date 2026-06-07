@@ -2,8 +2,20 @@ import type { ParkingOption, ParkingRateRule } from '../types';
 import { withAvailabilityScore } from '../providers/parking/shared/availability';
 import { googleMapsSearchUrl } from '../providers/parking/shared/urls';
 
-const SEA_OFFICIAL_SOURCE_URL = 'https://www.flysea.org/sea-tac/parking/parking-information';
-const SEA_RESERVED_URL = 'https://reservesea.portseattle.org/';
+export const SEA_GENERAL_PARKING_INFO_URL =
+  'https://www.portseattle.org/sea/parking/parking-information';
+export const SEA_PARKING_OVERVIEW_URL = 'https://www.portseattle.org/sea/parking';
+export const SEA_RESERVED_BOOKING_URL =
+  'https://reservesea.portseattle.org/book/SEA/Parking';
+export const SEA_RESERVED_INFO_URL =
+  'https://www.portseattle.org/page/reserved-parking-sea-airport';
+
+/** @deprecated Broken path — kept only so tests can assert it is never emitted. */
+export const BROKEN_SEA_OFFICIAL_SOURCE_URL =
+  'https://www.flysea.org/sea-tac/parking/parking-information';
+
+export const SEA_OFFICIAL_GARAGE_DISPLAY_NAME = 'Official SEA Airport Garage';
+
 const SEA_GARAGE_ADDRESS = 'SEA Airport Parking Garage, 17801 International Blvd, SeaTac, WA 98158';
 const SEA_GARAGE_LAT = 47.4439;
 const SEA_GARAGE_LNG = -122.3022;
@@ -64,7 +76,7 @@ function seaGeneralRateRules(): ParkingRateRule[] {
       hourlyRate: 8,
       dailyMax: 37,
       sourceName: 'Port of Seattle',
-      sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+      sourceUrl: SEA_GENERAL_PARKING_INFO_URL,
       confidence: 'high',
     },
     {
@@ -73,7 +85,7 @@ function seaGeneralRateRules(): ParkingRateRule[] {
       kind: 'daily_max',
       amount: 37,
       sourceName: 'Port of Seattle',
-      sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+      sourceUrl: SEA_GENERAL_PARKING_INFO_URL,
       confidence: 'high',
     },
     {
@@ -83,7 +95,7 @@ function seaGeneralRateRules(): ParkingRateRule[] {
       amount: 222,
       minDurationMinutes: 7 * 24 * 60,
       sourceName: 'Port of Seattle',
-      sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+      sourceUrl: SEA_GENERAL_PARKING_INFO_URL,
       confidence: 'high',
       notes: ['Weekly pricing is estimated from published SEA General Parking weekly maximum.'],
     },
@@ -98,7 +110,7 @@ function seaReservedRateRules(): ParkingRateRule[] {
       kind: 'daily_max',
       amount: 47,
       sourceName: 'Port of Seattle',
-      sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+      sourceUrl: SEA_RESERVED_INFO_URL,
       confidence: 'high',
       notes: ['Reserved Parking is on Floor 4, formerly Terminal Direct.'],
     },
@@ -110,7 +122,7 @@ function seaReservedRateRules(): ParkingRateRule[] {
       hourlyRate: 10,
       dailyMax: 47,
       sourceName: 'Port of Seattle',
-      sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+      sourceUrl: SEA_RESERVED_INFO_URL,
       confidence: 'high',
       notes: ['Overstay hourly rate applies up to the daily maximum.'],
     },
@@ -144,15 +156,15 @@ export function buildSeaOfficialParkingOptions(args: {
       priceSource: 'official-rate',
       priceConfidence: 'high',
       priceNote:
-        'Official published SEA General Parking rate. Estimated total based on selected duration; confirm current airport rates before parking.',
+        'General Parking — official $37/day. Estimated total based on selected duration; confirm current airport rates before parking.',
       rateRules: seaGeneralRateRules(),
       activeRate: {
         total: generalTotal,
-        label: `Published airport rate: $${generalTotal}`,
+        label: `Official published rate: $${generalTotal}`,
         rateType: 'daily_max',
         confidence: 'high',
         sourceName: 'Port of Seattle',
-        sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+        sourceUrl: SEA_GENERAL_PARKING_INFO_URL,
         ruleId: 'sea-general-rate',
         warnings: ['Airport garage is fastest but costs more than many off-site lots.'],
       },
@@ -163,7 +175,7 @@ export function buildSeaOfficialParkingOptions(args: {
       isAvailable: true,
       trustStatus: 'verified-source',
       sourceName: 'Port of Seattle',
-      sourceLink: SEA_OFFICIAL_SOURCE_URL,
+      sourceLink: SEA_GENERAL_PARKING_INFO_URL,
       mapLink: googleMapsSearchUrl(SEA_GARAGE_ADDRESS),
       routeDestination: SEA_GARAGE_ADDRESS,
       address: SEA_GARAGE_ADDRESS,
@@ -201,16 +213,16 @@ export function buildSeaOfficialParkingOptions(args: {
       priceSource: 'official-rate',
       priceConfidence: 'high',
       priceNote:
-        'Official published SEA Reserved Parking rate. Floor 4 was formerly Terminal Direct; advance reservations are required.',
+        'Reserved Parking / Terminal Direct — official $47/day, reservation required. Floor 4 was formerly Terminal Direct.',
       bookingProvider: 'SEA Airport',
       rateRules: seaReservedRateRules(),
       activeRate: {
         total: reservedTotal,
-        label: `Published airport rate: $${reservedTotal}`,
+        label: `Official published rate: $${reservedTotal}`,
         rateType: 'daily_max',
         confidence: 'high',
         sourceName: 'Port of Seattle',
-        sourceUrl: SEA_OFFICIAL_SOURCE_URL,
+        sourceUrl: SEA_RESERVED_INFO_URL,
         ruleId: 'sea-reserved-rate',
         warnings: [
           'Airport garage is fastest but costs more than many off-site lots.',
@@ -224,7 +236,7 @@ export function buildSeaOfficialParkingOptions(args: {
       isAvailable: true,
       trustStatus: 'verified-source',
       sourceName: 'Port of Seattle',
-      sourceLink: SEA_RESERVED_URL,
+      sourceLink: SEA_RESERVED_BOOKING_URL,
       mapLink: googleMapsSearchUrl(SEA_GARAGE_ADDRESS),
       routeDestination: SEA_GARAGE_ADDRESS,
       address: SEA_GARAGE_ADDRESS,

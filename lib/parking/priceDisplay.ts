@@ -32,11 +32,12 @@ export function getParkingDailyPrice(
 export function parkingPriceLine(
   option: ParkingOption,
   tripData: TripData | null
-): { primary: string; secondary: string | null; confidence?: string } {
+): { primary: string; secondary: string | null; confidence?: string; badge?: string | null } {
   const line = formatParkingPriceLine(option, tripData);
   return {
     primary: line.primary,
     secondary: line.secondary,
     confidence: line.confidence,
+    badge: line.badge,
   };
 }

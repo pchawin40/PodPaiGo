@@ -293,19 +293,20 @@ describe('Mapbox backup route timing', () => {
     expect(calls.some((u) => u.includes('api.mapbox.com'))).toBe(true);
   });
 
-  test('Mapbox is not used for parking-candidate routes (no fan-out)', async () => {
+  test('Mapbox can back up parking origin-to-lot routes when Google is unavailable', async () => {
     process.env.DISABLE_GOOGLE_ROUTES = 'true';
-    const { calls } = installFetch(() => mapboxOk(210));
+    const { calls } = installFetch(() => mapboxOk(3300));
 
     const estimate = await provider.getTrafficEstimate(
       'Monroe, WA',
       'Some Parking Lot',
       new Date().toISOString(),
       destFor(6),
-      { routePurpose: 'origin_to_parking', lotId: 'lot-123', originLatLng: ORIGIN },
+      { routePurpose: 'parking_origin_to_lot', lotId: 'lot-123', originLatLng: ORIGIN },
     );
 
-    expect(calls.some((u) => u.includes('api.mapbox.com'))).toBe(false);
-    expect(estimate.sourceName).toBe('Estimated from coordinates');
+    expect(calls.some((u) => u.includes('api.mapbox.com'))).toBe(true);
+    expect(estimate.sourceName).toBe('Mapbox Directions');
+    expect(estimate.duration).toBe(55);
   });
 });

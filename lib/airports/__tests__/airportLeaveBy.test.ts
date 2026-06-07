@@ -1,121 +1,102 @@
 import {
-  computePrimaryAirportPlan,
-  deriveRecommendedParkingCheckIn,
-  hasUserProvidedParkingCheckIn,
-  resolveEffectiveDriveMinutes,
+  formatParkingCheckInDeltaDuration,
+  resolveParkingCheckInTimingMessage,
 } from '../airportLeaveBy';
-import type { TripData } from '../../types';
 
-const baseTrip: TripData = {
-  type: 'one-way-departure',
-  origin: 'Seattle, WA',
-  destination: 'SEA Airport',
-  departureDate: '2026-06-01',
-  departureTime: '09:00',
-  airportCode: 'SEA',
-  transportAvailability: 'all',
-  bagPlan: 'none',
-  checkingBags: false,
-  securityOption: 'standard',
-  flightType: 'domestic',
-  cabin: 'economy',
+const defaultTiming = {
+  totalMinutes: 45,
+  driveMinutes: 30,
+  parkingBufferMinutes: 5,
+  shuttleWalkMinutes: 10,
 };
 
-const timing = {
-  totalMinutes: 72,
-  driveMinutes: 45,
-  parkingBufferMinutes: 10,
-  shuttleWalkMinutes: 17,
-};
-
-describe('airportLeaveBy', () => {
-  test('user parking check-in drives leave-by from drive time', () => {
-    const trip: TripData = {
-      ...baseTrip,
-      parkingCheckInDate: '2026-06-01',
-      parkingCheckInTime: '06:00',
-      parkingCheckInUserOverride: true,
-    };
-
-    const plan = computePrimaryAirportPlan({
-      intent: 'flying-out',
-      tripData: trip,
-      selectedParkingName: 'WallyPark',
-      selectedTiming: timing,
-      fallbackLeaveByTime: '07:49',
-      airportReadyBufferMinutes: 75,
-      securityTargetTime: '07:45',
-    });
-
-    expect(plan.leaveByTime).toBe('05:10');
-    expect(plan.basisText).toContain('6:00 AM parking check-in');
-    expect(plan.parkingCheckInSource).toBe('user');
+describe('formatParkingCheckInDeltaDuration', () => {
+  test('formats sub-hour durations as minutes only', () => {
+    expect(formatParkingCheckInDeltaDuration(5)).toBe('5 min');
+    expect(formatParkingCheckInDeltaDuration(18)).toBe('18 min');
   });
 
-  test('derived parking check-in when user has not overridden', () => {
-    const trip: TripData = {
-      ...baseTrip,
-      parkingCheckInDate: '2026-06-01',
-      parkingCheckInTime: '09:00',
-    };
-
-    expect(hasUserProvidedParkingCheckIn(trip)).toBe(false);
-
-    const recommended = deriveRecommendedParkingCheckIn({
-      tripData: trip,
-      timing,
-      airportReadyBufferMinutes: 75,
-    });
-
-    expect(recommended).toBe('07:18');
-
-    const plan = computePrimaryAirportPlan({
-      intent: 'flying-out',
-      tripData: trip,
-      selectedParkingName: 'WallyPark',
-      selectedTiming: timing,
-      fallbackLeaveByTime: '07:49',
-      airportReadyBufferMinutes: 75,
-      securityTargetTime: '07:45',
-    });
-
-    expect(plan.leaveByTime).toBe('06:33');
-    expect(plan.basisText).toContain('PodPaiGo recommended parking check-in');
-    expect(plan.parkingCheckInSource).toBe('recommended');
+  test('formats hour durations with zero-padded minutes', () => {
+    expect(formatParkingCheckInDeltaDuration(65)).toBe('1h 05m');
+    expect(formatParkingCheckInDeltaDuration(90)).toBe('1h 30m');
+    expect(formatParkingCheckInDeltaDuration(130)).toBe('2h 10m');
   });
 
-  test('hero, card, and timeline inputs agree on leave-by', () => {
-    const trip: TripData = {
-      ...baseTrip,
-      parkingCheckInDate: '2026-06-01',
-      parkingCheckInTime: '06:00',
-      parkingCheckInUserOverride: true,
-    };
+  test('never uses a zero-hour prefix', () => {
+    expect(formatParkingCheckInDeltaDuration(5)).not.toContain('0h');
+    expect(formatParkingCheckInDeltaDuration(45)).not.toContain('0h');
+  });
+});
 
-    const plan = computePrimaryAirportPlan({
-      intent: 'flying-out',
-      tripData: trip,
-      selectedParkingName: 'WallyPark',
-      selectedTiming: timing,
-      fallbackLeaveByTime: '07:49',
-      airportReadyBufferMinutes: 75,
-      securityTargetTime: '07:45',
+describe('resolveParkingCheckInTimingMessage', () => {
+  test('shows extra cushion when selected check-in is 90 min earlier', () => {
+    const message = resolveParkingCheckInTimingMessage({
+      checkInTime: '06:30',
+      recommendedCheckInTime: '08:00',
+      timing: defaultTiming,
     });
 
-    expect(plan.leaveByTime).toBe('05:10');
-    expect(plan.travelMinutes).toBe(45);
-    expect(plan.parkingCheckInTime).toBe('06:00');
-    expect(plan.leaveByTime).not.toBe('07:49');
+    expect(message).toMatchObject({
+      status: 'early',
+      deltaMinutes: 90,
+      absoluteDeltaLabel: '1h 30m',
+      recommendedCheckInTime: '08:00',
+      selectedCheckInTime: '06:30',
+    });
+    expect(message?.title).toBe('You have 1h 30m extra airport cushion');
+    expect(message?.body).toContain('6:30 AM parking check-in');
+    expect(message?.basis).toBe('Based on your selected parking check-in.');
   });
 
-  test('resolveEffectiveDriveMinutes falls back from total timing parts', () => {
-    expect(
-      resolveEffectiveDriveMinutes({
-        totalMinutes: 72,
-        driveMinutes: null,
-        parkingBufferMinutes: 10,
-        shuttleWalkMinutes: 17,
-      }),
-    ).toBe(45);
+  test('shows tightness when selected check-in is 20 min later', () => {
+    const message = resolveParkingCheckInTimingMessage({
+      checkInTime: '08:20',
+      recommendedCheckInTime: '08:00',
+      timing: defaultTiming,
+    });
+
+    expect(message).toMatchObject({
+      status: 'late',
+      deltaMinutes: -20,
+      absoluteDeltaLabel: '20 min',
+    });
+    expect(message?.title).toBe('Parking check-in may be tight by 20 min');
+    expect(message?.basis).toBe(
+      'Consider moving check-in earlier or choosing a faster parking option.',
+    );
+  });
+
+  test('shows good timing when within 10 minutes of recommended', () => {
+    const message = resolveParkingCheckInTimingMessage({
+      checkInTime: '07:50',
+      recommendedCheckInTime: '08:00',
+      timing: defaultTiming,
+    });
+
+    expect(message).toMatchObject({
+      status: 'good',
+      deltaMinutes: 10,
+      absoluteDeltaLabel: '10 min',
+    });
+    expect(message?.title).toBe('Parking time looks good');
+    expect(message?.basis).toBe('');
+  });
+
+  test('returns unknown status without duration when recommended is missing', () => {
+    const message = resolveParkingCheckInTimingMessage({
+      checkInTime: '06:00',
+      recommendedCheckInTime: null,
+      timing: defaultTiming,
+    });
+
+    expect(message).toMatchObject({
+      status: 'unknown',
+      deltaMinutes: null,
+      absoluteDeltaLabel: null,
+      recommendedCheckInTime: null,
+      selectedCheckInTime: '06:00',
+    });
+    expect(message?.title).not.toMatch(/\d/);
+    expect(message?.body).not.toMatch(/\d/);
   });
 });

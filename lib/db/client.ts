@@ -37,6 +37,7 @@ export function parkingDbCacheDisabledByConfig(): boolean {
 
   const isPlaceholder =
     connectionString.includes('<PROJECT_REF>') ||
+    connectionString.includes('<PASSWORD>') ||
     connectionString.includes('postgres.<PROJECT_REF>');
 
   if (process.env.NODE_ENV !== 'production' && isPlaceholder) {

@@ -11,6 +11,11 @@ import {
   writeDestinationAccessConfirmed,
   type DestinationParkingClassification,
 } from '../../lib/parking/destinationParkingClassifier';
+import {
+  buildParkingOptionsHints,
+  type GoogleParkingOptionsSignals,
+} from '../../lib/parking/googleParkingOptionsSignals';
+import { matchCuratedLocalParkingZone } from '../../lib/parking/localParkingZones';
 import { accessBadgeLabel } from './ParkingAccessBadge';
 import ParkingInfoReportModal from './ParkingInfoReportModal';
 import { trackEvent } from '../../lib/analytics/trackEvent';
@@ -20,6 +25,7 @@ type DestinationParkingSummaryProps = {
   origin?: string | null;
   destinationKind?: string | null;
   airportCode?: string | null;
+  googleParkingOptions?: GoogleParkingOptionsSignals | null;
   onCheckNearbyParking?: () => void;
   className?: string;
 };
@@ -42,6 +48,7 @@ export default function DestinationParkingSummary({
   origin = null,
   destinationKind = null,
   airportCode = null,
+  googleParkingOptions = null,
   onCheckNearbyParking,
   className = '',
 }: DestinationParkingSummaryProps) {
@@ -74,6 +81,8 @@ export default function DestinationParkingSummary({
   const headline = destinationParkingHeadline(classification.mode);
   const subcopy = destinationParkingSubcopy(classification.mode);
   const isRestricted = classification.mode === 'restricted_possible';
+  const localZone = matchCuratedLocalParkingZone(destination);
+  const parkingHints = buildParkingOptionsHints(googleParkingOptions, { airportTrip: false });
 
   const handleConfirmAccess = () => {
     writeDestinationAccessConfirmed(destination);
@@ -91,6 +100,32 @@ export default function DestinationParkingSummary({
         </div>
         <h3 className="mt-1 text-lg font-semibold text-zinc-900">{headline}</h3>
         <p className="mt-1 text-sm text-zinc-600">{subcopy}</p>
+
+        {localZone ? (
+          <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+            <div className="font-semibold">{localZone.headline}</div>
+            <p className="mt-1">{localZone.detail}</p>
+          </div>
+        ) : null}
+
+        {parkingHints.hints.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Nearby parking signals
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {parkingHints.hints.map((hint) => (
+                <span
+                  key={hint.category}
+                  className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-800"
+                >
+                  {hint.label}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-zinc-500">{parkingHints.verifyNotice}</p>
+          </div>
+        ) : null}
 
         <dl className="mt-4 grid gap-2 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">

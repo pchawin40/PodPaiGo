@@ -1,5 +1,6 @@
 import type { ParkingOption, TripData, TrustStatus } from '../types';
 import { getParkingTotalPrice } from './priceDisplay';
+import { streetParkingScorePenalty } from './googleParkingOptionsSignals';
 import {
   buildParkingDriveContextFromOption,
   getParkingTerminalTimeMinutes,
@@ -7,6 +8,13 @@ import {
 } from './routeMinutes';
 import { isParkingRouteUnavailable } from './routeStatus';
 import { resolveTripParkingContext } from '../trip/tripContext';
+import {
+  cheapestBadgeExplanation,
+  getParkingPriceTier,
+  parkingComparableCostWithReliability,
+  qualifiesForCheapestBadge,
+} from './priceReliability';
+import { debugLog } from '../utils/debug';
 
 export type ParkingSortMode = 'best' | 'easiest' | 'cheapest' | 'fastest';
 
@@ -16,6 +24,8 @@ export type ParkingSortContext = {
   /** Total estimated parking cost; free parking should resolve to 0. */
   totalCost?: (option: ParkingOption) => number;
   tripData?: TripData | null;
+  /** Peer options used for cheapest badge/explanation comparisons. */
+  peers?: ParkingOption[];
 };
 
 const BIG = 1_000_000;
@@ -26,33 +36,45 @@ function num(value: unknown): number | null {
 
 /** Origin → parking lot drive time in minutes, using the best available signal. */
 export function parkingDriveMinutes(option: ParkingOption): number {
-  return (
-    num(option.originToParkingMinutes) ??
-    num(option.routeToParkingMinutes) ??
-    num(option.driveMinutes) ??
-    num(option.duration) ??
-    num(option.distance) ??
-    0
-  );
+  return resolveParkingDriveMinutesDetailed(
+    option,
+    buildParkingDriveContextFromOption(option),
+  ).minutes;
 }
 
 /** Parking lot → final destination/terminal time (walk, shuttle, transfer) in minutes. */
 export function parkingWalkTransferMinutes(option: ParkingOption): number {
+  const shuttleWait =
+    option.transferType === 'shuttle'
+      ? num(option.shuttleWaitMinutes) ?? 8
+      : 0;
+
   return (
-    num(option.walkingMinutes) ??
-    num(option.transferToTerminalMinutes) ??
-    num(option.shuttleMinutes) ??
-    0
+    shuttleWait +
+    (num(option.transferToTerminalMinutes) ?? 0) +
+    (num(option.walkingMinutes) ?? 0) +
+    (num(option.bufferRiskMinutes) ?? 0)
   );
 }
 
-/** Total door-to-destination time: drive + park/check-in buffer + walk/shuttle/transfer. */
-export function parkingTotalDoorMinutes(option: ParkingOption): number {
-  return (
-    parkingDriveMinutes(option) +
-    (num(option.parkingBufferMinutes) ?? 0) +
-    parkingWalkTransferMinutes(option)
+/** Total door-to-terminal time including drive, park/check-in, shuttle, walk, and buffer. */
+export function parkingTotalDoorMinutes(
+  option: ParkingOption,
+  tripData?: TripData | null,
+): number {
+  return getParkingTerminalTimeMinutes(
+    option,
+    buildParkingDriveContextFromOption(option),
+    tripData ? resolveTripParkingContext(tripData) : 'airport_trip',
   );
+}
+
+/** Alias used by fastest ranking and UI totals. */
+export function totalTimeToTerminalMinutes(
+  option: ParkingOption,
+  tripData?: TripData | null,
+): number {
+  return getParkingTotalTimeMinutes(option, tripData);
 }
 
 function trustPenalty(status: TrustStatus | undefined): number {
@@ -186,23 +208,37 @@ export function getParkingComparableCost(
 
 function cheapestKey(option: ParkingOption, tripData?: TripData | null): number {
   const cost = getParkingComparableCost(option, tripData);
-  return cost == null ? BIG : cost;
+  const base = cost == null ? BIG : cost;
+  return (
+    parkingComparableCostWithReliability(option, tripData ?? null, base) +
+    streetParkingScorePenalty(option, tripData) * 0.05
+  );
+}
+
+function frictionPenalty(option: ParkingOption): number {
+  let penalty = transferPenalty(option);
+  if (option.transferType === 'shuttle') {
+    penalty += (num(option.shuttleWaitMinutes) ?? 8) * 0.75;
+  }
+  if (option.priceDisplay === 'check-live' || option.priceDisplay === 'unavailable') {
+    penalty += 20;
+  }
+  return penalty;
 }
 
 function easiestKey(option: ParkingOption, tripData?: TripData | null): number {
   const totalTime = getParkingTotalTimeMinutes(option, tripData);
-  const walkTransfer = parkingWalkTransferMinutes(option);
 
   return (
-    totalTime +
+    totalTime * 0.4 +
     routePenalty(option, tripData) +
-    transferPenalty(option) +
+    frictionPenalty(option) +
     availabilityPenalty(option) +
     trustPenalty(option.trustStatus) +
     priceConfidencePenalty(option) +
     unknownPricePenalty(option, tripData) +
     easiestConfidenceBonus(option) +
-    walkTransfer * 0.6
+    streetParkingScorePenalty(option, tripData)
   );
 }
 
@@ -261,12 +297,70 @@ export function compareParkingByFastest(
   b: ParkingOption,
   tripData?: TripData | null,
 ): number {
+  const aTotal = totalTimeToTerminalMinutes(a, tripData);
+  const bTotal = totalTimeToTerminalMinutes(b, tripData);
+
   return (
-    getParkingTotalTimeMinutes(a, tripData) - getParkingTotalTimeMinutes(b, tripData) ||
+    aTotal - bTotal ||
     routePenalty(a, tripData) - routePenalty(b, tripData) ||
     unknownPricePenalty(a, tripData) - unknownPricePenalty(b, tripData) ||
     getParkingComparableCost(a, tripData) - getParkingComparableCost(b, tripData)
   );
+}
+
+export type ParkingSortScoreSnapshot = {
+  lotId: string;
+  lotName: string;
+  mode: ParkingSortMode;
+  totalTimeToTerminalMinutes: number;
+  driveMinutes: number;
+  comparableCost: number;
+  priceTier: string;
+  cheapestKey: number;
+  fastestKey: number;
+  easiestKey: number;
+  qualifiesForCheapestBadge: boolean;
+};
+
+export function buildParkingSortScoreSnapshot(
+  option: ParkingOption,
+  mode: ParkingSortMode,
+  tripData?: TripData | null,
+  peers: ParkingOption[] = [option],
+): ParkingSortScoreSnapshot {
+  const totalMinutes = totalTimeToTerminalMinutes(option, tripData);
+  const cost = getParkingComparableCost(option, tripData);
+
+  return {
+    lotId: String(option.id || option.name || 'unknown'),
+    lotName: option.name,
+    mode,
+    totalTimeToTerminalMinutes: totalMinutes,
+    driveMinutes: parkingDriveMinutes(option),
+    comparableCost: cost,
+    priceTier: getParkingPriceTier(option, tripData ?? null),
+    cheapestKey: cheapestKey(option, tripData),
+    fastestKey: totalMinutes,
+    easiestKey: easiestKey(option, tripData),
+    qualifiesForCheapestBadge: qualifiesForCheapestBadge({
+      option,
+      peers,
+      tripData: tripData ?? null,
+    }),
+  };
+}
+
+export function logParkingSortScores(
+  options: ParkingOption[],
+  mode: ParkingSortMode,
+  tripData?: TripData | null,
+): void {
+  const peers = options.filter((option) => !isParkingRouteUnavailable(option));
+
+  debugLog('[Parking sort scores]', {
+    mode,
+    options: peers.map((option) => buildParkingSortScoreSnapshot(option, mode, tripData, peers)),
+  });
 }
 
 /**
@@ -289,7 +383,7 @@ export function sortParkingOptionsForMode(
   const totalCost = context.totalCost ?? ((option) => getParkingComparableCost(option, context.tripData));
   const tripData = context.tripData ?? null;
 
-  return options
+  const sorted = options
     .map((option, index) => ({ option, index }))
     .sort((a, b) => {
       const aUnavailable = isUnavailable(a.option);
@@ -297,9 +391,6 @@ export function sortParkingOptionsForMode(
       if (aUnavailable !== bUnavailable) return aUnavailable ? 1 : -1;
 
       if (mode === 'cheapest') {
-        const aCost = totalCost(a.option);
-        const bCost = totalCost(b.option);
-        if (aCost !== bCost) return aCost - bCost;
         return compareParkingByCheapest(a.option, b.option, tripData) || a.index - b.index;
       }
 
@@ -318,6 +409,10 @@ export function sortParkingOptionsForMode(
       return compareParkingByEasiest(a.option, b.option, tripData) || a.index - b.index;
     })
     .map((entry) => entry.option);
+
+  logParkingSortScores(sorted, mode, tripData);
+
+  return sorted;
 }
 
 /** Short evidence label explaining why an option ranks well in the current mode. */
@@ -332,8 +427,12 @@ export function parkingRankEvidenceLabel(
     return 'Verified free parking';
   }
 
-  if (mode === 'cheapest') return 'Lowest reliable total price';
+  if (mode === 'cheapest') {
+    const peers = context.peers ?? [option];
+    return cheapestBadgeExplanation(option, peers, context.tripData ?? null);
+  }
   if (mode === 'fastest') return 'Shortest door-to-terminal time';
+  if (mode === 'best') return 'Best overall';
 
   const walk = parkingWalkTransferMinutes(option);
   if (walk > 0 && walk <= 6) return 'Low shuttle/walk friction';
@@ -344,4 +443,39 @@ export function parkingRankEvidenceLabel(
     return 'High confidence';
   }
   return 'Lower stress estimate';
+}
+
+/** One-line explanation matching the active sort mode. */
+export function parkingRankExplanation(
+  option: ParkingOption,
+  mode: ParkingSortMode,
+  tripData?: TripData | null,
+  peers: ParkingOption[] = [option],
+): string {
+  const totalCost = getParkingComparableCost(option, tripData);
+  const totalMinutes = getParkingTotalTimeMinutes(option, tripData);
+
+  if (mode === 'cheapest') {
+    if (totalCost === 0) {
+      return 'Lowest reliable total among route-available options, including verified free parking.';
+    }
+    if (qualifiesForCheapestBadge({ option, peers, tripData: tripData ?? null })) {
+      return 'Lowest reliable live total among comparable options with usable route timing.';
+    }
+    return 'Lowest estimate among options without live prices.';
+  }
+
+  if (mode === 'fastest') {
+    return 'Shortest door-to-terminal time with a real drive route — official garages can win when walk access is direct.';
+  }
+
+  if (mode === 'best') {
+    return 'Weighted balance of reliable price, total time, bookability, route confidence, and low-friction access.';
+  }
+
+  if (mode === 'easiest') {
+    return 'Lowest-stress pick based on live price confidence, bookability, short access, and weather-friendly access.';
+  }
+
+  return `Balanced pick (${totalMinutes} min total, ${totalCost >= 1000000 ? 'price TBD' : `$${totalCost} total`}).`;
 }

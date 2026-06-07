@@ -1,4 +1,10 @@
 import {
+  canConsumeGooglePlacesDailyCallSync,
+  getGooglePlacesDailyLimit,
+  recordGooglePlacesDailyCall,
+  type GooglePlacesDailyEndpoint,
+} from '../apiUsage/googlePlacesDailyBudget';
+import {
   getActivePlacesRequestBudget,
   recordPlacesRequestBlocked,
   tryConsumePlacesRequestCall,
@@ -46,6 +52,31 @@ export function isGoogleParkingDiscoveryLiveBlocked(): boolean {
     process.env.DISABLE_GOOGLE_PARKING_DISCOVERY === 'true' ||
     isGooglePlacesLiveBlocked()
   );
+}
+
+function dailyEndpointForPlacesCall(
+  endpoint: GooglePlacesEndpoint,
+): GooglePlacesDailyEndpoint {
+  if (endpoint === 'searchText') return 'searchText';
+  if (endpoint === 'getPlace' || endpoint === 'reviews') return 'getPlace';
+  return 'photoMedia';
+}
+
+function logBudgetGuardSkipped(
+  endpoint: GooglePlacesEndpoint,
+  context: GooglePlacesCallContext,
+): void {
+  if (process.env.NODE_ENV === 'test') return;
+
+  console.info('google_live_skipped_budget_guard', {
+    endpoint,
+    route: context.route ?? 'unknown',
+    reason: context.reason,
+    lotName: context.lotName ?? null,
+    airportCode: context.airportCode ?? null,
+    cacheKey: context.cacheKey ?? null,
+    dailyLimit: getGooglePlacesDailyLimit(dailyEndpointForPlacesCall(endpoint)),
+  });
 }
 
 function logBlocked(
@@ -109,11 +140,19 @@ function guardLiveCall(
     return false;
   }
 
+  const dailyEndpoint = dailyEndpointForPlacesCall(endpoint);
+  if (!canConsumeGooglePlacesDailyCallSync(dailyEndpoint)) {
+    recordPlacesRequestBlocked();
+    logBudgetGuardSkipped(endpoint, context);
+    return false;
+  }
+
   if (!tryConsumePlacesRequestCall(endpoint)) {
     logBlocked(endpoint, context, 'request_budget');
     return false;
   }
 
+  recordGooglePlacesDailyCall(dailyEndpoint);
   logAllowedLiveCall(endpoint, context);
   return true;
 }
@@ -166,6 +205,14 @@ export function canMakeLiveGoogleReviewCall(context: GooglePlacesCallContext): b
     return false;
   }
 
+  const dailyEndpoint = dailyEndpointForPlacesCall('reviews');
+  if (!canConsumeGooglePlacesDailyCallSync(dailyEndpoint)) {
+    recordPlacesRequestBlocked();
+    logBudgetGuardSkipped('reviews', { ...context, reason: context.reason || 'reviews' });
+    return false;
+  }
+
+  recordGooglePlacesDailyCall(dailyEndpoint);
   logAllowedLiveCall('reviews', { ...context, reason: context.reason || 'reviews' });
   return true;
 }

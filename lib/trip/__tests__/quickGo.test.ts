@@ -8,6 +8,8 @@ import {
   quickGoParkingExpectationLabel,
   quickGoClassificationForTrip,
   resolveQuickGoBestWay,
+  resolveQuickGoLocalParkingWalkBufferMinutes,
+  resolveQuickGoLocalTripTiming,
   readQuickGoOriginFromSearchParams,
 } from '../quickGo';
 import { classifyDestinationParking } from '../../parking/destinationParkingClassifier';
@@ -357,6 +359,59 @@ describe('quickGo', () => {
 
     expect(params.get('quickGoConfirmed')).toBe('1');
     expect(params.get('detectedAirportCode')).toBeNull();
+  });
+
+  test('local cafe uses a small free-customer parking/walk buffer', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: "Jeno's Cafe, Monroe, WA",
+    });
+
+    expect(classification.mode).toBe('free_likely');
+    expect(resolveQuickGoLocalParkingWalkBufferMinutes(classification)).toBeGreaterThanOrEqual(2);
+    expect(resolveQuickGoLocalParkingWalkBufferMinutes(classification)).toBeLessThanOrEqual(5);
+
+    const timing = resolveQuickGoLocalTripTiming({ driveMinutes: 4, classification });
+    expect(timing.driveMinutes).toBe(4);
+    expect(timing.bufferMinutes).toBe(4);
+    expect(timing.totalMinutes).toBe(8);
+    expect(timing.breakdownDetail).toBe('~4 min drive + ~4 min parking/walk');
+    expect(timing.guidance).toMatch(/Free\/customer parking likely/i);
+  });
+
+  test('downtown destination uses a larger street-parking buffer', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationKind: 'downtown',
+    });
+
+    expect(classification.mode).toBe('paid_likely');
+    expect(resolveQuickGoLocalParkingWalkBufferMinutes(classification)).toBeGreaterThanOrEqual(5);
+    expect(resolveQuickGoLocalParkingWalkBufferMinutes(classification)).toBeLessThanOrEqual(12);
+
+    const timing = resolveQuickGoLocalTripTiming({ driveMinutes: 4, classification });
+    expect(timing.totalMinutes).toBe(timing.driveMinutes + timing.bufferMinutes);
+    expect(timing.bufferMinutes).toBe(8);
+    expect(timing.totalMinutes).toBe(12);
+  });
+
+  test('airport classification is excluded from local buffer timing helper', () => {
+    const classification = quickGoClassificationForTrip({
+      destination: 'SEA Airport',
+      destinationKind: 'airport',
+      detectedAirportCode: 'SEA',
+    });
+
+    expect(classification.mode).toBe('airport');
+    expect(resolveQuickGoLocalParkingWalkBufferMinutes(classification)).toBe(0);
+  });
+
+  test('local trip timing always includes known drive in total', () => {
+    const classification = classifyDestinationParking({ destination: 'Neighborhood grocery store' });
+    const timing = resolveQuickGoLocalTripTiming({ driveMinutes: 6.4, classification });
+
+    expect(timing.driveMinutes).toBe(6);
+    expect(timing.totalMinutes).toBe(timing.driveMinutes + timing.bufferMinutes);
+    expect(timing.breakdownDetail).toContain('~6 min drive');
   });
 
   test('mergeStoredTripSearchParams keeps stored quick-go origin when route has stale params', () => {

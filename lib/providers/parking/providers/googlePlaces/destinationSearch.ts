@@ -15,6 +15,10 @@ import { withAvailabilityScore } from '../../shared/availability';
 import { googleMapsSearchUrl } from '../../shared/urls';
 import { debugLog } from '../../../../utils/debug';
 import { validateParkingInventoryOption } from '../../../../parking/inventoryValidation';
+import {
+  inferParkingCategoryFromSignals,
+  parseGoogleParkingOptionsSignals,
+} from '../../../../parking/googleParkingOptionsSignals';
 
 type GooglePlace = {
   id?: string;
@@ -28,6 +32,15 @@ type GooglePlace = {
   rating?: number;
   userRatingCount?: number;
   businessStatus?: string;
+  parkingOptions?: {
+    freeStreetParking?: boolean;
+    paidStreetParking?: boolean;
+    freeParkingLot?: boolean;
+    paidParkingLot?: boolean;
+    freeGarageParking?: boolean;
+    paidGarageParking?: boolean;
+    valetParking?: boolean;
+  };
   photos?: Array<{
     name?: string;
     widthPx?: number;
@@ -331,6 +344,7 @@ async function fetchPlacesForDestinationQuery(args: {
           'places.businessStatus',
           'places.location',
           'places.photos',
+          'places.parkingOptions',
         ].join(','),
       },
       body: JSON.stringify(body),
@@ -500,6 +514,9 @@ export async function getDestinationParkingOptions(args: {
           ? place.userRatingCount
           : undefined;
 
+      const googleParkingOptions = parseGoogleParkingOptionsSignals(place.parkingOptions);
+      const parkingCategory = inferParkingCategoryFromSignals(googleParkingOptions);
+
       let option: ParkingOption = {
         id: `destination-google-${place.id || name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         name,
@@ -525,6 +542,8 @@ export async function getDestinationParkingOptions(args: {
         mapLink: googleMapsSearchUrl(routeDestination),
         googlePlaceId: place.id,
         googleMapsUri: place.googleMapsUri,
+        googleParkingOptions: googleParkingOptions ?? undefined,
+        parkingCategory,
         address: place.formattedAddress,
         normalizedAddress: place.formattedAddress,
         imageUrl: undefined,
@@ -548,6 +567,12 @@ export async function getDestinationParkingOptions(args: {
         lastUpdated: new Date().toISOString(),
         assumptions: [
           'Discovered from Google Places near your destination.',
+          ...(googleParkingOptions?.freeParkingLot
+            ? ['Google Places suggests free customer parking may be available — verify posted signs.']
+            : []),
+          ...(googleParkingOptions?.freeStreetParking
+            ? ['Google Places suggests nearby street parking may exist — verify posted limits and rules.']
+            : []),
           ...(pricing.assumptions || []),
           isParkAndRide
             ? 'Park & Ride rules vary. Do not assume overnight parking unless verified.'

@@ -327,6 +327,17 @@ export type ParkingOption = {
   availabilityStatus?: 'available' | 'unavailable' | 'unknown'; // simplified availability for UI display 
   isAvailable?: boolean; // legacy field, true if availabilityStatus is 'available'
   googlePlaceId?: string;
+  /** Google Places ParkingOptions signals — guidance only, not legal certainty. */
+  googleParkingOptions?: {
+    freeStreetParking?: boolean;
+    paidStreetParking?: boolean;
+    freeParkingLot?: boolean;
+    paidParkingLot?: boolean;
+    freeGarageParking?: boolean;
+    paidGarageParking?: boolean;
+    valetParking?: boolean;
+  };
+  parkingCategory?: 'customer_lot' | 'street' | 'garage_paid' | 'valet' | 'unknown';
   providerLotId?: string;
   normalizedName?: string;
   normalizedAddress?: string;
@@ -423,6 +434,21 @@ export type ParkingOption = {
   accessNotes?: string;
   accessConfidence?: 'high' | 'medium' | 'low' | 'unknown';
   userAccessEligible?: boolean;
+  /** Collapsed official airport garage family id (e.g. SEA General + Reserved + Google garage). */
+  officialGarageGroupId?: string;
+  /** Sub-options shown inside Details & evidence for grouped official garages. */
+  officialGarageSubOptions?: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    dailyRate: number;
+    bookable: boolean;
+    bookingUrl: string | null;
+    infoUrl: string | null;
+    sourceName: string;
+  }>;
+  /** Member option ids absorbed into an official garage group card. */
+  officialGarageMemberIds?: string[];
 };
 
 export type ParkingGoogleReview = {

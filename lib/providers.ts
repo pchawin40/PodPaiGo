@@ -30,6 +30,7 @@ import {
 } from './parking/parkingCoordinates';
 import {
   logParkingRouteCoordinateAudit,
+  logParkingRouteToLot,
   parkingRouteAuditFromOption,
 } from './parking/parkingRouteAuditLog';
 import {
@@ -260,8 +261,24 @@ function routeLatLngKey(value: RouteLatLng): string {
   return `${value.lat},${value.lng}`;
 }
 
+export const PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE = 'parking_origin_to_lot' as const;
+
+function isParkingOriginToLotPurpose(routePurpose?: string | null): boolean {
+  return (
+    routePurpose === PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE ||
+    routePurpose === 'origin_to_parking'
+  );
+}
+
+export function isUntrustedParkingRouteEstimate(estimate: TrafficEstimate): boolean {
+  if (estimate.routeUnavailable === true) return true;
+  if (estimate.sourceName === 'Estimated route model') return true;
+  if (estimate.sourceName === 'Estimated from coordinates') return true;
+  return false;
+}
+
 function routeUnavailableReasonForContext(routeContext?: RouteRequestContext): string {
-  if (routeContext?.routePurpose === 'origin_to_parking') {
+  if (isParkingOriginToLotPurpose(routeContext?.routePurpose)) {
     return DEFAULT_ROUTE_UNAVAILABLE_REASON;
   }
 
@@ -356,7 +373,7 @@ type RouteLatLng = { lat: number; lng: number };
 type RouteRequestContext = {
   airportCode?: string | null;
   lotId?: string | null;
-  routePurpose?: 'main_to_destination' | 'origin_to_parking';
+  routePurpose?: 'main_to_destination' | 'parking_origin_to_lot' | 'origin_to_parking';
   tripType?: string | null;
   tripMode?: string | null;
   originLatLng?: RouteLatLng | null;
@@ -623,6 +640,7 @@ function routeDebugPayload(args: {
 export function isServeableCachedRouteEstimate(estimate: TrafficEstimate): boolean {
   if (estimate.routeUnavailable === true) return false;
   if (estimate.sourceName === 'Estimated from coordinates') return false;
+  if (estimate.sourceName === 'Estimated route model') return false;
   return true;
 }
 
@@ -852,8 +870,7 @@ export class LiveTrafficProvider implements TrafficProvider {
     unavailableReason: string;
     routeContext?: RouteRequestContext;
   }): Promise<TrafficEstimate> {
-    const allowMapbox =
-      !args.routeContext?.lotId && args.routeContext?.routePurpose !== 'origin_to_parking';
+    const allowMapbox = true;
 
     if (allowMapbox) {
       const mapbox = await this.mapboxRouteEstimate({
@@ -1632,11 +1649,12 @@ export class MockProvider implements DataProvider {
       lotId: routeContext?.lotId,
     });
 
-    if (this.routeCache.has(cacheKey)) {
+    const cachedEstimate = this.routeCache.get(cacheKey);
+    if (cachedEstimate && isServeableCachedRouteEstimate(cachedEstimate)) {
       if (allowLive) {
         logRoutesApiCache('Routes API cache hit', cacheKey, 'provider-route');
       }
-      return this.routeCache.get(cacheKey)!;
+      return cachedEstimate;
     }
 
     const inFlight = this.routeInFlight.get(cacheKey);
@@ -1664,11 +1682,24 @@ export class MockProvider implements DataProvider {
           destinationLatLng,
           routeContext,
         );
+      } else if (isParkingOriginToLotPurpose(routeContext?.routePurpose)) {
+        const coordEstimate = coordinateFallbackTrafficEstimate(
+          normalizeTrafficRoute(origin, destination),
+          routeOriginLatLng,
+          destinationLatLng,
+        );
+        estimate = coordEstimate ?? unavailableTrafficEstimate(
+          normalizeTrafficRoute(origin, destination),
+          'Route validation',
+          routeUnavailableReasonForContext(routeContext),
+        );
       } else {
         estimate = this.estimateRouteDuration(origin, destination, 35);
       }
 
-      this.routeCache.set(cacheKey, estimate);
+      if (isServeableCachedRouteEstimate(estimate)) {
+        this.routeCache.set(cacheKey, estimate);
+      }
       return estimate;
     })();
 
@@ -1839,38 +1870,54 @@ export class MockProvider implements DataProvider {
       );
     };
 
+    const originRouteKey = originCoords
+      ? routeLatLngKey(originCoords)
+      : origin;
+
     const parkingRouteEntries = parkingSource.map((option) => {
       const lotDestination = resolveParkingLotDestination(option, routeDestination);
-      const routeDestinationForLot = lotDestination.destination || routeDestinationFor(option);
+      let routeDestinationForLot = lotDestination.destination || routeDestinationFor(option);
       const routeCoords = getParkingRouteCoordinates(option);
       const destinationLatLng =
         typeof routeCoords.lat === 'number' && typeof routeCoords.lng === 'number'
           ? { lat: routeCoords.lat, lng: routeCoords.lng }
           : null;
+
+      const airportNormalizedDestination = routeDestination.trim().toLowerCase();
+      const lotNormalizedDestination = routeDestinationForLot.trim().toLowerCase();
+      const routesToAirport =
+        lotNormalizedDestination === airportNormalizedDestination ||
+        lotNormalizedDestination.includes('seattle-tacoma international airport');
+
+      if (routesToAirport && destinationLatLng) {
+        routeDestinationForLot = routeLatLngKey(destinationLatLng);
+      }
+
       const routeDestinationKey = destinationLatLng
-        ? `${destinationLatLng.lat},${destinationLatLng.lng}`
+        ? routeLatLngKey(destinationLatLng)
         : routeDestinationForLot;
+      const sharedCacheArgs = {
+        origin: originRouteKey,
+        destination: routeDestinationKey,
+        dateTime: routeDepartureTime,
+        routePurpose: PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE,
+        lotId: option.id,
+        airportCode: isAirportDestination ? airportCode : null,
+      };
 
       return {
         option,
         lotDestination,
         routeDestination: routeDestinationForLot,
         destinationLatLng,
+        routesToAirport,
         routeCacheKey: buildRouteEstimateCacheKey({
-          origin,
-          destination: routeDestinationKey,
-          dateTime: routeDepartureTime,
+          ...sharedCacheArgs,
           mode: 'DRIVE_LIVE',
-          routePurpose: 'origin_to_parking',
-          lotId: option.id,
         }),
         liveRouteCacheKey: buildRouteEstimateCacheKey({
-          origin,
-          destination: routeDestinationKey,
-          dateTime: routeDepartureTime,
+          ...sharedCacheArgs,
           mode: 'DRIVE',
-          routePurpose: 'origin_to_parking',
-          lotId: option.id,
         }),
       };
     });
@@ -1936,7 +1983,8 @@ export class MockProvider implements DataProvider {
         {
           airportCode: isAirportDestination ? airportCode : null,
           lotId: entry.option.id || entry.option.name,
-          routePurpose: 'origin_to_parking',
+          routePurpose: PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE,
+          originLatLng: originCoords,
           targetTerminalArrivalTime: context?.targetTerminalArrivalTime,
         },
       );
@@ -1965,8 +2013,6 @@ export class MockProvider implements DataProvider {
             shouldUseLiveRoute,
           ),
         );
-
-        const routeEstimate = await getParkingRouteEstimate(entry, shouldUseLiveRoute);
 
         const meta = resolveParkingTransferMeta(option);
         const parkingBufferMinutes =
@@ -2055,6 +2101,77 @@ export class MockProvider implements DataProvider {
           googleMapsUrlDestination: lotDestination.destination || routeDestination,
         };
 
+        const logRouteToLot = (args: {
+          source: 'google_live' | 'google_cached' | 'mapbox' | 'fallback' | 'unavailable' | 'deferred_haversine';
+          durationMinutes: number | null;
+          routeEstimate?: TrafficEstimate | null;
+          cached?: boolean;
+        }) => {
+          logParkingRouteToLot({
+            lotName: option.name,
+            lotAddress: option.address || option.normalizedAddress || routeDestination,
+            lotCoordinates: routeTargetCoords,
+            originText: origin,
+            originCoordinates: originCoords,
+            routePurpose: PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE,
+            cacheKey: entry.routeCacheKey,
+            liveRouteCacheKey: entry.liveRouteCacheKey,
+            source: args.source,
+            durationMinutes: args.durationMinutes,
+            distanceMeters: args.routeEstimate?.distanceMeters ?? null,
+            departureTime: routeDepartureTime,
+            trafficAware: args.routeEstimate?.sourceName === 'Google Routes API' ||
+              args.routeEstimate?.sourceName === 'Mapbox Directions',
+            routeToLot: !entry.routesToAirport,
+            routeToAirport: entry.routesToAirport,
+            cached: args.cached === true,
+            cacheKeyComponents: {
+              origin: originRouteKey,
+              destination: entry.destinationLatLng
+                ? routeLatLngKey(entry.destinationLatLng)
+                : routeDestination,
+              lotId: String(option.id || ''),
+              mode: shouldUseLiveRoute ? 'DRIVE_LIVE' : 'DRIVE_ESTIMATED',
+            },
+          });
+        };
+
+        if (!shouldUseLiveRoute) {
+          const fallbackDriveMinutes = await resolveFallbackDriveMinutes();
+
+          logRouteToLot({
+            source: 'deferred_haversine',
+            durationMinutes: fallbackDriveMinutes > 0 ? fallbackDriveMinutes : null,
+          });
+
+          const deferredOption = applyParkingOriginDriveMinutes(
+            {
+              ...option,
+              ...commonRouteFields,
+              parkingRouteDebug,
+              routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
+              routeUnavailable: false,
+              routeUnavailableReason: option.routeUnavailableReason,
+              assumptions: [
+                ...option.assumptions,
+                fallbackDriveMinutes > 0
+                  ? `Estimated ${fallbackDriveMinutes} min drive from origin based on straight-line distance.`
+                  : 'Live route calculation deferred for parking options outside the initially visible set.',
+              ],
+            },
+            fallbackDriveMinutes,
+            'haversine-estimated',
+            routeTarget,
+          );
+
+          return deferredOption;
+        }
+
+        const routeWasCached =
+          this.routeCache.has(entry.routeCacheKey) ||
+          Boolean(getCachedRouteEstimate(entry.liveRouteCacheKey));
+        const routeEstimate = await getParkingRouteEstimate(entry, true);
+
         if (!routeEstimate) {
           const fallbackDriveMinutes = await resolveFallbackDriveMinutes();
 
@@ -2093,16 +2210,31 @@ export class MockProvider implements DataProvider {
         }
 
         const liveDriveMinutes =
-          !routeEstimate.routeUnavailable && typeof routeEstimate.duration === 'number'
+          !isUntrustedParkingRouteEstimate(routeEstimate) &&
+          typeof routeEstimate.duration === 'number'
             ? routeEstimate.duration
             : null;
 
-        const routeFailed = routeEstimate.routeUnavailable === true || liveDriveMinutes == null;
+        const routeFailed =
+          isUntrustedParkingRouteEstimate(routeEstimate) || liveDriveMinutes == null;
         const fallbackDriveMinutes = routeFailed ? await resolveFallbackDriveMinutes() : 0;
         const driveMinutes = routeFailed
           ? fallbackDriveMinutes
           : liveDriveMinutes!;
-        const routeWasLive = shouldUseLiveRoute && routeEstimate.trustStatus === 'live';
+        const routeWasLive = routeEstimate.trustStatus === 'live';
+
+        logRouteToLot({
+          source: routeFailed
+            ? 'fallback'
+            : routeEstimate.sourceName === 'Mapbox Directions'
+              ? 'mapbox'
+              : routeWasCached
+                ? 'google_cached'
+                : 'google_live',
+          durationMinutes: driveMinutes > 0 ? driveMinutes : null,
+          routeEstimate,
+          cached: routeWasCached,
+        });
 
         const enrichedOption = applyParkingOriginDriveMinutes(
           {

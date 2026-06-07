@@ -4,6 +4,7 @@ import {
   compareParkingByFastest,
   getParkingComparableCost,
   getParkingTotalTimeMinutes,
+  parkingRankExplanation,
   parkingTotalDoorMinutes,
   sortParkingOptionsForMode,
 } from '../sortParkingOptions';
@@ -68,13 +69,30 @@ describe('sortParkingOptionsForMode', () => {
     expect(ids(sorted)).toEqual(['free', 'cheap', 'pricey']);
   });
 
-  test('fastest puts lowest total route + transfer time first', () => {
-    const slow = lot({ id: 'slow', originToParkingMinutes: 30, walkingMinutes: 10 });
-    const fast = lot({ id: 'fast', originToParkingMinutes: 8, walkingMinutes: 3 });
-    const mid = lot({ id: 'mid', originToParkingMinutes: 15, walkingMinutes: 5 });
+  test('fastest puts lowest totalTimeToTerminalMinutes first, not proximity', () => {
+    const slow = lot({
+      id: 'slow',
+      distance: 1,
+      originToParkingMinutes: 30,
+      transferType: 'shuttle',
+      shuttleWaitMinutes: 8,
+      transferToTerminalMinutes: 12,
+      walkingMinutes: 3,
+      bufferRiskMinutes: 5,
+    });
+    const fast = lot({
+      id: 'fast',
+      distance: 12,
+      originToParkingMinutes: 20,
+      transferType: 'walk',
+      transferToTerminalMinutes: 3,
+      walkingMinutes: 3,
+      parkingBufferMinutes: 5,
+    });
+    const mid = lot({ id: 'mid', distance: 6, originToParkingMinutes: 15, walkingMinutes: 5 });
 
     const sorted = sortParkingOptionsForMode([slow, mid, fast], 'fastest');
-    expect(ids(sorted)).toEqual(['fast', 'mid', 'slow']);
+    expect(ids(sorted)).toEqual(['mid', 'fast', 'slow']);
   });
 
   test('a 0-minute / missing drive time does not win fastest', () => {
@@ -126,6 +144,27 @@ describe('sortParkingOptionsForMode', () => {
     expect(ids(sorted)).toEqual(['trusted-live', 'untrusted-close']);
   });
 
+  test('cheapest does not award badge to estimated range when live exact exists', () => {
+    const liveExact = lot({
+      id: 'live',
+      price: 30,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      sourceLink: 'https://book.example',
+    });
+    const estimatedRange = lot({
+      id: 'estimated',
+      price: 20,
+      priceMin: 18,
+      priceMax: 28,
+      priceDisplay: 'estimated',
+      priceConfidence: 'low',
+    });
+
+    const sorted = sortParkingOptionsForMode([estimatedRange, liveExact], 'cheapest');
+    expect(sorted[0]?.id).toBe('live');
+  });
+
   test('cheapest prefers reliable live price when totals are close', () => {
     const vagueCheap = lot({
       id: 'vague',
@@ -170,14 +209,20 @@ describe('sortParkingOptionsForMode', () => {
     expect(cheapest).not.toEqual(fastest);
   });
 
-  test('direct comparators match mode intent', () => {
-    const easy = lot({ id: 'easy', originToParkingMinutes: 8, walkingMinutes: 2, transferType: 'walk' });
-    const shuttle = lot({ id: 'shuttle', originToParkingMinutes: 8, shuttleMinutes: 10, transferType: 'shuttle' });
-    const free = lot({ id: 'free', price: 0, validationStatus: 'free', originToParkingMinutes: 25 });
-    const paidFast = lot({ id: 'paid-fast', price: 25, originToParkingMinutes: 5, walkingMinutes: 2 });
+  test('parkingRankExplanation matches sort intent', () => {
+    const option = lot({
+      id: 'ranked',
+      price: 20,
+      originToParkingMinutes: 10,
+      walkingMinutes: 4,
+      trustStatus: 'live',
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+    });
 
-    expect(compareParkingByEasiest(easy, shuttle)).toBeLessThan(0);
-    expect(compareParkingByCheapest(free, paidFast)).toBeLessThan(0);
-    expect(compareParkingByFastest(paidFast, free)).toBeLessThan(0);
+    expect(parkingRankExplanation(option, 'cheapest')).toContain('Lowest reliable live total');
+    expect(parkingRankExplanation(option, 'fastest')).toContain('door-to-terminal');
+    expect(parkingRankExplanation(option, 'easiest')).toContain('Lowest-stress');
+    expect(parkingRankExplanation(option, 'best')).toContain('Weighted balance');
   });
 });

@@ -14,7 +14,10 @@ import { trackEvent } from '../../lib/analytics/trackEvent';
 type ParkingProviderActionsProps = {
   bookingUrl: string | null;
   providerUrl?: string | null;
-  directionsUrl?: string | null;
+  routeToParkingUrl?: string | null;
+  parkingToTerminalUrl?: string | null;
+  parkingToDestinationUrl?: string | null;
+  transferLinkLabel?: string;
   searchQuery: string;
   provider?: string | null;
   airportCode?: string | null;
@@ -23,6 +26,8 @@ type ParkingProviderActionsProps = {
   accessToken?: string | null;
   compact?: boolean;
   onReserve?: () => void;
+  reserveLabel?: string;
+  infoOnlyBooking?: boolean;
 };
 
 function buildTracking(
@@ -47,12 +52,23 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
   const ctas = buildParkingMonetizationCtas({
     bookingUrl: props.bookingUrl,
     providerUrl: props.providerUrl,
-    directionsUrl: props.directionsUrl,
+    directionsUrl: props.routeToParkingUrl,
+    reserveLabel: props.reserveLabel,
+    infoOnlyBooking: props.infoOnlyBooking,
   });
+
+  const transferUrl = props.parkingToTerminalUrl || props.parkingToDestinationUrl || null;
+  const transferLabel =
+    props.transferLinkLabel ||
+    (props.parkingToTerminalUrl ? 'Parking to terminal' : 'Parking to destination');
 
   const buttonClass = props.compact
     ? 'inline-flex w-full items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold'
     : 'inline-flex w-full items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold';
+
+  const secondaryButtonClass =
+    buttonClass +
+    ' border border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800';
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -84,20 +100,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         >
           {ctas.reserveLabel}
         </button>
-      ) : (
-        <button
-          type="button"
-          disabled
-          className={
-            buttonClass +
-            ' cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-500'
-          }
-        >
-          {ctas.reserveLabel}
-        </button>
-      )}
-
-      {ctas.viewProviderEnabled ? (
+      ) : ctas.viewProviderEnabled ? (
         <button
           type="button"
           onClick={() =>
@@ -107,14 +110,22 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
               props.accessToken,
             )
           }
-          className={
-            buttonClass +
-            ' border border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
-          }
+          className={secondaryButtonClass}
         >
           {ctas.viewProviderLabel}
         </button>
-      ) : null}
+      ) : (
+        <button
+          type="button"
+          disabled
+          className={
+            buttonClass +
+            ' cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+          }
+        >
+          {ctas.reserveLabel}
+        </button>
+      )}
 
       {ctas.directionsEnabled ? (
         <button
@@ -126,25 +137,47 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
                 provider: props.provider ?? undefined,
                 airportCode: props.airportCode ?? undefined,
                 lotId: props.parkingLotId ?? undefined,
-                ctaType: 'get_directions',
+                ctaType: 'route_to_parking',
               },
             });
             openTrackedUrl(
               ctas.directionsUrl!,
-              buildTracking('get_directions', ctas.directionsUrl, props),
+              buildTracking('route_to_parking', ctas.directionsUrl, props),
               props.accessToken,
             );
           }}
-          className={
-            buttonClass +
-            ' border border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
-          }
+          className={secondaryButtonClass}
         >
           {ctas.directionsLabel}
         </button>
       ) : null}
 
-      <p className="text-[11px] leading-4 text-slate-500">{AFFILIATE_DISCLOSURE}</p>
+      {transferUrl ? (
+        <button
+          type="button"
+          onClick={() => {
+            trackEvent('directions_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: {
+                provider: props.provider ?? undefined,
+                airportCode: props.airportCode ?? undefined,
+                lotId: props.parkingLotId ?? undefined,
+                ctaType: 'parking_to_terminal',
+              },
+            });
+            openTrackedUrl(
+              transferUrl,
+              buildTracking('parking_to_terminal', transferUrl, props),
+              props.accessToken,
+            );
+          }}
+          className={secondaryButtonClass}
+        >
+          {transferLabel}
+        </button>
+      ) : null}
+
+      <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">{AFFILIATE_DISCLOSURE}</p>
     </div>
   );
 }

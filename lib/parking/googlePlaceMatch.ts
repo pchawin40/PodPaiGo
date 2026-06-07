@@ -11,6 +11,7 @@ import { selectBestParkingPhotoFields } from './parkingLotPhotoShared';
 type MatchCacheEntry = ParkingOption;
 type AttachGooglePlaceOptions = {
   force?: boolean;
+  includePhoto?: boolean;
 };
 
 const GOOGLE_PLACE_MATCH_CLIENT_TIMEOUT_MS = 2500;
@@ -36,10 +37,6 @@ function buildMatchKey(parking: ParkingOption, airportCode: string | null): stri
     `provider:${normalize(parking.bookingProvider)}`,
     `source:${normalize(parking.sourceName)}`,
   ].join('|');
-}
-
-function hasGooglePhotoMetadata(parking: ParkingOption): boolean {
-  return Boolean(parking.googlePhotoName || parking.googlePhotoNames?.length);
 }
 
 function buildRequestBody(
@@ -125,7 +122,7 @@ export async function attachGooglePlaceToParking(
   if (cached && !options.force) return withStableParkingRouteStatus(cached);
 
   const body = buildRequestBody(parking, tripData, airportCode, {
-    includePhoto: options.force || !hasGooglePhotoMetadata(parking),
+    includePhoto: options.includePhoto ?? false,
   });
 
   const promise = (async () => {

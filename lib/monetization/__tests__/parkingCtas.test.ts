@@ -13,7 +13,7 @@ describe('parking monetization CTAs', () => {
 
     expect(ctas.reserveLabel).toBe('Reserve parking');
     expect(ctas.viewProviderLabel).toBe('View provider');
-    expect(ctas.directionsLabel).toBe('Get directions');
+    expect(ctas.directionsLabel).toBe('Route to parking');
     expect(ctas.reserveEnabled).toBe(true);
   });
 
@@ -29,5 +29,28 @@ describe('parking monetization CTAs', () => {
 
   test('includes affiliate disclosure copy', () => {
     expect(AFFILIATE_DISCLOSURE).toContain('partner links');
+  });
+
+  test('supports official info-only CTA labels', () => {
+    const ctas = buildParkingMonetizationCtas({
+      bookingUrl: 'https://www.portseattle.org/sea/parking/parking-information',
+      providerUrl: 'https://www.portseattle.org/sea/parking/parking-information',
+      reserveLabel: 'Check official parking',
+      infoOnlyBooking: true,
+    });
+
+    expect(ctas.reserveLabel).toBe('Check official parking');
+    expect(ctas.reserveEnabled).toBe(true);
+  });
+
+  test('supports official ReserveSEA booking CTA labels', () => {
+    const ctas = buildParkingMonetizationCtas({
+      bookingUrl: 'https://reservesea.portseattle.org/book/SEA/Parking',
+      providerUrl: 'https://reservesea.portseattle.org/book/SEA/Parking',
+      reserveLabel: 'Reserve official parking',
+    });
+
+    expect(ctas.reserveLabel).toBe('Reserve official parking');
+    expect(ctas.reserveEnabled).toBe(true);
   });
 });

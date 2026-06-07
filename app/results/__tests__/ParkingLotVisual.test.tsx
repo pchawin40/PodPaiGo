@@ -293,6 +293,28 @@ describe('ParkingLotVisual attribution', () => {
     expect(screen.getAllByText('Google photo').length).toBeGreaterThan(0);
   });
 
+  test('does not render parking review rating or count on the photo card', async () => {
+    render(
+      <ParkingLotVisual
+        option={{
+          id: 'review-enriched-lot',
+          name: 'Review Enriched Lot',
+          type: 'off-airport',
+          googlePlaceId: 'places/review',
+          googlePhotoName: 'places/review/photos/primary',
+          reviewScore: 4.2,
+          reviewCount: 323,
+        }}
+        airportCode="SEA"
+      />,
+    );
+
+    expect(screen.getByAltText('Review Enriched Lot photo')).toBeInTheDocument();
+    expect(screen.queryByText(/★ 4\.2/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/323 reviews/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Google reviews')).not.toBeInTheDocument();
+  });
+
   test('background visuals use local placeholder without selector request', async () => {
     render(
       <ParkingLotVisual

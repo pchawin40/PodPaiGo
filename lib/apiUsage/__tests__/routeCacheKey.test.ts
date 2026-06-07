@@ -46,7 +46,7 @@ describe('buildRouteEstimateCacheKey', () => {
     ).not.toBe(
       buildRouteEstimateCacheKey({
         ...base,
-        routePurpose: 'origin_to_parking',
+        routePurpose: 'parking_origin_to_lot',
         tripType: 'general-trip',
         lotId: 'pike-place-garage',
       }),

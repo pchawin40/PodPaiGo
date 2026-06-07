@@ -279,24 +279,43 @@ export function formatParkingPriceLine(
   const totalIsExact = total.min === total.max;
   const showDailyApprox =
     !dailyIsExact || confidence === 'estimated' || !totalIsExact;
+  const hasDisplayableTotal = total.min > 0 && total.max > 0;
 
-  const primary =
-    confidence === 'final_on_provider' || confidence === 'estimated'
-      ? `Estimated ${totalText} total`
-      : `${label} ${totalText} total`;
+  let primary: string;
+  let badge: string | null = null;
+
+  if (confidence === 'live' && totalIsExact) {
+    primary = `Live ${totalText} total`;
+  } else if (confidence === 'official') {
+    primary = `Official ${totalText} total`;
+  } else if (confidence === 'recent') {
+    primary = totalIsExact ? `Recent ${totalText} total` : `Estimated ${totalText} total`;
+  } else if (confidence === 'final_on_provider' && !hasDisplayableTotal) {
+    primary = 'Check provider';
+  } else if (confidence === 'estimated' || !totalIsExact) {
+    primary = `Estimated ${totalText} total`;
+    badge = 'Estimated range';
+  } else if (confidence === 'final_on_provider') {
+    primary = `Estimated ${totalText} total`;
+    badge = 'Estimated range';
+  } else {
+    primary = `${label} ${totalText} total`;
+  }
+
   const dailyPrefix = showDailyApprox && !dailyIsExact ? '~' : '';
   const baseSecondary = dailyIsExact
     ? `${dailyPrefix}${formatMoney(daily.min)}/day for ${days} day${days === 1 ? '' : 's'}`
     : `${dailyPrefix}${dailyText}/day for ${days} day${days === 1 ? '' : 's'}`;
   const secondary =
-    confidence === 'final_on_provider' || confidence === 'estimated'
-      ? `${baseSecondary}. Confirm at provider; provider controls final price.`
+    confidence === 'final_on_provider' || confidence === 'estimated' || badge === 'Estimated range'
+      ? `${baseSecondary}. Provider controls final price.`
       : baseSecondary;
 
   return {
     primary,
     secondary,
     confidence,
+    badge,
   };
 }
 

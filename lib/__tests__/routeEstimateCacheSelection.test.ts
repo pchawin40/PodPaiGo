@@ -46,4 +46,12 @@ describe('isServeableCachedRouteEstimate (cached fallback must not shadow live)'
       ),
     ).toBe(false);
   });
+
+  test('does NOT serve a cached 35-minute placeholder estimate', () => {
+    expect(
+      isServeableCachedRouteEstimate(
+        estimate({ sourceName: 'Estimated route model', trustStatus: 'estimated', duration: 35 }),
+      ),
+    ).toBe(false);
+  });
 });

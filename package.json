@@ -19,7 +19,8 @@
     "activate:parking-providers": "npx ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/activate-parking-providers.ts",
     "lint": "eslint",
     "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:check": "node scripts/check-db-connection.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",

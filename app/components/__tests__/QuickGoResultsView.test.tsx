@@ -435,9 +435,78 @@ describe('QuickGoResultsView', () => {
 
     expect(screen.getByText('Live drive time: 4 min')).toBeInTheDocument();
     expect(screen.getByText('Total trip time')).toBeInTheDocument();
-    expect(screen.getByText('4 min drive + 12 min parking/walk buffer')).toBeInTheDocument();
+    expect(screen.getByText('Estimated total: ~12 min')).toBeInTheDocument();
+    expect(screen.getByText('~4 min drive + ~8 min parking/walk')).toBeInTheDocument();
+    expect(screen.queryByText(/0 min drive/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Recommended option/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Best choice/i)).not.toBeInTheDocument();
+  });
+
+  test('local cafe uses route drive time instead of parking-lot drive in total breakdown', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: "Jeno's Cafe, Monroe, WA",
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: "Jeno's Cafe, Monroe, WA",
+          destinationName: "Jeno's Cafe",
+          destinationKind: 'restaurant',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: {
+            ...trafficEstimate({
+              duration: 4,
+              trustStatus: 'live',
+              sourceName: 'Google Routes API',
+            }),
+          },
+        }}
+        rankedOptions={[
+          {
+            type: 'parking',
+            option: {
+              id: 'destination-parking',
+              name: 'Parking near destination',
+              type: 'off-airport',
+              price: 0,
+              distance: 1,
+              availability: 80,
+              trustStatus: 'estimated',
+              sourceName: 'Test parking',
+              lastUpdated: '2026-06-01T00:00:00.000Z',
+              assumptions: [],
+              parkingBufferMinutes: 8,
+              transferToTerminalMinutes: 8,
+              walkingMinutes: 0,
+              transferType: 'walk',
+            },
+            score: 90,
+            cost: 0,
+            duration: 16,
+            stressScore: 70,
+            reasons: [],
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Estimated total: ~8 min')).toBeInTheDocument();
+    expect(screen.getByText('~4 min drive + ~4 min parking/walk')).toBeInTheDocument();
+    expect(
+      screen.getByText('Free/customer parking likely. Small parking/walk buffer added.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 min drive/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('16 min')).not.toBeInTheDocument();
   });
 
   test('shows backup route estimate label without foregrounding Mapbox', () => {

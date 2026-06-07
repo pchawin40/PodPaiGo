@@ -15,6 +15,7 @@ jest.mock('../lib/db/client', () => ({
     query: jest.fn(async () => ({ rows: [] })),
     connect: jest.fn(),
   },
+  parkingDbCacheDisabledByConfig: () => false,
 }));
 
 describe('google place reviews guard', () => {

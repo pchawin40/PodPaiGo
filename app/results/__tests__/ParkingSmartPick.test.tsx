@@ -66,7 +66,7 @@ describe('ParkingSmartPick fallback', () => {
       />,
     );
 
-    expect(screen.getByText('Jiffy Airport Parking Lot SEA')).toBeInTheDocument();
+    expect(screen.getAllByText('Jiffy Airport Parking Lot SEA').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Route timing unavailable').length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(
@@ -78,7 +78,7 @@ describe('ParkingSmartPick fallback', () => {
     expect(screen.queryByText('Check reviews')).not.toBeInTheDocument();
   });
 
-  test('shows enriched Google photo metadata, rating, count, and review snippets', () => {
+  test('shows enriched Google photo metadata and a single review chip', () => {
     const onShowReviews = jest.fn();
     const routeAvailableParking: ParkingOption = {
       ...routeUnavailableParking,
@@ -125,11 +125,13 @@ describe('ParkingSmartPick fallback', () => {
       'data-photo-name',
       'places/jiffy/photos/primary',
     );
-    expect(screen.getAllByText('★ 4.6 · 1,248 reviews').length).toBeGreaterThan(0);
-    expect(screen.getByText('Google reviews')).toBeInTheDocument();
-    expect(screen.getByText('Fast shuttle and easy uncovered self parking.')).toBeInTheDocument();
+    expect(screen.getAllByText('★ 4.6 · 1,248 reviews')).toHaveLength(1);
+    expect(screen.queryByText('Google reviews')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Fast shuttle and easy uncovered self parking.'),
+    ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: /4\.6/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: /4\.6/ }));
     expect(onShowReviews).toHaveBeenCalledWith(
       expect.objectContaining({
         googlePlaceId: 'places/jiffy',

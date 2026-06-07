@@ -1,27 +1,39 @@
 import { parkingDbCacheDisabledByConfig } from '../client';
 
-describe('parkingDbCacheDisabledByConfig', () => {
-  const originalEnv = process.env;
+describe('db client cache configuration', () => {
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  const originalLocalDatabaseUrl = process.env.LOCAL_DATABASE_URL;
+  const originalDisableParkingDbCache = process.env.DISABLE_PARKING_DB_CACHE;
 
-  beforeEach(() => {
-    process.env = { ...originalEnv, NODE_ENV: 'development' };
-  });
+  function restoreEnv(
+    name: 'DATABASE_URL' | 'LOCAL_DATABASE_URL' | 'DISABLE_PARKING_DB_CACHE',
+    value: string | undefined,
+  ): void {
+    if (typeof value === 'string') {
+      process.env[name] = value;
+      return;
+    }
+
+    delete process.env[name];
+  }
 
   afterEach(() => {
-    process.env = originalEnv;
+    restoreEnv('DATABASE_URL', originalDatabaseUrl);
+    restoreEnv('LOCAL_DATABASE_URL', originalLocalDatabaseUrl);
+    restoreEnv('DISABLE_PARKING_DB_CACHE', originalDisableParkingDbCache);
   });
 
-  test('skips DB cache for placeholder Supabase config', () => {
+  test('placeholder Supabase still skips DB cache quickly', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.DISABLE_PARKING_DB_CACHE = 'false';
     process.env.DATABASE_URL =
-      'postgresql://postgres:password@postgres.<PROJECT_REF>.supabase.co:6543/postgres';
-
-    expect(parkingDbCacheDisabledByConfig()).toBe(true);
-  });
-
-  test('skips DB cache when DATABASE_URL is missing', () => {
-    delete process.env.DATABASE_URL;
+      'postgresql://postgres:<PASSWORD>@postgres.<PROJECT_REF>.supabase.co:6543/postgres';
     delete process.env.LOCAL_DATABASE_URL;
 
-    expect(parkingDbCacheDisabledByConfig()).toBe(true);
+    try {
+      expect(parkingDbCacheDisabledByConfig()).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

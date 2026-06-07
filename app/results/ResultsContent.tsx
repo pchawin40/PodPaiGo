@@ -25,8 +25,15 @@ import {
   getParkingComparableCost,
   getParkingTotalTimeMinutes,
   parkingRankEvidenceLabel,
+  parkingRankExplanation,
   sortParkingOptionsForMode,
 } from '../../lib/parking/sortParkingOptions';
+import { buildParkingPriorityBadges } from '../../lib/parking/priorityBadges';
+import {
+  getSeasonalClimateGuidance,
+  seasonalClimateSummary,
+} from '../../lib/weather/seasonalClimate';
+import ParkingCheckInTimingBanner from './ParkingCheckInTimingBanner';
 import {
   businessTravelModeNeedsParking,
   readTravelPreferences,
@@ -38,6 +45,7 @@ import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
+import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import ParkingProviderActions from './ParkingProviderActions';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
@@ -82,6 +90,10 @@ import {
   buildParkingProviderHandoff,
   formatParkingHandoffDuration,
 } from '../../lib/parking/providerHandoff';
+import {
+  groupOfficialSeaGarageOptions,
+  resolveOfficialSeaGarageCtas,
+} from '../../lib/parking/officialAirportGarageGroup';
 import {
   parkingRouteLinks,
   routeUrlForOption,
@@ -436,7 +448,10 @@ function ParkingTimeSummary({
   routeUnavailable?: boolean;
   tripContext?: ReturnType<typeof resolveTripParkingContext>;
 }) {
-  const unavailable = routeUnavailable || isParkingRouteUnavailable(option);
+  const explicitTotal =
+    typeof option.duration === 'number' && option.duration > 0 ? option.duration : null;
+  const unavailable =
+    (routeUnavailable || isParkingRouteUnavailable(option)) && explicitTotal == null;
 
   if (unavailable) {
     if (compact) {
@@ -645,11 +660,12 @@ function weatherRiskClass(weather: WeatherImpact): string {
   return 'border-zinc-200 bg-zinc-50 text-zinc-800';
 }
 
-function weatherSectionTitle(context?: WeatherContext): string {
+function weatherSectionTitle(context?: WeatherContext, seasonalTitle?: string | null): string {
+  if (seasonalTitle) return seasonalTitle;
   if (context === 'travel-time-forecast') return 'Weather for your travel time';
   if (context === 'current-airport-weather') return 'Current airport weather';
   if (context === 'current-destination-weather') return 'Current destination weather';
-  if (context === 'forecast-unavailable') return 'Forecast not available yet';
+  if (context === 'forecast-unavailable') return 'Seasonal weather guidance';
   return 'Weather unavailable';
 }
 
@@ -2128,6 +2144,7 @@ function OptionCard({
   parkingPhotoPriority = 'background',
   alignedLeaveByTime = null,
   alignedLeaveByReason = null,
+  parkingPeerOptions = [],
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -2144,6 +2161,7 @@ function OptionCard({
   parkingPhotoPriority?: ParkingPhotoPriority;
   alignedLeaveByTime?: string | null;
   alignedLeaveByReason?: string | null;
+  parkingPeerOptions?: ParkingOption[];
 }) {
   const [bookingHelperOpen, setBookingHelperOpen] = useState(false);
   const opt =
@@ -2167,11 +2185,21 @@ function OptionCard({
       ? trustedParkingBookingLink(opt)
       : opt.sourceLink || null;
 
+  const officialSeaCtas =
+    item.type === 'parking'
+      ? resolveOfficialSeaGarageCtas(opt as ParkingOption)
+      : null;
+
   const parkingProviderHandoff =
     item.type === 'parking'
-      ? buildParkingProviderHandoff(opt as ParkingOption, tripData, sourceLink)
+      ? buildParkingProviderHandoff(
+          opt as ParkingOption,
+          tripData,
+          officialSeaCtas?.bookingUrl || sourceLink,
+        )
       : null;
-  const parkingProviderUrl = parkingProviderHandoff?.providerUrl ?? sourceLink;
+  const parkingProviderUrl =
+    officialSeaCtas?.bookingUrl || parkingProviderHandoff?.providerUrl || sourceLink;
 
   const displayParkingOption =
     item.type === 'parking'
@@ -2433,92 +2461,50 @@ function OptionCard({
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              {item.type !== 'rideshare' && (
+              {item.type !== 'rideshare' && item.type !== 'parking' && (
                 <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + trust.className}>
                   {trust.label}
                 </div>
               )}
 
-              {timingMeta && (
+              {timingMeta && item.type !== 'parking' && (
                 <div className={"rounded-full border px-2.5 py-1 text-xs font-medium " + timingMeta.className}>
                   {timingMeta.label}
                 </div>
               )}
 
-              {price.badge && !((opt.bestFor || []) as string[]).includes(price.badge) && (
+              {price.badge && !((opt.bestFor || []) as string[]).includes(price.badge) && item.type !== 'parking' && (
                 <div className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
                   {price.badge}
                 </div>
               )}
 
-              {parkingPriceTrust ? (
-                <div className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${parkingPriceTrust.badgeClassName}`}>
-                  {parkingPriceTrust.label}
-                </div>
-              ) : null}
-
-              {item.type === 'parking' && (() => {
-                const freshness = resolveParkingFreshness(opt as ParkingOption);
-                const title = [
-                  freshness.providerSource ? `Source: ${freshness.providerSource}` : null,
-                  freshness.fetchedAt ? `Fetched: ${freshness.fetchedAt}` : null,
-                ].filter(Boolean).join(' · ') || undefined;
-
-                return (
-                  <div
-                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${freshness.className}`}
-                    title={title}
-                  >
-                    {freshness.label}
-                  </div>
-                );
-              })()}
-
-              {item.type === 'parking' &&
-                Array.isArray(opt.bestFor) &&
-                Array.from(new Set(opt.bestFor as string[])).slice(0, 2).map((tag: string) => (
-                  <div
-                    key={tag}
-                    className={
-                      'rounded-full border px-2.5 py-1 text-xs font-medium ' +
-                      (tag === 'Great Deal' || tag === 'Cheapest'
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                        : tag === 'Live Price' || tag === 'Selected-date price' || tag === 'APR listed price'
-                          ? 'border-blue-200 bg-blue-50 text-blue-800'
-                          : 'border-zinc-200 bg-white text-zinc-700')
-                    }
-                  >
-                    {formatTag(tag)}
-                  </div>
-                ))}
-
-              {item.type === 'parking' && displayParkingOption
-                ? getVisibleParkingFeatureBadges(displayParkingOption).slice(0, 3).map((meta) => (
+              {item.type === 'parking' && normalizedParkingOption
+                ? buildParkingPriorityBadges({
+                    option: (displayParkingOption || normalizedParkingOption) as ParkingOption,
+                    mode: sort,
+                    tripData,
+                    peers: parkingPeerOptions.length > 0
+                      ? parkingPeerOptions
+                      : [(displayParkingOption || normalizedParkingOption) as ParkingOption],
+                  }).map((badge) => (
                     <div
-                      key={`${displayParkingOption.id}-${meta.key}-${meta.confidence}`}
-                      title={`Source: ${meta.sourceLabel}. Confidence: ${meta.confidence.replace('_', ' ')}.`}
-                      className={
-                        'rounded-full border px-2.5 py-1 text-xs font-medium ' +
-                        (meta.confidence === 'verified'
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                          : meta.confidence === 'provider_claimed'
-                            ? 'border-blue-200 bg-blue-50 text-blue-800'
-                            : 'border-amber-200 bg-amber-50 text-amber-900')
-                      }
+                      key={badge.key}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
                     >
-                      {meta.label}
+                      {badge.label}
                     </div>
                   ))
                 : null}
 
-              {aprLiveChecking &&
-                item.type === 'parking' &&
-                isAprOption(opt) &&
-                isAprFetching &&
-                getAprLivePrice(opt, aprLivePrices) == null && <InlinePriceLoading />}
+              {parkingPrice?.badge && item.type === 'parking' ? (
+                <div className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+                  {parkingPrice.badge}
+                </div>
+              ) : null}
 
-              {item.type === "parking" ? (() => {
-                const parking = (googleEnrichedParking?.[opt.id || ""] || opt) as ParkingOption;
+              {item.type === 'parking' && (() => {
+                const parking = (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption;
                 if (!hasParkingReviewSource(parking) || !onShowReviews) return null;
 
                 return (
@@ -2531,7 +2517,7 @@ function OptionCard({
                     {parkingReviewLabel(parking)}
                   </button>
                 );
-              })() : null}
+              })()}
             </div>
           </div>
             </>
@@ -2542,35 +2528,6 @@ function OptionCard({
               Route unavailable from this origin to this parking lot. Try a local origin near the airport, rideshare, or another transportation option.
             </div>
           )}
-
-          {item.type === 'parking' && parkingPriceTrust ? (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950">
-              <div className="font-semibold">
-                {parkingPriceTrust.kind === 'live_marketplace_price' || parkingPriceTrust.kind === 'live_final_provider_price'
-                  ? 'Confirm at checkout'
-                  : 'Estimated price only'}
-              </div>
-              <div className="mt-1">
-                {parkingPriceTrust.disclosure}
-              </div>
-            </div>
-          ) : null}
-
-          {item.type === 'parking' && activeParkingRate ? (
-            <div className="mt-3 rounded-xl border border-border bg-muted/40 p-3 text-sm text-foreground">
-              <div className="font-semibold">{activeParkingRate.label}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {activeParkingRate.sourceName || 'Parking source'} · {activeParkingRate.confidence} confidence
-              </div>
-              {activeParkingRate.warnings.length > 0 ? (
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                  {activeParkingRate.warnings.slice(0, 3).map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
 
           {item.type === 'parking' && !compact ? (
             <ParkingBookingHelperPanel
@@ -2678,11 +2635,22 @@ function OptionCard({
           {!compact && (
             <div className="mt-4">
               <div className="text-sm font-medium text-zinc-900">Why this option</div>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
-                {item.reasons.slice(0, 3).map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
+              <p className="mt-2 text-sm text-zinc-700">
+                {item.type === 'parking'
+                  ? parkingRankExplanation(
+                      (displayParkingOption || (opt as ParkingOption)) as ParkingOption,
+                      sort,
+                      tripData,
+                    )
+                  : item.reasons.slice(0, 3).join(' · ')}
+              </p>
+              {item.type !== 'parking' ? (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700">
+                  {item.reasons.slice(0, 3).map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
 
@@ -2782,17 +2750,24 @@ function OptionCard({
             <ParkingProviderActions
               compact={compact}
               bookingUrl={parkingProviderUrl}
-              providerUrl={parkingProviderUrl}
-              directionsUrl={
-                parkingLotRouteLink || opt.mapLink || null
-              }
+              providerUrl={officialSeaCtas?.providerUrl || parkingProviderUrl}
+              routeToParkingUrl={parkingLotRouteLink || opt.mapLink || null}
+              parkingToTerminalUrl={parkingToTerminalRouteLink}
+              parkingToDestinationUrl={parkingToDestinationRouteLink}
+              transferLinkLabel={parkingTransferLinkLabel}
               searchQuery={opt.searchQuery || safeParkingSearchQuery}
-              provider={opt.bookingProvider || opt.sourceName || opt.name}
+              provider={
+                (opt as ParkingOption).officialGarageGroupId
+                  ? 'SEA Airport / Port of Seattle'
+                  : opt.bookingProvider || opt.sourceName || opt.name
+              }
               airportCode={airportCode}
               parkingLotId={opt.id || null}
               tripId={tripId || null}
               accessToken={accessToken}
               onReserve={() => setBookingHelperOpen(true)}
+              reserveLabel={officialSeaCtas?.reserveLabel}
+              infoOnlyBooking={officialSeaCtas?.isInfoOnly}
             />
           ) : compact ? (
             <div className="flex flex-col gap-2">
@@ -2857,35 +2832,94 @@ function OptionCard({
               )}
             </>
           )}
-
-          {item.type === 'parking' && !routeUnavailable && parkingToDestinationRouteLink ? (
-            <a
-              href={parkingToDestinationRouteLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-            >
-              {parkingTransferLinkLabel}
-            </a>
-          ) : null}
-
-          {item.type === 'parking' && parkingToTerminalRouteLink ? (
-            <a
-              href={parkingToTerminalRouteLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
-            >
-              Parking to terminal
-            </a>
-          ) : null}
         </div>
       </div>
 
       {!compact && (
         <details className="mt-4">
-          <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800">Details & evidence</summary>
-          <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+          <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">Details & evidence</summary>
+          <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200">
+            {item.type === 'parking' && parkingProviderUrl ? (
+              <div className="mb-3">
+                <a
+                  href={parkingProviderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300"
+                >
+                  View provider
+                </a>
+              </div>
+            ) : null}
+
+            {item.type === 'parking' && parkingPriceTrust ? (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+                <div className="font-semibold">
+                  {parkingPriceTrust.kind === 'live_marketplace_price' || parkingPriceTrust.kind === 'live_final_provider_price'
+                    ? 'Confirm at checkout'
+                    : 'Estimated price only'}
+                </div>
+                <div className="mt-1">{parkingPriceTrust.disclosure}</div>
+              </div>
+            ) : null}
+
+            {item.type === 'parking' &&
+            Array.isArray((displayParkingOption || opt as ParkingOption).officialGarageSubOptions) &&
+            (displayParkingOption || (opt as ParkingOption)).officialGarageSubOptions!.length > 0 ? (
+              <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-sm text-indigo-950 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-100">
+                <div className="font-semibold">Official SEA garage products</div>
+                <ul className="mt-2 space-y-2 text-sm">
+                  {(displayParkingOption || (opt as ParkingOption)).officialGarageSubOptions!.map((sub) => (
+                    <li key={sub.id}>
+                      <div className="font-medium">{sub.label}</div>
+                      <div className="text-xs text-indigo-900/80 dark:text-indigo-100/80">{sub.detail}</div>
+                      <div className="text-xs text-indigo-900/80 dark:text-indigo-100/80">
+                        Provider: SEA Airport / Port of Seattle · Source: Official published rate
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {item.type === 'parking' && activeParkingRate ? (
+              <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3 text-sm text-foreground">
+                <div className="font-semibold">{activeParkingRate.label}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {activeParkingRate.sourceName || 'Parking source'} · {activeParkingRate.confidence} confidence
+                </div>
+                {activeParkingRate.warnings.length > 0 ? (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {activeParkingRate.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+
+            {item.type === 'parking' && displayParkingOption ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {getVisibleParkingFeatureBadges(displayParkingOption).map((meta) => (
+                  <span
+                    key={`detail-${displayParkingOption.id}-${meta.key}`}
+                    className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                  >
+                    {meta.label}
+                  </span>
+                ))}
+                {Array.isArray(opt.bestFor)
+                  ? Array.from(new Set(opt.bestFor as string[])).map((tag: string) => (
+                      <span
+                        key={`detail-tag-${tag}`}
+                        className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                      >
+                        {formatTag(tag)}
+                      </span>
+                    ))
+                  : null}
+              </div>
+            ) : null}
             {!routeUnavailable && timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' && (
               <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
                 <div className="text-sm font-medium text-zinc-900">Flight timing check</div>
@@ -3018,6 +3052,8 @@ function extractBrandKey(name: string): string {
 }
 
 function isOfficialLikeParking(option: ParkingOption): boolean {
+  if (option.officialGarageGroupId) return true;
+
   const name = String(option.name || '').toLowerCase();
 
   return (
@@ -4750,6 +4786,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     ? ''
     : ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
 
+  const seasonalClimateGuidance = useMemo(() => {
+    if (recommendation?.weatherContext !== 'forecast-unavailable') return null;
+
+    const targetDate =
+      tripData?.type === 'one-way-departure'
+        ? tripData.departureDate
+        : tripData?.type === 'general-trip'
+          ? tripData.arrivalDate
+          : tripData?.type === 'round-trip'
+            ? tripData.departureDate
+            : null;
+
+    return getSeasonalClimateGuidance({
+      airportCode: currentAirportCode || 'SEA',
+      targetDate,
+    });
+  }, [recommendation?.weatherContext, tripData, currentAirportCode]);
+
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = isCityTrip
     ? cityDestinationText || 'General trip'
@@ -5471,7 +5525,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       travelPreferences.parkingFilters,
     );
 
-    const canonical = canonicalizeParkingOptions(filteredOptions);
+    const groupedOfficial = groupOfficialSeaGarageOptions(
+      filteredOptions,
+      sort,
+      tripData,
+      tripData?.airportCode || getTripAirportCode(tripData),
+    );
+
+    const canonical = canonicalizeParkingOptions(groupedOfficial);
     const available = canonical.filter((option) => !isParkingRouteUnavailable(option));
     const unavailable = canonical.filter((option) => isParkingRouteUnavailable(option));
 
@@ -5608,7 +5669,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </p>
               ) : null}
 
-              {primaryAirportPlan.warningText ? (
+              {primaryAirportPlan.parkingCheckInTiming ? (
+                <div className="mt-3">
+                  <ParkingCheckInTimingBanner message={primaryAirportPlan.parkingCheckInTiming} />
+                </div>
+              ) : primaryAirportPlan.warningText ? (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   {primaryAirportPlan.warningText}
                 </div>
@@ -5804,10 +5869,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   </details>
                 </>
               )}
-              {(recommendation.weatherImpact || recommendation.weatherContext) && (
+              {(recommendation.weatherImpact || recommendation.weatherContext || seasonalClimateGuidance) && (
                 <div className="flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 text-sm">
                   <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-lg ${weatherToneBg}`}>
-                    {recommendation.weatherImpact?.condition === 'rain'
+                    {(recommendation.weatherImpact?.condition === 'rain' || seasonalClimateGuidance?.weatherImpact.condition === 'rain')
                       ? '🌧️'
                       : recommendation.weatherImpact?.condition === 'snow'
                         ? '🌨️'
@@ -5815,7 +5880,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           ? '⛈️'
                           : recommendation.weatherImpact?.condition === 'wind'
                             ? '🌬️'
-                            : recommendation.weatherImpact
+                            : recommendation.weatherImpact || seasonalClimateGuidance
                               ? '☀️'
                               : '🌤️'}
                   </div>
@@ -5833,6 +5898,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                             : ''}
                           {' · '}
                           {weatherRiskText(recommendation.weatherImpact)}
+                        </span>
+                      </>
+                    ) : seasonalClimateGuidance ? (
+                      <>
+                        <span className="font-medium text-zinc-900">
+                          {seasonalClimateGuidance.title}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {seasonalClimateGuidance.historicalLabel} · {seasonalClimateSummary(seasonalClimateGuidance)}
+                        </span>
+                        <span className="mt-1 text-xs text-zinc-500">
+                          {seasonalClimateGuidance.disclaimer}
                         </span>
                       </>
                     ) : (
@@ -5880,7 +5957,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         ) : (
                           <div className="mt-1 text-xs">
                             {item.context === 'forecast-unavailable'
-                              ? 'Forecast not available yet. Weather check becomes available closer to your trip date.'
+                              ? (() => {
+                                  const guidance = getSeasonalClimateGuidance({
+                                    airportCode: currentAirportCode || 'SEA',
+                                    targetDate: item.date,
+                                  });
+                                  if (!guidance) {
+                                    return weatherSectionDetail(item.context);
+                                  }
+                                  return `${guidance.historicalLabel} · ${seasonalClimateSummary(guidance)} · ${guidance.disclaimer}`;
+                                })()
                               : weatherSectionDetail(item.context)}
                           </div>
                         )}
@@ -6467,7 +6553,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         type="button"
                         onClick={action.onClick}
                         className={
-                          'cursor-pointer rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
+                          'relative cursor-pointer rounded-2xl border p-4 pt-10 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
                           (row.unavailable
                             ? 'border-border bg-muted/60 opacity-80'
                             : selected
@@ -6475,24 +6561,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                               : 'border-border bg-card')
                         }
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            {row.confidence} confidence
-                          </div>
-                          <span
-                            className={
-                              'rounded-full px-2.5 py-1 text-xs font-semibold ' +
-                              (row.unavailable
-                                ? 'bg-muted text-muted-foreground'
-                                : selected
-                                  ? 'bg-primary text-primary-foreground'
-                                  : row.verdict === 'Avoid' || row.verdict === 'Unavailable'
-                                    ? 'bg-danger/10 text-danger'
-                                    : 'bg-muted text-foreground')
-                            }
-                          >
-                            {row.verdict}
-                          </span>
+                        <div className="absolute right-3 top-3">
+                          <RecommendationStatusBadge
+                            verdict={row.verdict}
+                            unavailable={row.unavailable}
+                            sort={sort}
+                            isCheapestMode={cheapestMode?.key === row.key}
+                            isFastestMode={fastestMode?.key === row.key}
+                          />
+                        </div>
+
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {row.confidence} confidence
                         </div>
 
                         <div className="mt-3 text-sm font-bold text-foreground">
@@ -6778,7 +6858,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   <ParkingSmartPick
                     options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
                     tripData={tripData}
-                    sortMode={sort}
+                    sortMode="best"
+                    listSortMode={sort}
                     leaveByTime={primaryLeaveByTime}
                     leaveByReason={primaryAirportPlan.basisText}
                     selectedOption={
@@ -7147,6 +7228,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           accessToken={accessToken}
                           tripId={searchParams.get('tripId')}
                           parkingPhotoPriority={parkingPhotoPriority}
+                          parkingPeerOptions={displayedParking.map(
+                            (entry) => entry.option as ParkingOption,
+                          )}
                         />
                       );
                       })}

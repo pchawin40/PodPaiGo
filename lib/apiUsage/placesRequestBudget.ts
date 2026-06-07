@@ -2,7 +2,9 @@ import {
   inferGooglePlacesRequestRoute,
   logGooglePlacesConfig,
   logGooglePlacesRequestSummary,
+  logGoogleUsageSummary,
 } from '../parking/googlePlacesConfig';
+import { runWithPlaceMetadataRequestCache } from '../parking/placeMetadataRequestCache';
 import {
   getMaxGooglePhotoMediaPerRequest,
   getMaxGooglePlaceDetailsPerRequest,
@@ -33,6 +35,16 @@ type ActivePlacesRequestBudget = {
 };
 
 let activePlacesRequestBudget: ActivePlacesRequestBudget | null = null;
+const activePhotoMediaNames = new Set<string>();
+
+export function hasPhotoMediaBeenRequestedThisRequest(photoName: string): boolean {
+  return activePhotoMediaNames.has(photoName);
+}
+
+export function markPhotoMediaRequestedThisRequest(photoName: string): void {
+  if (!photoName.trim()) return;
+  activePhotoMediaNames.add(photoName.trim());
+}
 
 export function runWithPlacesRequestBudget<T>(
   requestKey: string,
@@ -41,35 +53,49 @@ export function runWithPlacesRequestBudget<T>(
 ): Promise<T> {
   const route = options?.route ?? inferGooglePlacesRequestRoute(requestKey);
 
-  activePlacesRequestBudget = {
-    key: requestKey,
-    route,
-    searchText: 0,
-    getPlace: 0,
-    photoMedia: 0,
-    reviews: 0,
-    total: 0,
-    blocked: 0,
-  };
+  return runWithPlaceMetadataRequestCache(requestKey, () => {
+    activePlacesRequestBudget = {
+      key: requestKey,
+      route,
+      searchText: 0,
+      getPlace: 0,
+      photoMedia: 0,
+      reviews: 0,
+      total: 0,
+      blocked: 0,
+    };
+    activePhotoMediaNames.clear();
 
-  logGooglePlacesConfig('request', { route, requestKey });
+    logGooglePlacesConfig('request', { route, requestKey });
 
-  return Promise.resolve(fn()).finally(() => {
-    const budget = activePlacesRequestBudget;
-    if (budget) {
-      logGooglePlacesRequestSummary({
-        route: budget.route,
-        requestKey: budget.key,
-        searchTextUsed: budget.searchText,
-        getPlaceUsed: budget.getPlace,
-        photoMediaUsed: budget.photoMedia,
-        reviewsUsed: budget.reviews,
-        totalUsed: budget.total,
-        blocked: budget.blocked,
-      });
-    }
+    return Promise.resolve(fn()).finally(() => {
+      const budget = activePlacesRequestBudget;
+      if (budget) {
+        logGooglePlacesRequestSummary({
+          route: budget.route,
+          requestKey: budget.key,
+          searchTextUsed: budget.searchText,
+          getPlaceUsed: budget.getPlace,
+          photoMediaUsed: budget.photoMedia,
+          reviewsUsed: budget.reviews,
+          totalUsed: budget.total,
+          blocked: budget.blocked,
+        });
+        logGoogleUsageSummary({
+          route: budget.route,
+          requestKey: budget.key,
+          searchTextUsed: budget.searchText,
+          getPlaceUsed: budget.getPlace,
+          photoMediaUsed: budget.photoMedia,
+          reviewsUsed: budget.reviews,
+          totalUsed: budget.total,
+          blocked: budget.blocked,
+        });
+      }
 
-    activePlacesRequestBudget = null;
+      activePlacesRequestBudget = null;
+      activePhotoMediaNames.clear();
+    });
   });
 }
 
@@ -159,4 +185,5 @@ export function tryConsumePlacesReviewCall(): boolean {
 
 export function resetPlacesRequestBudgetForTests(): void {
   activePlacesRequestBudget = null;
+  activePhotoMediaNames.clear();
 }

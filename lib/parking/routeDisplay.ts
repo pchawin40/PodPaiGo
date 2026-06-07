@@ -57,7 +57,18 @@ export function parkingTimeBreakdown(
   totalMinutes: number;
   parts: Array<{ label: string; minutes: number; display?: string }>;
 } {
+  const explicitTotal =
+    typeof option.duration === 'number' && option.duration > 0 ? option.duration : null;
+
   if (isParkingRouteUnavailable(option)) {
+    if (explicitTotal != null) {
+      return {
+        label: `${formatMinutes(explicitTotal)} total`,
+        totalMinutes: explicitTotal,
+        parts: [{ label: 'Total time', minutes: explicitTotal }],
+      };
+    }
+
     return {
       label: 'Route unavailable',
       totalMinutes: 0,

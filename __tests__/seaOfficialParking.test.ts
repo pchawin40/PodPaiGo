@@ -1,4 +1,11 @@
-import { buildSeaOfficialParkingOptions } from '../lib/parking/seaOfficialParking';
+import {
+  buildSeaOfficialParkingOptions,
+  BROKEN_SEA_OFFICIAL_SOURCE_URL,
+  SEA_GENERAL_PARKING_INFO_URL,
+  SEA_RESERVED_BOOKING_URL,
+  SEA_RESERVED_INFO_URL,
+} from '../lib/parking/seaOfficialParking';
+import { resolveOfficialSeaGarageCtas } from '../lib/parking/officialAirportGarageGroup';
 import { sortParkingOptionsForMode } from '../lib/parking/sortParkingOptions';
 import type { ParkingOption, TripData } from '../lib/types';
 
@@ -57,6 +64,59 @@ describe('SEA official parking', () => {
     expect(options.every((option) => option.priceSource === 'official-rate')).toBe(true);
     expect(options.every((option) => option.priceUnit === 'total')).toBe(true);
     expect(options.every((option) => option.activeRate?.sourceName === 'Port of Seattle')).toBe(true);
+  });
+
+  test('official SEA URLs are canonical and never use the broken flysea path', () => {
+    const options = buildSeaOfficialParkingOptions({
+      airportCode: 'SEA',
+      checkInAt: '2026-06-01T09:00',
+      checkOutAt: '2026-06-03T09:00',
+    });
+
+    const urls = options.flatMap((option) => [
+      option.sourceLink,
+      ...(option.rateRules || []).map((rule) => rule.sourceUrl),
+      option.activeRate?.sourceUrl,
+    ]);
+
+    for (const url of urls) {
+      if (!url) continue;
+      expect(url).not.toContain('/sea/sea-tac/parking/parking-information');
+      expect(url).not.toBe(BROKEN_SEA_OFFICIAL_SOURCE_URL);
+    }
+
+    const general = options.find((option) => option.id === 'sea-general');
+    const reserved = options.find((option) => option.id === 'sea-reserved');
+
+    expect(general?.sourceLink).toBe(SEA_GENERAL_PARKING_INFO_URL);
+    expect(reserved?.sourceLink).toBe(SEA_RESERVED_BOOKING_URL);
+    expect(reserved?.activeRate?.sourceUrl).toBe(SEA_RESERVED_INFO_URL);
+  });
+
+  test('SEA Reserved CTA opens ReserveSEA booking URL', () => {
+    const reserved = buildSeaOfficialParkingOptions({
+      airportCode: 'SEA',
+      checkInAt: '2026-06-01T09:00',
+      checkOutAt: '2026-06-03T09:00',
+    }).find((option) => option.id === 'sea-reserved');
+
+    const ctas = resolveOfficialSeaGarageCtas(reserved!);
+    expect(ctas.reserveLabel).toBe('Reserve official parking');
+    expect(ctas.bookingUrl).toBe(SEA_RESERVED_BOOKING_URL);
+    expect(ctas.isInfoOnly).toBe(false);
+  });
+
+  test('SEA General CTA uses Check official parking and Port info URL', () => {
+    const general = buildSeaOfficialParkingOptions({
+      airportCode: 'SEA',
+      checkInAt: '2026-06-01T09:00',
+      checkOutAt: '2026-06-03T09:00',
+    }).find((option) => option.id === 'sea-general');
+
+    const ctas = resolveOfficialSeaGarageCtas(general!);
+    expect(ctas.reserveLabel).toBe('Check official parking');
+    expect(ctas.bookingUrl).toBe(SEA_GENERAL_PARKING_INFO_URL);
+    expect(ctas.isInfoOnly).toBe(true);
   });
 
   test('fastest sorting can rank official terminal parking ahead of a cheaper shuttle lot', () => {

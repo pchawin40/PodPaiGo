@@ -778,3 +778,84 @@ export function resolveQuickGoBestWay(input: {
 export function quickGoParkingHeadline(classification: DestinationParkingClassification): string {
   return destinationParkingHeadline(classification.mode);
 }
+
+export function isQuickGoAirportTrip(input: {
+  classification: DestinationParkingClassification;
+  destinationKind?: string | null;
+  detectedAirportCode?: string | null;
+}): boolean {
+  return (
+    input.classification.mode === 'airport' ||
+    String(input.destinationKind || '').trim().toLowerCase() === 'airport' ||
+    Boolean(String(input.detectedAirportCode || '').trim())
+  );
+}
+
+/**
+ * Context-aware parking/walk buffer for local (non-airport) Quick Go trips.
+ * Airport trips keep their existing parking/terminal buffer model elsewhere.
+ */
+export function resolveQuickGoLocalParkingWalkBufferMinutes(
+  classification: DestinationParkingClassification,
+): number {
+  if (classification.mode === 'airport') {
+    return 0;
+  }
+
+  switch (classification.mode) {
+    case 'free_likely':
+      return 4;
+    case 'validated_possible':
+      return 5;
+    case 'paid_likely':
+      return 8;
+    case 'restricted_possible':
+      return 12;
+    case 'permit_possible':
+      return 7;
+    case 'unknown':
+      return 8;
+    default:
+      return 8;
+  }
+}
+
+export function quickGoLocalBufferGuidance(
+  classification: DestinationParkingClassification,
+): string | null {
+  switch (classification.mode) {
+    case 'free_likely':
+      return 'Free/customer parking likely. Small parking/walk buffer added.';
+    case 'unknown':
+      return 'Parking/walk estimate added. Open directions to confirm.';
+    default:
+      return null;
+  }
+}
+
+export type QuickGoLocalTripTiming = {
+  driveMinutes: number;
+  bufferMinutes: number;
+  totalMinutes: number;
+  totalLabel: string;
+  breakdownDetail: string;
+  guidance: string | null;
+};
+
+export function resolveQuickGoLocalTripTiming(input: {
+  driveMinutes: number;
+  classification: DestinationParkingClassification;
+}): QuickGoLocalTripTiming {
+  const driveMinutes = Math.round(input.driveMinutes);
+  const bufferMinutes = resolveQuickGoLocalParkingWalkBufferMinutes(input.classification);
+  const totalMinutes = driveMinutes + bufferMinutes;
+
+  return {
+    driveMinutes,
+    bufferMinutes,
+    totalMinutes,
+    totalLabel: `Estimated total: ~${totalMinutes} min`,
+    breakdownDetail: `~${driveMinutes} min drive + ~${bufferMinutes} min parking/walk`,
+    guidance: quickGoLocalBufferGuidance(input.classification),
+  };
+}

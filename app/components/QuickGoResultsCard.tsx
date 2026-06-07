@@ -8,11 +8,13 @@ import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinut
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
 import { resolveTripParkingContext } from '../../lib/trip/tripContext';
 import {
+  isQuickGoAirportTrip,
   quickGoClassificationForTrip,
   quickGoParkingConfidenceLabel,
   quickGoParkingExpectationLabel,
   quickGoParkingHeadline,
   quickGoStressLabel,
+  resolveQuickGoLocalTripTiming,
 } from '../../lib/trip/quickGo';
 import type { ParkingOption, TripData, TrustStatus } from '../../lib/types';
 import type { WeatherImpact } from '../../lib/weather/types';
@@ -123,10 +125,17 @@ function driveTimeHelperText(
   return null;
 }
 
+type QuickGoTotalBreakdown = {
+  total: number;
+  detail: string;
+  totalLabel?: string;
+  guidance?: string | null;
+};
+
 function parkingTotalBreakdown(
   option: ParkingOption | null,
   tripData: TripData,
-): { total: number; detail: string } | null {
+): QuickGoTotalBreakdown | null {
   if (!option || isParkingRouteUnavailable(option)) return null;
 
   const breakdown = parkingTimeBreakdown(
@@ -190,13 +199,35 @@ export default function QuickGoResultsCard({
   const guidance = purposeGuidance(quickGoPurpose);
   const bestParkingOption =
     bestOption?.type === 'parking' ? (bestOption.option as ParkingOption) : null;
-  const totalBreakdown = parkingTotalBreakdown(bestParkingOption, tripData);
+  const airportTrip = isQuickGoAirportTrip({
+    classification,
+    destinationKind: tripData.destinationKind,
+  });
+  const localTripTiming =
+    !airportTrip &&
+    !driveTimeUnavailable &&
+    driveMinutes != null &&
+    Number.isFinite(driveMinutes)
+      ? resolveQuickGoLocalTripTiming({ driveMinutes, classification })
+      : null;
+  const totalBreakdown: QuickGoTotalBreakdown | null = airportTrip
+    ? parkingTotalBreakdown(bestParkingOption, tripData)
+    : localTripTiming
+      ? {
+          total: localTripTiming.totalMinutes,
+          totalLabel: localTripTiming.totalLabel,
+          detail: localTripTiming.breakdownDetail,
+          guidance: localTripTiming.guidance,
+        }
+      : null;
   const driveHelperText = driveTimeHelperText(driveTimeTrustStatus, driveTimeSourceName);
   const showTotalBreakdown = Boolean(
     totalBreakdown &&
-    driveMinutes != null &&
-    Number.isFinite(driveMinutes) &&
-    totalBreakdown.total > driveMinutes + 1,
+    (airportTrip
+      ? driveMinutes != null &&
+        Number.isFinite(driveMinutes) &&
+        totalBreakdown.total > driveMinutes + 1
+      : localTripTiming != null && localTripTiming.bufferMinutes > 0),
   );
 
   return (
@@ -262,11 +293,14 @@ export default function QuickGoResultsCard({
               Total trip time
             </dt>
             <dd className="mt-2 text-lg font-semibold text-foreground">
-              {formatMinutesLabel(totalBreakdown.total)}
+              {totalBreakdown.totalLabel ?? formatMinutesLabel(totalBreakdown.total)}
             </dd>
             <dd className="mt-1 text-sm text-muted-foreground">
               {totalBreakdown.detail}
             </dd>
+            {totalBreakdown.guidance ? (
+              <dd className="mt-1 text-sm text-muted-foreground">{totalBreakdown.guidance}</dd>
+            ) : null}
           </div>
         ) : null}
 

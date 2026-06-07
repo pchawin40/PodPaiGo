@@ -5,6 +5,7 @@ import {
   getMaxGooglePlacesCallsPerRequest,
   getMaxGoogleSearchTextPerRequest,
 } from '../apiUsage/placesRequestLimits';
+import { getGooglePlacesDailyCountsSnapshot } from '../apiUsage/googlePlacesDailyBudget';
 import { getGooglePlacesCacheWriteTimeoutMs } from './googlePlacesCacheWrite';
 import {
   isGoogleParkingDiscoveryLiveBlocked,
@@ -151,4 +152,20 @@ export function logGooglePlacesRequestSummary(summary: GooglePlacesRequestSummar
   if (process.env.DEBUG_LOGS === 'true') {
     console.info('google_places_request_summary', summary);
   }
+}
+
+export function logGoogleUsageSummary(summary: GooglePlacesRequestSummary): void {
+  if (process.env.NODE_ENV === 'test') return;
+
+  console.info('google_usage_summary', {
+    route: summary.route ?? 'unknown',
+    requestKey: summary.requestKey,
+    searchTextUsed: summary.searchTextUsed,
+    getPlaceUsed: summary.getPlaceUsed,
+    photoMediaUsed: summary.photoMediaUsed,
+    reviewsUsed: summary.reviewsUsed,
+    totalUsed: summary.totalUsed,
+    blocked: summary.blocked,
+    dailyCounts: getGooglePlacesDailyCountsSnapshot(),
+  });
 }
