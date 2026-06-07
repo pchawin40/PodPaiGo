@@ -21,6 +21,7 @@ import {
   type QuickGoPreference,
   type QuickGoDestinationSelection,
   type QuickGoOriginSelection,
+  type QuickGoOriginSource,
   type QuickGoPurpose,
 } from '../../lib/trip/quickGo';
 import {
@@ -67,6 +68,55 @@ function buildSavedOriginSelection(originText: string): QuickGoOriginSelection {
     originLabel: trimmed,
     originSource: 'saved',
   };
+}
+
+function searchResultPlaceId(result: DestinationSearchResult): string | undefined {
+  if (result.placeId) return result.placeId;
+  const separatorIndex = result.id.indexOf(':');
+  if (separatorIndex < 0) return undefined;
+  const source = result.id.slice(0, separatorIndex);
+  if (source !== 'google' && source !== 'geocoder') return undefined;
+  return result.id.slice(separatorIndex + 1) || undefined;
+}
+
+function originSourceFromSearchResult(result: DestinationSearchResult): QuickGoOriginSource {
+  if (result.source === 'typed') return 'manual';
+  return result.source;
+}
+
+function destinationSearchResultToOriginSelection(
+  result: DestinationSearchResult,
+): QuickGoOriginSelection {
+  const origin = (result.address || result.label).trim();
+  const originLabel = result.label.trim() || origin;
+
+  return {
+    origin,
+    originLabel,
+    originSource: originSourceFromSearchResult(result),
+    originLat: result.lat,
+    originLng: result.lng,
+    originPlaceId: searchResultPlaceId(result),
+    originConfidence: result.confidence,
+  };
+}
+
+function selectedOriginMatchesInput(
+  originInputText: string,
+  originSelection: QuickGoOriginSelection,
+): boolean {
+  const input = originInputText.trim().toLowerCase();
+  if (!input) return true;
+  return (
+    input === originSelection.origin.trim().toLowerCase() ||
+    input === originSelection.originLabel.trim().toLowerCase()
+  );
+}
+
+function formatOriginSearchSource(source: DestinationSearchResult['source']): string {
+  if (source === 'recent') return 'Recent origin';
+  if (source === 'saved') return 'Saved place';
+  return formatDestinationSearchSource(source);
 }
 
 function canUseGeolocationNow(): boolean {
@@ -134,6 +184,11 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [destinationSearchError, setDestinationSearchError] = useState<string | null>(null);
   const [originInputText, setOriginInputText] = useState('');
   const [originSelection, setOriginSelection] = useState<QuickGoOriginSelection | null>(null);
+  const [originSuggestions, setOriginSuggestions] = useState<DestinationSearchResult[]>([]);
+  const [originSearchOpen, setOriginSearchOpen] = useState(false);
+  const [originSearchLoading, setOriginSearchLoading] = useState(false);
+  const [originSearchError, setOriginSearchError] = useState<string | null>(null);
+  const [originActiveIndex, setOriginActiveIndex] = useState(-1);
   const [showOriginEditor, setShowOriginEditor] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAirportCode, setPendingAirportCode] = useState<string | null>(null);
@@ -151,6 +206,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const [locateError, setLocateError] = useState<string | null>(null);
   const [geolocationSupported, setGeolocationSupported] = useState(false);
   const destinationInputRef = useRef<HTMLInputElement>(null);
+  const originInputRef = useRef<HTMLInputElement>(null);
 
   const recentOrigins = useMemo(() => getRecentOrigins(), []);
   const savedDestinations = useMemo(() => readSavedDestinations(), []);
@@ -166,24 +222,37 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   useEffect(() => {
     if (!canUseGeolocationNow()) return;
 
-    setGeolocationSupported(true);
-    setOriginSelection((current) => current ?? buildPendingGeolocationOriginSelection());
+    const timeoutId = window.setTimeout(() => {
+      setGeolocationSupported(true);
+      setOriginSelection((current) => current ?? buildPendingGeolocationOriginSelection());
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {
     const query = destinationText.trim();
+    const controller = new AbortController();
+
     if (query.length < 3) {
-      setDestinationSuggestions([]);
-      setDestinationSearchLoading(false);
-      setDestinationSearchError(null);
-      return;
+      const resetId = window.setTimeout(() => {
+        setDestinationSuggestions([]);
+        setDestinationSearchLoading(false);
+        setDestinationSearchError(null);
+      }, 0);
+
+      return () => {
+        window.clearTimeout(resetId);
+        controller.abort();
+      };
     }
 
-    setDestinationSearchLoading(true);
-    setDestinationSearchError(null);
-
-    const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
+      setDestinationSearchLoading(true);
+      setDestinationSearchError(null);
+
       void searchDestinations(
         {
           query,
@@ -224,6 +293,75 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     originSelection?.originLng,
     originSelection?.originSource,
   ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    if (!showOriginEditor) {
+      const resetId = window.setTimeout(() => {
+        setOriginSuggestions([]);
+        setOriginSearchLoading(false);
+        setOriginSearchError(null);
+        setOriginActiveIndex(-1);
+      }, 0);
+
+      return () => {
+        window.clearTimeout(resetId);
+        controller.abort();
+      };
+    }
+
+    const query = originInputText.trim();
+    if (query.length < 3) {
+      const resetId = window.setTimeout(() => {
+        setOriginSuggestions([]);
+        setOriginSearchLoading(false);
+        setOriginSearchError(null);
+        setOriginActiveIndex(-1);
+      }, 0);
+
+      return () => {
+        window.clearTimeout(resetId);
+        controller.abort();
+      };
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setOriginSearchLoading(true);
+      setOriginSearchError(null);
+
+      void searchDestinations(
+        {
+          query,
+          savedDestinations,
+          recentDestinations: recentOrigins,
+          signal: controller.signal,
+        },
+        {},
+      )
+        .then((results) => {
+          if (controller.signal.aborted) return;
+          setOriginSuggestions(results);
+          setOriginSearchOpen(true);
+          setOriginSearchLoading(false);
+          setOriginActiveIndex(results.length > 0 ? 0 : -1);
+        })
+        .catch((searchError) => {
+          if (controller.signal.aborted) return;
+          console.warn('Origin search failed', searchError);
+          setOriginSuggestions([]);
+          setOriginSearchOpen(true);
+          setOriginSearchLoading(false);
+          setOriginActiveIndex(-1);
+          setOriginSearchError('Unable to load starting point suggestions.');
+        });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [originInputText, recentOrigins, savedDestinations, showOriginEditor]);
 
   useEffect(() => {
     if (!canUseGeo || originSelection?.originSource !== 'geolocation') return;
@@ -273,11 +411,19 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const resolveOriginForSubmit = async (): Promise<QuickGoOriginSelection | null> => {
     const typedOrigin = originInputText.trim();
 
+    if (
+      originSelection &&
+      originSelection.originSource !== 'geolocation' &&
+      selectedOriginMatchesInput(originInputText, originSelection)
+    ) {
+      return originSelection;
+    }
+
     if (typedOrigin) {
       return buildManualOriginSelection(typedOrigin);
     }
 
-    if (originSelection?.originSource === 'saved') {
+    if (originSelection && originSelection.originSource !== 'geolocation') {
       return originSelection;
     }
 
@@ -419,6 +565,53 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     setError(null);
   };
 
+  const handleOriginSelect = (result: DestinationSearchResult) => {
+    const selection = destinationSearchResultToOriginSelection(result);
+    setOriginSelection(selection);
+    setOriginInputText(selection.originLabel);
+    setOriginSearchOpen(false);
+    setOriginSearchError(null);
+    setOriginActiveIndex(-1);
+    setLocateError(null);
+    setError(null);
+  };
+
+  const handleOriginInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Escape') {
+      if (originSearchOpen) {
+        event.preventDefault();
+        setOriginSearchOpen(false);
+        setOriginActiveIndex(-1);
+      }
+      return;
+    }
+
+    if (!originSearchOpen || originSuggestions.length === 0) return;
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOriginActiveIndex((current) => (current + 1) % originSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setOriginActiveIndex((current) =>
+        current <= 0 ? originSuggestions.length - 1 : current - 1,
+      );
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      const selected = originSuggestions[
+        originActiveIndex >= 0 ? originActiveIndex : 0
+      ];
+      if (!selected) return;
+      event.preventDefault();
+      handleOriginSelect(selected);
+    }
+  };
+
   const handleUseTypedDestination = () => {
     const trimmedText = destinationText.trim();
     if (!trimmedText) return;
@@ -452,6 +645,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
       setOriginSelection(selection);
       setOriginInputText('');
       setShowOriginEditor(false);
+      setOriginSearchOpen(false);
+      setOriginSuggestions([]);
+      setOriginActiveIndex(-1);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to get location';
       setLocateError(message);
@@ -466,6 +662,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     setLocateError(null);
     setError(null);
     setShowOriginEditor(false);
+    setOriginSearchOpen(false);
+    setOriginSuggestions([]);
+    setOriginActiveIndex(-1);
   };
 
   const handleUseFullPlanner = async () => {
@@ -572,6 +771,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
                       key={result.id}
                       type="button"
                       role="option"
+                      aria-selected={false}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => handleDestinationSelect(result)}
                       className="block w-full border-b border-border/60 px-4 py-3 text-left last:border-b-0 hover:bg-muted/50"
@@ -800,21 +1000,90 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
         {showOriginEditor ? (
           <div className="space-y-3 rounded-xl border border-border/80 bg-muted/20 p-3 sm:p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <label className="block min-w-0 flex-1">
-                <span className="text-xs font-medium text-muted-foreground">Type a starting point</span>
-                <input
-                  type="text"
-                  value={originInputText}
-                  onChange={(event) => {
-                    setOriginInputText(event.target.value);
-                    setOriginSelection(null);
-                    setLocateError(null);
-                    setError(null);
-                  }}
-                  placeholder="Type an address or place"
-                  className={`${inputClassName} mt-1.5`}
-                />
-              </label>
+              <div className="relative min-w-0 flex-1">
+                <label className="block">
+                  <span className="text-xs font-medium text-muted-foreground">Type a starting point</span>
+                  <input
+                    ref={originInputRef}
+                    type="text"
+                    value={originInputText}
+                    onChange={(event) => {
+                      setOriginInputText(event.target.value);
+                      setOriginSelection(null);
+                      setLocateError(null);
+                      setError(null);
+                      setOriginSearchOpen(true);
+                    }}
+                    onFocus={() => setOriginSearchOpen(true)}
+                    onBlur={() => window.setTimeout(() => setOriginSearchOpen(false), 150)}
+                    onKeyDown={handleOriginInputKeyDown}
+                    placeholder="Type an address or place"
+                    className={`${inputClassName} mt-1.5`}
+                    role="combobox"
+                    aria-expanded={originSearchOpen}
+                    aria-controls="quick-go-origin-suggestions"
+                    aria-autocomplete="list"
+                    aria-activedescendant={
+                      originActiveIndex >= 0
+                        ? `quick-go-origin-option-${originActiveIndex}`
+                        : undefined
+                    }
+                  />
+                </label>
+
+                {originSearchOpen && originInputText.trim().length >= 3 ? (
+                  <div
+                    id="quick-go-origin-suggestions"
+                    role="listbox"
+                    className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-border bg-card shadow-xl"
+                  >
+                    {originSearchLoading ? (
+                      <div className="px-4 py-3 text-sm text-muted-foreground">
+                        Searching starting points…
+                      </div>
+                    ) : null}
+
+                    {!originSearchLoading && originSearchError ? (
+                      <div className="px-4 py-3 text-sm text-danger">{originSearchError}</div>
+                    ) : null}
+
+                    {!originSearchLoading &&
+                      originSuggestions.map((result, index) => {
+                        const active = index === originActiveIndex;
+                        return (
+                          <button
+                            key={result.id}
+                            id={`quick-go-origin-option-${index}`}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setOriginActiveIndex(index)}
+                            onClick={() => handleOriginSelect(result)}
+                            className={
+                              'block w-full border-b border-border/60 px-4 py-3 text-left last:border-b-0 ' +
+                              (active ? 'bg-muted/70' : 'hover:bg-muted/50')
+                            }
+                          >
+                            <div className="text-sm font-medium text-foreground">{result.label}</div>
+                            <div className="mt-0.5 text-xs text-muted-foreground">{result.address}</div>
+                            <div className="mt-1 flex flex-wrap gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <span>{formatDestinationSearchCategory(result.category)}</span>
+                              <span>·</span>
+                              <span>{formatOriginSearchSource(result.source)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                    {!originSearchLoading && !originSearchError && originSuggestions.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-muted-foreground">
+                        No suggestions found. You can still use the typed starting point.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
 
               <button
                 type="button"
@@ -825,6 +1094,13 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
                 {isLocating ? 'Detecting…' : 'Use current location'}
               </button>
             </div>
+
+            {originSelection && originSelection.originSource !== 'geolocation' ? (
+              <p className="text-xs text-muted-foreground">
+                Selected starting point: {originSelection.originLabel}
+                {originSelection.originConfidence === 'low' ? ' · lower confidence' : ''}
+              </p>
+            ) : null}
 
             {recentOrigins.length > 0 ? (
               <div>

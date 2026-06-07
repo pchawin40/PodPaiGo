@@ -284,6 +284,123 @@ describe('QuickGoPanel', () => {
     expect(payload.tripData?.origin).toBe('123 Main Street, Example City, ST');
   });
 
+  test('origin autocomplete selects a hotel and stores coordinates for routing', async () => {
+    searchDestinationsMock.mockImplementation(async ({ query }) => {
+      if (/la quinta/i.test(query)) {
+        return [
+          {
+            id: 'google:la-quinta-seattle',
+            label: 'La Quinta Inn & Suites by Wyndham Seattle Downtown',
+            address: '2224 8th Avenue, Seattle, WA',
+            category: 'address',
+            source: 'google',
+            lat: 47.6172,
+            lng: -122.3405,
+            placeId: 'la-quinta-seattle',
+            confidence: 'medium',
+          },
+        ];
+      }
+
+      if (/grocery/i.test(query)) {
+        return [
+          {
+            id: 'geocoder:grocery',
+            label: 'Neighborhood Grocery Store',
+            address: '100 Market Street, Example City, ST',
+            category: 'retail',
+            source: 'geocoder',
+            confidence: 'high',
+          },
+        ];
+      }
+
+      return [];
+    });
+
+    render(<QuickGoPanel />);
+
+    ensureOriginEditorOpen();
+    fireEvent.change(screen.getByPlaceholderText('Type an address or place'), {
+      target: { value: 'la quinta inn' },
+    });
+
+    const hotel = await screen.findByRole('option', {
+      name: /La Quinta Inn & Suites by Wyndham Seattle Downtown/i,
+    });
+    fireEvent.click(hotel);
+
+    expect(screen.getByPlaceholderText('Type an address or place')).toHaveValue(
+      'La Quinta Inn & Suites by Wyndham Seattle Downtown',
+    );
+    expect(
+      screen.getByText(/Selected starting point: La Quinta Inn & Suites/i),
+    ).toBeInTheDocument();
+
+    await typeDestination('Grocery store');
+    fireEvent.click(await screen.findByRole('option', { name: /Neighborhood Grocery Store/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Go' }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledTimes(1);
+    });
+
+    const storedKey = Object.keys(window.localStorage).find((key) =>
+      key.startsWith('podpaigo-trip-'),
+    );
+    const payload = JSON.parse(window.localStorage.getItem(storedKey!) || '{}') as {
+      tripData?: Record<string, string>;
+    };
+    expect(payload.tripData?.origin).toBe('2224 8th Avenue, Seattle, WA');
+    expect(payload.tripData?.originLabel).toBe(
+      'La Quinta Inn & Suites by Wyndham Seattle Downtown',
+    );
+    expect(payload.tripData?.originSource).toBe('google');
+    expect(payload.tripData?.originLat).toBe('47.6172');
+    expect(payload.tripData?.originLng).toBe('-122.3405');
+    expect(payload.tripData?.originPlaceId).toBe('la-quinta-seattle');
+  });
+
+  test('origin autocomplete supports keyboard selection', async () => {
+    searchDestinationsMock.mockResolvedValue([
+      {
+        id: 'google:la-quinta-downtown',
+        label: 'La Quinta Downtown',
+        address: '2224 8th Avenue, Seattle, WA',
+        category: 'address',
+        source: 'google',
+        lat: 47.6172,
+        lng: -122.3405,
+        placeId: 'la-quinta-downtown',
+        confidence: 'medium',
+      },
+      {
+        id: 'google:la-quinta-tacoma',
+        label: 'La Quinta Tacoma',
+        address: '1425 East 27th Street, Tacoma, WA',
+        category: 'address',
+        source: 'google',
+        lat: 47.2408,
+        lng: -122.4112,
+        placeId: 'la-quinta-tacoma',
+        confidence: 'medium',
+      },
+    ]);
+
+    render(<QuickGoPanel />);
+
+    ensureOriginEditorOpen();
+    const originInput = screen.getByPlaceholderText('Type an address or place');
+    fireEvent.change(originInput, { target: { value: 'la quinta inn' } });
+
+    await screen.findByRole('option', { name: /La Quinta Downtown/i });
+    fireEvent.keyDown(originInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(originInput, { key: 'Enter' });
+
+    expect(originInput).toHaveValue('La Quinta Tacoma');
+    expect(screen.getByText(/Selected starting point: La Quinta Tacoma/i)).toBeInTheDocument();
+  });
+
   test('Fred Meyer Monroe search returns selectable destination', async () => {
     searchDestinationsMock.mockResolvedValue([
       {

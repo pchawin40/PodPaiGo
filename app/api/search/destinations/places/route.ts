@@ -77,6 +77,7 @@ function placeToResult(place: GooglePlace): DestinationSearchResult | null {
     source: 'google',
     lat: place.location?.latitude,
     lng: place.location?.longitude,
+    placeId: place.id,
     confidence: 'medium',
   };
 }

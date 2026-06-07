@@ -111,6 +111,8 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const originLngRaw = searchParams.get('originLng');
   const originLat = originLatRaw ? Number(originLatRaw) : undefined;
   const originLng = originLngRaw ? Number(originLngRaw) : undefined;
+  const originName = searchParams.get('originLabel')?.trim() || undefined;
+  const originPlaceId = searchParams.get('originPlaceId')?.trim() || undefined;
   const destinationLatRaw = searchParams.get('destinationLat');
   const destinationLngRaw = searchParams.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
@@ -395,6 +397,9 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
       data = { ...data, originLat, originLng };
     }
 
+    if (originName) data = { ...data, originName };
+    if (originPlaceId) data = { ...data, originPlaceId };
+
     const isAirportStyleTrip =
       data.destinationKind === 'airport' ||
       data.type === 'one-way-departure' ||
@@ -473,6 +478,16 @@ export function tripDataToSearchParams(
 
   params.set('type', data.type);
   params.set('origin', data.origin);
+  if (data.originName) {
+    params.set('originLabel', data.originName);
+  } else {
+    params.delete('originLabel');
+  }
+  if (data.originPlaceId) {
+    params.set('originPlaceId', data.originPlaceId);
+  } else {
+    params.delete('originPlaceId');
+  }
   if (typeof data.originLat === 'number' && Number.isFinite(data.originLat)) {
     params.set('originLat', String(data.originLat));
   } else {

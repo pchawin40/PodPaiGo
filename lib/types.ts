@@ -67,6 +67,8 @@ type BaseTripData = {
    */
   originLat?: number;
   originLng?: number;
+  originName?: string;
+  originPlaceId?: string;
 
   /**
    * Optional destination coordinates from autocomplete/geocoding later.
