@@ -4,6 +4,7 @@ import {
   calculateParkingDuration,
   type RankedRecommendation,
 } from '../domain';
+import { isTransitFareKnown } from '../transit/transitPricing';
 import type { Recommendation, TripData } from '../types';
 import type { ParkingOption, RideshareOption, TransitOption } from '../types';
 import { parkingTimeBreakdown } from './routeDisplay';
@@ -101,9 +102,14 @@ export function computeCityTripPointAbRanking(input: {
     bestTransitOption?.trustStatus !== 'fallback' &&
     transitDuration !== null;
   const transitCost =
-    bestTransitOption && input.tripData && hasReliableTransit
+    bestTransitOption &&
+    input.tripData &&
+    hasReliableTransit &&
+    isTransitFareKnown(bestTransitOption)
       ? getTransitTripTotalCost(bestTransitOption, input.tripData)
-      : typeof bestTransit?.cost === 'number' && bestTransit.cost < 999999
+      : typeof bestTransit?.cost === 'number' &&
+          bestTransit.cost < 999999 &&
+          (!bestTransitOption || isTransitFareKnown(bestTransitOption))
         ? bestTransit.cost
         : null;
   const transitCostDisplay =
@@ -139,6 +145,7 @@ export function computeCityTripPointAbRanking(input: {
     destinationLabel: input.destinationLabel,
     noParkingPreferred: input.noParkingPreferred,
     bestParking,
+    parkingOptions: input.parkingDisplayOptions,
     parkingTotal,
     parkingMinutes: parkingBreakdown?.totalMinutes ?? null,
     bestRideOption: bestRideOption ?? null,
@@ -153,7 +160,7 @@ export function computeCityTripPointAbRanking(input: {
     pointAbParkRide,
     parkRideCost: pointAbParkRide?.cost ?? null,
     parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
-    parkRideReliable: Boolean(pointAbParkRide?.recommended),
+    parkRideReliable: Boolean(pointAbParkRide?.reliable),
     streetMeterParking,
     driveMinutes:
       input.driveMinutes ?? input.recommendation.trafficEstimate?.duration ?? null,

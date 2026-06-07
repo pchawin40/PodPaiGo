@@ -33,6 +33,10 @@ import {
   formatParkingHandoffDuration,
 } from '../../lib/parking/providerHandoff';
 import { resolveOfficialSeaGarageCtas } from '../../lib/parking/officialAirportGarageGroup';
+import {
+  buildDestinationParkingIntelligence,
+  isPaidParkingOption,
+} from '../../lib/parking/destinationParkingIntelligence';
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
@@ -721,6 +725,21 @@ export default function ParkingSmartPick({
   const bestWithMeta = best as ParkingOption & {
     updatedAt?: string;
   };
+  const destinationIntelligence =
+    !airportTrip && tripData
+      ? buildDestinationParkingIntelligence({
+          destination: tripData.destinationName || tripData.destination,
+          destinationKind: tripData.destinationKind,
+          airportCode: tripData.airportCode,
+          parkingOptions: optionsWithAprLivePrice,
+        })
+      : null;
+  const smartPickBadgeLabel =
+    destinationIntelligence && isPaidParkingOption(best)
+      ? destinationIntelligence.customerCandidate
+        ? destinationIntelligence.paidOptionBackupLabel
+        : destinationIntelligence.paidOptionBestLabel
+      : 'Best overall';
 
   return (
     <section className="travel-card overflow-hidden rounded-3xl p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
@@ -730,7 +749,7 @@ export default function ParkingSmartPick({
         stageNote="ParkingSmartPick selected final best parking option"
       />
       <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
-        Best overall
+        {smartPickBadgeLabel}
       </div>
 
       <div className="mt-4">

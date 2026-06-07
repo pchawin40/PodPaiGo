@@ -22,6 +22,7 @@ import {
 } from './trip/quickGo';
 import { debugLog } from './utils/debug';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
+import { resolveTransitFare } from './transit/transitFareResolver';
 import {
   applyParkingOriginDriveMinutes,
   estimateDriveMinutesFromStraightLineMiles,
@@ -2567,21 +2568,24 @@ export class MockProvider implements DataProvider {
           ? 55
           : Math.max(20, Math.round(routeEstimate.duration * 1.45 + 12));
 
+      const fareResolution = resolveTransitFare({ destination, origin });
+      const oneWayFare = fareResolution.oneWayDollars ?? 0;
+
       return [
         {
           id: 'regional-transit-to-destination',
           name: 'Transit route to destination',
-          price: 3.25,
+          price: oneWayFare,
           duration: estimatedTransitMinutes,
           frequency: 15,
           totalDuration: estimatedTransitMinutes,
-          totalCost: 3.25,
+          totalCost: oneWayFare,
           segments: [
             {
               mode: 'bus',
               name: 'Open transit directions for exact route',
               duration: estimatedTransitMinutes,
-              cost: 3.25,
+              cost: oneWayFare,
               frequency: 15,
             },
           ],
@@ -2592,15 +2596,25 @@ export class MockProvider implements DataProvider {
           routeOrigin: origin,
           routeDestination: destination,
           assumptions: [
-            'Regional transit fare estimate based on origin and destination.',
+            fareResolution.matchKind === 'unknown'
+              ? 'Open transit directions to confirm route and local fare.'
+              : `${fareResolution.fareLabel}. Open transit directions for exact route.`,
             routeEstimate.routeUnavailable
               ? 'Drive time unavailable; open transit directions to confirm route.'
               : 'Transit time estimated from entered origin and destination.',
           ],
-          sourceName: 'Google Maps transit directions',
-          sourceLink: this.buildGoogleTransitDirectionsLink(origin, destination),
+          sourceName:
+            fareResolution.matchKind === 'unknown'
+              ? 'Google Maps transit directions'
+              : fareResolution.agencyName || fareResolution.sourceLabel,
+          sourceLink: fareResolution.sourceUrl || this.buildGoogleTransitDirectionsLink(origin, destination),
           mapLink: this.buildGoogleTransitDirectionsLink(origin, destination),
           lastUpdated: new Date().toISOString(),
+          transitFareResolution: fareResolution,
+          priceNote:
+            fareResolution.matchKind === 'unknown'
+              ? 'Fare varies by agency'
+              : fareResolution.fareLabel,
         },
       ];
     }

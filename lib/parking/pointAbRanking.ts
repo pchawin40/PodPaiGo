@@ -1,7 +1,13 @@
 import type { RecommendationStatus } from '../recommendationStatusBadge';
 import type { AccessStrategyOption } from '../access/types';
-import type { ParkingOption, RideshareOption, TransitOption, TripData } from '../types';
-import type { PointAbParkRidePresentation } from './parkAndRideTypes';
+import type {
+  ParkingOption,
+  PointToPointTiming,
+  RideshareOption,
+  TransitOption,
+  TripData,
+} from '../types';
+import type { PointAbParkRidePresentation, ParkRideAvailabilityTier } from './parkAndRideTypes';
 import {
   buildParkingOptionsHints,
   inferParkingCategoryFromSignals,
@@ -11,8 +17,26 @@ import { evaluateLocalStreetParkingRules } from './localParkingRules';
 import { getParkingTotalPrice } from './priceDisplay';
 import { isParkingRouteUnavailable } from './routeStatus';
 import type { StreetMeterParkingPresentation } from './streetMeterParking';
+import {
+  buildDestinationParkingIntelligence,
+  isPaidParkingOption,
+  type DestinationParkingIntelligence,
+} from './destinationParkingIntelligence';
+import {
+  resolveCustomerParkingTiming,
+  resolvePaidGarageTiming,
+  resolveRideshareTiming,
+  resolveStreetMeterTiming,
+} from './pointAbModeTiming';
+import { shouldExcludeFromPointAbQuickRead } from './pointAbQuickRead';
 
-export type PointAbModeKey = 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
+export type PointAbModeKey =
+  | 'destination-customer'
+  | 'parking'
+  | 'street-meter'
+  | 'rideshare'
+  | 'transit'
+  | 'park-ride';
 export type PointAbSortMode = 'easiest' | 'cheapest' | 'fastest';
 
 export type PointAbModeCandidate = {
@@ -32,6 +56,8 @@ export type PointAbModePresentation = {
   cost: string;
   costNote?: string;
   time: string;
+  timeLabel?: 'Drive time' | 'Total time';
+  timing?: PointToPointTiming | null;
   confidence: 'High' | 'Medium' | 'Low';
   pros: string[];
   cons: string[];
@@ -58,6 +84,7 @@ type RankPointAbModesInput = {
   destinationLabel: string;
   noParkingPreferred: boolean;
   bestParking: ParkingOption | null;
+  parkingOptions?: ParkingOption[];
   parkingTotal: number | null;
   parkingMinutes: number | null;
   bestRideOption: RideshareOption | null;
@@ -103,7 +130,9 @@ export function formatPointAbCheapestVsBestNote(input: {
   if (cheapestMode.key === recommendationMode) return null;
 
   const cheapestLabel =
-    cheapestMode.key === 'street-meter'
+    cheapestMode.key === 'destination-customer'
+      ? 'Customer parking'
+      : cheapestMode.key === 'street-meter'
       ? 'Street / meter parking'
       : cheapestMode.key === 'park-ride'
         ? 'Park & Ride'
@@ -147,6 +176,7 @@ export function computePointAbPreferenceBoost(args: {
   if (args.mode === 'rideshare') return capped ? 8 : 28;
   if (args.mode === 'transit') return capped ? 6 : 18;
   if (args.mode === 'parking') return capped ? -8 : -28;
+  if (args.mode === 'destination-customer') return capped ? -6 : -18;
   return 0;
 }
 
@@ -173,6 +203,7 @@ export function scorePointAbMode(args: {
     score -= args.mode.cost * 0.25;
     if (args.mode.key === 'rideshare') score += 12;
     if (args.mode.key === 'parking') score += 4;
+    if (args.mode.key === 'destination-customer') score += 6;
     if (args.mode.key === 'transit') score -= 8;
     if (args.mode.key === 'park-ride' && args.mode.baseScore == null) score -= 4;
   }
@@ -208,6 +239,28 @@ function parkingGoogleSignalsBonus(parking: ParkingOption | null): number {
   if (hints.hints.some((hint) => hint.category === 'garage_paid')) bonus -= 4;
 
   return bonus;
+}
+
+function customerParkingTiming(
+  input: RankPointAbModesInput,
+  confidence: 'High' | 'Medium' | 'Low' = 'Medium',
+): PointToPointTiming | null {
+  return resolveCustomerParkingTiming({
+    driveMinutes: input.driveMinutes,
+    confidence,
+  });
+}
+
+function parkingRoleLabel(args: {
+  intelligence: DestinationParkingIntelligence;
+  parking: ParkingOption | null;
+  recommended: boolean;
+}): string | undefined {
+  if (!args.parking) return undefined;
+  if (!isPaidParkingOption(args.parking)) return undefined;
+  return args.recommended
+    ? args.intelligence.paidOptionBestLabel
+    : args.intelligence.paidOptionBackupLabel;
 }
 
 function getTripArrivalContext(tripData: TripData): {
@@ -320,10 +373,14 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
   name: string;
   cost: number | null;
   costDisplay: string;
+  costNote?: string;
   durationMinutes: number | null;
   reliable: boolean;
   confidenceScore: number;
   recommended: boolean;
+  availabilityTier: ParkRideAvailabilityTier;
+  cardHeadline: string;
+  hasCandidates: boolean;
   pros: string[];
   cons: string[];
   unavailable: boolean;
@@ -333,13 +390,17 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       name: input.pointAbParkRide.displayName,
       cost: input.pointAbParkRide.cost,
       costDisplay: input.pointAbParkRide.costDisplay,
+      costNote: input.pointAbParkRide.costNote,
       durationMinutes: input.pointAbParkRide.durationMinutes,
       reliable: input.pointAbParkRide.reliable,
       confidenceScore: input.pointAbParkRide.confidenceScore,
       recommended: input.pointAbParkRide.recommended,
+      availabilityTier: input.pointAbParkRide.availabilityTier,
+      cardHeadline: input.pointAbParkRide.cardHeadline,
+      hasCandidates: input.pointAbParkRide.hasCandidates,
       pros: input.pointAbParkRide.pros,
       cons: input.pointAbParkRide.cons,
-      unavailable: !input.pointAbParkRide.recommended,
+      unavailable: input.pointAbParkRide.availabilityTier === 'data_not_available',
     };
   }
 
@@ -352,10 +413,14 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       reliable: input.parkRideReliable,
       confidenceScore: input.bestParkRideAccess.confidenceScore ?? 45,
       recommended: input.bestParkRideAccess.recommendedForTrip !== false,
+      availabilityTier: input.parkRideReliable ? 'recommended' : 'not_recommended',
+      cardHeadline: input.parkRideReliable
+        ? 'Park & Ride option.'
+        : 'Park & Ride found, but not recommended for this trip.',
+      hasCandidates: true,
       pros: input.bestParkRideAccess.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
       cons: [input.bestParkRideAccess.overnightCaveat || 'Verify lot rules before leaving your car'],
-      unavailable:
-        !input.bestParkRideAccess || input.bestParkRideAccess.recommendedForTrip === false,
+      unavailable: !input.parkRideReliable && input.bestParkRideAccess.recommendedForTrip === false,
     };
   }
 
@@ -367,6 +432,9 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
     reliable: false,
     confidenceScore: 30,
     recommended: false,
+    availabilityTier: 'data_not_available',
+    cardHeadline: 'Park & Ride data not available yet for this metro.',
+    hasCandidates: false,
     pros: ['Good for same-day transit trips'],
     cons: ['Verify lot rules before leaving your car'],
     unavailable: true,
@@ -375,18 +443,63 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
 
 export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingResult {
   const parkRide = resolveParkRidePresentation(input);
+  const destinationIntelligence = buildDestinationParkingIntelligence({
+    destination: input.destinationLabel,
+    destinationKind: input.tripData.destinationKind,
+    airportCode: input.tripData.airportCode,
+    parkingOptions: input.parkingOptions ?? (input.bestParking ? [input.bestParking] : []),
+  });
+  const customerCandidate = destinationIntelligence.customerCandidate;
+  const customerTiming = customerCandidate
+    ? customerParkingTiming(input, customerCandidate.confidence)
+    : null;
+  const customerMinutes = customerTiming?.totalOptionMinutes ?? null;
   const parkingRouteUnavailable = input.bestParking
     ? isParkingRouteUnavailable(input.bestParking)
     : false;
-  const parkingDisplayMinutes = input.parkingMinutes ?? input.driveMinutes ?? null;
+  const parkingTiming = resolvePaidGarageTiming({
+    driveMinutes: input.driveMinutes,
+    parkingMinutes: input.parkingMinutes,
+    parking: input.bestParking,
+  });
+  const parkingDisplayMinutes = parkingTiming?.totalOptionMinutes ?? null;
+  const streetMeterTiming = input.streetMeterParking?.applicable
+    ? resolveStreetMeterTiming({
+        driveMinutes: input.driveMinutes,
+        hasDestinationCoords:
+          typeof input.tripData.destinationLat === 'number' &&
+          typeof input.tripData.destinationLng === 'number',
+      })
+    : null;
+  const streetMeterMinutes =
+    streetMeterTiming?.totalOptionMinutes ?? input.streetMeterParking?.durationMinutes ?? null;
+  const rideshareTiming = resolveRideshareTiming({
+    driveMinutes: input.driveMinutes,
+    rideshare: input.bestRideOption,
+  });
+  const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
+  const hasRideshareOption = Boolean(input.bestRideOption || rideshareTiming);
   const parkingHasUsableTiming =
     parkingDisplayMinutes != null || Boolean(input.bestParking && !parkingRouteUnavailable);
 
   const candidates: PointAbModeCandidate[] = [
+    customerCandidate
+      ? {
+          key: 'destination-customer',
+          label: customerCandidate.label,
+          cost: customerCandidate.cost,
+          minutes: finiteOr(customerMinutes),
+          reliable: Boolean(customerMinutes != null || input.driveMinutes != null),
+          confidence: customerCandidate.confidence,
+          baseScore: customerCandidate.scoreBonus,
+        }
+      : null,
     input.bestParking
       ? {
           key: 'parking',
-          label: 'Destination parking',
+          label: isPaidParkingOption(input.bestParking)
+            ? 'Paid garage/lot'
+            : 'Destination parking',
           cost: finiteOr(input.parkingTotal),
           minutes: finiteOr(parkingDisplayMinutes),
           reliable: parkingHasUsableTiming,
@@ -398,7 +511,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           key: 'street-meter',
           label: input.streetMeterParking.label,
           cost: finiteOr(input.streetMeterParking.cost, 0),
-          minutes: finiteOr(input.streetMeterParking.durationMinutes),
+          minutes: finiteOr(streetMeterMinutes ?? input.streetMeterParking.durationMinutes),
           reliable: Boolean(
             input.streetMeterParking.durationMinutes != null || input.driveMinutes != null,
           ),
@@ -406,14 +519,14 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           baseScore: -6,
         }
       : null,
-    input.bestRideOption
+    hasRideshareOption
       ? {
           key: 'rideshare',
           label: 'Rideshare',
           cost: finiteOr(input.ridePrice),
-          minutes: finiteOr(input.rideDuration),
-          reliable: true,
-          confidence: input.bestRideOption.trustStatus === 'live' ? 'High' : 'Medium',
+          minutes: finiteOr(rideDisplayMinutes),
+          reliable: rideDisplayMinutes != null,
+          confidence: input.bestRideOption?.trustStatus === 'live' ? 'High' : 'Medium',
         }
       : null,
     input.hasReliableTransit
@@ -492,13 +605,16 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       ? preferenceBest
       : objectiveBest ?? preferenceBest) ?? null;
 
+  const visibleForQuickRead = (key: PointAbModeKey) =>
+    !shouldExcludeFromPointAbQuickRead(key, input.noParkingPreferred);
+
   const cheapestMode =
     [...candidates]
-      .filter((mode) => mode.reliable)
+      .filter((mode) => mode.reliable && mode.cost < BIG && visibleForQuickRead(mode.key))
       .sort((a, b) => a.cost - b.cost)[0] ?? null;
   const fastestMode =
     [...candidates]
-      .filter((mode) => mode.reliable)
+      .filter((mode) => mode.reliable && visibleForQuickRead(mode.key))
       .sort((a, b) => a.minutes - b.minutes)[0] ?? null;
 
   const parkingHints = input.bestParking?.googleParkingOptions
@@ -514,21 +630,60 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       : input.bestParking && getParkingTotalPrice(input.bestParking, input.tripData) == null
         ? 'Check provider'
         : 'Estimated range';
+  const paidParkingRole = parkingRoleLabel({
+    intelligence: destinationIntelligence,
+    parking: input.bestParking,
+    recommended: recommendationMode === 'parking',
+  });
+  const primaryParkingHint =
+    parkingHints?.hints[0]?.category === 'customer_lot'
+      ? parkingHints.hints[0].label
+      : paidParkingRole || parkingHints?.hints[0]?.label;
 
   const modes: PointAbModePresentation[] = [
+    ...(customerCandidate
+      ? [
+          {
+            key: 'destination-customer' as const,
+            label: customerCandidate.label,
+            name: customerCandidate.name,
+            cost: customerCandidate.costDisplay,
+            costNote: customerCandidate.costNote,
+            time: customerMinutes != null ? formatMinutesLabel(customerMinutes) : 'Drive + verify',
+            timeLabel: 'Total time' as const,
+            timing: customerTiming,
+            confidence: customerCandidate.confidence,
+            pros: customerCandidate.pros,
+            cons: [
+              ...customerCandidate.cons,
+              destinationIntelligence.warning || '',
+            ].filter(Boolean),
+            status: 'verify_rules' as const,
+            unavailable: false,
+            hiddenByPreference: input.noParkingPreferred,
+          },
+        ]
+      : []),
     {
       key: 'parking',
-      label: 'Destination parking',
+      label:
+        input.bestParking && isPaidParkingOption(input.bestParking)
+          ? 'Paid garage/lot'
+          : 'Destination parking',
       name: input.bestParking?.name || 'No parking option found',
       cost: parkingCostDisplay,
-      costNote: parkingHints?.hints[0]?.label,
+      costNote: primaryParkingHint,
       time: parkingDisplayMinutes != null ? formatMinutesLabel(parkingDisplayMinutes) : 'Check route',
+      timeLabel: 'Total time',
+      timing: parkingTiming,
       confidence: input.bestParking ? (input.bestParking.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
       pros: input.bestParking
         ? [
-            parkingHints?.hints[0]?.label || 'Parking near destination',
+            primaryParkingHint || 'Parking near destination',
             input.bestParking.covered ? 'Covered garage/lot' : 'You keep your car with you',
+            destinationIntelligence.warning || '',
           ]
+            .filter(Boolean)
         : ['No parking result available'],
       cons: input.bestParking
         ? [
@@ -556,7 +711,12 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
             name: input.streetMeterParking.name,
             cost: input.streetMeterParking.costDisplay,
             costNote: input.streetMeterParking.costNote,
-            time: input.streetMeterParking.timeDisplay,
+            time:
+              streetMeterMinutes != null
+                ? formatMinutesLabel(streetMeterMinutes)
+                : input.streetMeterParking.timeDisplay,
+            timeLabel: 'Total time' as const,
+            timing: streetMeterTiming,
             confidence: input.streetMeterParking.confidence,
             pros: input.streetMeterParking.pros,
             cons: input.streetMeterParking.cons,
@@ -572,12 +732,17 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       name: input.bestRideOption?.name || 'Uber / Lyft',
       cost: rideshareCost.primary,
       costNote: rideshareCost.note,
-      time: input.rideDuration != null ? formatMinutesLabel(input.rideDuration) : 'Open app',
-      confidence: input.bestRideOption ? (input.bestRideOption.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
+      time: rideDisplayMinutes != null ? formatMinutesLabel(rideDisplayMinutes) : 'Open app',
+      timeLabel: 'Total time',
+      timing: rideshareTiming,
+      confidence: input.bestRideOption?.trustStatus === 'live' ? 'High' : 'Medium',
       pros: ['No parking required', 'Lowest walking burden'],
-      cons: ['Surge pricing can change', rideshareCost.note ? 'Higher total cost than driving' : ''].filter(Boolean),
+      cons: [
+        'Surge pricing can change',
+        rideshareCost.note ? 'Open the app for current pricing' : '',
+      ].filter(Boolean),
       status: 'easy_backup',
-      unavailable: !input.bestRideOption,
+      unavailable: !hasRideshareOption,
       hiddenByPreference: false,
     },
     {
@@ -594,6 +759,17 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
         input.transitDuration != null && input.hasReliableTransit
           ? formatMinutesLabel(input.transitDuration)
           : 'Check route',
+      timeLabel: 'Total time',
+      timing:
+        input.transitDuration != null
+          ? {
+              driveMinutes: null,
+              parkingBufferMinutes: null,
+              walkToDestinationMinutes: null,
+              pickupWaitMinutes: null,
+              totalOptionMinutes: input.transitDuration,
+            }
+          : null,
       confidence: input.hasReliableTransit ? 'Medium' : 'Low',
       pros: ['Usually low cost', 'Avoids parking search'],
       cons: ['More walking and waiting'],
@@ -606,10 +782,22 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       label: 'Park & Ride',
       name: parkRide.name,
       cost: parkRide.costDisplay,
+      costNote: parkRide.costNote,
       time:
         parkRide.durationMinutes != null
           ? formatMinutesLabel(parkRide.durationMinutes)
           : 'Not estimated',
+      timeLabel: 'Total time',
+      timing:
+        parkRide.durationMinutes != null
+          ? {
+              driveMinutes: null,
+              parkingBufferMinutes: null,
+              walkToDestinationMinutes: null,
+              pickupWaitMinutes: null,
+              totalOptionMinutes: parkRide.durationMinutes,
+            }
+          : null,
       confidence:
         parkRide.confidenceScore >= 70
           ? 'High'
@@ -620,9 +808,13 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       cons: parkRide.cons,
       status: parkRide.unavailable
         ? 'unavailable'
-        : parkRide.recommended
+        : parkRide.availabilityTier === 'recommended'
           ? 'verify_rules'
-          : 'not_recommended',
+          : parkRide.availabilityTier === 'backup_available'
+            ? 'easy_backup'
+            : parkRide.availabilityTier === 'not_recommended'
+              ? 'not_recommended'
+              : 'unavailable',
       unavailable: parkRide.unavailable,
       hiddenByPreference: false,
     },
@@ -638,6 +830,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       unavailable: row.unavailable,
       hiddenByPreference: row.hiddenByPreference,
       verifyRules:
+        (row.key === 'destination-customer' && (customerCandidate?.verifyRequired ?? false)) ||
         (row.key === 'park-ride' && row.status === 'verify_rules') ||
         (row.key === 'street-meter' && (input.streetMeterParking?.verifyRequired ?? false)),
       hasReliableData: !row.unavailable && row.status !== 'route_needed',
@@ -645,7 +838,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   })) as PointAbModePresentation[];
 
   const recommendedTitle =
-    recommendationMode === 'parking'
+    recommendationMode === 'destination-customer'
+      ? 'Check customer parking first'
+      : recommendationMode === 'parking'
       ? input.bestParking?.name
         ? `Park at ${input.bestParking.name}`
         : 'Park near your destination'
@@ -660,7 +855,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
               : 'Compare options';
 
   const recommendedReason =
-    recommendationMode === 'street-meter'
+    recommendationMode === 'destination-customer'
+      ? 'Free or customer parking is plausible here, but it is not a reserved space. Verify signs, hours, and access rules on arrival.'
+      : recommendationMode === 'street-meter'
       ? 'Best fit when a legal on-street stall is open and you can verify posted signs.'
       : recommendationMode === 'parking' && input.noParkingPreferred && extremeCostGap
       ? 'Drive and parking are much cheaper than rideshare, even though you marked parking as not needed.'

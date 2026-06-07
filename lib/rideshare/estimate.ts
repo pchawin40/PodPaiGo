@@ -590,9 +590,22 @@ export function buildRideshareEstimateOptions(
       distanceMiles: Math.round(distanceMiles * 10) / 10,
       routeDistanceMeters,
       pickupWaitMinutes: profile.pickupWaitMinutes,
+      driveMinutes: resolvedRoute.duration,
       duration:
         (resolvedRoute.duration + profile.pickupWaitMinutes) *
         (tripScope === 'round-trip' ? 2 : 1),
+      totalOptionMinutes:
+        (resolvedRoute.duration + profile.pickupWaitMinutes) *
+        (tripScope === 'round-trip' ? 2 : 1),
+      timingBreakdown: {
+        driveMinutes: resolvedRoute.duration,
+        parkingBufferMinutes: null,
+        walkToDestinationMinutes: null,
+        pickupWaitMinutes: profile.pickupWaitMinutes,
+        totalOptionMinutes:
+          (resolvedRoute.duration + profile.pickupWaitMinutes) *
+          (tripScope === 'round-trip' ? 2 : 1),
+      },
       availability: profile.availability,
       trustStatus: 'estimated',
       routeTrustStatus: resolvedRoute.trustStatus,

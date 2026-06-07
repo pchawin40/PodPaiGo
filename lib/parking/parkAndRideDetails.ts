@@ -1,8 +1,6 @@
-import type { CuratedParkAndRideLotSeed } from './parkAndRideProvider';
-import {
-  getSeattleRegionParkAndRideLots,
-  VERIFY_SIGNS_WARNING,
-} from './parkAndRideProvider';
+import type { ParkRideFacility } from './parkRideFacilities';
+import { getParkRideFacilityById } from './parkRideFacilities';
+import { resolveLotStatusLabel, VERIFY_SIGNS_WARNING } from './parkRideResolver';
 import {
   parkAndRideRulesLinkLabel,
   resolveParkAndRideRulesUrl,
@@ -21,12 +19,17 @@ function formatMinutesLabel(minutes: number | null | undefined): string {
   return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
-function buildParkingRuleSummary(seed: CuratedParkAndRideLotSeed): string {
+function buildParkingRuleSummary(facility?: ParkRideFacility, option?: ParkAndRideOption): string {
   const parts = [
-    seed.maxParkingDuration,
-    seed.permitInfo,
-    seed.operator === 'WSDOT' ? 'WSDOT lots often have 48-hour max.' : null,
-    seed.operator === 'King County Metro' ? 'Metro permit suspended; FCFS parking.' : null,
+    facility?.timeLimit,
+    facility?.parkingCostExpectation === 'free'
+      ? 'Free during service hours; no overnight parking.'
+      : null,
+    facility?.parkingCostExpectation === 'permit' ? 'Permit or validation may apply.' : null,
+    facility?.agencyName === 'WSDOT' ? 'WSDOT lots often have 48-hour max.' : null,
+    facility?.agencyName === 'King County Metro' ? 'Metro permit suspended; FCFS parking.' : null,
+    facility?.agencyName === 'CapMetro' ? 'Park only in designated CapMetro spaces.' : null,
+    option?.maxParkingDuration,
   ].filter(Boolean);
 
   return parts.join(' ') || 'Same-day commuter parking is typical. Verify posted signs.';
@@ -43,16 +46,6 @@ function confidenceLabel(confidence: ParkAndRideOption['confidence']): string {
   }
 }
 
-function statusLabel(
-  option: ParkAndRideOption,
-  recommendedId?: string,
-): string {
-  if (option.unavailableReason) return 'Not useful';
-  if (recommendedId && option.id === recommendedId) return 'Best pick';
-  if (option.isRecommended) return 'Good backup';
-  return 'Check rules';
-}
-
 function uniqueOptions(options: ParkAndRideOption[]): ParkAndRideOption[] {
   const seen = new Set<string>();
   return options.filter((option) => {
@@ -66,35 +59,38 @@ export function buildParkAndRideLotCards(
   options: ParkAndRideOption[],
   recommendedId?: string,
 ): ParkAndRideLotCard[] {
-  const seedById = new Map(
-    getSeattleRegionParkAndRideLots().map((seed) => [seed.id, seed]),
-  );
-
   return uniqueOptions(options)
     .slice(0, 4)
     .map((option) => {
-      const seed = seedById.get(option.id);
+      const facility = getParkRideFacilityById(option.id);
       const rulesUrl = resolveParkAndRideRulesUrl({
         id: option.id,
         lotName: option.lotName,
         operator: option.operator,
         rulesUrl: option.rulesUrl,
       });
+      const statusLabel = resolveLotStatusLabel({ option, recommendedId });
+      const reasonLine =
+        option.timeDeltaLabel ||
+        option.selectionReason ||
+        option.unavailableReason ||
+        'Verify signs before parking.';
 
       return {
         id: option.id,
         lotName: option.lotName,
-        provider: option.operator,
+        provider: option.agencyName || option.operator,
         address: option.address,
-        parkingRuleSummary: seed
-          ? buildParkingRuleSummary(seed)
-          : 'Verify posted signs and lot rules.',
-        costDisplay: option.costEstimate?.display || 'Cost not estimated',
+        parkingRuleSummary: buildParkingRuleSummary(facility, option),
+        costDisplay: option.costEstimate?.parkingDisplay || 'Parking cost not estimated',
+        parkingCostDisplay: option.costEstimate?.parkingDisplay || 'Parking cost not estimated',
+        transitFareDisplay: option.costEstimate?.transitFareDisplay || 'Transit fare not estimated',
         transitTimeDisplay: formatMinutesLabel(option.transitMinutes),
         totalTimeDisplay: formatMinutesLabel(option.totalTimeMinutes),
         confidence: option.confidence,
         confidenceLabel: confidenceLabel(option.confidence),
-        statusLabel: statusLabel(option, recommendedId),
+        statusLabel,
+        timeDeltaLabel: option.timeDeltaLabel,
         rulesUrl,
         rulesLinkLabel: parkAndRideRulesLinkLabel({
           id: option.id,
@@ -103,7 +99,7 @@ export function buildParkAndRideLotCards(
         }),
         directionsToLotUrl: option.directionsToLotUrl,
         transitRouteUrl: option.transitRouteUrl,
-        unavailableReason: option.unavailableReason,
+        unavailableReason: reasonLine,
         warnings: option.warnings,
       };
     });
@@ -111,10 +107,10 @@ export function buildParkAndRideLotCards(
 
 export function buildParkAndRideDetailsPanel(
   option: ParkAndRideOption,
-  seed?: CuratedParkAndRideLotSeed,
+  facility?: ParkRideFacility,
   candidates: ParkAndRideOption[] = [option],
 ): ParkAndRideDetailsPanel {
-  const parkingRuleSummary = seed ? buildParkingRuleSummary(seed) : 'Verify posted signs and lot rules.';
+  const parkingRuleSummary = buildParkingRuleSummary(facility, option);
   const rulesUrl = resolveParkAndRideRulesUrl({
     id: option.id,
     lotName: option.lotName,
@@ -122,10 +118,15 @@ export function buildParkAndRideDetailsPanel(
     rulesUrl: option.rulesUrl,
   });
   const lots = buildParkAndRideLotCards([option, ...candidates], option.id);
+  const whyLine =
+    option.timeDeltaLabel ||
+    option.selectionReason ||
+    option.unavailableReason ||
+    'No strong Park & Ride fit for this trip.';
 
   return {
     lotName: option.lotName,
-    operator: option.operator,
+    operator: option.agencyName || option.operator,
     address: option.address,
     rulesUrl,
     routesServed: option.routesServed,
@@ -152,13 +153,12 @@ export function buildParkAndRideDetailsPanel(
           `Walk: ${formatMinutesLabel(option.walkMinutes)}`,
           `Wait/transfer buffer: ${formatMinutesLabel(option.waitMinutes)}`,
           `Estimated total: ${formatMinutesLabel(option.totalTimeMinutes)}`,
-        ],
+          option.timeDeltaLabel ? `Compared to driving: ${option.timeDeltaLabel}` : null,
+        ].filter(Boolean) as string[],
       },
       {
         title: option.isRecommended ? 'Why this lot' : 'Why not recommended',
-        lines: [
-          option.selectionReason || option.unavailableReason || 'No strong Park & Ride fit for this trip.',
-        ],
+        lines: [whyLine],
       },
       ...(option.warnings.length > 0
         ? [{ title: 'Warnings', lines: option.warnings }]

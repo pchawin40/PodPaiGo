@@ -1,4 +1,5 @@
 import { RecommendationEngine } from '../recommendationEngine';
+import { clearNwsWeatherCache } from '../weather/nws';
 import type { DataProvider } from '../providers';
 import { getAirportById } from '../airports/catalog';
 import type {
@@ -72,12 +73,14 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    clearNwsWeatherCache();
     mockWeatherFetch();
   });
 
   afterEach(() => {
     RecommendationEngine.setDataProvider(originalProvider);
     global.fetch = originalFetch;
+    clearNwsWeatherCache();
     if (originalParkingTimeout == null) {
       delete process.env.PARKING_FETCH_TIMEOUT_MS;
     } else {
@@ -259,6 +262,151 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
     expect(recommendation.trafficEstimate?.duration).toBeLessThanOrEqual(8);
     expect(recommendation.trafficEstimate?.duration).not.toBe(35);
+  });
+
+  test('Austin La Quinta to Franklin BBQ uses coordinate fallback when live routing is blocked', async () => {
+    process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => new Promise(() => {}) as Promise<never>,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Estimated from coordinates');
+    expect(recommendation.trafficEstimate?.trustStatus).toBe('estimated');
+    expect(recommendation.trafficEstimate?.routeStatus).toBe('ready');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
+    expect(recommendation.trafficEstimate?.duration).not.toBe(35);
+  });
+
+  test('provider unavailable result does not override coordinate fallback for normal Quick Go', async () => {
+    const unavailableTraffic: TrafficEstimate = {
+      route: 'custom',
+      duration: 0,
+      congestion: 'high',
+      trustStatus: 'fallback',
+      routeUnavailable: true,
+      routeUnavailableReason: 'Route timing unavailable; open directions to confirm.',
+      sourceName: 'Cached route snapshot',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Cached provider response was unavailable.'],
+    };
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => unavailableTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Estimated from coordinates');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
+  });
+
+  test('local Quick Go keeps rideshare app options when live quote provider is unavailable', async () => {
+    const traffic: TrafficEstimate = {
+      route: 'custom',
+      duration: 12,
+      distanceMeters: 8600,
+      congestion: 'medium',
+      trustStatus: 'live',
+      routeUnavailable: false,
+      sourceName: 'Google Routes API',
+      lastUpdated: new Date().toISOString(),
+      assumptions: [],
+    };
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => {
+        throw new Error('rideshare quote unavailable');
+      },
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => traffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.rideshare).toHaveLength(2);
+    expect(recommendation.rideshare[0]).toMatchObject({
+      name: 'Uber',
+      priceDisplay: 'check-live',
+      rideshareEstimateConfidence: 'unavailable',
+      driveMinutes: 12,
+      pickupWaitMinutes: 5,
+      duration: 17,
+      totalOptionMinutes: 17,
+    });
+    expect(recommendation.rideshare[0]?.sourceLink).toContain('https://m.uber.com/ul/');
+    expect(recommendation.rideshare[0]?.priceNote).toBe('Open app for live price.');
   });
 
   test('local Quick Go missing coordinates returns confirm-timing state instead of bad 35 minute estimate', async () => {
@@ -469,6 +617,8 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
   });
 
   test('general trip weather uses geocoded destination coordinates for tomorrow forecast', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
     const trafficSpy = jest.fn(async () => okTraffic);
     const geocodeSpy = jest.fn(async (address: string) => {
       if (/pike place/i.test(address)) return { lat: 47.6097, lng: -122.3425 };
@@ -476,7 +626,7 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       return null;
     });
     const fetchMock = mockWeatherFetch([
-      { startTime: '2026-06-07T09:00:00-07:00', shortForecast: 'Seattle morning forecast' },
+      { startTime: `${tomorrowDate}T09:00:00-07:00`, shortForecast: 'Seattle morning forecast' },
     ]);
 
     const mockProvider: DataProvider = {
@@ -498,7 +648,7 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       destination: 'Pike Place Market, Seattle, WA',
       destinationName: 'Pike Place Market',
       destinationKind: 'downtown',
-      arrivalDate: '2026-06-07',
+      arrivalDate: tomorrowDate,
       arrivalTime: '09:00',
       transportAvailability: 'all',
     });

@@ -279,6 +279,7 @@ export {
   formatTransitCostDisplay,
   getTransitOneWayCost,
   getTransitTripTotalCost,
+  isTransitFareKnown,
   shouldIncludeReturnTransitLeg,
 } from './transit/transitPricing';
 export type { TransitCostDisplay } from './transit/transitPricing';
@@ -645,7 +646,8 @@ export function rankRecommendations(
 
   const transitWaitPenalty = tripData.type === 'one-way-arrival' ? 0 : tsaEstimate.waitTime * 0.5;
   transitJourneys.forEach(transit => {
-    const cost = calculateTransitCost(transit, tripData);
+    const rawCost = calculateTransitCost(transit, tripData);
+    const cost = Number.isFinite(rawCost) ? rawCost : 99;
     const totalDuration = 'totalDuration' in transit ? transit.totalDuration : transit.duration;
     const transfers = 'transfers' in transit ? transit.transfers : 0;
     const hasLightRail = 'segments' in transit && Array.isArray(transit.segments)

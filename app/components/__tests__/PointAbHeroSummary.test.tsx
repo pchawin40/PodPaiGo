@@ -9,6 +9,19 @@ import type { PointAbRankingResult } from '@/lib/parking/pointAbRanking';
 const ranking = {
   modes: [
     {
+      key: 'destination-customer',
+      label: 'Customer parking',
+      name: 'Customer parking at destination',
+      cost: 'Free? Verify',
+      time: '23 min',
+      confidence: 'Medium',
+      pros: [],
+      cons: [],
+      status: 'verify_rules',
+      unavailable: false,
+      hiddenByPreference: false,
+    },
+    {
       key: 'parking',
       label: 'Destination parking',
       name: 'Garage A',
@@ -22,8 +35,8 @@ const ranking = {
       hiddenByPreference: false,
     },
   ],
-  recommendationMode: 'parking',
-  recommendedTitle: 'Park at Garage A',
+  recommendationMode: 'destination-customer',
+  recommendedTitle: 'Check customer parking first',
   recommendedReason: 'Best fit if you want to drive.',
   cheapestMode: { key: 'transit', label: 'Transit', cost: 3.25 },
   fastestMode: { key: 'rideshare', label: 'Rideshare', minutes: 28 },
@@ -62,7 +75,7 @@ describe('PointAbHeroSummary', () => {
     expect(screen.getByText('Cheapest')).toBeInTheDocument();
     expect(screen.getByText('Fastest')).toBeInTheDocument();
     expect(screen.getByText('Parking outlook')).toBeInTheDocument();
-    expect(screen.getByText('Drive + park')).toBeInTheDocument();
+    expect(screen.getByText('Customer parking')).toBeInTheDocument();
     expect(screen.getByText('Parking not confirmed yet')).toBeInTheDocument();
   });
 });

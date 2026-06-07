@@ -150,7 +150,7 @@ describe('pointAbRanking', () => {
     );
   });
 
-  test('Google ParkingOptions free customer lot signals improve parking presentation', () => {
+  test('Google ParkingOptions free customer lot signals become a separate verify candidate', () => {
     const suburbanTrip = {
       ...tripData,
       destination: 'Costco Wholesale, Issaquah, WA',
@@ -166,6 +166,7 @@ describe('pointAbRanking', () => {
       destinationLabel: suburbanTrip.destination,
       noParkingPreferred: false,
       bestParking: suburbanParking,
+      parkingOptions: [suburbanParking],
       parkingTotal: 0,
       parkingMinutes: 35,
       bestRideOption: expensiveRide,
@@ -182,13 +183,183 @@ describe('pointAbRanking', () => {
       parkRideReliable: false,
     });
 
-    expect(ranked.modes[0]?.costNote).toContain('Free customer parking likely');
+    const customerMode = ranked.modes.find((mode) => mode.key === 'destination-customer');
+
+    expect(customerMode).toMatchObject({
+      label: 'Customer parking',
+      cost: 'Free? Verify',
+      status: 'verify_rules',
+    });
     expect(
       buildParkingOptionsHints(suburbanParking.googleParkingOptions, {
         airportTrip: false,
         destination: suburbanTrip.destination,
       }).hints,
     ).toHaveLength(1);
+  });
+
+  test('restaurant outside dense downtown with paid lot still gets customer/free verify candidate', () => {
+    const restaurantTrip = {
+      ...tripData,
+      destination: 'Neighborhood Cafe, Boise, ID',
+      destinationKind: 'restaurant' as const,
+      parkingDuration: 120,
+    };
+    const paidLot = {
+      ...parkingOption,
+      id: 'boise-paid-garage',
+      name: 'Main Street Garage',
+      price: 18,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: restaurantTrip,
+      sort: 'easiest',
+      destinationLabel: restaurantTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLot,
+      parkingOptions: [paidLot],
+      parkingTotal: 18,
+      parkingMinutes: 31,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 24,
+    });
+
+    const customerMode = ranked.modes.find((mode) => mode.key === 'destination-customer');
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(ranked.fastestMode?.key).toBe('destination-customer');
+    expect(customerMode).toMatchObject({
+      label: 'Customer parking',
+      cost: 'Free? Verify',
+      status: 'verify_rules',
+    });
+    expect(customerMode?.time).toBe('29 min');
+    expect(paidMode).toMatchObject({
+      label: 'Paid garage/lot',
+      costNote: 'Bookable paid backup',
+    });
+    expect(paidMode?.time).toBe('37 min');
+    expect(paidMode?.status).not.toBe('best_pick');
+  });
+
+  test('dense downtown with many paid lots can keep paid garage as best', () => {
+    const downtownTrip = {
+      ...tripData,
+      destination: 'Downtown Chicago, IL',
+      destinationKind: 'downtown' as const,
+      parkingDuration: 120,
+    };
+    const paidLots = [0, 1, 2].map((index) => ({
+      ...parkingOption,
+      id: `downtown-paid-${index}`,
+      name: `Downtown Garage ${index + 1}`,
+      price: 18 + index * 4,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+      transferToTerminalMinutes: 5 + index,
+    })) satisfies ParkingOption[];
+
+    const ranked = rankPointAbModes({
+      tripData: downtownTrip,
+      sort: 'easiest',
+      destinationLabel: downtownTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLots[0],
+      parkingOptions: paidLots,
+      parkingTotal: 18,
+      parkingMinutes: 25,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 20,
+    });
+
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.modes.some((mode) => mode.key === 'destination-customer')).toBe(false);
+    expect(ranked.recommendationMode).toBe('parking');
+    expect(paidMode).toMatchObject({
+      label: 'Paid garage/lot',
+      costNote: 'Best confirmed paid option',
+      status: 'best_pick',
+    });
+  });
+
+  test('stadium event warning outranks generic free parking assumption', () => {
+    const stadiumTrip = {
+      ...tripData,
+      destination: 'Riverfront Stadium, Phoenix, AZ',
+      destinationKind: 'stadium' as const,
+      parkingDuration: 180,
+    };
+    const eventLot = {
+      ...parkingOption,
+      id: 'stadium-event-lot',
+      name: 'Event Garage',
+      price: 32,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: stadiumTrip,
+      sort: 'easiest',
+      destinationLabel: stadiumTrip.destination,
+      noParkingPreferred: false,
+      bestParking: eventLot,
+      parkingOptions: [eventLot],
+      parkingTotal: 32,
+      parkingMinutes: 34,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 26,
+    });
+
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.modes.some((mode) => mode.key === 'destination-customer')).toBe(false);
+    expect(paidMode?.costNote).toBe('Best confirmed event parking');
+    expect(paidMode?.pros.join(' ')).toMatch(/Event-zone or special paid parking rules/i);
   });
 
   test('Seattle Sunday street parking may be free', () => {
@@ -221,6 +392,47 @@ describe('pointAbRanking', () => {
       mapComparisonVerdictToStatus({ verdict: 'Hidden by preference' }),
     ).toBe('hidden_by_preference');
     expect(recommendationStatusLabel('hidden_by_preference')).toBe('Hidden');
+  });
+
+  test('no-parking mode excludes parking options from cheapest and fastest summaries', () => {
+    const ranked = rankPointAbModes({
+      tripData,
+      sort: 'easiest',
+      destinationLabel: tripData.destination,
+      noParkingPreferred: true,
+      bestParking: parkingOption,
+      parkingTotal: 7,
+      parkingMinutes: 48,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 52,
+      transitCostDisplay: '$3.25 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+    });
+
+    expect(ranked.cheapestMode).toMatchObject({ key: 'transit', cost: 3.25 });
+    expect(ranked.fastestMode).toMatchObject({ key: 'rideshare', minutes: 38 });
+  });
+
+  test('Point A→B customer parking actions omit verify-signs button styling', () => {
+    const actions = buildPointAbModeActions({
+      mode: 'destination-customer',
+      routeToParkingUrl: 'https://maps.example/route',
+      onDetails: () => undefined,
+    });
+
+    expect(actions).toHaveLength(2);
+    expect(actions.map((action) => action.label)).toEqual([
+      'Open directions',
+      'Details',
+    ]);
   });
 
   test('Point A→B cards expose at most three actions', () => {
@@ -283,7 +495,7 @@ describe('pointAbRanking', () => {
 
     expect(ranked.recommendationMode).toBe('parking');
     expect(ranked.recommendedTitle).toBe('Park at Pike Place Market Parking Garage');
-    expect(parkingMode?.time).toBe('31 min');
+    expect(parkingMode?.time).toBe('44 min');
     expect(parkingMode?.unavailable).toBe(false);
     expect(parkingMode?.status).toBe('best_pick');
     expect(parkingMode?.cons).toContain('Backup route estimate; open directions to confirm');
@@ -344,6 +556,144 @@ describe('pointAbRanking', () => {
     expect(recommendationStatusLabel('budget_option')).toBe('Budget');
     expect(recommendationStatusLabel('verify_rules')).toBe('Verify');
     expect(recommendationStatusLabel('route_needed')).toBe('Route needed');
+  });
+
+  test('customer parking ranks fastest over paid garage for destination-adjacent trips', () => {
+    const austinTrip = {
+      ...tripData,
+      origin: 'La Quinta Inn & Suites by Wyndham Austin Airport',
+      destination: 'Franklin Barbecue, Austin TX',
+      destinationKind: 'restaurant' as const,
+      parkingDuration: 120,
+    };
+    const paidLot = {
+      ...parkingOption,
+      id: 'austin-paid-garage',
+      name: 'East Austin Parking Garage',
+      price: 15,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+      transferToTerminalMinutes: 5,
+      parkingBufferMinutes: 8,
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: austinTrip,
+      sort: 'fastest',
+      destinationLabel: austinTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLot,
+      parkingOptions: [paidLot],
+      parkingTotal: 15,
+      parkingMinutes: null,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 18,
+    });
+
+    const customerMode = ranked.modes.find((mode) => mode.key === 'destination-customer');
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(ranked.fastestMode?.key).toBe('destination-customer');
+    expect(customerMode?.time).toBe('23 min');
+    expect(customerMode?.timeLabel).toBe('Total time');
+    expect(paidMode?.time).toBe('31 min');
+    expect(paidMode?.timeLabel).toBe('Total time');
+    expect(paidMode?.costNote).toBe('Bookable paid backup');
+  });
+
+  test('Austin restaurant timing keeps customer parking near drive time and rideshare viable without live price', () => {
+    const austinTrip = {
+      ...tripData,
+      origin: 'La Quinta Inn & Suites by Wyndham Austin Airport',
+      destination: 'Franklin Barbecue, 900 E 11th St, Austin TX',
+      destinationKind: 'restaurant' as const,
+      parkingDuration: 120,
+    };
+    const paidLot = {
+      ...parkingOption,
+      id: 'east-austin-paid-garage',
+      name: 'East Austin Paid Garage',
+      price: 15,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+      transferToTerminalMinutes: 5,
+      parkingBufferMinutes: 8,
+    } satisfies ParkingOption;
+    const appOnlyRide = {
+      ...expensiveRide,
+      price: 35,
+      priceDisplay: 'check-live' as const,
+      rideshareEstimateConfidence: 'unavailable' as const,
+      priceNote: 'Open app for live price.',
+      driveMinutes: 12,
+      pickupWaitMinutes: 5,
+      duration: 17,
+      totalOptionMinutes: 17,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: austinTrip,
+      sort: 'fastest',
+      destinationLabel: austinTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLot,
+      parkingOptions: [paidLot],
+      parkingTotal: 15,
+      parkingMinutes: 27,
+      bestRideOption: appOnlyRide,
+      ridePrice: null,
+      rideDuration: 17,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 12,
+    });
+
+    const customerMode = ranked.modes.find((mode) => mode.key === 'destination-customer');
+    const paidMode = ranked.modes.find((mode) => mode.key === 'parking');
+    const rideMode = ranked.modes.find((mode) => mode.key === 'rideshare');
+
+    expect(ranked.fastestMode).toMatchObject({
+      key: 'destination-customer',
+      minutes: 17,
+    });
+    expect(customerMode).toMatchObject({
+      time: '17 min',
+      timeLabel: 'Total time',
+      unavailable: false,
+    });
+    expect(paidMode).toMatchObject({
+      time: '27 min',
+      timeLabel: 'Total time',
+    });
+    expect(rideMode).toMatchObject({
+      cost: 'Open app for live price',
+      costNote: 'Fare estimate unavailable',
+      time: '17 min',
+      timeLabel: 'Total time',
+      unavailable: false,
+    });
   });
 
   test('Monroe 4-hour street parking rule penalizes longer stays', () => {

@@ -2,6 +2,10 @@
 import { getAirportById } from '../airports/catalog';
 import { WeatherImpact, WeatherLookupResult } from './types';
 
+const NWS_USER_AGENT =
+  process.env.NWS_USER_AGENT || 'PodPaiGo/1.0 (https://podpaigo.com; support@podpaigo.com)';
+const NWS_CACHE_TTL_MS = 10 * 60 * 1000;
+
 type NwsHourlyPeriod = {
   startTime: string;
   temperature?: number;
@@ -11,6 +15,104 @@ type NwsHourlyPeriod = {
     value: number | null;
   };
 };
+
+type NwsPointProperties = {
+  forecastHourly?: string;
+  forecast?: string;
+  forecastGridData?: string;
+  timeZone?: string;
+};
+
+type CacheEntry<T> = {
+  expiresAt: number;
+  value: T;
+};
+
+const pointCache = new Map<string, CacheEntry<NwsPointProperties | null>>();
+const forecastCache = new Map<string, CacheEntry<NwsHourlyPeriod[] | null>>();
+
+function cacheGet<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function cacheSet<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): T {
+  cache.set(key, {
+    expiresAt: Date.now() + NWS_CACHE_TTL_MS,
+    value,
+  });
+  return value;
+}
+
+export function clearNwsWeatherCache(): void {
+  pointCache.clear();
+  forecastCache.clear();
+}
+
+function nwsHeaders(): HeadersInit {
+  return {
+    Accept: 'application/geo+json',
+    'User-Agent': NWS_USER_AGENT,
+  };
+}
+
+function pointCacheKey(lat: number, lng: number): string {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`;
+}
+
+async function fetchNwsPointProperties(lat: number, lng: number): Promise<NwsPointProperties | null> {
+  const cacheKey = pointCacheKey(lat, lng);
+  const cached = cacheGet(pointCache, cacheKey);
+  if (cached !== undefined) return cached;
+
+  const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, {
+    headers: nwsHeaders(),
+  });
+
+  if (!pointRes.ok) return cacheSet(pointCache, cacheKey, null);
+
+  const pointData = await pointRes.json();
+  const properties = pointData?.properties;
+  if (!properties || typeof properties !== 'object') {
+    return cacheSet(pointCache, cacheKey, null);
+  }
+
+  return cacheSet(pointCache, cacheKey, {
+    forecastHourly:
+      typeof properties.forecastHourly === 'string'
+        ? properties.forecastHourly
+        : undefined,
+    forecast:
+      typeof properties.forecast === 'string'
+        ? properties.forecast
+        : undefined,
+    forecastGridData:
+      typeof properties.forecastGridData === 'string'
+        ? properties.forecastGridData
+        : undefined,
+    timeZone:
+      typeof properties.timeZone === 'string'
+        ? properties.timeZone
+        : undefined,
+  });
+}
+
+async function fetchNwsPeriods(url: string): Promise<NwsHourlyPeriod[] | null> {
+  const cached = cacheGet(forecastCache, url);
+  if (cached !== undefined) return cached;
+
+  const forecastRes = await fetch(url, { headers: nwsHeaders() });
+  if (!forecastRes.ok) return cacheSet(forecastCache, url, null);
+
+  const forecastData = await forecastRes.json();
+  const periods = forecastData?.properties?.periods;
+  return cacheSet(forecastCache, url, Array.isArray(periods) ? periods : null);
+}
 
 function parseWindMph(windSpeed?: string): number | undefined {
   if (!windSpeed) return undefined;
@@ -62,8 +164,85 @@ function buildWeatherImpact(period: NwsHourlyPeriod): WeatherImpact {
       uncoveredPenalty: riskLevel === 'high' ? -8 : riskLevel === 'medium' ? -4 : 0,
     },
     summary: period.shortForecast ?? 'Weather impact unavailable',
-    sourceName: 'National Weather Service',
+    sourceName: 'weather.gov / National Weather Service',
     lastUpdated: new Date().toISOString(),
+  };
+}
+
+function unavailableWeatherResult(targetDateTime?: string): WeatherLookupResult {
+  return {
+    weatherImpact: null,
+    context: 'unavailable',
+    targetDateTime,
+  };
+}
+
+function resolveForecastFromPeriods(args: {
+  periods: NwsHourlyPeriod[];
+  targetDateTime?: string;
+  timeZone?: string;
+  currentContext: WeatherLookupResult['context'];
+}): WeatherLookupResult {
+  const periods = args.periods;
+  if (periods.length === 0) return unavailableWeatherResult(args.targetDateTime);
+
+  const firstPeriod = periods[0];
+  const lastPeriod = periods[periods.length - 1];
+  const firstTime = new Date(firstPeriod.startTime).getTime();
+  const lastTime = new Date(lastPeriod.startTime).getTime();
+
+  if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
+    return unavailableWeatherResult(args.targetDateTime);
+  }
+
+  if (args.targetDateTime) {
+    const targetTime = parseTargetDateTimeMs(args.targetDateTime, args.timeZone);
+    if (!Number.isFinite(targetTime)) {
+      return {
+        weatherImpact: null,
+        context: 'invalid-travel-time',
+        targetDateTime: args.targetDateTime,
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    if (targetTime < firstTime || targetTime > lastTime) {
+      return {
+        weatherImpact: null,
+        context: 'forecast-unavailable',
+        targetDateTime: args.targetDateTime,
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
+    if (!targetPeriod) {
+      return {
+        ...unavailableWeatherResult(args.targetDateTime),
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    return {
+      weatherImpact: buildWeatherImpact(targetPeriod),
+      context: 'travel-time-forecast',
+      targetDateTime: args.targetDateTime,
+      forecastRangeStart: firstPeriod.startTime,
+      forecastRangeEnd: lastPeriod.startTime,
+    };
+  }
+
+  const now = Date.now();
+  const currentPeriod = findFirstPeriodAtOrAfter(periods, now) || periods[0];
+
+  return {
+    weatherImpact: currentPeriod ? buildWeatherImpact(currentPeriod) : null,
+    context: currentPeriod ? args.currentContext : 'unavailable',
+    forecastRangeStart: firstPeriod.startTime,
+    forecastRangeEnd: lastPeriod.startTime,
   };
 }
 
@@ -208,130 +387,23 @@ export async function getWeatherForAirport(args: {
 
   const { lat, lng } = airport.geoLocation;
 
-  const headers = {
-    Accept: 'application/geo+json',
-    UserAgent: 'PodPaiGo/1.0',
-  };
-
   try {
-    const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, {
-      headers,
-    });
-
-    if (!pointRes.ok) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const pointData = await pointRes.json();
-    const hourlyUrl = pointData.properties?.forecastHourly;
-    const timeZone =
-      typeof pointData.properties?.timeZone === 'string'
-        ? pointData.properties.timeZone
-        : undefined;
+    const point = await fetchNwsPointProperties(lat, lng);
+    const hourlyUrl = point?.forecastHourly;
 
     if (!hourlyUrl) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
+      return unavailableWeatherResult(args.targetDateTime);
     }
 
-    const hourlyRes = await fetch(hourlyUrl, { headers });
-
-    if (!hourlyRes.ok) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const hourlyData = await hourlyRes.json();
-    const periods: NwsHourlyPeriod[] = hourlyData.properties?.periods ?? [];
-
-    if (periods.length === 0) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const firstPeriod = periods[0];
-    const lastPeriod = periods[periods.length - 1];
-    const firstTime = new Date(firstPeriod.startTime).getTime();
-    const lastTime = new Date(lastPeriod.startTime).getTime();
-
-    if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    if (args.targetDateTime) {
-      const targetTime = parseTargetDateTimeMs(args.targetDateTime, timeZone);
-      if (!Number.isFinite(targetTime)) {
-        return {
-          weatherImpact: null,
-          context: 'invalid-travel-time',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      if (targetTime < firstTime || targetTime > lastTime) {
-        return {
-          weatherImpact: null,
-          context: 'forecast-unavailable',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
-      if (!targetPeriod) {
-        return {
-          weatherImpact: null,
-          context: 'unavailable',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      return {
-        weatherImpact: buildWeatherImpact(targetPeriod),
-        context: 'travel-time-forecast',
-        targetDateTime: args.targetDateTime,
-        forecastRangeStart: firstPeriod.startTime,
-        forecastRangeEnd: lastPeriod.startTime,
-      };
-    }
-
-    const now = Date.now();
-    const currentPeriod = findFirstPeriodAtOrAfter(periods, now) || periods[0];
-
-    return {
-      weatherImpact: currentPeriod ? buildWeatherImpact(currentPeriod) : null,
-      context: currentPeriod ? 'current-airport-weather' : 'unavailable',
-      forecastRangeStart: firstPeriod.startTime,
-      forecastRangeEnd: lastPeriod.startTime,
-    };
-  } catch {
-    return {
-      weatherImpact: null,
-      context: 'unavailable',
+    const periods = await fetchNwsPeriods(hourlyUrl);
+    return resolveForecastFromPeriods({
+      periods: periods ?? [],
       targetDateTime: args.targetDateTime,
-    };
+      timeZone: point?.timeZone,
+      currentContext: 'current-airport-weather',
+    });
+  } catch {
+    return unavailableWeatherResult(args.targetDateTime);
   }
 }
 
@@ -349,130 +421,23 @@ export async function getWeatherForPoint(args: {
     };
   }
 
-  const headers = {
-    Accept: 'application/geo+json',
-    UserAgent: 'PodPaiGo/1.0',
-  };
-
   try {
-    const pointRes = await fetch(`https://api.weather.gov/points/${args.lat},${args.lng}`, {
-      headers,
-    });
-
-    if (!pointRes.ok) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const pointData = await pointRes.json();
-    const hourlyUrl = pointData.properties?.forecastHourly;
-    const timeZone =
-      typeof pointData.properties?.timeZone === 'string'
-        ? pointData.properties.timeZone
-        : undefined;
+    const point = await fetchNwsPointProperties(args.lat, args.lng);
+    const hourlyUrl = point?.forecastHourly;
 
     if (!hourlyUrl) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
+      return unavailableWeatherResult(args.targetDateTime);
     }
 
-    const hourlyRes = await fetch(hourlyUrl, { headers });
-
-    if (!hourlyRes.ok) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const hourlyData = await hourlyRes.json();
-    const periods: NwsHourlyPeriod[] = hourlyData.properties?.periods ?? [];
-
-    if (periods.length === 0) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    const firstPeriod = periods[0];
-    const lastPeriod = periods[periods.length - 1];
-    const firstTime = new Date(firstPeriod.startTime).getTime();
-    const lastTime = new Date(lastPeriod.startTime).getTime();
-
-    if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
-      return {
-        weatherImpact: null,
-        context: 'unavailable',
-        targetDateTime: args.targetDateTime,
-      };
-    }
-
-    if (args.targetDateTime) {
-      const targetTime = parseTargetDateTimeMs(args.targetDateTime, timeZone);
-      if (!Number.isFinite(targetTime)) {
-        return {
-          weatherImpact: null,
-          context: 'invalid-travel-time',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      if (targetTime < firstTime || targetTime > lastTime) {
-        return {
-          weatherImpact: null,
-          context: 'forecast-unavailable',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
-      if (!targetPeriod) {
-        return {
-          weatherImpact: null,
-          context: 'unavailable',
-          targetDateTime: args.targetDateTime,
-          forecastRangeStart: firstPeriod.startTime,
-          forecastRangeEnd: lastPeriod.startTime,
-        };
-      }
-
-      return {
-        weatherImpact: buildWeatherImpact(targetPeriod),
-        context: 'travel-time-forecast',
-        targetDateTime: args.targetDateTime,
-        forecastRangeStart: firstPeriod.startTime,
-        forecastRangeEnd: lastPeriod.startTime,
-      };
-    }
-
-    const now = Date.now();
-    const currentPeriod = findFirstPeriodAtOrAfter(periods, now) || periods[0];
-
-    return {
-      weatherImpact: currentPeriod ? buildWeatherImpact(currentPeriod) : null,
-      context: currentPeriod ? args.currentContext || 'current-destination-weather' : 'unavailable',
-      forecastRangeStart: firstPeriod.startTime,
-      forecastRangeEnd: lastPeriod.startTime,
-    };
-  } catch {
-    return {
-      weatherImpact: null,
-      context: 'unavailable',
+    const periods = await fetchNwsPeriods(hourlyUrl);
+    return resolveForecastFromPeriods({
+      periods: periods ?? [],
       targetDateTime: args.targetDateTime,
-    };
+      timeZone: point?.timeZone,
+      currentContext: args.currentContext || 'current-destination-weather',
+    });
+  } catch {
+    return unavailableWeatherResult(args.targetDateTime);
   }
 }
 

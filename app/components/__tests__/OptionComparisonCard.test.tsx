@@ -46,11 +46,13 @@ describe('OptionComparisonCard compact layout', () => {
         name="Sample Garage"
         cost="$24"
         time="32 min"
+        timeLabel="Total time"
         pros={['Near destination', 'Covered garage/lot']}
         cons={['Paid garage', 'Route timing unavailable']}
       />,
     );
 
+    expect(screen.getByText('Total time')).toBeInTheDocument();
     expect(screen.getByText('Near destination')).toBeInTheDocument();
     expect(screen.queryByText('Covered garage/lot')).not.toBeInTheDocument();
     expect(screen.getByText('Paid garage')).toBeInTheDocument();
@@ -128,12 +130,51 @@ describe('OptionComparisonCard compact layout', () => {
 
   test('exposes stable section IDs for each Point A→B mode', () => {
     expect(POINT_AB_DETAILS_SECTION_IDS).toEqual({
+      'destination-customer': 'details-destination-parking',
       parking: 'details-destination-parking',
       'street-meter': 'details-street-meter',
       rideshare: 'details-rideshare',
       transit: 'details-transit',
       'park-ride': 'details-park-ride',
     });
+  });
+
+  test('mutes hidden parking cards and replaces CTAs with show-parking action', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Customer parking"
+        name="Customer parking at destination"
+        cost="Free? Verify"
+        time="23 min"
+        pros={['No paid parking if rules allow']}
+        cons={['Verify posted signs']}
+        hiddenByPreference
+        selected
+        status="best_pick"
+        verdict="Best pick"
+        isCheapestMode
+        isFastestMode
+        actions={[
+          { label: 'Open directions', href: 'https://maps.example/route' },
+          { label: 'Details', onClick: () => undefined },
+        ]}
+        onShowParkingAnyway={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Hidden')).toBeInTheDocument();
+    expect(screen.queryByText('Best pick')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open directions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Hidden by your No parking needed preference.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show parking anyway' })).toBeInTheDocument();
+
+    const card = screen.getByText('Customer parking').closest('div.rounded-2xl');
+    expect(card).toHaveClass('opacity-75');
+    expect(card).not.toHaveClass('bg-primary/10');
   });
 
   test('uses equal-height flex column layout with pinned actions', () => {

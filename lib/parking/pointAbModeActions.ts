@@ -34,7 +34,7 @@ function unavailableDetailsAction(
 }
 
 export function buildPointAbModeActions(input: {
-  mode: 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
+  mode: 'destination-customer' | 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
   routeToParkingUrl?: string | null;
   parkingToDestinationUrl?: string | null;
   streetMeterDirectionsUrl?: string | null;
@@ -51,12 +51,18 @@ export function buildPointAbModeActions(input: {
   detailsExpanded?: boolean;
 }): DestinationModeAction[] {
   switch (input.mode) {
+    case 'destination-customer':
+      return [
+        input.routeToParkingUrl
+          ? { label: 'Open directions', href: input.routeToParkingUrl }
+          : { label: 'Open directions', disabled: true },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+      ];
     case 'street-meter':
       return [
         input.streetMeterDirectionsUrl
           ? { label: 'Open directions', href: input.streetMeterDirectionsUrl }
           : { label: 'Open directions', disabled: true },
-        { label: 'Verify signs', onClick: input.onDetails },
         detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
       ];
     case 'parking':

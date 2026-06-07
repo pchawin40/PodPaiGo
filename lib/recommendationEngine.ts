@@ -24,6 +24,7 @@ import {
   resolveScheduledTripDateTime,
   resolveTargetTerminalArrivalIso,
   resolveTripRouteTiming,
+  shouldUseNowForRouting,
 } from './trip/routeTiming';
 import { attachSeaCheckpointRoute } from './airports/seaCheckpointRouting';
 import { getParkingDiscoveryNotice } from './parking/parkingDiscoveryMode';
@@ -300,6 +301,36 @@ function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): Traffic
   });
 }
 
+function hasCoordinateFallbackInputs(tripData: TripData): boolean {
+  return Boolean(
+    resolveFiniteCoordinate(tripData.originLat, tripData.originLng) &&
+      resolveFiniteCoordinate(tripData.destinationLat, tripData.destinationLng),
+  );
+}
+
+function isDefinitiveRouteImpossible(estimate: TrafficEstimate): boolean {
+  const text = [
+    estimate.routeUnavailableReason,
+    ...(estimate.assumptions || []),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return /\b(no route|not drivable|unreachable|not reachable|route impossible|could not calculate a driving route)\b/.test(
+    text,
+  );
+}
+
+function shouldUseCoordinateFallbackForUnavailableTraffic(
+  estimate: TrafficEstimate,
+  tripData: TripData,
+): boolean {
+  if (estimate.routeUnavailable !== true) return false;
+  if (!hasCoordinateFallbackInputs(tripData)) return false;
+  return !isDefinitiveRouteImpossible(estimate);
+}
+
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
   airportCode?: string;
@@ -395,42 +426,82 @@ function genericParkingFallback(airportCode: string, destination: string): Parki
   }];
 }
 
-function genericRideshareFallback(): RideshareOption[] {
+function genericRideshareFallback(args?: {
+  origin?: string;
+  destination?: string;
+  trafficEstimate?: TrafficEstimate | null;
+}): RideshareOption[] {
   const now = new Date().toISOString();
+  const driveMinutes =
+    typeof args?.trafficEstimate?.duration === 'number' &&
+    Number.isFinite(args.trafficEstimate.duration) &&
+    args.trafficEstimate.duration > 0 &&
+    !args.trafficEstimate.routeUnavailable
+      ? Math.round(args.trafficEstimate.duration)
+      : 15;
+  const destination = args?.destination?.trim() || '';
+  const origin = args?.origin?.trim() || '';
+  const mapLink =
+    origin && destination
+      ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`
+      : 'https://www.google.com/maps';
+  const uberLink = `https://m.uber.com/ul/?${new URLSearchParams({
+    action: 'setPickup',
+    pickup: 'my_location',
+    ...(destination ? { 'dropoff[formatted_address]': destination } : {}),
+  }).toString()}`;
+
+  const buildOption = (input: {
+    id: 'uber' | 'lyft';
+    name: string;
+    waitMinutes: number;
+    sourceLink: string;
+  }): RideshareOption => {
+    const totalOptionMinutes = driveMinutes + input.waitMinutes;
+    return {
+      id: input.id,
+      name: input.name,
+      price: 35,
+      duration: totalOptionMinutes,
+      driveMinutes,
+      pickupWaitMinutes: input.waitMinutes,
+      totalOptionMinutes,
+      timingBreakdown: {
+        driveMinutes,
+        parkingBufferMinutes: null,
+        walkToDestinationMinutes: null,
+        pickupWaitMinutes: input.waitMinutes,
+        totalOptionMinutes,
+      },
+      availability: input.id === 'uber' ? 90 : 88,
+      trustStatus: 'estimated',
+      priceDisplay: 'check-live',
+      priceNote: 'Open app for live price.',
+      rideshareEstimateConfidence: 'unavailable',
+      sourceName: input.name,
+      sourceLink: input.sourceLink,
+      mapLink,
+      lastUpdated: now,
+      assumptions: [
+        'Rideshare app link shown because live Uber/Lyft quote is unavailable.',
+        `Duration uses ${driveMinutes} min drive time plus estimated ${input.waitMinutes} min pickup wait.`,
+      ],
+    };
+  };
 
   return [
-    {
+    buildOption({
       id: 'uber',
       name: 'Uber',
-      price: 30,
-      duration: 20,
-      availability: 90,
-      trustStatus: 'estimated',
-      priceDisplay: 'estimated',
-      priceNote: 'Baseline estimate only. Open Uber for final pricing.',
-      rideshareEstimateConfidence: 'baseline-estimate',
-      sourceName: 'Uber',
-      sourceLink: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',
-      mapLink: 'https://www.google.com/maps',
-      lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.', 'Not a live Uber quote.'],
-    },
-    {
+      waitMinutes: 5,
+      sourceLink: uberLink,
+    }),
+    buildOption({
       id: 'lyft',
       name: 'Lyft',
-      price: 30,
-      duration: 20,
-      availability: 90,
-      trustStatus: 'estimated',
-      priceDisplay: 'estimated',
-      priceNote: 'Baseline estimate only. Open Lyft for final pricing.',
-      rideshareEstimateConfidence: 'baseline-estimate',
-      sourceName: 'Lyft',
       sourceLink: 'https://lyft.com/ride',
-      mapLink: 'https://www.google.com/maps',
-      lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.', 'Not a live Lyft quote.'],
-    },
+      waitMinutes: 5,
+    }),
   ];
 }
 
@@ -864,7 +935,23 @@ export class RecommendationEngine {
         : Promise.resolve(null),
     ]);
 
-    const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimate);
+    const replaceUnavailableTrafficWithCoordinateFallback =
+      shouldUseCoordinateFallbackForUnavailableTraffic(trafficEstimate, trafficTripData);
+    const trafficEstimateForDisplay = replaceUnavailableTrafficWithCoordinateFallback
+      ? fallbackTrafficEstimate(trafficTripData, false)
+      : trafficEstimate;
+    const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimateForDisplay);
+
+    if (replaceUnavailableTrafficWithCoordinateFallback) {
+      debugLog('route_unavailable_replaced_with_coordinate_fallback', {
+        type: tripData.type,
+        tripMode: tripData.tripMode,
+        route: trafficEstimate.route,
+        providerSource: trafficEstimate.sourceName,
+        providerReason: trafficEstimate.routeUnavailableReason,
+        duration: effectiveTrafficEstimate.duration,
+      });
+    }
 
     debugLog('quickgo_route_timing_result', {
       destinationText: tripData.destination,
@@ -902,10 +989,16 @@ export class RecommendationEngine {
       );
     }
 
+    const weatherTargetDateTime = isAirportTrip
+      ? routeTiming.targetTerminalArrivalIso || tripDateTime
+      : shouldUseNowForRouting(tripDateTime)
+        ? undefined
+        : tripDateTime;
+
     const weatherResult = isAirportTrip
       ? await getWeatherForAirport({
         airportCode,
-        targetDateTime: routeTiming.targetTerminalArrivalIso || tripDateTime,
+        targetDateTime: weatherTargetDateTime,
       }).catch((): WeatherLookupResult => ({
         weatherImpact: null,
         context: 'unavailable' as const,
@@ -914,7 +1007,7 @@ export class RecommendationEngine {
         ? await getWeatherForPoint({
           lat: mainDestinationLatLng.lat,
           lng: mainDestinationLatLng.lng,
-          targetDateTime: tripDateTime,
+          targetDateTime: weatherTargetDateTime,
           currentContext: 'current-destination-weather',
         }).catch((): WeatherLookupResult => ({
           weatherImpact: null,
@@ -929,9 +1022,7 @@ export class RecommendationEngine {
       type: tripData.type,
       destinationText: tripData.destination,
       isAirportTrip,
-      targetDateTime: isAirportTrip
-        ? routeTiming.targetTerminalArrivalIso || tripDateTime
-        : tripDateTime,
+      targetDateTime: weatherTargetDateTime ?? tripDateTime,
       destinationCoordsPresent: Boolean(mainDestinationLatLng),
       destinationResolvedViaGeocode:
         Boolean(resolvedDestinationCoords) && typeof tripData.destinationLat !== 'number',
@@ -943,6 +1034,14 @@ export class RecommendationEngine {
 
     const weatherImpact = weatherResult.weatherImpact;
 
+    if (!isAirportTrip && allowRideshare && rideshare.length === 0 && !effectiveTrafficEstimate.routeUnavailable) {
+      rideshare = genericRideshareFallback({
+        origin: tripData.origin,
+        destination: tripData.destination,
+        trafficEstimate: effectiveTrafficEstimate,
+      });
+    }
+
     if (isAirportTrip) {
       if (airportCode !== 'SEA') {
         if (allowCarOptions && parking.length === 0) {
@@ -950,7 +1049,11 @@ export class RecommendationEngine {
         }
 
         if (allowRideshare && rideshare.length === 0 && !effectiveTrafficEstimate.routeUnavailable) {
-          rideshare = genericRideshareFallback();
+          rideshare = genericRideshareFallback({
+            origin: tripData.origin,
+            destination: tripData.destination,
+            trafficEstimate: effectiveTrafficEstimate,
+          });
         }
 
         transit = [];

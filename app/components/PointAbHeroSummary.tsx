@@ -13,6 +13,8 @@ type PointAbHeroSummaryProps = {
 
 function modeLabel(key: string): string {
   switch (key) {
+    case 'destination-customer':
+      return 'Customer parking';
     case 'parking':
       return 'Drive + park';
     case 'street-meter':
@@ -38,12 +40,16 @@ function SummaryCard({
   detail?: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card/80 p-3 shadow-sm">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-border bg-card/80 p-3 shadow-sm">
+      <div className="line-clamp-2 break-words text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
-      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
-      {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
+      <div className="mt-1 line-clamp-2 break-words text-sm font-semibold text-foreground">
+        {value}
+      </div>
+      {detail ? (
+        <div className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{detail}</div>
+      ) : null}
     </div>
   );
 }

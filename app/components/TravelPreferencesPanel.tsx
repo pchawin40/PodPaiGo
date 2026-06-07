@@ -18,6 +18,7 @@ type TravelPreferencesPanelProps = {
   onChange?: (preferences: TripTravelPreferences) => void;
   className?: string;
   embedded?: boolean;
+  hideParkingFilters?: boolean;
 };
 
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
@@ -45,6 +46,7 @@ export default function TravelPreferencesPanel({
   onChange,
   className = '',
   embedded = false,
+  hideParkingFilters = false,
 }: TravelPreferencesPanelProps) {
   const [preferences, setPreferences] = useState<TripTravelPreferences>(
     value || DEFAULT_TRAVEL_PREFERENCES,
@@ -112,27 +114,29 @@ export default function TravelPreferencesPanel({
         })}
       </div>
 
-      <div className="mt-6">
-        <div className="text-sm font-medium text-foreground">Parking filters</div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Filters use verified or provider-claimed features. Inferred claims stay visible but do not pass strict filters.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {FILTER_KEYS.map((key) => {
-            const active = Boolean(preferences.parkingFilters[key]);
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => toggleFilter(key)}
-                className="rounded-full"
-              >
-                <StatusPill tone={active ? 'primary' : 'muted'}>{PARKING_FILTER_LABELS[key]}</StatusPill>
-              </button>
-            );
-          })}
+      {!hideParkingFilters ? (
+        <div className="mt-6">
+          <div className="text-sm font-medium text-foreground">Parking filters</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Filters use verified or provider-claimed features. Inferred claims stay visible but do not pass strict filters.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {FILTER_KEYS.map((key) => {
+              const active = Boolean(preferences.parkingFilters[key]);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleFilter(key)}
+                  className="rounded-full"
+                >
+                  <StatusPill tone={active ? 'primary' : 'muted'}>{PARKING_FILTER_LABELS[key]}</StatusPill>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : null}
     </>
   );
 

@@ -1,5 +1,6 @@
 import { WeatherContext, WeatherImpact } from './weather/types';
 import type { OptionIntelligence } from './intelligence/optionIntelligence';
+import type { TransitFareResolution } from './transit/transitFareResolver';
 
 export type TripType =
   | 'airport-departure'
@@ -21,7 +22,15 @@ export type DestinationKind =
   | 'event'
   | 'hospital'
   | 'restaurant'
+  | 'cafe'
+  | 'bar'
   | 'hotel'
+  | 'grocery'
+  | 'store'
+  | 'mall'
+  | 'park'
+  | 'trailhead'
+  | 'neighborhood'
   | 'general';
 
 export type TransportAvailability = 'car' | 'rideshare' | 'transit' | 'all';
@@ -231,6 +240,14 @@ export type TransferLeg = {
   note?: string;
 };
 
+export type PointToPointTiming = {
+  driveMinutes?: number | null;
+  parkingBufferMinutes?: number | null;
+  walkToDestinationMinutes?: number | null;
+  pickupWaitMinutes?: number | null;
+  totalOptionMinutes?: number | null;
+};
+
 export type ParkAndRideRuleConfidence = 'confirmed' | 'unknown' | 'estimated';
 
 export type ParkAndRideParkingRules = {
@@ -299,6 +316,9 @@ export type ParkingOption = {
   driveMinutes?: number;
   /** Live or estimated origin→lot drive duration in minutes. */
   duration?: number;
+  walkToDestinationMinutes?: number;
+  totalOptionMinutes?: number;
+  timingBreakdown?: PointToPointTiming;
   /** How origin→lot drive time was derived. */
   originDriveSource?: 'google-routes' | 'haversine-estimated' | 'same-place';
   /** Geocoded trip origin used for drive-time fallback. */
@@ -526,6 +546,9 @@ export type RideshareOption = {
   distanceMiles?: number;
   routeDistanceMeters?: number;
   pickupWaitMinutes?: number;
+  driveMinutes?: number;
+  totalOptionMinutes?: number;
+  timingBreakdown?: PointToPointTiming;
   duration: number; // in minutes
   availability: number;
   trustStatus: TrustStatus;
@@ -593,6 +616,7 @@ export type TransitOption = {
   weatherPenaltyLabel?: string;
 
   trueTotalCost?: number;
+  transitFareResolution?: TransitFareResolution;
 };
 
 export type TransitSegment = {

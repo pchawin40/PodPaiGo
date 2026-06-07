@@ -1,6 +1,7 @@
 import type { PointAbModeKey } from './pointAbRanking';
 
 export const POINT_AB_DETAILS_SECTION_IDS: Record<PointAbModeKey, string> = {
+  'destination-customer': 'details-destination-parking',
   parking: 'details-destination-parking',
   'street-meter': 'details-street-meter',
   rideshare: 'details-rideshare',

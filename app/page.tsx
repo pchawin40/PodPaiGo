@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import HeroBadge from './components/HeroBadge';
 import PodPaiGoAssistant from './components/PodPaiGoAssistant';
 import SavedTripsHomeSection from './components/SavedTripsHomeSection';
@@ -49,6 +50,40 @@ const steps = [
   'Choose whether you can drive, rideshare, use transit, or compare everything.',
   'Review timing, cost, stress, parking outlook, weather, and backup options.',
 ];
+
+function PreviewMiniCard({
+  eyebrow,
+  title,
+  metricLabel,
+  metricValue,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  metricLabel: string;
+  metricValue: string;
+  children: ReactNode;
+}) {
+  return (
+    <article className="flex h-full min-h-[205px] flex-col rounded-2xl border border-white/10 bg-white/10 p-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-100/75">
+          {eyebrow}
+        </p>
+        <h3 className="mt-2 text-base font-semibold text-white">{title}</h3>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <span className="text-sm font-semibold text-sky-100/90">{metricLabel}</span>
+        <span className="max-w-[7rem] text-right text-xl font-bold leading-tight text-sky-300">
+          {metricValue}
+        </span>
+      </div>
+
+      <div className="mt-auto flex flex-wrap gap-2 pt-4">{children}</div>
+    </article>
+  );
+}
 
 export default function Home() {
   return (
@@ -122,44 +157,34 @@ export default function Home() {
                 </div>
                 <div className="mt-2 text-2xl font-bold text-white">Airport day + city trip</div>
               </div>
-              <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-100/75">
-                    Airport day
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-white">SEA departure</div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-sm font-medium text-sky-100/90">Leave by</span>
-                    <span className="text-lg font-bold text-sky-300">6:42 AM</span>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
-                      TSA/checklist
-                    </StatusPill>
-                    <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
-                      Airport parking
-                    </StatusPill>
-                  </div>
-                </div>
+              <div className="grid items-stretch gap-3 px-5 py-4 sm:grid-cols-2">
+                <PreviewMiniCard
+                  eyebrow="Airport day"
+                  title="SEA departure"
+                  metricLabel="Leave by"
+                  metricValue="6:42 AM"
+                >
+                  <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
+                    TSA/checklist
+                  </StatusPill>
+                  <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
+                    Airport parking
+                  </StatusPill>
+                </PreviewMiniCard>
 
-                <div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-100/75">
-                    City trip
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-white">Downtown Seattle</div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-sm font-medium text-sky-100/90">Best option</span>
-                    <span className="text-lg font-bold text-sky-300">Drive + park</span>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
-                      Street outlook
-                    </StatusPill>
-                    <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
-                      Park & Ride backup
-                    </StatusPill>
-                  </div>
-                </div>
+                <PreviewMiniCard
+                  eyebrow="City trip"
+                  title="Downtown Seattle"
+                  metricLabel="Best option"
+                  metricValue="Drive + park"
+                >
+                  <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
+                    Street outlook
+                  </StatusPill>
+                  <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
+                    Park & Ride backup
+                  </StatusPill>
+                </PreviewMiniCard>
               </div>
             </div>
 

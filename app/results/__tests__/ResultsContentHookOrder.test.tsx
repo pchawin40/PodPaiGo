@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ResultsContent from '../ResultsContent';
 import type { Recommendation } from '@/lib/types';
 
@@ -32,7 +32,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-function cityTripSearchParams(): string {
+function cityTripSearchParams(overrides?: Record<string, string>): string {
   const params = new URLSearchParams({
     type: 'general-trip',
     origin: 'Monroe, WA',
@@ -45,6 +45,7 @@ function cityTripSearchParams(): string {
     parkingPreference: 'nearby',
     transport: 'all',
     transitPayment: 'normal',
+    ...overrides,
   });
   return params.toString();
 }
@@ -97,6 +98,47 @@ function cityTripRecommendation(): Recommendation {
       assumptions: [],
     },
     parkingDataStatus: 'empty',
+  };
+}
+
+function cityTripRecommendationWithParking(): Recommendation {
+  return {
+    ...cityTripRecommendation(),
+    parkingDataStatus: 'available',
+    parking: [
+      {
+        id: 'test-garage-one',
+        name: 'Test Garage One',
+        type: 'off-airport',
+        price: 12,
+        distance: 4,
+        duration: 20,
+        routeToParkingMinutes: 15,
+        parkingBufferMinutes: 4,
+        walkToDestinationMinutes: 1,
+        availability: 90,
+        trustStatus: 'estimated',
+        sourceName: 'Test parking',
+        lastUpdated: '2026-06-01T00:00:00.000Z',
+        assumptions: [],
+      },
+      {
+        id: 'test-garage-two',
+        name: 'Test Garage Two',
+        type: 'off-airport',
+        price: 18,
+        distance: 6,
+        duration: 25,
+        routeToParkingMinutes: 18,
+        parkingBufferMinutes: 5,
+        walkToDestinationMinutes: 2,
+        availability: 85,
+        trustStatus: 'estimated',
+        sourceName: 'Test parking',
+        lastUpdated: '2026-06-01T00:00:00.000Z',
+        assumptions: [],
+      },
+    ],
   };
 }
 
@@ -158,5 +200,66 @@ describe('ResultsContent hook order', () => {
       ),
     );
     expect(hookOrderErrors).toHaveLength(0);
+  });
+
+  test('hides more parking options while no-parking preference is active', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(recommendation),
+            json: async () => recommendation,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({ parkingPreference: 'none' })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('No parking needed / rideshare strategy')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
+    expect(screen.getByText('Estimated drive time')).toBeInTheDocument();
+    expect(screen.getByText('Drive route')).toBeInTheDocument();
+    expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
+    expect(screen.getByText('Pickup wait')).toBeInTheDocument();
+    expect(screen.getByText('Check app')).toBeInTheDocument();
+    expect(screen.queryByText('Parking filters')).not.toBeInTheDocument();
+    expect(screen.queryByText('More parking options')).not.toBeInTheDocument();
+    expect(screen.queryByText('Test Garage One')).not.toBeInTheDocument();
+    expect(screen.queryByText('Test Garage Two')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show parking anyway/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Parking is visible for comparison.')).toBeInTheDocument();
+      expect(screen.getByText('More parking options')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('Test Garage Two').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Change preference/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Car and parking preference').length).toBeGreaterThan(0);
+    });
   });
 });

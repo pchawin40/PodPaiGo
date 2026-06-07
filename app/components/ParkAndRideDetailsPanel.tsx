@@ -37,15 +37,20 @@ export default function ParkAndRideDetailsPanel({ details }: ParkAndRideDetailsP
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-md bg-muted/50 px-2 py-1.5">
                   <div className="text-[11px] uppercase">Parking</div>
-                  <div className="font-semibold text-foreground">{lot.costDisplay}</div>
+                  <div className="font-semibold text-foreground">
+                    {lot.parkingCostDisplay || lot.costDisplay}
+                  </div>
                   <div>{lot.parkingRuleSummary}</div>
                 </div>
                 <div className="rounded-md bg-muted/50 px-2 py-1.5">
-                  <div className="text-[11px] uppercase">Transit</div>
+                  <div className="text-[11px] uppercase">Transit fare</div>
                   <div className="font-semibold text-foreground">
-                    {lot.transitTimeDisplay}
+                    {lot.transitFareDisplay}
                   </div>
-                  <div>Total: {lot.totalTimeDisplay}</div>
+                  <div>
+                    Transit {lot.transitTimeDisplay} · Total {lot.totalTimeDisplay}
+                  </div>
+                  {lot.timeDeltaLabel ? <div>{lot.timeDeltaLabel}</div> : null}
                 </div>
                 <div className="rounded-md bg-muted/50 px-2 py-1.5">
                   <div className="text-[11px] uppercase">Confidence</div>
