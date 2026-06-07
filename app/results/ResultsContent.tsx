@@ -46,8 +46,12 @@ import {
 import TravelPreferencesPanel from '../components/TravelPreferencesPanel';
 import {
   isQuickGoMode,
+  logQuickGoClientRoute,
   mergeStoredTripSearchParams,
+  quickGoRouteHydrationStateForFinalResult,
   resolveQuickGoDriveTime,
+  shouldStartQuickGoRouteRefresh,
+  type QuickGoRouteHydrationState,
 } from '../../lib/trip/quickGo';
 import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
@@ -3939,6 +3943,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [quickGoRouteFetchInFlight, setQuickGoRouteFetchInFlight] = useState(false);
+  const [clientRouteRefreshPending, setClientRouteRefreshPending] = useState(false);
+  const [routeHydrationState, setRouteHydrationState] =
+    useState<QuickGoRouteHydrationState>('not_started');
   const [invalidTripMessage, setInvalidTripMessage] = useState<string | null>(null);
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [googleEnrichedParking, setGoogleEnrichedParking] = useState<Record<string, ParkingOption>>({});
@@ -3991,6 +3999,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const liveRefreshInFlightKeyRef = useRef('');
   const liveRefreshLoadedKeyRef = useRef('');
   const priorQuickGoDriveMinutesRef = useRef<number | null>(null);
+  const routeRequestSeq = useRef(0);
+  const quickGoRouteRequestIdRef = useRef(0);
 
   function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
     const normalize = (value: string | null | undefined) =>
@@ -4438,6 +4448,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     const data = parseTripDataFromSearchParams(searchParams);
 
     if (data) {
+      const quickGoRequest = isQuickGoMode(searchParams);
       const requestKey = JSON.stringify(data);
       const currentRequest = recommendationsRequestRef.current;
 
@@ -4464,11 +4475,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         priceMatchKeyRef.current = '';
         liveRefreshLoadedKeyRef.current = '';
         liveRefreshInFlightKeyRef.current = '';
+        setRouteHydrationState('not_started');
       }
 
       if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
-        setLoading(false);
-        return;
+        const quickGoNeedsRouteRefresh =
+          quickGoRequest &&
+          routeHydrationState !== 'final_ready' &&
+          routeHydrationState !== 'final_unavailable' &&
+          shouldStartQuickGoRouteRefresh(data, recommendation.trafficEstimate);
+        if (!quickGoNeedsRouteRefresh) {
+          setLoading(false);
+          return;
+        }
       }
 
       if (
@@ -4512,6 +4531,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       }
 
       logRecommendationsFetch('start', requestKey);
+      const routeRequestId = ++routeRequestSeq.current;
+      quickGoRouteRequestIdRef.current = routeRequestId;
+      if (quickGoRequest) {
+        logQuickGoClientRoute('request_start', { routeRequestId, requestKey });
+        setQuickGoRouteFetchInFlight(true);
+        setClientRouteRefreshPending(true);
+        setRouteHydrationState('resolving');
+      }
 
       fetch('/api/recommendations', {
         method: 'POST',
@@ -4543,6 +4570,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               hasNewerRequest:
                 recommendationsRequestRef.current?.controller !== controller &&
                 recommendationsRequestRef.current?.inFlight === true,
+            });
+            return;
+          }
+
+          if (
+            isQuickGoMode(searchParams) &&
+            routeRequestId !== quickGoRouteRequestIdRef.current
+          ) {
+            logQuickGoClientRoute('ignore_stale', {
+              routeRequestId,
+              activeRouteRequestId: quickGoRouteRequestIdRef.current,
+              requestKey,
             });
             return;
           }
@@ -4580,6 +4619,36 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             },
           );
           setRankedOptions(ranked);
+          if (quickGoRequest) {
+            const serverState = rec.trafficEstimate;
+            const nextRouteHydrationState = quickGoRouteHydrationStateForFinalResult({
+              isQuickGo: true,
+              tripData: data,
+              trafficEstimate: serverState,
+            });
+            setRouteHydrationState(nextRouteHydrationState);
+
+            if (nextRouteHydrationState === 'resolving') {
+              logQuickGoClientRoute('render', {
+                routeRequestId,
+                requestKey,
+                phase: 'pending_after_response',
+              });
+            } else if (nextRouteHydrationState === 'final_unavailable') {
+              logQuickGoClientRoute('final_unavailable', {
+                routeRequestId,
+                requestKey,
+                reason: serverState?.routeUnavailableReason ?? null,
+              });
+            } else {
+              logQuickGoClientRoute('success', {
+                routeRequestId,
+                requestKey,
+                duration: serverState?.duration ?? null,
+                source: serverState?.routeSource ?? serverState?.sourceName ?? null,
+              });
+            }
+          }
           logRecommendationsFetch('success', requestKey, {
             parking: rec.parking?.length ?? 0,
             rideshare: rec.rideshare?.length ?? 0,
@@ -4640,6 +4709,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             setLoading(false);
             setIsRecalculating(false);
           }
+          if (quickGoRequest) {
+            if (
+              routeRequestId === quickGoRouteRequestIdRef.current &&
+              (isCurrentRequest || !hasNewerRequest)
+            ) {
+              setQuickGoRouteFetchInFlight(false);
+              setClientRouteRefreshPending(false);
+            } else if (routeRequestId !== quickGoRouteRequestIdRef.current) {
+              logQuickGoClientRoute('ignore_stale', {
+                routeRequestId,
+                activeRouteRequestId: quickGoRouteRequestIdRef.current,
+                phase: 'finally',
+                requestKey,
+              });
+            }
+          }
         });
 
       return () => {
@@ -4659,12 +4744,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             controller,
             inFlight: false,
           };
-          setLoading(false);
         }
       };
     } else {
       recommendationsRequestRef.current?.controller.abort();
       recommendationsLoadedKeyRef.current = '';
+      setRouteHydrationState('not_started');
       setInvalidTripMessage(
         'This trip is missing required details. Start a new trip to see live results.'
       );
@@ -5354,6 +5439,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const quickGoTripDataFromParams = parseTripDataFromSearchParams(searchParams);
   const quickGoActive = isQuickGoMode(searchParams);
+  const quickGoRouteData = quickGoTripDataFromParams ?? tripData;
+  const quickGoRouteRequestKeyForRender = quickGoRouteData
+    ? JSON.stringify(quickGoRouteData)
+    : '';
+  const effectiveRouteHydrationState =
+    quickGoActive &&
+    quickGoRouteRequestKeyForRender &&
+    recommendationsLoadedKeyRef.current !== quickGoRouteRequestKeyForRender
+      ? 'not_started'
+      : routeHydrationState;
+  const quickGoNeedsInitialRouteRefresh =
+    quickGoActive &&
+    effectiveRouteHydrationState !== 'final_ready' &&
+    effectiveRouteHydrationState !== 'final_unavailable' &&
+    shouldStartQuickGoRouteRefresh(quickGoRouteData, recommendation?.trafficEstimate);
+  const quickGoRoutePending =
+    quickGoActive &&
+    (loading ||
+      isRecalculating ||
+      quickGoRouteFetchInFlight ||
+      clientRouteRefreshPending ||
+      quickGoNeedsInitialRouteRefresh);
 
   if (loading && quickGoActive && quickGoTripDataFromParams) {
     const placeholderRecommendation: Recommendation =
@@ -5378,9 +5485,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         recommendation={placeholderRecommendation}
         rankedOptions={rankedOptions}
         searchParams={searchParams}
-        routeLoading
+        routeLoading={quickGoRoutePending}
         routeRefreshing={isRecalculating && priorQuickGoDriveMinutesRef.current != null}
         priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
+        clientRouteRefreshPending={clientRouteRefreshPending || quickGoNeedsInitialRouteRefresh}
+        routeHydrationState={effectiveRouteHydrationState}
       />
     );
   }
@@ -5425,8 +5534,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         recommendation={recommendation}
         rankedOptions={sortedOptions}
         searchParams={searchParams}
+        routeLoading={quickGoRoutePending}
         routeRefreshing={isRecalculating}
         priorDriveMinutes={priorQuickGoDriveMinutesRef.current}
+        clientRouteRefreshPending={clientRouteRefreshPending || quickGoNeedsInitialRouteRefresh}
+        routeHydrationState={effectiveRouteHydrationState}
       />
     );
   }

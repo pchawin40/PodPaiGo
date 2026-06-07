@@ -594,9 +594,11 @@ export type TripRouteStatus =
   | 'idle'
   | 'resolving_coordinates'
   | 'google_loading'
+  | 'google_failed_trying_mapbox'
   | 'mapbox_loading'
   | 'fallback_loading'
   | 'ready'
+  | 'provisional_unavailable'
   | 'unavailable';
 
 export type TripRouteSource =

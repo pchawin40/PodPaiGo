@@ -864,13 +864,12 @@ export class LiveTrafficProvider implements TrafficProvider {
   }
 
   /**
-   * Backup chain when Google Routes is unavailable: Mapbox Directions -> straight-line
-   * coordinate fallback -> unavailable. Mapbox is attempted only for the main route
-   * (never per parking candidate). Successful Mapbox/route results are cached as
-   * serveable; coordinate/unavailable fallbacks are cached but not serveable, so a
-   * later request retries live.
+   * Final Quick Go backup chain after Google Routes is unavailable: Mapbox
+   * Directions -> straight-line coordinate fallback -> unavailable. This returns
+   * one final estimate only; Google failure is never surfaced to the UI as a
+   * completed unavailable route while backup providers can still run.
    */
-  private async resolveBackupRouteEstimate(args: {
+  private async resolveQuickGoRouteFinal(args: {
     routeKey: string;
     cacheKey: string;
     originLatLng?: RouteLatLng | null;
@@ -878,11 +877,32 @@ export class LiveTrafficProvider implements TrafficProvider {
     unavailableReason: string;
     routeContext?: RouteRequestContext;
     onRouteStatus?: (status: QuickGoRouteStatus) => void;
+    requestKey?: string;
+    chainStartedAt?: number;
   }): Promise<TrafficEstimate> {
     const allowMapbox = true;
+    const chainStartedAt = args.chainStartedAt ?? Date.now();
+
+    args.onRouteStatus?.('google_failed_trying_mapbox');
+    if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+      debugLog('quickgo_route_chain_google_failed', {
+        requestKey: args.requestKey,
+        route: args.routeKey,
+        originCoordsPresent: Boolean(resolveRouteLatLng(args.originLatLng)),
+        destinationCoordsPresent: Boolean(resolveRouteLatLng(args.destinationLatLng)),
+        elapsedMs: Date.now() - chainStartedAt,
+      });
+    }
 
     if (allowMapbox) {
       args.onRouteStatus?.('mapbox_loading');
+      if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+        debugLog('quickgo_route_chain_mapbox_start', {
+          requestKey: args.requestKey,
+          route: args.routeKey,
+          elapsedMs: Date.now() - chainStartedAt,
+        });
+      }
       const mapbox = await this.mapboxRouteEstimate({
         routeKey: args.routeKey,
         cacheKey: args.cacheKey,
@@ -891,6 +911,16 @@ export class LiveTrafficProvider implements TrafficProvider {
         routeContext: args.routeContext,
       });
       if (mapbox) {
+        if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+          debugLog('quickgo_route_chain_mapbox_success', {
+            requestKey: args.requestKey,
+            route: args.routeKey,
+            provider: 'mapbox',
+            status: 'ready',
+            duration: mapbox.duration,
+            elapsedMs: Date.now() - chainStartedAt,
+          });
+        }
         debugLog('route_timing_final', { source: 'mapbox', duration: mapbox.duration });
         return cacheRouteEstimate(args.cacheKey, mapbox);
       }
@@ -906,6 +936,13 @@ export class LiveTrafficProvider implements TrafficProvider {
     }
 
     args.onRouteStatus?.('fallback_loading');
+    if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+      debugLog('quickgo_route_chain_fallback_start', {
+        requestKey: args.requestKey,
+        route: args.routeKey,
+        elapsedMs: Date.now() - chainStartedAt,
+      });
+    }
     const coordinateFallback = coordinateFallbackTrafficEstimate(
       args.routeKey,
       args.originLatLng,
@@ -925,14 +962,32 @@ export class LiveTrafficProvider implements TrafficProvider {
         duration: coordinateFallback.duration,
       });
       debugLog('route_timing_final', { source: 'coordinate_fallback', duration: coordinateFallback.duration });
+      if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+        debugLog('quickgo_route_chain_final', {
+          requestKey: args.requestKey,
+          route: args.routeKey,
+          provider: 'coordinate_fallback',
+          status: 'ready',
+          duration: coordinateFallback.duration,
+          elapsedMs: Date.now() - chainStartedAt,
+        });
+      }
       return cacheRouteEstimate(args.cacheKey, coordinateFallback);
     }
 
     debugLog('route_timing_final', { source: 'unavailable' });
-    return cacheRouteEstimate(
-      args.cacheKey,
-      unavailableTrafficEstimate(args.routeKey, 'Google Routes API', args.unavailableReason),
-    );
+    const unavailable = unavailableTrafficEstimate(args.routeKey, 'Google Routes API', args.unavailableReason);
+    if (isDisplayedQuickGoMainRoute(args.routeContext)) {
+      debugLog('quickgo_route_chain_final', {
+        requestKey: args.requestKey,
+        route: args.routeKey,
+        provider: 'unavailable',
+        status: 'unavailable',
+        duration: unavailable.duration,
+        elapsedMs: Date.now() - chainStartedAt,
+      });
+    }
+    return cacheRouteEstimate(args.cacheKey, unavailable);
   }
 
   async getTrafficEstimate(
@@ -1024,6 +1079,16 @@ export class LiveTrafficProvider implements TrafficProvider {
       }
       if (isDisplayedQuickGoMainRoute(routeContext)) {
         logRouteEvent('quickgo_main_route_final', { stage }, enriched, originLatLng, destinationRouteLatLng);
+        debugLog('quickgo_route_chain_final', {
+          requestKey,
+          route: routeKey,
+          origin: originKey,
+          destination: destinationKey,
+          provider: enriched.routeSource ?? enriched.sourceName,
+          status: enriched.routeStatus,
+          duration: enriched.duration,
+          elapsedMs: Date.now() - routeStartedAt,
+        });
       }
       return enriched;
     };
@@ -1033,7 +1098,20 @@ export class LiveTrafficProvider implements TrafficProvider {
         ? 'google_loading'
         : 'resolving_coordinates',
     );
+    const backupChainContext = {
+      requestKey,
+      chainStartedAt: routeStartedAt,
+    };
+
     if (isDisplayedQuickGoMainRoute(routeContext)) {
+      debugLog('quickgo_route_chain_start', {
+        requestKey,
+        route: routeKey,
+        origin: originKey,
+        destination: destinationKey,
+        originCoordsPresent: Boolean(providedOriginLatLng),
+        destinationCoordsPresent: Boolean(providedDestinationLatLng),
+      });
       logRouteEvent('quickgo_main_route_start', {
         requestKey,
         routeLabel,
@@ -1057,6 +1135,15 @@ export class LiveTrafficProvider implements TrafficProvider {
       hasOriginCoords: Boolean(providedOriginLatLng),
       hasDestinationCoords: Boolean(providedDestinationLatLng),
     });
+    if (isDisplayedQuickGoMainRoute(routeContext)) {
+      debugLog('quickgo_route_chain_google_start', {
+        requestKey,
+        route: routeKey,
+        origin: originKey,
+        destination: destinationKey,
+        elapsedMs: Date.now() - routeStartedAt,
+      });
+    }
 
     try {
       if (!providedOriginLatLng && isClearlyNonDrivableRoute(origin, destination)) {
@@ -1097,7 +1184,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           blockedByKillSwitch: true,
         });
         return finishRouteEstimate(
-          await this.resolveBackupRouteEstimate({
+          await this.resolveQuickGoRouteFinal({
             routeKey,
             cacheKey,
             originLatLng: providedOriginLatLng,
@@ -1105,6 +1192,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             unavailableReason: 'Live routing disabled; using cached or estimated timing only.',
             routeContext,
             onRouteStatus: setRouteStatus,
+            ...backupChainContext,
           }),
           'backup_after_kill_switch',
         );
@@ -1200,7 +1288,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             return cacheRouteEstimate(cacheKey, snapshotToEstimate(staleSnapshot, routeKey));
           }
 
-          return await this.resolveBackupRouteEstimate({
+          return await this.resolveQuickGoRouteFinal({
             routeKey,
             cacheKey,
             originLatLng: providedOriginLatLng,
@@ -1208,6 +1296,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             unavailableReason: 'Route budget exceeded; open map directions to confirm drive time.',
             routeContext,
             onRouteStatus: setRouteStatus,
+            ...backupChainContext,
           });
         }
 
@@ -1389,7 +1478,7 @@ export class LiveTrafficProvider implements TrafficProvider {
             originLatLng,
             destLatLng,
           );
-          return await this.resolveBackupRouteEstimate({
+          return await this.resolveQuickGoRouteFinal({
             routeKey,
             cacheKey,
             originLatLng,
@@ -1398,6 +1487,7 @@ export class LiveTrafficProvider implements TrafficProvider {
               'Google Routes could not calculate a driving route for this origin and destination.',
             routeContext,
             onRouteStatus: setRouteStatus,
+            ...backupChainContext,
           });
         }
 
@@ -1544,7 +1634,7 @@ export class LiveTrafficProvider implements TrafficProvider {
       });
 
       return finishRouteEstimate(
-        await this.resolveBackupRouteEstimate({
+        await this.resolveQuickGoRouteFinal({
           routeKey,
           cacheKey,
           originLatLng: resolvedOriginLatLngForFallback,
@@ -1552,6 +1642,7 @@ export class LiveTrafficProvider implements TrafficProvider {
           unavailableReason: routeUnavailableReasonForContext(routeContext),
           routeContext,
           onRouteStatus: setRouteStatus,
+          ...backupChainContext,
         }),
         'backup_after_google_failure',
       );

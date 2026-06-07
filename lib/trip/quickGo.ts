@@ -7,6 +7,7 @@ import {
 } from '../parking/destinationParkingClassifier';
 import type { RankedRecommendation } from '../domain';
 import type { DestinationKind, TrafficEstimate, TransportAvailability, TripData } from '../types';
+import { debugLog } from '../utils/debug';
 import { buildResultsPathFromSearchParams } from './searchParams';
 import { deriveParkingWindowFromArrival } from './parkingWindow';
 
@@ -648,8 +649,24 @@ export type QuickGoRouteStatus =
   | 'idle'
   | 'resolving_coordinates'
   | 'google_loading'
+  | 'google_failed_trying_mapbox'
   | 'mapbox_loading'
   | 'fallback_loading'
+  | 'ready'
+  | 'provisional_unavailable'
+  | 'unavailable';
+
+export type QuickGoRouteFinalStatus = 'pending' | 'ready' | 'unavailable';
+
+export type QuickGoRouteHydrationState =
+  | 'not_started'
+  | 'resolving'
+  | 'final_ready'
+  | 'final_unavailable';
+
+export type QuickGoDisplayRouteState =
+  | 'calculating'
+  | 'refreshing'
   | 'ready'
   | 'unavailable';
 
@@ -663,11 +680,13 @@ export type QuickGoRouteSource =
 export type QuickGoDriveTimeInput = {
   duration?: number | null;
   routeUnavailable?: boolean;
+  routeUnavailableReason?: string;
   trustStatus?: string;
   distanceMeters?: number;
   sourceName?: string | null;
   routeStatus?: QuickGoRouteStatus;
   routeSource?: QuickGoRouteSource;
+  assumptions?: string[];
 } | null | undefined;
 
 export type QuickGoDriveTime = {
@@ -686,9 +705,16 @@ export type QuickGoDriveTime = {
 const QUICK_GO_ROUTE_LOADING_STATUSES = new Set<QuickGoRouteStatus>([
   'resolving_coordinates',
   'google_loading',
+  'google_failed_trying_mapbox',
   'mapbox_loading',
   'fallback_loading',
 ]);
+
+export type QuickGoRouteState = {
+  status: QuickGoRouteStatus;
+  source: QuickGoRouteSource | null;
+  failureReasons: string[];
+};
 
 export function isQuickGoRouteLoading(status: QuickGoRouteStatus): boolean {
   return QUICK_GO_ROUTE_LOADING_STATUSES.has(status);
@@ -732,14 +758,424 @@ export function quickGoRouteLoadingBody(status: QuickGoRouteStatus): string {
   switch (status) {
     case 'resolving_coordinates':
       return 'Finding your start and destination…';
+    case 'google_failed_trying_mapbox':
     case 'mapbox_loading':
-      return 'Trying backup routing source…';
+      return 'Trying backup route timing…';
     case 'fallback_loading':
       return 'Estimating from coordinates…';
     case 'google_loading':
     default:
       return 'Checking live route timing…';
   }
+}
+
+export function shouldSuppressStaleRouteUnavailable(input: {
+  traffic?: QuickGoDriveTimeInput;
+  routeLoading?: boolean;
+  routeRefreshing?: boolean;
+  clientRouteRefreshPending?: boolean;
+}): boolean {
+  if (
+    input.routeLoading ||
+    input.routeRefreshing ||
+    input.clientRouteRefreshPending
+  ) {
+    return true;
+  }
+
+  const status = input.traffic?.routeStatus;
+  if (status === 'provisional_unavailable') {
+    return true;
+  }
+  return Boolean(status && isQuickGoRouteLoading(status));
+}
+
+export function logQuickGoClientRoute(
+  event: 'render' | 'request_start' | 'ignore_stale' | 'success' | 'final_unavailable',
+  payload: Record<string, unknown> = {},
+): void {
+  const eventName =
+    event === 'render' ? 'quickgo_client_route_render' : `quickgo_client_route_${event}`;
+  debugLog(eventName, payload);
+}
+
+export function logQuickGoDisplayStateDecision(
+  payload: Record<string, unknown> = {},
+): void {
+  debugLog('quickgo_display_state_decision', payload);
+}
+
+type QuickGoRoutabilityTripData = Partial<Pick<
+  TripData,
+  | 'type'
+  | 'origin'
+  | 'originLat'
+  | 'originLng'
+  | 'destination'
+  | 'destinationName'
+  | 'destinationLat'
+  | 'destinationLng'
+  | 'destinationKind'
+>> & {
+  airportCode?: string | null;
+};
+
+export type QuickGoRouteRoutability = {
+  routable: boolean;
+  localQuickGo: boolean;
+  hasOrigin: boolean;
+  hasDestination: boolean;
+  hasOriginCoordinates: boolean;
+  hasDestinationCoordinates: boolean;
+  reason: string;
+};
+
+function hasFiniteCoordinatePair(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === 'number' &&
+    Number.isFinite(lat) &&
+    typeof lng === 'number' &&
+    Number.isFinite(lng)
+  );
+}
+
+export function quickGoRouteRoutability(input: {
+  isQuickGo: boolean;
+  tripData: QuickGoRoutabilityTripData | null | undefined;
+}): QuickGoRouteRoutability {
+  const tripData = input.tripData;
+  const hasOriginCoordinates = hasFiniteCoordinatePair(
+    tripData?.originLat,
+    tripData?.originLng,
+  );
+  const hasDestinationCoordinates = hasFiniteCoordinatePair(
+    tripData?.destinationLat,
+    tripData?.destinationLng,
+  );
+  const hasOrigin = Boolean(String(tripData?.origin || '').trim()) || hasOriginCoordinates;
+  const destinationText = String(
+    tripData?.destinationName || tripData?.destination || '',
+  ).trim();
+  const hasDestination = Boolean(destinationText);
+  const isAirportTrip =
+    tripData?.destinationKind === 'airport' ||
+    String(tripData?.type || '').includes('airport') ||
+    Boolean(tripData?.airportCode);
+  const localQuickGo = input.isQuickGo && !isAirportTrip;
+
+  if (!input.isQuickGo) {
+    return {
+      routable: false,
+      localQuickGo,
+      hasOrigin,
+      hasDestination,
+      hasOriginCoordinates,
+      hasDestinationCoordinates,
+      reason: 'not_quick_go',
+    };
+  }
+
+  if (!localQuickGo) {
+    return {
+      routable: false,
+      localQuickGo,
+      hasOrigin,
+      hasDestination,
+      hasOriginCoordinates,
+      hasDestinationCoordinates,
+      reason: 'not_local_quick_go',
+    };
+  }
+
+  if (!hasDestination) {
+    return {
+      routable: false,
+      localQuickGo,
+      hasOrigin,
+      hasDestination,
+      hasOriginCoordinates,
+      hasDestinationCoordinates,
+      reason: 'missing_destination',
+    };
+  }
+
+  if (!hasOrigin) {
+    return {
+      routable: false,
+      localQuickGo,
+      hasOrigin,
+      hasDestination,
+      hasOriginCoordinates,
+      hasDestinationCoordinates,
+      reason: 'missing_origin',
+    };
+  }
+
+  return {
+    routable: true,
+    localQuickGo,
+    hasOrigin,
+    hasDestination,
+    hasOriginCoordinates,
+    hasDestinationCoordinates,
+    reason: hasOriginCoordinates && hasDestinationCoordinates
+      ? 'routable_with_coordinates'
+      : 'routable_with_text',
+  };
+}
+
+export function isQuickGoTripRoutable(
+  tripData: QuickGoRoutabilityTripData | null | undefined,
+): boolean {
+  return quickGoRouteRoutability({ isQuickGo: true, tripData }).routable;
+}
+
+export function isProvisionalQuickGoRouteUnavailable(
+  traffic?: QuickGoDriveTimeInput | null,
+): boolean {
+  if (!traffic) return false;
+  if (traffic.routeStatus === 'provisional_unavailable') return true;
+  return Boolean(traffic.routeStatus && isQuickGoRouteLoading(traffic.routeStatus));
+}
+
+export function hasReliableQuickGoRoute(traffic?: QuickGoDriveTimeInput | null): boolean {
+  if (!traffic) return false;
+  if (isProvisionalQuickGoRouteUnavailable(traffic)) return false;
+  if (traffic.routeStatus && isQuickGoRouteLoading(traffic.routeStatus)) return false;
+
+  const resolved = resolveQuickGoDriveMinutes(traffic, {
+    suppressStaleUnavailable: true,
+  });
+  if (resolved.minutes != null && !resolved.unavailable) return true;
+
+  return false;
+}
+
+export function quickGoTrafficNeedsRouteResolution(
+  traffic?: QuickGoDriveTimeInput | null,
+): boolean {
+  if (!traffic) return true;
+  if (isProvisionalQuickGoRouteUnavailable(traffic)) return true;
+  if (traffic.routeStatus && isQuickGoRouteLoading(traffic.routeStatus)) return true;
+  if (
+    traffic.routeStatus === 'unavailable' ||
+    traffic.routeSource === 'unavailable' ||
+    traffic.routeUnavailable === true
+  ) {
+    return true;
+  }
+
+  const resolved = resolveQuickGoDriveMinutes(traffic, {
+    suppressStaleUnavailable: true,
+  });
+  return resolved.minutes == null || resolved.unavailable;
+}
+
+export function shouldForceInitialQuickGoRoutePending(input: {
+  isQuickGo: boolean;
+  tripData: QuickGoRoutabilityTripData | null | undefined;
+  trafficEstimate?: QuickGoDriveTimeInput | null;
+  routeHydrationState: QuickGoRouteHydrationState;
+  hasReliableRoute: boolean;
+}): boolean {
+  const routability = quickGoRouteRoutability({
+    isQuickGo: input.isQuickGo,
+    tripData: input.tripData,
+  });
+
+  if (!routability.routable) return false;
+  if (input.hasReliableRoute) return false;
+  if (
+    input.routeHydrationState === 'final_ready' ||
+    input.routeHydrationState === 'final_unavailable'
+  ) {
+    return false;
+  }
+
+  return quickGoTrafficNeedsRouteResolution(input.trafficEstimate);
+}
+
+export function deriveQuickGoDisplayRouteState(input: {
+  isQuickGo: boolean;
+  tripData: QuickGoRoutabilityTripData | null | undefined;
+  trafficEstimate?: QuickGoDriveTimeInput | null;
+  routeHydrationState: QuickGoRouteHydrationState;
+  routeLoading?: boolean;
+  routeRefreshing?: boolean;
+  clientRouteRefreshPending?: boolean;
+  hasPriorRoute?: boolean;
+  hasReliableRoute?: boolean;
+}): {
+  displayRouteState: QuickGoDisplayRouteState;
+  shouldForceInitialPending: boolean;
+  hasReliableRoute: boolean;
+  serverRouteUnavailable: boolean;
+  routable: boolean;
+  reason: string;
+} {
+  const routability = quickGoRouteRoutability({
+    isQuickGo: input.isQuickGo,
+    tripData: input.tripData,
+  });
+  const hasReliableRoute =
+    input.hasReliableRoute ?? hasReliableQuickGoRoute(input.trafficEstimate);
+  const serverState = classifyQuickGoServerRouteState(input.trafficEstimate);
+  const shouldForceInitialPending = shouldForceInitialQuickGoRoutePending({
+    isQuickGo: input.isQuickGo,
+    tripData: input.tripData,
+    trafficEstimate: input.trafficEstimate,
+    routeHydrationState: input.routeHydrationState,
+    hasReliableRoute,
+  });
+  const refreshing = Boolean(input.routeRefreshing && input.hasPriorRoute);
+  const loading = Boolean(
+    input.routeLoading ||
+    input.routeRefreshing ||
+    input.clientRouteRefreshPending,
+  );
+
+  if (input.routeHydrationState === 'not_started' && shouldForceInitialPending) {
+    return {
+      displayRouteState: refreshing ? 'refreshing' : 'calculating',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: refreshing
+        ? 'initial_routable_quickgo_refreshing'
+        : 'initial_routable_quickgo_pending',
+    };
+  }
+
+  if (input.routeHydrationState === 'resolving') {
+    return {
+      displayRouteState: refreshing ? 'refreshing' : 'calculating',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: refreshing ? 'route_refresh_resolving' : 'route_resolving',
+    };
+  }
+
+  if (input.routeHydrationState === 'final_ready') {
+    return {
+      displayRouteState: 'ready',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: 'client_route_final_ready',
+    };
+  }
+
+  if (input.routeHydrationState === 'final_unavailable') {
+    return {
+      displayRouteState: 'unavailable',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: 'client_route_final_unavailable',
+    };
+  }
+
+  if (hasReliableRoute) {
+    return {
+      displayRouteState: loading ? (refreshing ? 'refreshing' : 'calculating') : 'ready',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: loading ? 'revalidating_reliable_route' : 'server_reliable_route',
+    };
+  }
+
+  if (loading || quickGoTrafficNeedsRouteResolution(input.trafficEstimate)) {
+    return {
+      displayRouteState: routability.routable ? 'calculating' : 'unavailable',
+      shouldForceInitialPending,
+      hasReliableRoute,
+      serverRouteUnavailable: serverState.serverRouteUnavailable,
+      routable: routability.routable,
+      reason: routability.routable ? 'routable_route_pending' : routability.reason,
+    };
+  }
+
+  return {
+    displayRouteState: routability.routable ? 'calculating' : 'unavailable',
+    shouldForceInitialPending,
+    hasReliableRoute,
+    serverRouteUnavailable: serverState.serverRouteUnavailable,
+    routable: routability.routable,
+    reason: routability.routable ? 'routable_without_final_route' : routability.reason,
+  };
+}
+
+export function quickGoRouteHydrationStateForFinalResult(input: {
+  isQuickGo: boolean;
+  tripData: QuickGoRoutabilityTripData | null | undefined;
+  trafficEstimate?: QuickGoDriveTimeInput | null;
+}): QuickGoRouteHydrationState {
+  const routability = quickGoRouteRoutability({
+    isQuickGo: input.isQuickGo,
+    tripData: input.tripData,
+  });
+
+  if (!input.isQuickGo) return 'not_started';
+  if (!routability.routable) return 'final_unavailable';
+  if (hasReliableQuickGoRoute(input.trafficEstimate)) return 'final_ready';
+
+  const serverState = classifyQuickGoServerRouteState(input.trafficEstimate);
+  if (serverState.latestRouteFinalStatus === 'unavailable') {
+    return 'final_unavailable';
+  }
+
+  return 'resolving';
+}
+
+export function classifyQuickGoServerRouteState(traffic?: QuickGoDriveTimeInput | null): {
+  serverRouteUnavailable: boolean;
+  latestRouteFinalStatus: QuickGoRouteFinalStatus;
+} {
+  if (!traffic) {
+    return { serverRouteUnavailable: false, latestRouteFinalStatus: 'pending' };
+  }
+
+  if (traffic.routeStatus && isQuickGoRouteLoading(traffic.routeStatus)) {
+    return { serverRouteUnavailable: false, latestRouteFinalStatus: 'pending' };
+  }
+
+  if (isProvisionalQuickGoRouteUnavailable(traffic)) {
+    return { serverRouteUnavailable: true, latestRouteFinalStatus: 'pending' };
+  }
+
+  const resolved = resolveQuickGoDriveMinutes(traffic);
+  if (resolved.minutes != null && !resolved.unavailable) {
+    return { serverRouteUnavailable: false, latestRouteFinalStatus: 'ready' };
+  }
+
+  if (resolved.unavailable && !isProvisionalQuickGoRouteUnavailable(traffic)) {
+    return { serverRouteUnavailable: true, latestRouteFinalStatus: 'unavailable' };
+  }
+
+  if (
+    traffic.routeStatus === 'unavailable' ||
+    traffic.routeSource === 'unavailable' ||
+    traffic.routeUnavailable === true
+  ) {
+    return { serverRouteUnavailable: true, latestRouteFinalStatus: 'unavailable' };
+  }
+
+  return { serverRouteUnavailable: false, latestRouteFinalStatus: 'pending' };
+}
+
+export function shouldStartQuickGoRouteRefresh(
+  tripData: Pick<TripData, 'origin' | 'destination' | 'destinationName'> | null | undefined,
+  trafficEstimate?: QuickGoDriveTimeInput | null,
+): boolean {
+  if (!isQuickGoTripRoutable(tripData)) return false;
+  return !hasReliableQuickGoRoute(trafficEstimate);
 }
 
 export function resolveQuickGoRouteStatus(input: {
@@ -761,12 +1197,30 @@ export function resolveQuickGoRouteStatus(input: {
   }
 
   if (input.routeLoading || input.routeRefreshing) {
+    if (input.traffic?.routeStatus === 'mapbox_loading') {
+      return 'mapbox_loading';
+    }
+    if (input.traffic?.routeStatus === 'google_failed_trying_mapbox') {
+      return 'google_failed_trying_mapbox';
+    }
+    if (input.traffic?.routeStatus === 'fallback_loading') {
+      return 'fallback_loading';
+    }
+    if (input.traffic?.routeStatus === 'google_loading') {
+      return 'google_loading';
+    }
     return 'google_loading';
   }
 
   if (input.traffic?.routeStatus) {
-    if (input.traffic.routeStatus === 'ready' || input.traffic.routeStatus === 'unavailable') {
-      return input.traffic.routeStatus;
+    if (
+      input.traffic.routeStatus === 'ready' ||
+      input.traffic.routeStatus === 'unavailable' ||
+      input.traffic.routeStatus === 'provisional_unavailable'
+    ) {
+      return input.traffic.routeStatus === 'provisional_unavailable'
+        ? 'google_loading'
+        : input.traffic.routeStatus;
     }
   }
 
@@ -787,13 +1241,16 @@ export function resolveQuickGoRouteStatus(input: {
   return 'idle';
 }
 
-function resolveQuickGoDriveMinutes(traffic: QuickGoDriveTimeInput): {
+function resolveQuickGoDriveMinutes(
+  traffic: QuickGoDriveTimeInput,
+  options?: { suppressStaleUnavailable?: boolean },
+): {
   minutes: number | null;
   unavailable: boolean;
 } {
   if (!traffic) return { minutes: null, unavailable: true };
 
-  if (traffic.routeUnavailable === true) {
+  if (traffic.routeUnavailable === true && !options?.suppressStaleUnavailable) {
     return { minutes: null, unavailable: true };
   }
 
@@ -821,6 +1278,8 @@ export type ResolveQuickGoDriveTimeInput = {
   routeRefreshing?: boolean;
   resolvingCoordinates?: boolean;
   priorMinutes?: number | null;
+  clientRouteRefreshPending?: boolean;
+  routeHydrationState?: QuickGoRouteHydrationState;
 };
 
 /**
@@ -841,6 +1300,7 @@ export function resolveQuickGoDriveTime(
       'routeRefreshing' in trafficOrInput ||
       'resolvingCoordinates' in trafficOrInput ||
       'priorMinutes' in trafficOrInput ||
+      'routeHydrationState' in trafficOrInput ||
       'traffic' in trafficOrInput)
       ? (trafficOrInput as ResolveQuickGoDriveTimeInput)
       : { traffic: trafficOrInput as QuickGoDriveTimeInput };
@@ -851,16 +1311,58 @@ export function resolveQuickGoDriveTime(
       ? input.priorMinutes
       : null;
   const hasPriorRoute = priorMinutes != null;
-  const routeStatus = resolveQuickGoRouteStatus({
+  const serverState = classifyQuickGoServerRouteState(traffic);
+  const clientRouteRefreshPending = Boolean(input.clientRouteRefreshPending);
+  const suppressStaleUnavailable = shouldSuppressStaleRouteUnavailable({
     traffic,
     routeLoading: input.routeLoading,
+    routeRefreshing: input.routeRefreshing,
+    clientRouteRefreshPending,
+  }) || input.routeHydrationState === 'final_ready';
+  const pendingRouteResolution =
+    clientRouteRefreshPending ||
+    Boolean(input.routeLoading) ||
+    Boolean(input.routeRefreshing) ||
+    isProvisionalQuickGoRouteUnavailable(traffic);
+  const routeStatus = resolveQuickGoRouteStatus({
+    traffic,
+    routeLoading:
+      input.routeLoading ||
+      clientRouteRefreshPending ||
+      isProvisionalQuickGoRouteUnavailable(traffic),
     routeRefreshing: input.routeRefreshing,
     resolvingCoordinates: input.resolvingCoordinates,
     hasPriorRoute,
   });
-  const loading = isQuickGoRouteLoading(routeStatus);
+  const loading = pendingRouteResolution || isQuickGoRouteLoading(routeStatus);
   const refreshing = Boolean(input.routeRefreshing && hasPriorRoute);
-  const resolved = resolveQuickGoDriveMinutes(traffic);
+  const resolved = resolveQuickGoDriveMinutes(traffic, { suppressStaleUnavailable });
+
+  if (
+    input.routeHydrationState === 'final_ready' &&
+    resolved.minutes != null &&
+    !resolved.unavailable
+  ) {
+    return {
+      minutes: resolved.minutes,
+      unavailable: false,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'ready',
+      routeSource: deriveQuickGoRouteSource(traffic),
+    };
+  }
+
+  if (input.routeHydrationState === 'final_unavailable') {
+    return {
+      minutes: null,
+      unavailable: true,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'unavailable',
+      routeSource: deriveQuickGoRouteSource(traffic),
+    };
+  }
 
   if (loading) {
     return {
@@ -873,7 +1375,7 @@ export function resolveQuickGoDriveTime(
     };
   }
 
-  if (resolved.minutes != null && !resolved.unavailable) {
+  if (serverState.latestRouteFinalStatus === 'ready' && resolved.minutes != null && !resolved.unavailable) {
     return {
       minutes: resolved.minutes,
       unavailable: false,
@@ -884,24 +1386,78 @@ export function resolveQuickGoDriveTime(
     };
   }
 
+  if (serverState.latestRouteFinalStatus === 'unavailable') {
+    return {
+      minutes: null,
+      unavailable: true,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'unavailable',
+      routeSource: deriveQuickGoRouteSource(traffic),
+    };
+  }
+
+  if (!traffic) {
+    return {
+      minutes: null,
+      unavailable: true,
+      loading: false,
+      refreshing: false,
+      routeStatus: 'unavailable',
+      routeSource: null,
+    };
+  }
+
   return {
-    minutes: null,
-    unavailable: true,
-    loading: false,
-    refreshing: false,
-    routeStatus: 'unavailable',
+    minutes: refreshing ? priorMinutes : null,
+    unavailable: false,
+    loading: true,
+    refreshing,
+    routeStatus,
     routeSource: deriveQuickGoRouteSource(traffic),
   };
 }
 
+export function buildQuickGoRouteState(
+  traffic: QuickGoDriveTimeInput,
+  driveTime?: Pick<QuickGoDriveTime, 'routeStatus' | 'routeSource'>,
+): QuickGoRouteState {
+  const failureReasons: string[] = [];
+  if (traffic?.routeUnavailableReason) {
+    failureReasons.push(traffic.routeUnavailableReason);
+  }
+  if (traffic?.routeUnavailable && traffic.assumptions?.length) {
+    failureReasons.push(...traffic.assumptions);
+  }
+
+  return {
+    status: driveTime?.routeStatus ?? 'idle',
+    source: driveTime?.routeSource ?? deriveQuickGoRouteSource(traffic),
+    failureReasons,
+  };
+}
+
 export function attachTrafficRouteMetadata(estimate: TrafficEstimate): TrafficEstimate {
+  if (estimate.routeStatus && isQuickGoRouteLoading(estimate.routeStatus)) {
+    return {
+      ...estimate,
+      routeSource: deriveQuickGoRouteSource(estimate) ?? estimate.routeSource,
+      routeStatus: estimate.routeStatus,
+    };
+  }
+
   const resolved = resolveQuickGoDriveMinutes(estimate);
   const routeSource = deriveQuickGoRouteSource(estimate) ?? 'unavailable';
+  const routeStatus = isProvisionalQuickGoRouteUnavailable(estimate)
+    ? 'provisional_unavailable'
+    : resolved.unavailable
+      ? 'unavailable'
+      : 'ready';
 
   return {
     ...estimate,
     routeSource,
-    routeStatus: resolved.unavailable ? 'unavailable' : 'ready',
+    routeStatus,
   };
 }
 

@@ -7,6 +7,9 @@ import {
   mergeStoredTripSearchParams,
   quickGoParkingExpectationLabel,
   quickGoClassificationForTrip,
+  deriveQuickGoDisplayRouteState,
+  quickGoRouteHydrationStateForFinalResult,
+  quickGoRouteRoutability,
   resolveQuickGoBestWay,
   resolveQuickGoDriveTime,
   resolveQuickGoLocalParkingWalkBufferMinutes,
@@ -450,5 +453,69 @@ describe('quickGo', () => {
     expect(merged.get('origin')).toBe(savedOrigin.origin);
     expect(merged.get('originSource')).toBe('saved');
     expect(merged.get('sort')).toBe('cheapest');
+  });
+
+  test('routable local Quick Go can route with text destination before coords exist', () => {
+    const routability = quickGoRouteRoutability({
+      isQuickGo: true,
+      tripData: {
+        type: 'general-trip',
+        origin: manualOrigin.origin,
+        destination: 'Dairy Queen, Monroe, WA',
+        destinationName: 'Dairy Queen',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+      },
+    });
+
+    expect(routability.routable).toBe(true);
+    expect(routability.reason).toBe('routable_with_text');
+  });
+
+  test('hydration gap displays calculating for stale unavailable local Quick Go', () => {
+    const decision = deriveQuickGoDisplayRouteState({
+      isQuickGo: true,
+      tripData: {
+        type: 'general-trip',
+        origin: manualOrigin.origin,
+        destination: 'Fred Meyer, Monroe, WA',
+        destinationName: 'Fred Meyer',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+      },
+      trafficEstimate: {
+        duration: 0,
+        routeUnavailable: true,
+        routeStatus: 'unavailable',
+      },
+      routeHydrationState: 'not_started',
+    });
+
+    expect(decision.displayRouteState).toBe('calculating');
+    expect(decision.shouldForceInitialPending).toBe(true);
+  });
+
+  test('missing origin is unavailable only as an unroutable or final unavailable state', () => {
+    const trip = {
+      type: 'general-trip' as const,
+      origin: '',
+      destination: 'Dairy Queen, Monroe, WA',
+      destinationName: 'Dairy Queen',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+    };
+
+    expect(quickGoRouteRoutability({ isQuickGo: true, tripData: trip }).routable).toBe(false);
+    expect(
+      quickGoRouteHydrationStateForFinalResult({
+        isQuickGo: true,
+        tripData: trip,
+        trafficEstimate: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'unavailable',
+        },
+      }),
+    ).toBe('final_unavailable');
   });
 });

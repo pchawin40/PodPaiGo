@@ -252,6 +252,7 @@ describe('QuickGoResultsView', () => {
         }}
         rankedOptions={[]}
         searchParams={params}
+        routeHydrationState="final_unavailable"
       />,
     );
 
@@ -283,6 +284,7 @@ describe('QuickGoResultsView', () => {
         }}
         rankedOptions={[]}
         searchParams={params}
+        routeHydrationState="final_unavailable"
       />,
     );
 
@@ -514,6 +516,43 @@ describe('QuickGoResultsView', () => {
     expect(screen.queryByText('16 min')).not.toBeInTheDocument();
   });
 
+  test('overrides stale server unavailable while route refresh is pending', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeLoading
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('Calculating…')).toBeInTheDocument();
+  });
+
   test('shows calculating drive time while route is loading', () => {
     const params = buildQuickGoSearchParams({
       destinationText: 'Grocery store',
@@ -658,5 +697,339 @@ describe('QuickGoResultsView', () => {
     expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
     // Google Maps remains the user-facing directions link.
     expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+  });
+
+  test('suppresses initial stale unavailable via clientRouteRefreshPending', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        clientRouteRefreshPending
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('routable Quick Go with stale server unavailable starts as calculating before hydration', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Dairy Queen, Monroe, WA',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Dairy Queen, Monroe, WA',
+          destinationName: 'Dairy Queen',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeHydrationState="not_started"
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('routable Quick Go stays calculating while route hydration is resolving', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeHydrationState="resolving"
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('final ready hydration shows Mapbox result even after stale unavailable server state', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 4,
+            routeUnavailable: true,
+            routeStatus: 'ready',
+            routeSource: 'mapbox',
+            trustStatus: 'live',
+            sourceName: 'Mapbox Directions',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeHydrationState="final_ready"
+      />,
+    );
+
+    expect(screen.getByText('Estimated drive time: ~4 min')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('missing destination coords but geocodable destination remains calculating', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Dairy Queen, Monroe, WA',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Dairy Queen, Monroe, WA',
+          destinationName: 'Dairy Queen',
+          destinationLat: undefined,
+          destinationLng: undefined,
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeHydrationState="not_started"
+      />,
+    );
+
+    expect(screen.getByText('Calculating drive time…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('missing origin renders unavailable only as an unroutable final state', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Dairy Queen, Monroe, WA',
+      origin: {
+        origin: '',
+        originLabel: '',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          origin: '',
+          destination: 'Dairy Queen, Monroe, WA',
+          destinationName: 'Dairy Queen',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'unavailable',
+            trustStatus: 'fallback',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeHydrationState="final_unavailable"
+      />,
+    );
+
+    expect(screen.getByText('Drive time unavailable')).toBeInTheDocument();
+  });
+
+  test('shows mapbox loading body during google to mapbox transition', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 0,
+            routeUnavailable: true,
+            routeStatus: 'mapbox_loading',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeLoading
+      />,
+    );
+
+    expect(screen.getByText('Trying backup route timing…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+  });
+
+  test('rapid route changes do not flash unavailable between pending states', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+      origin: {
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLabel: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originSource: 'manual',
+      },
+    });
+
+    const staleUnavailable = trafficEstimate({
+      duration: 0,
+      routeUnavailable: true,
+      routeStatus: 'unavailable',
+      trustStatus: 'fallback',
+    });
+
+    const { rerender } = render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{ ...recommendation, trafficEstimate: staleUnavailable }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeLoading
+        clientRouteRefreshPending
+      />,
+    );
+
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+
+    rerender(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{ ...recommendation, trafficEstimate: staleUnavailable }}
+        rankedOptions={[]}
+        searchParams={params}
+        routeRefreshing
+        priorDriveMinutes={4}
+        clientRouteRefreshPending
+      />,
+    );
+
+    expect(screen.getByText('Refreshing…')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
+
+    rerender(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Fred Meyer, 18805 US-2, Monroe, WA 98272',
+          destinationName: 'Fred Meyer',
+        }}
+        recommendation={{
+          ...recommendation,
+          trafficEstimate: trafficEstimate({
+            duration: 4,
+            trustStatus: 'live',
+            sourceName: 'Mapbox Directions',
+            routeSource: 'mapbox',
+            routeStatus: 'ready',
+          }),
+        }}
+        rankedOptions={[]}
+        searchParams={params}
+      />,
+    );
+
+    expect(screen.getByText('Estimated drive time: ~4 min')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
   });
 });

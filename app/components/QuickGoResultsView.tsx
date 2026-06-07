@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   sortRankedRecommendations,
@@ -10,12 +11,18 @@ import {
 import {
   buildFullAirportPlannerPath,
   buildQuickGoResultsPath,
+  deriveQuickGoDisplayRouteState,
   formatQuickGoOriginDisplayLabel,
+  hasReliableQuickGoRoute,
   isQuickGoMode,
+  isQuickGoRouteLoading,
+  logQuickGoClientRoute,
+  logQuickGoDisplayStateDecision,
   quickGoClassificationForTrip,
   readQuickGoOriginFromSearchParams,
   resolveQuickGoBestWay,
   resolveQuickGoDriveTime,
+  type QuickGoRouteHydrationState,
 } from '../../lib/trip/quickGo';
 import type { Recommendation, TripData } from '../../lib/types';
 import QuickGoResultsCard from './QuickGoResultsCard';
@@ -30,6 +37,8 @@ type QuickGoResultsViewProps = {
   routeLoading?: boolean;
   routeRefreshing?: boolean;
   priorDriveMinutes?: number | null;
+  clientRouteRefreshPending?: boolean;
+  routeHydrationState?: QuickGoRouteHydrationState;
 };
 
 export default function QuickGoResultsView({
@@ -40,8 +49,11 @@ export default function QuickGoResultsView({
   routeLoading = false,
   routeRefreshing = false,
   priorDriveMinutes = null,
+  clientRouteRefreshPending = false,
+  routeHydrationState = 'not_started',
 }: QuickGoResultsViewProps) {
   const router = useRouter();
+  const isQuickGo = isQuickGoMode(searchParams);
   const detectedAirportCode = searchParams.get('detectedAirportCode');
   const showAirportPrompt =
     Boolean(detectedAirportCode) && searchParams.get('quickGoConfirmed') !== '1';
@@ -53,22 +65,129 @@ export default function QuickGoResultsView({
     detectedAirportCode,
   });
 
-  const resolvingCoordinates =
-    routeLoading &&
-    !(
-      typeof tripData.originLat === 'number' &&
-      typeof tripData.originLng === 'number' &&
-      typeof tripData.destinationLat === 'number' &&
-      typeof tripData.destinationLng === 'number'
-    );
-  const driveTime = resolveQuickGoDriveTime({
-    traffic: recommendation.trafficEstimate ?? null,
+  const trafficRouteStatus = recommendation.trafficEstimate?.routeStatus;
+  const hasReliableRoute = hasReliableQuickGoRoute(recommendation.trafficEstimate);
+  const hasPriorRoute =
+    typeof priorDriveMinutes === 'number' && Number.isFinite(priorDriveMinutes);
+  const displayDecision = deriveQuickGoDisplayRouteState({
+    isQuickGo,
+    tripData,
+    trafficEstimate: recommendation.trafficEstimate ?? null,
+    routeHydrationState,
     routeLoading,
     routeRefreshing,
+    clientRouteRefreshPending,
+    hasPriorRoute,
+    hasReliableRoute,
+  });
+  const unavailableInvariantOk =
+    displayDecision.displayRouteState !== 'unavailable' ||
+    routeHydrationState === 'final_unavailable' ||
+    !displayDecision.routable;
+  const displayRouteState =
+    displayDecision.displayRouteState === 'unavailable' && !unavailableInvariantOk
+      ? 'calculating'
+      : displayDecision.displayRouteState;
+  const effectiveRouteRefreshing = displayRouteState === 'refreshing';
+  const effectiveRouteLoading =
+    displayRouteState === 'calculating' || displayRouteState === 'refreshing';
+  const hasResolvedCoordinates =
+    typeof tripData.originLat === 'number' &&
+    typeof tripData.originLng === 'number' &&
+    typeof tripData.destinationLat === 'number' &&
+    typeof tripData.destinationLng === 'number';
+  const resolvingCoordinates =
+    effectiveRouteLoading &&
+    !hasResolvedCoordinates &&
+    !(trafficRouteStatus && isQuickGoRouteLoading(trafficRouteStatus));
+  const driveTime = resolveQuickGoDriveTime({
+    traffic: recommendation.trafficEstimate ?? null,
+    routeLoading: effectiveRouteLoading && !effectiveRouteRefreshing,
+    routeRefreshing: effectiveRouteRefreshing,
     resolvingCoordinates,
     priorMinutes: priorDriveMinutes,
+    clientRouteRefreshPending:
+      clientRouteRefreshPending ||
+      displayDecision.shouldForceInitialPending ||
+      routeHydrationState === 'resolving',
+    routeHydrationState,
   });
   const driveMinutes = driveTime.minutes;
+  const resultId =
+    searchParams.get('tripId') ||
+    `${tripData.origin || 'unknown-origin'}->${destination || 'unknown-destination'}`;
+
+  useEffect(() => {
+    logQuickGoDisplayStateDecision({
+      resultId,
+      isQuickGo,
+      routeHydrationState,
+      routeLoading: effectiveRouteLoading,
+      hasReliableRoute,
+      serverRouteUnavailable: displayDecision.serverRouteUnavailable,
+      shouldForceInitialPending: displayDecision.shouldForceInitialPending,
+      displayRouteState,
+      reason: unavailableInvariantOk ? displayDecision.reason : 'invariant_guard_forced_calculating',
+    });
+
+    if (displayRouteState === 'unavailable') {
+      logQuickGoDisplayStateDecision({
+        resultId,
+        isQuickGo,
+        routeHydrationState,
+        routeLoading: effectiveRouteLoading,
+        hasReliableRoute,
+        serverRouteUnavailable: displayDecision.serverRouteUnavailable,
+        shouldForceInitialPending: displayDecision.shouldForceInitialPending,
+        displayRouteState,
+        reason: displayDecision.reason,
+        invariantOk: unavailableInvariantOk,
+      });
+    }
+
+    if (!unavailableInvariantOk) {
+      logQuickGoDisplayStateDecision({
+        resultId,
+        isQuickGo,
+        routeHydrationState,
+        routeLoading: effectiveRouteLoading,
+        hasReliableRoute,
+        serverRouteUnavailable: displayDecision.serverRouteUnavailable,
+        shouldForceInitialPending: displayDecision.shouldForceInitialPending,
+        displayRouteState: 'calculating',
+        reason: 'unavailable_invariant_violation_suppressed',
+      });
+    }
+
+    logQuickGoClientRoute('render', {
+      routeLoading: effectiveRouteLoading,
+      routeRefreshing: effectiveRouteRefreshing,
+      clientRouteRefreshPending,
+      routeHydrationState,
+      displayRouteState,
+      loading: driveTime.loading,
+      unavailable: driveTime.unavailable,
+      routeStatus: driveTime.routeStatus,
+      minutes: driveTime.minutes,
+    });
+  }, [
+    resultId,
+    isQuickGo,
+    routeHydrationState,
+    effectiveRouteLoading,
+    effectiveRouteRefreshing,
+    clientRouteRefreshPending,
+    hasReliableRoute,
+    displayDecision.serverRouteUnavailable,
+    displayDecision.shouldForceInitialPending,
+    displayDecision.reason,
+    displayRouteState,
+    unavailableInvariantOk,
+    driveTime.loading,
+    driveTime.unavailable,
+    driveTime.routeStatus,
+    driveTime.minutes,
+  ]);
   const preference: RecommendationSortMode =
     searchParams.get('quickGoPreference') === 'cheapest'
       ? 'cheapest'
@@ -117,7 +236,7 @@ export default function QuickGoResultsView({
     );
   };
 
-  if (!isQuickGoMode(searchParams)) {
+  if (!isQuickGo) {
     return null;
   }
 

@@ -1,8 +1,16 @@
 import {
   deriveQuickGoRouteSource,
+  deriveQuickGoDisplayRouteState,
+  hasReliableQuickGoRoute,
   isQuickGoRouteLoading,
+  isProvisionalQuickGoRouteUnavailable,
+  quickGoRouteHydrationStateForFinalResult,
   resolveQuickGoDriveTime,
   resolveQuickGoRouteStatus,
+  shouldStartQuickGoRouteRefresh,
+  shouldForceInitialQuickGoRoutePending,
+  shouldSuppressStaleRouteUnavailable,
+  classifyQuickGoServerRouteState,
 } from '../quickGo';
 
 describe('resolveQuickGoDriveTime', () => {
@@ -108,6 +116,43 @@ describe('resolveQuickGoDriveTime', () => {
       }),
     ).toBe('mapbox_loading');
     expect(isQuickGoRouteLoading('mapbox_loading')).toBe(true);
+    expect(isQuickGoRouteLoading('google_failed_trying_mapbox')).toBe(true);
+    expect(
+      resolveQuickGoRouteStatus({
+        traffic: { routeStatus: 'google_failed_trying_mapbox' },
+        routeLoading: true,
+      }),
+    ).toBe('google_failed_trying_mapbox');
+  });
+
+  test('stale server unavailable is suppressed while client refresh is pending', () => {
+    expect(
+      shouldSuppressStaleRouteUnavailable({
+        traffic: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'unavailable',
+        },
+        routeLoading: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveQuickGoDriveTime({
+        traffic: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'unavailable',
+        },
+        routeLoading: true,
+      }),
+    ).toEqual({
+      minutes: null,
+      unavailable: false,
+      loading: true,
+      refreshing: false,
+      routeStatus: 'google_loading',
+      routeSource: 'unavailable',
+    });
   });
 
   test('mapbox success resolves to ready with mapbox source', () => {
@@ -198,5 +243,189 @@ describe('resolveQuickGoDriveTime', () => {
         sourceName: 'Cached route snapshot (SEA)',
       }),
     ).toBe('google_cached');
+  });
+
+  test('initial stale unavailable stays loading when client refresh is pending', () => {
+    expect(
+      resolveQuickGoDriveTime({
+        traffic: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'unavailable',
+        },
+        clientRouteRefreshPending: true,
+      }),
+    ).toEqual({
+      minutes: null,
+      unavailable: false,
+      loading: true,
+      refreshing: false,
+      routeStatus: 'google_loading',
+      routeSource: 'unavailable',
+    });
+  });
+
+  test('provisional unavailable stays pending until final status', () => {
+    expect(
+      classifyQuickGoServerRouteState({
+        duration: 0,
+        routeUnavailable: true,
+        routeStatus: 'provisional_unavailable',
+      }),
+    ).toEqual({
+      serverRouteUnavailable: true,
+      latestRouteFinalStatus: 'pending',
+    });
+    expect(
+      resolveQuickGoDriveTime({
+        traffic: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'provisional_unavailable',
+        },
+      }).loading,
+    ).toBe(true);
+  });
+
+  test('shouldStartQuickGoRouteRefresh is true for routable trips without reliable route', () => {
+    expect(
+      shouldStartQuickGoRouteRefresh(
+        { origin: '123 Main St', destination: 'Fred Meyer', destinationName: 'Fred Meyer' },
+        { duration: 0, routeUnavailable: true, routeStatus: 'unavailable' },
+      ),
+    ).toBe(true);
+    expect(
+      shouldStartQuickGoRouteRefresh(
+        { origin: '123 Main St', destination: 'Fred Meyer', destinationName: 'Fred Meyer' },
+        null,
+      ),
+    ).toBe(true);
+    expect(
+      shouldStartQuickGoRouteRefresh(
+        { origin: '123 Main St', destination: 'Fred Meyer', destinationName: 'Fred Meyer' },
+        { duration: 4, trustStatus: 'live', sourceName: 'Google Routes API' },
+      ),
+    ).toBe(false);
+  });
+
+  test('rapid refresh changes keep pending state until latest request completes', () => {
+    const first = resolveQuickGoDriveTime({
+      traffic: { duration: 0, routeUnavailable: true, routeStatus: 'unavailable' },
+      routeLoading: true,
+    });
+    const second = resolveQuickGoDriveTime({
+      traffic: { duration: 4, trustStatus: 'live', sourceName: 'Google Routes API' },
+      routeLoading: false,
+      clientRouteRefreshPending: false,
+    });
+
+    expect(first.loading).toBe(true);
+    expect(first.unavailable).toBe(false);
+    expect(second.unavailable).toBe(false);
+    expect(second.minutes).toBe(4);
+  });
+
+  test('hasReliableQuickGoRoute distinguishes final and provisional unavailable', () => {
+    expect(
+      hasReliableQuickGoRoute({
+        duration: 0,
+        routeUnavailable: true,
+        routeStatus: 'unavailable',
+        routeSource: 'unavailable',
+      }),
+    ).toBe(false);
+    expect(
+      hasReliableQuickGoRoute({
+        duration: 0,
+        routeUnavailable: true,
+        routeStatus: 'provisional_unavailable',
+      }),
+    ).toBe(false);
+  });
+
+  test('forces initial pending for routable Quick Go with server unavailable', () => {
+    const tripData = {
+      type: 'general-trip' as const,
+      origin: '123 Main St',
+      destination: 'Dairy Queen, Monroe, WA',
+      destinationName: 'Dairy Queen',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+    };
+
+    expect(
+      shouldForceInitialQuickGoRoutePending({
+        isQuickGo: true,
+        tripData,
+        trafficEstimate: { duration: 0, routeUnavailable: true, routeStatus: 'unavailable' },
+        routeHydrationState: 'not_started',
+        hasReliableRoute: false,
+      }),
+    ).toBe(true);
+  });
+
+  test('deriveQuickGoDisplayRouteState keeps unavailable behind final state invariant', () => {
+    const tripData = {
+      type: 'general-trip' as const,
+      origin: '123 Main St',
+      destination: 'Fred Meyer',
+      destinationName: 'Fred Meyer',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+    };
+
+    const pending = deriveQuickGoDisplayRouteState({
+      isQuickGo: true,
+      tripData,
+      trafficEstimate: { duration: 0, routeUnavailable: true, routeStatus: 'unavailable' },
+      routeHydrationState: 'not_started',
+    });
+    expect(pending.displayRouteState).toBe('calculating');
+
+    const unavailable = deriveQuickGoDisplayRouteState({
+      isQuickGo: true,
+      tripData,
+      trafficEstimate: { duration: 0, routeUnavailable: true, routeStatus: 'unavailable' },
+      routeHydrationState: 'final_unavailable',
+    });
+    expect(unavailable.displayRouteState).toBe('unavailable');
+    expect(unavailable.reason).toBe('client_route_final_unavailable');
+  });
+
+  test('route hydration derives final ready for Mapbox and resolving for pending backup', () => {
+    const tripData = {
+      type: 'general-trip' as const,
+      origin: '123 Main St',
+      destination: 'Fred Meyer',
+      destinationName: 'Fred Meyer',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+    };
+
+    expect(
+      quickGoRouteHydrationStateForFinalResult({
+        isQuickGo: true,
+        tripData,
+        trafficEstimate: {
+          duration: 4,
+          trustStatus: 'live',
+          sourceName: 'Mapbox Directions',
+          routeStatus: 'ready',
+          routeSource: 'mapbox',
+        },
+      }),
+    ).toBe('final_ready');
+
+    expect(
+      quickGoRouteHydrationStateForFinalResult({
+        isQuickGo: true,
+        tripData,
+        trafficEstimate: {
+          duration: 0,
+          routeUnavailable: true,
+          routeStatus: 'google_failed_trying_mapbox',
+        },
+      }),
+    ).toBe('resolving');
   });
 });
