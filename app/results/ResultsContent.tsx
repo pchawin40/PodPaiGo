@@ -47,6 +47,10 @@ import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import ParkingProviderActions from './ParkingProviderActions';
+import DestinationModeActions, {
+  buildPointAbModeActions,
+} from './DestinationModeActions';
+import { rankPointAbModes } from '../../lib/parking/pointAbRanking';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -6167,6 +6171,30 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               bestParkRideAccess?.recommendedForTrip !== false &&
               !isOvernightTrip;
 
+            const pointAbRanking = isCityTrip
+              ? rankPointAbModes({
+                  tripData,
+                  sort,
+                  destinationLabel: cityDestinationText || tripData.destination,
+                  noParkingPreferred,
+                  bestParking,
+                  parkingTotal,
+                  parkingMinutes: parkingBreakdown?.totalMinutes ?? null,
+                  bestRideOption: bestRideOption ?? null,
+                  ridePrice,
+                  rideDuration,
+                  bestTransitOption: bestTransitOption ?? null,
+                  transitCost,
+                  transitDuration,
+                  transitCostDisplay: transitCostDisplay?.primary ?? null,
+                  hasReliableTransit,
+                  bestParkRideAccess,
+                  parkRideCost,
+                  parkRideDuration,
+                  parkRideReliable,
+                })
+              : null;
+
             const cheapestMode = (() => {
               const candidates = [
                 parkingTotal !== null && bestParking
@@ -6296,7 +6324,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const bestMode = scoredModes.sort((a, b) => b.score - a.score)[0];
 
-            const recommendationMode = bestMode?.key || 'compare';
+            const recommendationMode =
+              pointAbRanking?.recommendationMode ?? bestMode?.key ?? 'compare';
 
             const shortParkingName = bestParking?.name
               ? bestParking.name
@@ -6305,7 +6334,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               : '';
 
             const recommendedTitle =
-              recommendationMode === 'parking'
+              pointAbRanking?.recommendedTitle ??
+              (recommendationMode === 'parking'
                 ? shortParkingName
                   ? `Park at ${shortParkingName}`
                   : 'Park at the best available lot'
@@ -6313,10 +6343,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? `Take ${bestRideOption?.name || 'rideshare'}`
                   : recommendationMode === 'transit'
                     ? 'Take transit'
-                    : 'Compare options';
+                    : 'Compare options');
 
             const recommendedReason =
-              recommendationMode === 'parking'
+              pointAbRanking?.recommendedReason ??
+              (recommendationMode === 'parking'
                 ? isCityTrip
                   ? 'Best fit if you want to drive and use parking near your destination.'
                   : isOvernightTrip
@@ -6328,9 +6359,46 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     : 'Best fit if you want the lowest effort and do not want to leave a car parked.'
                   : recommendationMode === 'transit'
                     ? 'Best fit if cost matters most and your schedule has enough buffer.'
-                    : 'Open provider pricing before making a final decision.';
+                    : 'Open provider pricing before making a final decision.');
 
-            const modeRows = [
+            const cityDestinationRouteUrl =
+              tripData.origin && (cityDestinationText || tripData.destination)
+                ? googleMapsDirectionsLink(
+                    tripData.origin,
+                    cityDestinationText || tripData.destination,
+                  )
+                : null;
+
+            const modeRows = pointAbRanking
+              ? pointAbRanking.modes.map((mode) => ({
+                  key: mode.key,
+                  label: mode.label,
+                  name: mode.name,
+                  cost: mode.cost,
+                  costNote: mode.costNote,
+                  time: mode.time,
+                  confidence: mode.confidence,
+                  pros: mode.pros,
+                  cons: mode.cons,
+                  status: mode.status,
+                  unavailable: mode.unavailable,
+                  hiddenByPreference: mode.hiddenByPreference,
+                  verdict:
+                    mode.status === 'hidden_by_preference'
+                      ? 'Hidden by preference'
+                      : mode.status === 'best_pick'
+                        ? 'Best pick'
+                        : mode.status === 'budget_option'
+                          ? 'Budget option'
+                          : mode.status === 'verify_rules'
+                            ? 'Verify rules'
+                            : mode.status === 'route_needed'
+                              ? 'Live route needed'
+                              : mode.status === 'unavailable'
+                                ? 'Unavailable'
+                                : 'Good backup',
+                }))
+              : [
               {
                 key: 'parking',
                 label: isCityTrip
@@ -6544,30 +6612,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
                   {modeRows.map((row) => {
                     const selected = row.key === recommendationMode;
-
                     const action = cardActionFor(row.key);
-
-                    return (
-                      <button
-                        key={row.key}
-                        type="button"
-                        onClick={action.onClick}
-                        className={
-                          'relative cursor-pointer rounded-2xl border p-4 pt-10 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
-                          (row.unavailable
-                            ? 'border-border bg-muted/60 opacity-80'
-                            : selected
-                              ? 'border-primary/50 bg-primary/10'
-                              : 'border-border bg-card')
-                        }
-                      >
+                    const cardClassName =
+                      'relative rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
+                      (row.unavailable
+                        ? 'border-border bg-muted/60 opacity-80'
+                        : selected
+                          ? 'border-primary/50 bg-primary/10'
+                          : 'border-border bg-card');
+                    const cardBody = (
+                      <>
                         <div className="absolute right-3 top-3">
                           <RecommendationStatusBadge
+                            status={'status' in row ? row.status : undefined}
                             verdict={row.verdict}
                             unavailable={row.unavailable}
                             sort={sort}
-                            isCheapestMode={cheapestMode?.key === row.key}
-                            isFastestMode={fastestMode?.key === row.key}
+                            isCheapestMode={
+                              (pointAbRanking?.cheapestMode?.key ?? cheapestMode?.key) === row.key
+                            }
+                            isFastestMode={
+                              (pointAbRanking?.fastestMode?.key ?? fastestMode?.key) === row.key
+                            }
                           />
                         </div>
 
@@ -6583,12 +6649,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           {row.name}
                         </div>
 
+                        {'hiddenByPreference' in row && row.hiddenByPreference ? (
+                          <div className="mt-2 text-xs leading-5 text-violet-800 dark:text-violet-200">
+                            Drive is cheaper, but hidden because you said no parking.
+                          </div>
+                        ) : null}
+
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                           <div className="rounded-xl border border-border bg-card/80 p-2">
                             <div className="text-muted-foreground">Cost</div>
                             <div className="mt-0.5 font-semibold text-foreground">
                               {row.cost}
                             </div>
+                            {'costNote' in row && row.costNote ? (
+                              <div className="mt-1 text-[11px] text-muted-foreground">{row.costNote}</div>
+                            ) : null}
                           </div>
                           <div className="rounded-xl border border-border bg-card/80 p-2">
                             <div className="text-muted-foreground">Time</div>
@@ -6609,9 +6684,68 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           </div>
                         </div>
 
-                        <div className="mt-3 inline-flex text-xs font-semibold text-primary">
-                          {action.label}
+                        {isCityTrip ? (
+                          <DestinationModeActions
+                            compact
+                            actions={buildPointAbModeActions({
+                              mode: row.key as 'parking' | 'rideshare' | 'transit' | 'park-ride',
+                              routeToParkingUrl:
+                                row.key === 'parking'
+                                  ? bestParking?.mapLink ||
+                                    (tripData.origin && bestParking?.address
+                                      ? googleMapsDirectionsLink(tripData.origin, bestParking.address)
+                                      : cityDestinationRouteUrl)
+                                  : cityDestinationRouteUrl,
+                              parkingToDestinationUrl:
+                                bestParking?.address && (cityDestinationText || tripData.destination)
+                                  ? googleMapsDirectionsLink(
+                                      bestParking.address,
+                                      cityDestinationText || tripData.destination,
+                                      'walking',
+                                    )
+                                  : cityDestinationRouteUrl,
+                              rideshareUrl: bestRideOption?.sourceLink || PROVIDER_LINKS.uberDeepLink.url,
+                              transitRouteUrl:
+                                tripData.origin && (cityDestinationText || tripData.destination)
+                                  ? googleMapsDirectionsLink(
+                                      tripData.origin,
+                                      cityDestinationText || tripData.destination,
+                                      'transit',
+                                    )
+                                  : null,
+                              transitScheduleUrl: extraTransitProviders[0]?.sourceLink || null,
+                              parkRideRulesUrl: bestParkRideAccess?.sourceLink || null,
+                              parkRideDirectionsUrl: bestParkRideAccess?.mapLink || cityDestinationRouteUrl,
+                              onDetails: action.onClick,
+                            })}
+                          />
+                        ) : (
+                          <div className="mt-3 inline-flex text-xs font-semibold text-primary">
+                            {action.label}
+                          </div>
+                        )}
+                      </>
+                    );
+
+                    if (isCityTrip) {
+                      return (
+                        <div key={row.key} className={cardClassName}>
+                          {cardBody}
                         </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={row.key}
+                        type="button"
+                        onClick={action.onClick}
+                        className={
+                          cardClassName +
+                          ' cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+                        }
+                      >
+                        {cardBody}
                       </button>
                     );
                   })}

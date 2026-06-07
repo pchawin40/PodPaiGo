@@ -1,3 +1,7 @@
+import {
+  applyTripPlanningDefaults,
+  buildSingleClarificationQuestion,
+} from './tripPlanningConversation';
 import type {
   ParsedTripAssistantResult,
   ParsedTripTimeAnchor,
@@ -110,102 +114,10 @@ function inferDestinationKindFromCategory(
   }
 }
 
-function addQuestion(questions: string[], question: string): void {
-  if (questions.length >= 3) return;
-  if (!questions.includes(question)) questions.push(question);
-}
-
-function missingHas(missingFields: Set<string>, ...keys: string[]): boolean {
-  return keys.some((key) => missingFields.has(key));
-}
-
 function buildClarificationQuestions(parsed: ParsedTripAssistantResult): string[] {
-  const missingFields = new Set(parsed.missingFields);
-  const questions: string[] = [];
-  const destination = parsed.destinationText || parsed.destinationCity || 'your destination';
-
-  if (parsed.mode === 'general_trip' || parsed.mode === 'quick_go') {
-    if (missingFields.has('originText') && missingFields.has('targetTime')) {
-      addQuestion(
-        questions,
-        `Where are you starting from, and what time do you want to arrive at ${destination}?`,
-      );
-    } else if (missingFields.has('originText')) {
-      addQuestion(questions, `Where are you starting from for ${destination}?`);
-    } else if (missingFields.has('targetTime')) {
-      addQuestion(questions, `What time do you want to arrive at ${destination}, or are you leaving now?`);
-    }
-
-    if (missingFields.has('transportAvailability')) {
-      addQuestion(
-        questions,
-        'Should I compare all options, or prefer driving/parking, rideshare, or transit?',
-      );
-    }
-
-    if (missingFields.has('parkingPreference')) {
-      addQuestion(
-        questions,
-        'Will you need destination parking, nearby parking, or no parking?',
-      );
-    }
-
-    if (missingFields.has('parkingDurationMinutes')) {
-      addQuestion(questions, 'How long will you need parking?');
-    }
-  } else if (parsed.mode === 'parking_only') {
-    if (missingHas(missingFields, 'airportCode', 'destinationText')) {
-      addQuestion(questions, 'Which airport or destination do you need parking for?');
-    }
-    if (missingHas(
-      missingFields,
-      'parkingCheckInDate',
-      'parkingCheckInTime',
-      'parkingCheckOutDate',
-      'parkingCheckOutTime',
-    )) {
-      addQuestion(
-        questions,
-        'What parking check-in and check-out dates and times should I use?',
-      );
-    }
-    if (missingFields.has('originText')) {
-      addQuestion(
-        questions,
-        'Optional: where are you starting from if you want route timing too?',
-      );
-    }
-  } else {
-    if (missingFields.has('originText') && missingHas(missingFields, 'departureDate', 'departureTime')) {
-      addQuestion(
-        questions,
-        'Where are you starting from, and what date and time is the flight or airport arrival?',
-      );
-    } else if (missingFields.has('originText')) {
-      addQuestion(questions, 'Where are you starting from?');
-    }
-
-    if (missingFields.has('airportCode')) {
-      addQuestion(questions, 'Which airport should I plan around?');
-    }
-
-    if (missingHas(missingFields, 'departureDate', 'departureTime')) {
-      addQuestion(questions, 'What date and time is the flight or airport arrival?');
-    }
-
-    if (missingFields.has('transportAvailability')) {
-      addQuestion(
-        questions,
-        'Should I compare all options, or prefer driving/parking, rideshare, or transit?',
-      );
-    }
-  }
-
-  if (questions.length === 0 && parsed.missingFields.length > 0) {
-    addQuestion(questions, 'Can you add the missing trip details so I can prepare the review?');
-  }
-
-  return questions;
+  if (parsed.missingFields.length === 0) return [];
+  const question = buildSingleClarificationQuestion(parsed);
+  return question ? [question] : [];
 }
 
 export function normalizeParsedTripAssistantResult(
@@ -297,46 +209,39 @@ export function normalizeParsedTripAssistantResult(
 export function computeMissingParsedFields(
   parsed: ParsedTripAssistantResult,
 ): ParsedTripAssistantResult {
-  const missingFields = new Set(parsed.missingFields);
+  const withDefaults = applyTripPlanningDefaults(parsed);
+  const missingFields = new Set(withDefaults.missingFields);
 
-  if (parsed.mode === 'general_trip' || parsed.mode === 'quick_go') {
-    if (!parsed.destinationText?.trim()) missingFields.add('destinationText');
+  if (withDefaults.mode === 'general_trip' || withDefaults.mode === 'quick_go') {
+    if (!withDefaults.destinationText?.trim()) missingFields.add('destinationText');
     else missingFields.delete('destinationText');
 
-    if (parsed.originSource !== 'current_location' && !parsed.originText?.trim()) {
+    if (withDefaults.originSource !== 'current_location' && !withDefaults.originText?.trim()) {
       missingFields.add('originText');
     } else {
       missingFields.delete('originText');
     }
 
-    if (parsed.timeAnchor !== 'now' && (!parsed.departureDate || !parsed.departureTime)) {
+    if (withDefaults.timeAnchor !== 'now' && (!withDefaults.departureDate || !withDefaults.departureTime)) {
       missingFields.add('targetTime');
     } else {
       missingFields.delete('targetTime');
     }
 
-    if (!parsed.transportAvailability) {
-      missingFields.add('transportAvailability');
-    } else {
-      missingFields.delete('transportAvailability');
-    }
+    missingFields.delete('transportAvailability');
+    missingFields.delete('parkingPreference');
 
-    const parkingPreference =
-      parsed.parkingPreference ||
-      (parsed.transportAvailability === 'rideshare' || parsed.transportAvailability === 'transit'
-        ? 'none'
-        : null);
-
-    if (!parkingPreference) {
-      missingFields.add('parkingPreference');
-    } else {
-      missingFields.delete('parkingPreference');
-    }
+    const parkingPreference = withDefaults.parkingPreference;
+    const overnightParking =
+      withDefaults.parkingCheckOutDate &&
+      withDefaults.departureDate &&
+      withDefaults.parkingCheckOutDate !== withDefaults.departureDate;
 
     if (
       parkingPreference &&
       parkingPreference !== 'none' &&
-      !parsed.parkingDurationMinutes
+      !withDefaults.parkingDurationMinutes &&
+      overnightParking
     ) {
       missingFields.add('parkingDurationMinutes');
     } else {
@@ -346,38 +251,40 @@ export function computeMissingParsedFields(
     missingFields.delete('airportCode');
     missingFields.delete('departureDate');
     missingFields.delete('departureTime');
-  } else if (parsed.mode === 'parking_only') {
-    if (!parsed.airportCode && !parsed.destinationText?.trim()) {
+  } else if (withDefaults.mode === 'parking_only') {
+    if (!withDefaults.airportCode && !withDefaults.destinationText?.trim()) {
       missingFields.add('airportCode');
     } else {
       missingFields.delete('airportCode');
       missingFields.delete('destinationText');
     }
 
-    if (!parsed.parkingCheckInDate) missingFields.add('parkingCheckInDate');
+    if (!withDefaults.parkingCheckInDate) missingFields.add('parkingCheckInDate');
     else missingFields.delete('parkingCheckInDate');
-    if (!parsed.parkingCheckInTime) missingFields.add('parkingCheckInTime');
+    if (!withDefaults.parkingCheckInTime) missingFields.add('parkingCheckInTime');
     else missingFields.delete('parkingCheckInTime');
-    if (!parsed.parkingCheckOutDate) missingFields.add('parkingCheckOutDate');
+    if (!withDefaults.parkingCheckOutDate) missingFields.add('parkingCheckOutDate');
     else missingFields.delete('parkingCheckOutDate');
-    if (!parsed.parkingCheckOutTime) missingFields.add('parkingCheckOutTime');
+    if (!withDefaults.parkingCheckOutTime) missingFields.add('parkingCheckOutTime');
     else missingFields.delete('parkingCheckOutTime');
   } else {
-    if (!parsed.originText) missingFields.add('originText');
-    else missingFields.delete('originText');
-    if (!parsed.airportCode) missingFields.add('airportCode');
+    if (!withDefaults.originText && withDefaults.originSource !== 'current_location') {
+      missingFields.add('originText');
+    } else {
+      missingFields.delete('originText');
+    }
+    if (!withDefaults.airportCode) missingFields.add('airportCode');
     else missingFields.delete('airportCode');
-    if (!parsed.departureDate) missingFields.add('departureDate');
+    if (!withDefaults.departureDate) missingFields.add('departureDate');
     else missingFields.delete('departureDate');
-    if (!parsed.departureTime) missingFields.add('departureTime');
+    if (!withDefaults.departureTime) missingFields.add('departureTime');
     else missingFields.delete('departureTime');
-    if (!parsed.transportAvailability) missingFields.add('transportAvailability');
-    else missingFields.delete('transportAvailability');
+    missingFields.delete('transportAvailability');
     missingFields.delete('destinationText');
   }
 
   const next: ParsedTripAssistantResult = {
-    ...parsed,
+    ...withDefaults,
     missingFields: Array.from(missingFields),
   };
 

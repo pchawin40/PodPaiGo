@@ -5,14 +5,24 @@ import Link from 'next/link';
 import { trackEvent } from '../../lib/analytics/trackEvent';
 import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
+import {
+  buildTripPlanningTurn,
+  reprocessParsedTrip,
+  type TripPlanningQuickReply,
+} from '../../lib/ai/tripPlanningConversation';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
 import { useAuth } from './AuthProvider';
 import TripAssistantConfirm from './TripAssistantConfirm';
+import TripAssistantChatThread, {
+  createTripChatMessage,
+  type TripAssistantChatMessage,
+} from './TripAssistantChat';
+import { useTripPlanningLocation } from './useTripPlanningLocation';
 import StatusPill from './ui/StatusPill';
 
 const EXAMPLE_PROMPTS = [
-  'I’m flying from SEA to Las Vegas Friday night and coming back Sunday',
+  "I'm flying from SEA to Las Vegas Friday night and coming back Sunday",
   "I'm heading to Fred Meyer in Monroe",
   'Weekend trip from Monroe to SeaTac, Nov 15 to Nov 18',
   'Need parking at LAX for 4 days',
@@ -33,23 +43,30 @@ type ParseTripApiResponse = ParsedTripAssistantResult & {
 export default function TripAssistantPanel({ className = '' }: TripAssistantPanelProps) {
   const router = useRouter();
   const { session, user, loading: authLoading } = useAuth();
+  const locationContext = useTripPlanningLocation();
   const [userText, setUserText] = useState('');
   const [parsed, setParsed] = useState<ParsedTripAssistantResult | null>(null);
+  const [rawParsed, setRawParsed] = useState<ParsedTripAssistantResult | null>(null);
+  const [messages, setMessages] = useState<TripAssistantChatMessage[]>([]);
   const [liveProviderActive, setLiveProviderActive] = useState(false);
   const [configuredProvider, setConfiguredProvider] = useState<'mock' | 'openai'>('mock');
   const [confirmed, setConfirmed] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
-  const [clarificationQuestions, setClarificationQuestions] = useState<string[]>([]);
   const [parseTurns, setParseTurns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(
     () => `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
+  const chatRef = useRef<HTMLDivElement | null>(null);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
   const assistantStartedTracked = useRef(false);
+  const planningTurn = useMemo(() => {
+    if (!rawParsed) return null;
+    return buildTripPlanningTurn(rawParsed, locationContext);
+  }, [rawParsed, locationContext]);
 
   useEffect(() => {
     if (assistantStartedTracked.current) return;
@@ -60,10 +77,16 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const assistantStatusLabel = useMemo(() => {
     if (!signedIn) return 'Sign in to use AI Trip Planner';
     if (loading) return 'AI parse in progress…';
-    if (clarificationQuestions.length > 0) return 'Needs a few details';
+    if (planningTurn?.status === 'needs_clarification') return planningTurn.headline;
     if (parsed) return 'Review before running';
     return liveProviderActive ? 'AI Trip Planner' : 'Mock parser in development';
-  }, [signedIn, loading, clarificationQuestions.length, parsed, liveProviderActive]);
+  }, [signedIn, loading, planningTurn, parsed, liveProviderActive]);
+
+  useEffect(() => {
+    const container = chatRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [messages, parsed, loading]);
 
   useEffect(() => {
     if (!signedIn || !accessToken) return;
@@ -95,6 +118,64 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     };
   }, [accessToken, signedIn]);
 
+  const appendMessage = (message: TripAssistantChatMessage) => {
+    setMessages((current) => [...current, message]);
+  };
+
+  const applyParsedResponse = (data: ParsedTripAssistantResult) => {
+    const processed = reprocessParsedTrip(data);
+    const turn = buildTripPlanningTurn(data, locationContext);
+
+    setRawParsed(processed);
+    if (turn.status === 'ready_for_review') {
+      setParsed(processed);
+      setParseTurns([]);
+      appendMessage(
+        createTripChatMessage('assistant', turn.acknowledgment, turn),
+      );
+    } else {
+      setParsed(null);
+      appendMessage(
+        createTripChatMessage('assistant', turn.acknowledgment, turn),
+      );
+    }
+  };
+
+  const runParse = async (nextTurns: string[]) => {
+    const combinedUserText = nextTurns.join('\n');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch('/api/ai/parse-trip', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ userText: combinedUserText, sessionId }),
+    });
+
+    const data = (await response.json()) as ParseTripApiResponse & { message?: string };
+    if (!response.ok) {
+      throw new Error(data.message || 'Could not parse trip.');
+    }
+
+    setLiveProviderActive(Boolean(data.liveProviderActive || data.providerUsed === 'openai'));
+    setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
+    setParseTurns(nextTurns);
+    applyParsedResponse(data);
+
+    trackEvent('ai_assistant_submitted', {
+      accessToken,
+      eventProperties: {
+        configuredProvider: data.configuredProvider === 'openai' ? 'openai' : 'mock',
+        liveProviderActive: Boolean(data.liveProviderActive),
+        confirmed: false,
+      },
+    });
+  };
+
   const handleParse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -102,56 +183,62 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     if (!signedIn) {
       setParsed(null);
-      setClarificationQuestions([]);
+      setRawParsed(null);
       setError('Sign in to use AI Trip Planner.');
       return;
     }
 
+    const trimmed = userText.trim();
+    if (!trimmed) return;
+
+    appendMessage(createTripChatMessage('user', trimmed));
+    setUserText('');
     setLoading(true);
 
     try {
-      const nextTurns = [...parseTurns, userText.trim()].filter(Boolean);
-      const combinedUserText = nextTurns.join('\n');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (accessToken) {
-        headers.Authorization = `Bearer ${accessToken}`;
-      }
-
-      const response = await fetch('/api/ai/parse-trip', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ userText: combinedUserText, sessionId }),
-      });
-
-      const data = (await response.json()) as ParseTripApiResponse & { message?: string };
-      if (!response.ok) {
-        throw new Error(data.message || 'Could not parse trip.');
-      }
-
-      setLiveProviderActive(Boolean(data.liveProviderActive || data.providerUsed === 'openai'));
-      setConfiguredProvider(data.configuredProvider === 'openai' ? 'openai' : 'mock');
-      if (data.status === 'needs_clarification') {
-        setParsed(null);
-        setParseTurns(nextTurns);
-        setClarificationQuestions(data.clarificationQuestions || []);
-        setUserText('');
-      } else {
-        setParsed(data);
-        setParseTurns([]);
-        setClarificationQuestions([]);
-      }
-      trackEvent('ai_assistant_submitted', {
-        accessToken,
-        eventProperties: {
-          configuredProvider: data.configuredProvider === 'openai' ? 'openai' : 'mock',
-          liveProviderActive: Boolean(data.liveProviderActive),
-          confirmed: false,
-        },
-      });
+      const nextTurns = [...parseTurns, trimmed].filter(Boolean);
+      await runParse(nextTurns);
     } catch (parseError) {
       setParsed(null);
+      setRawParsed(null);
+      setError(parseError instanceof Error ? parseError.message : 'Could not parse trip.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickReply = async (reply: TripPlanningQuickReply) => {
+    if (loading) return;
+
+    if (reply.patch && rawParsed) {
+      const processed = reprocessParsedTrip(rawParsed, reply.patch);
+      const turn = buildTripPlanningTurn(processed, locationContext);
+      setRawParsed(processed);
+
+      if (turn.status === 'ready_for_review') {
+        setParsed(processed);
+        setParseTurns([]);
+        appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+        return;
+      }
+
+      appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+      return;
+    }
+
+    if (reply.value.endsWith(' ')) {
+      setUserText(reply.value);
+      return;
+    }
+
+    appendMessage(createTripChatMessage('user', reply.label));
+    setLoading(true);
+    setError(null);
+
+    try {
+      const nextTurns = [...parseTurns, reply.value].filter(Boolean);
+      await runParse(nextTurns);
+    } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : 'Could not parse trip.');
     } finally {
       setLoading(false);
@@ -186,9 +273,10 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
   const handleCancel = () => {
     setParsed(null);
+    setRawParsed(null);
     setConfirmed(false);
     setParseTurns([]);
-    setClarificationQuestions([]);
+    setMessages([]);
     setError(null);
   };
 
@@ -225,7 +313,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             <div className="mb-2 max-w-md rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground shadow-sm">
               AI planning is available for signed-in users. Register or sign in to use Ask
               PodPaiGo and save your trip context.
-              Describe your trip. PodPaiGo will ask follow-up questions, then fill the planner for review.
+              Describe your trip. PodPaiGo will ask one follow-up at a time, then fill the planner for review.
             </div>
           ) : null}
           <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
@@ -262,35 +350,49 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
         </div>
       ) : null}
 
+      {messages.length > 0 ? (
+        <div ref={chatRef} className="relative mt-4 max-h-80 overflow-y-auto pr-1">
+          <TripAssistantChatThread
+            messages={messages}
+            loading={loading}
+            onQuickReply={(reply) => {
+              void handleQuickReply(reply);
+            }}
+          />
+        </div>
+      ) : null}
+
       <form onSubmit={handleParse} className="relative mt-4 space-y-3">
         <label className="block text-sm font-medium text-foreground">
-          Trip description
+          {messages.length > 0 ? 'Your reply' : 'Trip description'}
           <textarea
             value={userText}
             onChange={(event) => setUserText(event.target.value)}
-            disabled={!signedIn || authLoading}
-            rows={4}
+            disabled={!signedIn || authLoading || loading}
+            rows={messages.length > 0 ? 2 : 4}
             placeholder={
-              clarificationQuestions.length > 0
-                ? 'Answer the follow-up questions here.'
+              planningTurn?.status === 'needs_clarification'
+                ? 'Answer here or tap a quick reply…'
                 : 'I am going to Pike Place Market tomorrow. Plan commute for me.'
             }
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />
         </label>
 
-        <div className="flex flex-wrap gap-2">
-          {EXAMPLE_PROMPTS.map((example) => (
-            <button
-              key={example}
-              type="button"
-              onClick={() => setUserText(example)}
-              className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-muted hover:text-foreground dark:bg-muted/50 dark:hover:bg-travel-sky/10 dark:hover:border-travel-sky/30 dark:hover:text-foreground"
-            >
-              {example}
-            </button>
-          ))}
-        </div>
+        {messages.length === 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {EXAMPLE_PROMPTS.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setUserText(example)}
+                className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-muted hover:text-foreground dark:bg-muted/50 dark:hover:bg-travel-sky/10 dark:hover:border-travel-sky/30 dark:hover:text-foreground"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {error ? (
           <div className="rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -298,35 +400,36 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           </div>
         ) : null}
 
-        {clarificationQuestions.length > 0 ? (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-950">
-            <p className="font-semibold">A few details needed</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {clarificationQuestions.map((question) => (
-                <li key={question}>{question}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="submit"
+            disabled={!userText.trim() || loading || !signedIn || authLoading}
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-sky-900/10 transition hover:from-sky-500 hover:to-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 dark:from-sky-500 dark:to-blue-600 dark:hover:from-sky-400 dark:hover:to-blue-500"
+          >
+            {loading ? 'Working…' : messages.length > 0 ? 'Send' : 'Start planning'}
+          </button>
 
-        <button
-          type="submit"
-          disabled={!userText.trim() || loading || !signedIn || authLoading}
-          className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-sky-900/10 transition hover:from-sky-500 hover:to-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 dark:from-sky-500 dark:to-blue-600 dark:hover:from-sky-400 dark:hover:to-blue-500"
-        >
-          {loading
-            ? 'AI parse…'
-            : clarificationQuestions.length > 0
-              ? 'Continue'
-              : 'Generate trip plan'}
-        </button>
+          {parsed && !confirmed ? (
+            <button
+              type="button"
+              onClick={handleConfirm}
+              className="inline-flex items-center justify-center rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary/15 dark:border-travel-sky/30 dark:bg-travel-sky/10 dark:text-foreground"
+            >
+              Plan Trip
+            </button>
+          ) : null}
+        </div>
       </form>
 
       {parsed && !confirmed ? (
         <div className="relative mt-5">
           <TripAssistantConfirm
             parsed={parsed}
-            onChange={setParsed}
+            onChange={(next) => {
+              const processed = reprocessParsedTrip(next);
+              setParsed(processed);
+              setRawParsed(processed);
+            }}
             onConfirm={handleConfirm}
             onCancel={handleCancel}
           />

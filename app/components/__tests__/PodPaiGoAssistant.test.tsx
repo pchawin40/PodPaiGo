@@ -238,8 +238,11 @@ describe('PodPaiGoAssistant', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Where are you starting from/i)).toBeInTheDocument();
+      expect(screen.getByText(/Got it — Pike Place Market/i)).toBeInTheDocument();
+      expect(screen.getByText(/I just need one detail/i)).toBeInTheDocument();
+      expect(screen.getByText(/starting from|starting near/i)).toBeInTheDocument();
       expect(screen.queryByText('Review point A-to-B trip')).not.toBeInTheDocument();
+      expect(screen.queryByText('A few details needed')).not.toBeInTheDocument();
     });
   });
 

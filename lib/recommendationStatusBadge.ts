@@ -1,20 +1,30 @@
 export type RecommendationStatus =
   | 'best_pick'
-  | 'easy_backup'
-  | 'cheapest'
+  | 'budget_option'
   | 'fastest'
-  | 'live_route_needed'
+  | 'easiest'
+  | 'easy_backup'
+  | 'hidden_by_preference'
+  | 'verify_rules'
   | 'unavailable'
-  | 'not_recommended';
+  | 'not_recommended'
+  | 'route_needed'
+  | 'cheapest'
+  | 'live_route_needed';
 
 export const RECOMMENDATION_STATUS_LABELS: Record<RecommendationStatus, string> = {
   best_pick: 'Best pick',
-  easy_backup: 'Easy backup',
-  cheapest: 'Cheapest',
+  budget_option: 'Budget',
   fastest: 'Fastest',
-  live_route_needed: 'Route needed',
+  easiest: 'Easiest',
+  easy_backup: 'Easy backup',
+  hidden_by_preference: 'Hidden',
+  verify_rules: 'Verify',
   unavailable: 'Unavailable',
   not_recommended: 'Not recommended',
+  route_needed: 'Route needed',
+  cheapest: 'Budget',
+  live_route_needed: 'Route needed',
 };
 
 export function recommendationStatusLabel(status: RecommendationStatus): string {
@@ -28,13 +38,19 @@ export function recommendationStatusBadgeClass(status: RecommendationStatus): st
   switch (status) {
     case 'best_pick':
       return `${base} border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-100`;
-    case 'easy_backup':
-      return `${base} border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-100`;
+    case 'budget_option':
     case 'cheapest':
       return `${base} border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-100`;
     case 'fastest':
       return `${base} border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-400/30 dark:bg-blue-400/10 dark:text-blue-100`;
+    case 'easiest':
+    case 'easy_backup':
+      return `${base} border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-100`;
+    case 'hidden_by_preference':
+      return `${base} border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-400/30 dark:bg-violet-400/10 dark:text-violet-100`;
+    case 'verify_rules':
     case 'live_route_needed':
+    case 'route_needed':
       return `${base} border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100`;
     case 'unavailable':
       return `${base} border-zinc-200 bg-zinc-100 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
@@ -52,7 +68,11 @@ export function mapComparisonVerdictToStatus(args: {
 }): RecommendationStatus {
   const { verdict, unavailable, sort, isCheapestMode, isFastestMode } = args;
 
-  if (unavailable || verdict === 'Unavailable' || verdict === 'Hidden by preference') {
+  if (verdict === 'Hidden by preference') {
+    return 'hidden_by_preference';
+  }
+
+  if (unavailable || verdict === 'Unavailable') {
     return 'unavailable';
   }
 
@@ -60,14 +80,26 @@ export function mapComparisonVerdictToStatus(args: {
     return 'not_recommended';
   }
 
-  if (verdict === 'Live route needed') {
-    return 'live_route_needed';
+  if (verdict === 'Verify rules') {
+    return 'verify_rules';
+  }
+
+  if (verdict === 'Live route needed' || verdict === 'Open app') {
+    return 'route_needed';
   }
 
   if (verdict === 'Best pick') {
-    if (sort === 'cheapest' || isCheapestMode) return 'cheapest';
+    if (sort === 'cheapest' || isCheapestMode) return 'budget_option';
     if (sort === 'fastest' || isFastestMode) return 'fastest';
     return 'best_pick';
+  }
+
+  if (verdict === 'Budget option') {
+    return 'budget_option';
+  }
+
+  if (verdict === 'Fastest') {
+    return 'fastest';
   }
 
   if (sort === 'cheapest' && (verdict === 'Good backup' || verdict === 'Budget option')) {

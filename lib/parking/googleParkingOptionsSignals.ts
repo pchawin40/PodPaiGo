@@ -1,4 +1,5 @@
 import type { ParkingOption, TripData } from '../types';
+import { evaluateLocalStreetParkingRules } from './localParkingRules';
 
 export type GoogleParkingOptionsSignals = {
   freeStreetParking?: boolean;
@@ -119,6 +120,21 @@ export function streetParkingScorePenalty(
 
   if (tripData?.destinationKind === 'airport' || tripData?.type !== 'general-trip') {
     penalty += 5000;
+  }
+
+  if (tripData?.type === 'general-trip') {
+    const arrivalDate =
+      tripData.type === 'general-trip' ? tripData.arrivalDate : undefined;
+    const arrivalTime =
+      tripData.type === 'general-trip' ? tripData.arrivalTime : undefined;
+
+    penalty += evaluateLocalStreetParkingRules({
+      destination: tripData.destinationName || tripData.destination,
+      arrivalDate,
+      arrivalTime,
+      durationMinutes: durationHours * 60,
+      isAirportTrip: false,
+    }).penalty;
   }
 
   return penalty;
