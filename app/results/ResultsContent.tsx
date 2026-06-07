@@ -284,14 +284,6 @@ type BestTooLateSummary = {
   shortByMinutes: number;
 } | null;
 
-type ParkingWeatherItem = {
-  key: string;
-  label: string;
-  date: string;
-  context: WeatherContext;
-  weatherImpact: WeatherImpact | null;
-};
-
 const POINT_AB_PARKING_UI_KEYS = new Set([
   'destination-customer',
   'parking',
@@ -682,31 +674,10 @@ function routeEstimateHeroLabel(estimate?: TrafficEstimate | null): string {
   return 'Estimated drive time';
 }
 
-function formatWeatherDateLabel(date: string): string {
-  const parsed = parseLocalDate(date);
-  if (!parsed) return date;
-
-  return parsed.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
-
-function buildWeatherTargetDateTime(date: string, time?: string): string {
-  return `${date}T${time || '12:00'}`;
-}
-
 function weatherRiskText(weather: WeatherImpact): string {
   if (weather.riskLevel === 'low') return 'Normal travel conditions';
   if (weather.riskLevel === 'medium') return 'May impact comfort';
   return 'Plan for weather impact';
-}
-
-function weatherRiskClass(weather: WeatherImpact): string {
-  if (weather.riskLevel === 'high') return 'border-red-200 bg-red-50 text-red-800';
-  if (weather.riskLevel === 'medium') return 'border-amber-200 bg-amber-50 text-amber-900';
-  return 'border-zinc-200 bg-zinc-50 text-zinc-800';
 }
 
 function weatherSectionTitle(
@@ -3900,7 +3871,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
   const [aprLiveChecking, setAprLiveChecking] = useState(false);
   const [aprLivePartial, setAprLivePartial] = useState(false);
-  const [parkingWeather, setParkingWeather] = useState<ParkingWeatherItem[]>([]);
   const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
   const [showMapModal, setShowMapModal] = useState(false);
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
@@ -4412,7 +4382,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setAprLivePartial(false);
         setAprLiveChecking(false);
         setParkingPricesChecking(false);
-        setParkingWeather([]);
         setVisibleParkingCount(COLLAPSED_PARKING_DISPLAY_COUNT);
         setSelectedParkingId(null);
 
@@ -5018,92 +4987,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     return [googleTransit];
   }, [cityDestinationText, currentAirport, currentAirportCode, isCityTrip, tripData?.destination, tripData?.origin]);
-
-  useEffect(() => {
-    if (!tripData) {
-      setParkingWeather([]);
-      return;
-    }
-
-    const tripExtras = tripData as TripDataWithExtras;
-    const startDate =
-      tripExtras.parkingCheckInDate ||
-      (tripData.type === 'one-way-departure' ? tripData.departureDate : '');
-    const returnDate = tripExtras.parkingCheckOutDate || '';
-    const airportCode = getTripAirportCode(tripData);
-    const startTime =
-      tripData.type === 'one-way-departure'
-        ? tripData.departureTime
-        : tripExtras.parkingCheckOutTime || '12:00';
-    const returnTime = tripExtras.parkingCheckOutTime || startTime || '12:00';
-
-    const requests = [
-      startDate
-        ? {
-          key: 'parking-start',
-          label: 'Start',
-          date: startDate,
-          time: startTime,
-        }
-        : null,
-      returnDate && returnDate !== startDate
-        ? {
-          key: 'parking-return',
-          label: 'Return',
-          date: returnDate,
-          time: returnTime,
-        }
-        : null,
-    ].filter((item): item is { key: string; label: string; date: string; time: string } =>
-      Boolean(item)
-    );
-
-    if (requests.length === 0) {
-      setParkingWeather([]);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    Promise.all(
-      requests.map(async (item) => {
-        const params = new URLSearchParams({
-          targetDateTime: buildWeatherTargetDateTime(item.date, item.time),
-        });
-        if (
-          tripData.type === 'general-trip' &&
-          typeof tripData.destinationLat === 'number' &&
-          typeof tripData.destinationLng === 'number'
-        ) {
-          params.set('lat', String(tripData.destinationLat));
-          params.set('lng', String(tripData.destinationLng));
-        } else {
-          params.set('airport', airportCode);
-        }
-
-        const response = await fetch(`/api/weather?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        const data = await response.json();
-
-        return {
-          key: item.key,
-          label: item.label,
-          date: item.date,
-          context: (data?.context || 'unavailable') as WeatherContext,
-          weatherImpact: (data?.weatherImpact || null) as WeatherImpact | null,
-        };
-      })
-    )
-      .then((items) => setParkingWeather(items))
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        console.warn('selected-date weather failed', error);
-        setParkingWeather([]);
-      });
-
-    return () => controller.abort();
-  }, [tripData]);
 
   const recommendationRouteUnavailableForRefresh =
     Boolean(recommendation?.airportRouteUnavailable) ||
@@ -6357,59 +6240,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         </span>
                       </>
                     )}
-                  </div>
-                </div>
-              )}
-
-              {shouldRenderParkingSections && parkingWeather.length > 0 && (
-                <div className="rounded-2xl border border-sky-100 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-zinc-500">
-                    Weather for your travel dates
-                  </div>
-
-                  <div className="mt-3 grid gap-2">
-                    {parkingWeather.map((item) => (
-                      <div
-                        key={item.key}
-                        className={`rounded-xl border px-3 py-2 text-sm ${item.weatherImpact
-                          ? weatherRiskClass(item.weatherImpact)
-                          : 'border-zinc-200 bg-zinc-50 text-zinc-700'
-                          }`}
-                      >
-                        <div className="font-semibold">
-                          {item.label}: {formatWeatherDateLabel(item.date)}
-                        </div>
-
-                        {item.weatherImpact ? (
-                          <div className="mt-1 text-xs leading-5">
-                            {item.weatherImpact.summary}
-                            {typeof item.weatherImpact.temperatureF === 'number'
-                              ? ` · ${item.weatherImpact.temperatureF}°F`
-                              : ''}
-                            {' · '}
-                            {weatherRiskText(item.weatherImpact)}
-                          </div>
-                        ) : (
-                          <div className="mt-1 text-xs">
-                            {item.context === 'forecast-unavailable'
-                              ? (() => {
-                                  const guidance =
-                                    !isCityTrip && currentAirportCode === 'SEA'
-                                      ? getSeasonalClimateGuidance({
-                                          airportCode: currentAirportCode,
-                                          targetDate: item.date,
-                                        })
-                                      : null;
-                                  if (!guidance) {
-                                    return weatherSectionDetail(item.context);
-                                  }
-                                  return `${guidance.historicalLabel} · ${seasonalClimateSummary(guidance)} · ${guidance.disclaimer}`;
-                                })()
-                              : weatherSectionDetail(item.context)}
-                          </div>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </div>
               )}

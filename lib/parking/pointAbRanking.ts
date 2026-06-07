@@ -32,6 +32,10 @@ import {
 import { shouldExcludeFromPointAbQuickRead } from './pointAbQuickRead';
 import { resolvePaidParkingDriveToLotMinutes } from './pointAbOptionScoring';
 import {
+  estimateDriveMinutesFromStraightLineMiles,
+  haversineMiles,
+} from './routeMinutes';
+import {
   computePointAbCanonicalWinners,
   resolvePointAbDisplayRecommendationMode,
   resolvePointAbRecommendationMode,
@@ -117,6 +121,70 @@ type RankPointAbModesInput = {
 };
 
 const BIG = 999_999;
+/** Park & Ride score penalty when free customer parking is the obvious local choice. */
+const CUSTOMER_PARKING_OVER_PARK_RIDE_PENALTY = 52;
+
+function normalizeTripLocation(value: string | null | undefined): string {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function extractCityFromAddress(value: string): string | null {
+  const match = normalizeTripLocation(value).match(/,\s*([^,]+),\s*[A-Z]{2}\b/i);
+  return match?.[1]?.trim().toLowerCase() ?? null;
+}
+
+export function estimateDirectDriveMinutesFromTrip(tripData: TripData): number | null {
+  const { originLat, originLng, destinationLat, destinationLng } = tripData;
+  if (
+    typeof originLat !== 'number' ||
+    typeof originLng !== 'number' ||
+    typeof destinationLat !== 'number' ||
+    typeof destinationLng !== 'number'
+  ) {
+    return null;
+  }
+
+  const miles = haversineMiles(originLat, originLng, destinationLat, destinationLng);
+  return estimateDriveMinutesFromStraightLineMiles(miles);
+}
+
+export function inferSameCityLocalDriveMinutesFallback(input: {
+  origin: string;
+  destination: string;
+}): number | null {
+  const originCity = extractCityFromAddress(input.origin);
+  const destinationCity = extractCityFromAddress(input.destination);
+  if (!originCity || !destinationCity || originCity !== destinationCity) {
+    return null;
+  }
+
+  return 10;
+}
+
+export function resolveEffectiveDriveMinutesForRanking(input: {
+  driveMinutes?: number | null;
+  tripData: TripData;
+  destinationLabel: string;
+}): number | null {
+  if (typeof input.driveMinutes === 'number' && Number.isFinite(input.driveMinutes)) {
+    return input.driveMinutes;
+  }
+
+  return (
+    estimateDirectDriveMinutesFromTrip(input.tripData) ??
+    inferSameCityLocalDriveMinutesFallback({
+      origin: input.tripData.origin,
+      destination: input.destinationLabel,
+    })
+  );
+}
+
+export function shouldDeprioritizeParkRideForCustomerParking(input: {
+  customerCandidate: DestinationParkingIntelligence['customerCandidate'];
+  noParkingPreferred: boolean;
+}): boolean {
+  return Boolean(input.customerCandidate) && !input.noParkingPreferred;
+}
 
 function finiteOr(value: number | null | undefined, fallback = BIG): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -462,10 +530,28 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     parkingOptions: input.parkingOptions ?? (input.bestParking ? [input.bestParking] : []),
   });
   const customerCandidate = destinationIntelligence.customerCandidate;
+  const deprioritizeParkRide = shouldDeprioritizeParkRideForCustomerParking({
+    customerCandidate,
+    noParkingPreferred: input.noParkingPreferred,
+  });
+  const effectiveDriveMinutes = resolveEffectiveDriveMinutesForRanking({
+    driveMinutes: input.driveMinutes,
+    tripData: input.tripData,
+    destinationLabel: input.destinationLabel,
+  });
   const customerTiming = customerCandidate
-    ? customerParkingTiming(input, customerCandidate.confidence)
+    ? customerParkingTiming(
+        { ...input, driveMinutes: effectiveDriveMinutes },
+        customerCandidate.confidence,
+      )
     : null;
   const customerMinutes = customerTiming?.totalOptionMinutes ?? null;
+  const customerParkingReliable = Boolean(
+    customerCandidate &&
+      (customerMinutes != null ||
+        effectiveDriveMinutes != null ||
+        destinationIntelligence.customerParkingPlausible),
+  );
   const parkingRouteUnavailable = input.bestParking
     ? isParkingRouteUnavailable(input.bestParking)
     : false;
@@ -478,7 +564,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   const parkingDisplayMinutes = parkingTiming?.totalOptionMinutes ?? null;
   const streetMeterTiming = input.streetMeterParking?.applicable
     ? resolveStreetMeterTiming({
-        driveMinutes: input.driveMinutes,
+        driveMinutes: effectiveDriveMinutes,
         hasDestinationCoords:
           typeof input.tripData.destinationLat === 'number' &&
           typeof input.tripData.destinationLng === 'number',
@@ -487,7 +573,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   const streetMeterMinutes =
     streetMeterTiming?.totalOptionMinutes ?? input.streetMeterParking?.durationMinutes ?? null;
   const rideshareTiming = resolveRideshareTiming({
-    driveMinutes: input.driveMinutes,
+    driveMinutes: effectiveDriveMinutes,
     rideshare: input.bestRideOption,
   });
   const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
@@ -504,7 +590,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           label: customerCandidate.label,
           cost: customerCandidate.cost,
           minutes: finiteOr(customerMinutes),
-          reliable: Boolean(customerMinutes != null || input.driveMinutes != null),
+          reliable: customerParkingReliable,
           confidence: customerCandidate.confidence,
           baseScore: customerCandidate.scoreBonus,
         }
@@ -528,7 +614,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           cost: finiteOr(input.streetMeterParking.cost, 0),
           minutes: finiteOr(streetMeterMinutes ?? input.streetMeterParking.durationMinutes),
           reliable: Boolean(
-            input.streetMeterParking.durationMinutes != null || input.driveMinutes != null,
+            input.streetMeterParking.durationMinutes != null || effectiveDriveMinutes != null,
           ),
           confidence: input.streetMeterParking.confidence,
           baseScore: -6,
@@ -568,11 +654,12 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
                 ? 'Medium'
                 : 'Low',
           baseScore:
-            parkRide.confidenceScore < 50
+            (deprioritizeParkRide ? -CUSTOMER_PARKING_OVER_PARK_RIDE_PENALTY : 0) +
+            (parkRide.confidenceScore < 50
               ? -20
               : parkRide.recommended
                 ? -4
-                : -40,
+                : -40),
         }
       : null,
   ].filter(Boolean) as PointAbModeCandidate[];
@@ -617,6 +704,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     parkingCost: input.parkingTotal,
     rideshareCost: input.ridePrice,
     parkingBonus,
+    preferCustomerParkingOverParkRide: deprioritizeParkRide,
   });
 
   const visibleForQuickRead = (key: PointAbModeKey) =>

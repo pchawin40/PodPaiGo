@@ -13,6 +13,10 @@ import {
   mapComparisonVerdictToStatus,
 } from '../../recommendationStatusBadge';
 import { buildPointAbModeActions } from '../pointAbModeActions';
+import {
+  selectBestParkAndRideForPointAb,
+  toPointAbParkRidePresentation,
+} from '../parkAndRideSelection';
 
 const tripData = {
   type: 'general-trip' as const,
@@ -856,5 +860,82 @@ describe('pointAbRanking', () => {
 
     expect(signal.penalty).toBeGreaterThan(20);
     expect(signal.headline).toContain('Monroe');
+  });
+
+  test('Monroe Dairy Queen with driving preference does not recommend Park & Ride when route timing is unavailable', () => {
+    const monroeTrip = {
+      type: 'general-trip' as const,
+      origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+      destination: 'Dairy Queen Grill & Chill, Monroe, WA',
+      destinationKind: 'restaurant' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+      originLat: 47.847,
+      originLng: -121.978,
+      destinationLat: 47.855,
+      destinationLng: -121.97,
+    };
+
+    const pointAbParkRideSelection = selectBestParkAndRideForPointAb({
+      origin: monroeTrip.origin,
+      originLat: monroeTrip.originLat,
+      originLng: monroeTrip.originLng,
+      destination: monroeTrip.destination,
+      destinationLat: monroeTrip.destinationLat,
+      destinationLng: monroeTrip.destinationLng,
+      parkingDurationMinutes: 60,
+      isAirportTrip: false,
+      sort: 'easiest',
+      parkingTotal: null,
+    });
+    const pointAbParkRide = toPointAbParkRidePresentation(pointAbParkRideSelection);
+
+    const ranked = rankPointAbModes({
+      tripData: monroeTrip,
+      sort: 'easiest',
+      destinationLabel: monroeTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: {
+        id: 'transit',
+        name: 'Community Transit',
+        price: 3,
+        duration: 42,
+        frequency: 12,
+        availability: 80,
+        trustStatus: 'verified-source',
+        sourceName: 'Test',
+        lastUpdated: '2026-06-01T00:00:00Z',
+        assumptions: [],
+      },
+      transitCost: 3,
+      transitDuration: 42,
+      transitCostDisplay: '$3 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      pointAbParkRide,
+      parkRideCost: pointAbParkRide?.cost ?? null,
+      parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
+      parkRideReliable: Boolean(pointAbParkRide?.reliable),
+      driveMinutes: null,
+    });
+
+    const customerMode = ranked.modes.find((mode) => mode.key === 'destination-customer');
+    const parkRideMode = ranked.modes.find((mode) => mode.key === 'park-ride');
+
+    expect(customerMode).toBeTruthy();
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(ranked.displayRecommendationMode).toBe('destination-customer');
+    expect(ranked.recommendedTitle).toMatch(/customer parking/i);
+    expect(parkRideMode?.status).not.toBe('best_pick');
+    expect(ranked.canonicalWinners.cheapestWinner?.key).toBe('destination-customer');
   });
 });

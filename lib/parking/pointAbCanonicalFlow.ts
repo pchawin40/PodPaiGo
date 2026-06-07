@@ -151,6 +151,7 @@ export function resolvePointAbRecommendationMode(input: {
   parkingCost: number | null;
   rideshareCost: number | null;
   parkingBonus?: number;
+  preferCustomerParkingOverParkRide?: boolean;
 }): PointAbModeKey | null {
   const winners = computePointAbCanonicalWinners(input);
   const extremeCostGap = preferenceBoostIsCapped({
@@ -174,7 +175,16 @@ export function resolvePointAbRecommendationMode(input: {
     if (objectiveBest) return objectiveBest;
   }
 
-  return winners.heroWinner;
+  const heroWinner = winners.heroWinner;
+  if (
+    input.preferCustomerParkingOverParkRide &&
+    heroWinner === 'park-ride' &&
+    input.candidates.some((mode) => mode.key === 'destination-customer')
+  ) {
+    return 'destination-customer';
+  }
+
+  return heroWinner;
 }
 
 const PARKING_UI_KEYS = new Set<PointAbModeKey>([
