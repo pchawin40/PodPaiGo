@@ -9,15 +9,18 @@ import { resolveTripPlannerStatusLabel, shouldShowDevMockProviderNote } from '..
 import {
   buildTripPlanningTurn,
   getNextMissingField,
+  getTripPlanningPlaceholder,
+  isOriginConfirmationPatch,
   reprocessParsedTrip,
   shouldAppendPlanningTurn,
   type TripPlanningQuickReply,
   type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
+import { getRecentOrigins } from '../../lib/trip/quickGo';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
 import { useAuth } from './AuthProvider';
-import TripAssistantConfirm from './TripAssistantConfirm';
+import TripAssistantReviewPanel from './TripAssistantReviewPanel';
 import TripAssistantChatThread, {
   createTripChatMessage,
   type TripAssistantChatMessage,
@@ -57,7 +60,9 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const [confirmed, setConfirmed] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [originInputMode, setOriginInputMode] = useState(false);
+  const [originInputReason, setOriginInputReason] = useState<'reject' | 'change' | 'default'>('default');
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [showRecentOriginPicker, setShowRecentOriginPicker] = useState(false);
   const [originBackup, setOriginBackup] = useState<{
     originText: ParsedTripAssistantResult['originText'];
     originSource: ParsedTripAssistantResult['originSource'];
@@ -71,6 +76,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const chatRef = useRef<HTMLDivElement | null>(null);
   const lastPlanningTurnRef = useRef<TripPlanningTurn | null>(null);
   const lastParsedRef = useRef<ParsedTripAssistantResult | null>(null);
+  const pendingTransitionRef = useRef(false);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
@@ -79,9 +85,24 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     if (!rawParsed) return null;
     return buildTripPlanningTurn(rawParsed, locationContext, {
       originInputMode,
+      originInputReason,
       reviewMode: showReviewPanel,
     });
-  }, [rawParsed, locationContext, originInputMode, showReviewPanel]);
+  }, [rawParsed, locationContext, originInputMode, originInputReason, showReviewPanel]);
+
+  const inputPlaceholder = useMemo(() => {
+    if (!planningTurn) {
+      return 'Describe a trip or destination…';
+    }
+
+    return getTripPlanningPlaceholder({
+      phase: planningTurn.phase,
+      nextField: planningTurn.nextField,
+      status: planningTurn.status,
+      originInputMode,
+      reviewMode: showReviewPanel,
+    });
+  }, [planningTurn, originInputMode, showReviewPanel]);
 
   useEffect(() => {
     if (assistantStartedTracked.current) return;
@@ -168,6 +189,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     patch: Partial<ParsedTripAssistantResult> = {},
     options?: {
       originInputMode?: boolean;
+      originInputReason?: 'reject' | 'change' | 'default';
       reviewMode?: boolean;
       appendUserLabel?: string;
       forceTurn?: boolean;
@@ -175,13 +197,17 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   ) => {
     const processed = reprocessParsedTrip(base, patch);
     const nextOriginInputMode = options?.originInputMode ?? originInputMode;
+    const nextOriginInputReason = options?.originInputReason ?? originInputReason;
     const turn = buildTripPlanningTurn(processed, locationContext, {
       originInputMode: nextOriginInputMode,
+      originInputReason: nextOriginInputReason,
       reviewMode: options?.reviewMode ?? showReviewPanel,
     });
 
     setRawParsed(processed);
     setOriginInputMode(nextOriginInputMode);
+    setOriginInputReason(nextOriginInputReason);
+    setShowRecentOriginPicker(false);
 
     if (options?.appendUserLabel) {
       appendMessage(createTripChatMessage('user', options.appendUserLabel));
@@ -190,6 +216,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
       setOriginInputMode(false);
+      setOriginInputReason('default');
       appendPlanningTurn(turn, processed, { force: options?.forceTurn });
       return processed;
     }
@@ -205,7 +232,9 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     setRawParsed(processed);
     setOriginInputMode(false);
+    setOriginInputReason('default');
     setShowReviewPanel(false);
+    setShowRecentOriginPicker(false);
 
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
@@ -312,7 +341,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   };
 
   const handleQuickReply = async (reply: TripPlanningQuickReply) => {
-    if (loading) return;
+    if (loading || pendingTransitionRef.current) return;
 
     if (reply.action === 'plan_trip') {
       handleConfirm();
@@ -321,6 +350,40 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     if (reply.action === 'edit_details') {
       setShowReviewPanel(true);
+      setShowRecentOriginPicker(false);
+      return;
+    }
+
+    if (reply.action === 'reject_origin_confirmation') {
+      if (!rawParsed) return;
+      setShowReviewPanel(false);
+      setOriginBackup(null);
+      applyLocalTripState(rawParsed, {}, {
+        originInputMode: true,
+        originInputReason: 'reject',
+        appendUserLabel: reply.label,
+      });
+      return;
+    }
+
+    if (reply.action === 'choose_recent_origin') {
+      if (!rawParsed) return;
+      const recents = getRecentOrigins();
+      if (recents.length === 1) {
+        pendingTransitionRef.current = true;
+        applyLocalTripState(rawParsed, {
+          originText: recents[0],
+          originSource: 'manual',
+        }, {
+          originInputMode: false,
+          originInputReason: 'default',
+          appendUserLabel: recents[0],
+        });
+        pendingTransitionRef.current = false;
+        return;
+      }
+      setShowRecentOriginPicker(true);
+      appendMessage(createTripChatMessage('user', reply.label));
       return;
     }
 
@@ -341,6 +404,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           : {};
       applyLocalTripState(rawParsed, originReset, {
         originInputMode: true,
+        originInputReason: 'change',
         appendUserLabel: reply.label,
       });
       return;
@@ -351,6 +415,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
       const restorePatch = originBackup ?? {};
       applyLocalTripState(rawParsed, restorePatch, {
         originInputMode: false,
+        originInputReason: 'default',
         appendUserLabel: reply.label,
       });
       setOriginBackup(null);
@@ -358,7 +423,17 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     }
 
     if (reply.patch && rawParsed) {
+      if (
+        isOriginConfirmationPatch(reply.patch) &&
+        rawParsed.originSource === 'current_location' &&
+        rawParsed.status === 'ready_for_review'
+      ) {
+        return;
+      }
+
+      pendingTransitionRef.current = true;
       applyLocalTripState(rawParsed, reply.patch, { appendUserLabel: reply.label });
+      pendingTransitionRef.current = false;
       return;
     }
 
@@ -414,6 +489,8 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
   const handleCancel = () => {
     setShowReviewPanel(false);
     setOriginInputMode(false);
+    setOriginInputReason('default');
+    setShowRecentOriginPicker(false);
     lastPlanningTurnRef.current = null;
     lastParsedRef.current = null;
     setError(null);
@@ -510,13 +587,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             onChange={(event) => setUserText(event.target.value)}
             disabled={!signedIn || authLoading || loading}
             rows={messages.length > 0 ? 2 : 4}
-            placeholder={
-              originInputMode
-                ? 'Enter your starting address…'
-                : planningTurn?.status === 'needs_clarification'
-                  ? 'Answer here or tap a quick reply…'
-                  : 'I am going to Pike Place Market tomorrow. Plan commute for me.'
-            }
+            placeholder={inputPlaceholder}
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />
         </label>
@@ -563,17 +634,43 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
         </div>
       </form>
 
+      {showRecentOriginPicker ? (
+        <div className="relative mt-3 flex flex-wrap gap-2">
+          {getRecentOrigins().map((origin) => (
+            <button
+              key={origin}
+              type="button"
+              onClick={() => {
+                if (!rawParsed) return;
+                applyLocalTripState(rawParsed, {
+                  originText: origin,
+                  originSource: 'manual',
+                }, {
+                  originInputMode: false,
+                  originInputReason: 'default',
+                  appendUserLabel: origin,
+                });
+              }}
+              className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium"
+            >
+              {origin}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {parsed && !confirmed && showReviewPanel ? (
         <div className="relative mt-5">
-          <TripAssistantConfirm
+          <TripAssistantReviewPanel
             parsed={parsed}
+            context={locationContext}
             onChange={(next) => {
               const processed = reprocessParsedTrip(next);
               setParsed(processed);
               setRawParsed(processed);
             }}
-            onConfirm={handleConfirm}
-            onCancel={handleCancel}
+            onPlanTrip={handleConfirm}
+            onClose={handleCancel}
           />
           {shouldShowDevMockProviderNote({
             liveProviderActive,

@@ -24,6 +24,8 @@ export type TripPlanningQuickReplyAction =
   | 'change_start'
   | 'edit_details'
   | 'await_origin_input'
+  | 'reject_origin_confirmation'
+  | 'choose_recent_origin'
   | 'back_from_origin_input';
 
 export type TripPlanningQuickReply = {
@@ -60,8 +62,18 @@ export type TripPlanningTurn = {
 
 export type TripPlanningBuildOptions = {
   originInputMode?: boolean;
+  originInputReason?: 'reject' | 'change' | 'default';
   reviewMode?: boolean;
   phase?: TripPlanningPhase;
+};
+
+export type TripPlanningPlaceholderInput = {
+  phase: TripPlanningPhase;
+  nextField: string | null;
+  status: 'needs_clarification' | 'ready_for_review';
+  originInputMode?: boolean;
+  reviewMode?: boolean;
+  page?: 'home' | 'trip' | 'results';
 };
 
 const CLARIFICATION_PRIORITY = [
@@ -364,10 +376,31 @@ export function shouldAppendPlanningTurn(
 ): boolean {
   if (!previousTurn) return true;
 
+  if (previousTurn.phase !== nextTurn.phase) {
+    return true;
+  }
+
   if (
     nextTurn.status === 'ready_for_review' &&
     previousTurn.status === 'ready_for_review' &&
     parsedTripTurnSnapshot(previousParsed) === parsedTripTurnSnapshot(nextParsed)
+  ) {
+    return false;
+  }
+
+  if (
+    previousTurn.phase === 'ready_to_plan' &&
+    nextTurn.phase === 'ready_to_plan' &&
+    parsedTripTurnSnapshot(previousParsed) === parsedTripTurnSnapshot(nextParsed)
+  ) {
+    return false;
+  }
+
+  if (
+    previousTurn.phase === 'awaiting_origin_confirmation' &&
+    nextTurn.phase === 'ready_to_plan' &&
+    nextParsed.originSource === 'current_location' &&
+    previousParsed?.originSource === 'current_location'
   ) {
     return false;
   }
@@ -489,12 +522,6 @@ function buildReadyQuickReplies(): TripPlanningQuickReply[] {
       action: 'plan_trip',
     },
     {
-      id: 'change-start-ready',
-      label: 'Change start',
-      value: '',
-      action: 'change_start',
-    },
-    {
       id: 'edit-details',
       label: 'Edit details',
       value: '',
@@ -506,9 +533,11 @@ function buildReadyQuickReplies(): TripPlanningQuickReply[] {
 function buildOriginInputQuestion(
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
+  options: TripPlanningBuildOptions = {},
 ): { question: string; quickReplies: TripPlanningQuickReply[] } {
   const destination = destinationLabel(parsed);
   const quickReplies: TripPlanningQuickReply[] = [];
+  const rejected = options.originInputReason === 'reject';
 
   if (context.geolocationAvailable && !context.geolocationDenied) {
     quickReplies.push({
@@ -520,6 +549,13 @@ function buildOriginInputQuestion(
   }
 
   quickReplies.push({
+    id: 'origin-recent',
+    label: 'Choose recent start',
+    value: '',
+    action: 'choose_recent_origin',
+  });
+
+  quickReplies.push({
     id: 'origin-back',
     label: 'Back',
     value: '',
@@ -527,7 +563,9 @@ function buildOriginInputQuestion(
   });
 
   return {
-    question: `Enter your starting address for ${destination}.`,
+    question: rejected
+      ? 'No problem — where should I start from?'
+      : `Enter your starting address for ${destination}.`,
     quickReplies,
   };
 }
@@ -536,11 +574,12 @@ function buildOriginQuestion(
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
   phase: TripPlanningPhase,
+  options: TripPlanningBuildOptions = {},
 ): { question: string; quickReplies: TripPlanningQuickReply[] } {
   const destination = destinationLabel(parsed);
 
   if (phase === 'awaiting_origin_input') {
-    return buildOriginInputQuestion(parsed, context);
+    return buildOriginInputQuestion(parsed, context, options);
   }
 
   if (context.geolocationDenied) {
@@ -562,10 +601,10 @@ function buildOriginQuestion(
           patch: { originSource: 'current_location', originText: null },
         },
         {
-          id: 'origin-change',
-          label: 'Change start',
+          id: 'origin-no',
+          label: 'No',
           value: '',
-          action: 'await_origin_input',
+          action: 'reject_origin_confirmation',
         },
       ],
     };
@@ -601,6 +640,7 @@ function buildQuestionForField(
   parsed: ParsedTripAssistantResult,
   context: TripPlanningContext,
   phase: TripPlanningPhase,
+  options: TripPlanningBuildOptions = {},
 ): { question: string; quickReplies: TripPlanningQuickReply[] } {
   const destination = destinationLabel(parsed);
 
@@ -611,7 +651,7 @@ function buildQuestionForField(
         quickReplies: [],
       };
     case 'originText':
-      return buildOriginQuestion(parsed, context, phase);
+      return buildOriginQuestion(parsed, context, phase, options);
     case 'targetTime':
       return {
         question: `What time do you want to arrive at ${destination}, or are you leaving now?`,
@@ -632,7 +672,7 @@ function buildQuestionForField(
       };
     case 'airportCode':
       if (!isAirportPlanningTrip(parsed)) {
-        return buildQuestionForField('originText', parsed, context, phase);
+        return buildQuestionForField('originText', parsed, context, phase, options);
       }
       return {
         question: 'Which airport should I plan around?',
@@ -716,7 +756,13 @@ function buildTurnFromProcessed(
     };
   }
 
-  const { question, quickReplies } = buildQuestionForField(nextField, processed, context, phase);
+  const { question, quickReplies } = buildQuestionForField(
+    nextField,
+    processed,
+    context,
+    phase,
+    options,
+  );
 
   return {
     status: 'needs_clarification',
@@ -729,6 +775,47 @@ function buildTurnFromProcessed(
     summary: [],
     nextField,
   };
+}
+
+export function getTripPlanningPlaceholder(
+  input: TripPlanningPlaceholderInput,
+): string {
+  if (input.page === 'results') {
+    return 'Ask about leave time, parking, TSA, or weather…';
+  }
+
+  if (input.reviewMode) {
+    return 'Update a field above, or tap Plan trip…';
+  }
+
+  if (input.originInputMode || input.phase === 'awaiting_origin_input') {
+    return 'Enter a starting address…';
+  }
+
+  if (input.status === 'ready_for_review' || input.phase === 'ready_to_plan') {
+    return 'Ask a change, or tap Plan trip…';
+  }
+
+  if (input.nextField === 'destinationText') {
+    return 'Where are you going?';
+  }
+
+  if (
+    input.nextField === 'originText' ||
+    input.phase === 'awaiting_origin_confirmation'
+  ) {
+    return 'Enter a starting address…';
+  }
+
+  if (
+    input.nextField === 'targetTime' ||
+    input.nextField === 'departureTime' ||
+    input.nextField === 'departureDate'
+  ) {
+    return 'When are you going?';
+  }
+
+  return 'Describe a trip or destination…';
 }
 
 export function buildTripPlanningTurn(
@@ -752,4 +839,13 @@ export function buildSingleClarificationQuestion(
   const phase = deriveTripPlanningPhase(parsed, context);
   const { question } = buildQuestionForField(nextField, parsed, context, phase);
   return question;
+}
+
+export function isOriginConfirmationPatch(
+  patch: Partial<ParsedTripAssistantResult> | undefined,
+): boolean {
+  return (
+    patch?.originSource === 'current_location' &&
+    (patch.originText === null || patch.originText === undefined)
+  );
 }

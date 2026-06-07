@@ -13,7 +13,7 @@ import {
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
 import { useAuth } from './AuthProvider';
-import TripAssistantConfirm from './TripAssistantConfirm';
+import TripAssistantReviewPanel from './TripAssistantReviewPanel';
 import TripAssistantVoiceButton from './TripAssistantVoiceButton';
 import TripAssistantChatThread, {
   createTripChatMessage,
@@ -23,11 +23,14 @@ import { resolveTripPlannerStatusLabel } from '../../lib/ai/tripPlanningAssistan
 import {
   buildTripPlanningTurn,
   getNextMissingField,
+  getTripPlanningPlaceholder,
+  isOriginConfirmationPatch,
   reprocessParsedTrip,
   shouldAppendPlanningTurn,
   type TripPlanningQuickReply,
   type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
+import { getRecentOrigins } from '../../lib/trip/quickGo';
 import { useTripPlanningLocation } from './useTripPlanningLocation';
 
 type PodPaiGoAssistantProps = {
@@ -55,7 +58,9 @@ export default function PodPaiGoAssistant({
   const [disabled, setDisabled] = useState<boolean | null>(null);
   const [assistantLabel, setAssistantLabel] = useState('AI planner beta');
   const [originInputMode, setOriginInputMode] = useState(false);
+  const [originInputReason, setOriginInputReason] = useState<'reject' | 'change' | 'default'>('default');
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [showRecentOriginPicker, setShowRecentOriginPicker] = useState(false);
   const [originBackup, setOriginBackup] = useState<{
     originText: ParsedTripAssistantResult['originText'];
     originSource: ParsedTripAssistantResult['originSource'];
@@ -81,8 +86,18 @@ export default function PodPaiGoAssistant({
     () => `assistant-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const reviewPanelRef = useRef<HTMLDivElement | null>(null);
   const lastPlanningTurnRef = useRef<TripPlanningTurn | null>(null);
   const lastParsedRef = useRef<ParsedTripAssistantResult | null>(null);
+  const pendingTransitionRef = useRef(false);
+  const planningTurn = useMemo(() => {
+    if (!rawParsed) return null;
+    return buildTripPlanningTurn(rawParsed, locationContext, {
+      originInputMode,
+      originInputReason,
+      reviewMode: showReviewPanel,
+    });
+  }, [rawParsed, locationContext, originInputMode, originInputReason, showReviewPanel]);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
@@ -141,7 +156,33 @@ export default function PodPaiGoAssistant({
     }
 
     container.scrollTop = container.scrollHeight;
-  }, [messages, parsed, loading]);
+  }, [messages, parsed, loading, showReviewPanel]);
+
+  useEffect(() => {
+    if (!showReviewPanel) return;
+    const panel = reviewPanelRef.current;
+    if (!panel) return;
+    if (typeof panel.scrollIntoView === 'function') {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [showReviewPanel]);
+
+  const inputPlaceholder = useMemo(() => {
+    if (!planningTurn) {
+      return page === 'results'
+        ? 'Ask about leave time, parking, TSA, or weather…'
+        : 'Describe a trip or destination…';
+    }
+
+    return getTripPlanningPlaceholder({
+      phase: planningTurn.phase,
+      nextField: planningTurn.nextField,
+      status: planningTurn.status,
+      originInputMode,
+      reviewMode: showReviewPanel,
+      page,
+    });
+  }, [planningTurn, originInputMode, showReviewPanel, page]);
 
   const statusLabel = useMemo(() => {
     if (disabled) return 'Assistant disabled';
@@ -186,6 +227,7 @@ export default function PodPaiGoAssistant({
     patch: Partial<ParsedTripAssistantResult> = {},
     options?: {
       originInputMode?: boolean;
+      originInputReason?: 'reject' | 'change' | 'default';
       reviewMode?: boolean;
       appendUserLabel?: string;
       forceTurn?: boolean;
@@ -193,13 +235,17 @@ export default function PodPaiGoAssistant({
   ) => {
     const processed = reprocessParsedTrip(base, patch);
     const nextOriginInputMode = options?.originInputMode ?? originInputMode;
+    const nextOriginInputReason = options?.originInputReason ?? originInputReason;
     const turn = buildTripPlanningTurn(processed, locationContext, {
       originInputMode: nextOriginInputMode,
+      originInputReason: nextOriginInputReason,
       reviewMode: options?.reviewMode ?? showReviewPanel,
     });
 
     setRawParsed(processed);
     setOriginInputMode(nextOriginInputMode);
+    setOriginInputReason(nextOriginInputReason);
+    setShowRecentOriginPicker(false);
 
     if (options?.appendUserLabel) {
       appendMessage(createTripChatMessage('user', options.appendUserLabel));
@@ -209,6 +255,7 @@ export default function PodPaiGoAssistant({
       setParsed(processed);
       setAwaitingClarification(false);
       setOriginInputMode(false);
+      setOriginInputReason('default');
       appendPlanningTurn(turn, processed, { force: options?.forceTurn });
       return processed;
     }
@@ -226,7 +273,9 @@ export default function PodPaiGoAssistant({
     setRawParsed(processed);
     setParseTurns(nextTurns);
     setOriginInputMode(false);
+    setOriginInputReason('default');
     setShowReviewPanel(false);
+    setShowRecentOriginPicker(false);
 
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
@@ -285,6 +334,8 @@ export default function PodPaiGoAssistant({
     setError(null);
     setShowReviewPanel(false);
     setOriginInputMode(false);
+    setOriginInputReason('default');
+    setShowRecentOriginPicker(false);
     lastPlanningTurnRef.current = null;
     lastParsedRef.current = null;
 
@@ -305,7 +356,7 @@ export default function PodPaiGoAssistant({
   };
 
   const handleQuickReply = async (reply: TripPlanningQuickReply) => {
-    if (loading) return;
+    if (loading || pendingTransitionRef.current) return;
 
     if (reply.action === 'plan_trip') {
       handleConfirmTrip();
@@ -314,6 +365,40 @@ export default function PodPaiGoAssistant({
 
     if (reply.action === 'edit_details') {
       setShowReviewPanel(true);
+      setShowRecentOriginPicker(false);
+      return;
+    }
+
+    if (reply.action === 'reject_origin_confirmation') {
+      if (!rawParsed) return;
+      setShowReviewPanel(false);
+      setOriginBackup(null);
+      applyLocalTripState(rawParsed, {}, {
+        originInputMode: true,
+        originInputReason: 'reject',
+        appendUserLabel: reply.label,
+      });
+      return;
+    }
+
+    if (reply.action === 'choose_recent_origin') {
+      if (!rawParsed) return;
+      const recents = getRecentOrigins();
+      if (recents.length === 1) {
+        pendingTransitionRef.current = true;
+        applyLocalTripState(rawParsed, {
+          originText: recents[0],
+          originSource: 'manual',
+        }, {
+          originInputMode: false,
+          originInputReason: 'default',
+          appendUserLabel: recents[0],
+        });
+        pendingTransitionRef.current = false;
+        return;
+      }
+      setShowRecentOriginPicker(true);
+      appendMessage(createTripChatMessage('user', reply.label));
       return;
     }
 
@@ -334,6 +419,7 @@ export default function PodPaiGoAssistant({
           : {};
       applyLocalTripState(rawParsed, originReset, {
         originInputMode: true,
+        originInputReason: 'change',
         appendUserLabel: reply.label,
       });
       return;
@@ -344,6 +430,7 @@ export default function PodPaiGoAssistant({
       const restorePatch = originBackup ?? {};
       applyLocalTripState(rawParsed, restorePatch, {
         originInputMode: false,
+        originInputReason: 'default',
         appendUserLabel: reply.label,
       });
       setOriginBackup(null);
@@ -351,7 +438,17 @@ export default function PodPaiGoAssistant({
     }
 
     if (reply.patch && rawParsed) {
+      if (
+        isOriginConfirmationPatch(reply.patch) &&
+        rawParsed.originSource === 'current_location' &&
+        rawParsed.status === 'ready_for_review'
+      ) {
+        return;
+      }
+
+      pendingTransitionRef.current = true;
       applyLocalTripState(rawParsed, reply.patch, { appendUserLabel: reply.label });
+      pendingTransitionRef.current = false;
       return;
     }
 
@@ -425,6 +522,8 @@ export default function PodPaiGoAssistant({
     setRawParsed(null);
     setShowReviewPanel(false);
     setOriginInputMode(false);
+    setOriginInputReason('default');
+    setShowRecentOriginPicker(false);
     lastPlanningTurnRef.current = null;
     lastParsedRef.current = null;
 
@@ -556,17 +655,43 @@ export default function PodPaiGoAssistant({
               />
 
               {parsed && showReviewPanel ? (
-                <div className="mr-2">
-                  <TripAssistantConfirm
+                <div ref={reviewPanelRef} className="mr-2">
+                  <TripAssistantReviewPanel
                     parsed={parsed}
+                    context={locationContext}
                     onChange={(next) => {
                       const processed = reprocessParsedTrip(next);
                       setParsed(processed);
                       setRawParsed(processed);
                     }}
-                    onConfirm={handleConfirmTrip}
-                    onCancel={() => setShowReviewPanel(false)}
+                    onPlanTrip={handleConfirmTrip}
+                    onClose={() => setShowReviewPanel(false)}
                   />
+                </div>
+              ) : null}
+
+              {showRecentOriginPicker ? (
+                <div className="mr-2 flex flex-wrap gap-2">
+                  {getRecentOrigins().map((origin) => (
+                    <button
+                      key={origin}
+                      type="button"
+                      onClick={() => {
+                        if (!rawParsed) return;
+                        applyLocalTripState(rawParsed, {
+                          originText: origin,
+                          originSource: 'manual',
+                        }, {
+                          originInputMode: false,
+                          originInputReason: 'default',
+                          appendUserLabel: origin,
+                        });
+                      }}
+                      className="rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-medium"
+                    >
+                      {origin}
+                    </button>
+                  ))}
                 </div>
               ) : null}
 
@@ -588,15 +713,7 @@ export default function PodPaiGoAssistant({
                 onChange={(event) => setInput(event.target.value)}
                 disabled={!signedIn || authLoading}
                 rows={2}
-                placeholder={
-                  page === 'results'
-                    ? 'Ask about leave time, parking, TSA, or weather…'
-                    : originInputMode
-                      ? 'Enter your starting address…'
-                      : awaitingClarification
-                        ? 'Answer here or tap a quick reply…'
-                        : 'Describe your trip…'
-                }
+                placeholder={inputPlaceholder}
                 className="w-full resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
 

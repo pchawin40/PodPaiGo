@@ -271,7 +271,8 @@ describe('PodPaiGoAssistant', () => {
     await waitFor(() => {
       expect(screen.getByText('Ready to plan')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Plan Trip' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Change start' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Change start' })).not.toBeInTheDocument();
     });
 
     const parseCallsAfterYes = fetchMock.mock.calls.filter(([url]) =>
@@ -335,6 +336,206 @@ describe('PodPaiGoAssistant', () => {
       expect(screen.getByText(/starting from|starting near/i)).toBeInTheDocument();
       expect(screen.queryByText('Review point A-to-B trip')).not.toBeInTheDocument();
       expect(screen.queryByText('A few details needed')).not.toBeInTheDocument();
+    });
+  });
+
+  test('No quick reply opens origin input without another parse call', async () => {
+    mockSignedInAuth();
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            mode: 'quick_go',
+            destinationText: 'Pike Place Market',
+            originSource: 'unknown',
+            destinationCategory: 'general',
+            originText: null,
+            airportCode: null,
+            destinationCity: null,
+            airlineText: null,
+            departureDate: '2026-06-06',
+            departureTime: '09:00',
+            timeAnchor: 'arrive_by',
+            returnDate: null,
+            returnTime: null,
+            transportAvailability: 'all',
+            parkingPreference: 'nearby',
+            tripType: 'quick-go',
+            needsParking: true,
+            needsLeaveTime: true,
+            missingFields: ['originText'],
+            confidence: 'medium',
+            parser: 'mock',
+            status: 'needs_clarification',
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: {
+        value: 'I am going to Pike Place Market tomorrow. Plan commute for me.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'No' })).toBeInTheDocument();
+    });
+
+    const parseCallsBeforeNo = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'No' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/No problem — where should I start from/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Message PodPaiGo assistant')).toHaveAttribute(
+        'placeholder',
+        'Enter a starting address…',
+      );
+    });
+
+    const parseCallsAfterNo = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/api/ai/parse-trip'),
+    ).length;
+    expect(parseCallsAfterNo).toBe(parseCallsBeforeNo);
+  });
+
+  test('Edit details opens compact review panel', async () => {
+    mockSignedInAuth();
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            mode: 'quick_go',
+            destinationText: 'Pike Place Market',
+            originSource: 'current_location',
+            destinationCategory: 'general',
+            originText: null,
+            airportCode: null,
+            destinationCity: null,
+            airlineText: null,
+            departureDate: '2026-06-06',
+            departureTime: '09:00',
+            timeAnchor: 'arrive_by',
+            returnDate: null,
+            returnTime: null,
+            transportAvailability: 'all',
+            parkingPreference: 'nearby',
+            tripType: 'quick-go',
+            needsParking: true,
+            needsLeaveTime: true,
+            missingFields: [],
+            confidence: 'medium',
+            parser: 'mock',
+            status: 'ready_for_review',
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: {
+        value: 'I am going to Pike Place Market tomorrow. Plan commute for me.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Trip details')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Change' }).length).toBeGreaterThan(0);
+      expect(screen.getByLabelText('Message PodPaiGo assistant')).toHaveAttribute(
+        'placeholder',
+        'Update a field above, or tap Plan trip…',
+      );
+    });
+  });
+
+  test('ready state uses conversational placeholder', async () => {
+    mockSignedInAuth();
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+
+      if (url.includes('/api/ai/status')) {
+        return {
+          ok: true,
+          json: async () => ({ disabled: false, provider: 'mock', assistantLabel: 'Basic assistant' }),
+        } as Response;
+      }
+
+      if (url.includes('/api/ai/parse-trip') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({ ...mockParsed, status: 'ready_for_review' }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<PodPaiGoAssistant page="trip" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask PodPaiGo' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask PodPaiGo' }));
+    fireEvent.change(screen.getByLabelText('Message PodPaiGo assistant'), {
+      target: { value: 'Weekend trip from Monroe to SEA Nov 15 to Nov 18 with parking' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message PodPaiGo assistant')).toHaveAttribute(
+        'placeholder',
+        'Ask a change, or tap Plan trip…',
+      );
     });
   });
 
