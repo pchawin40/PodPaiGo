@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ResultsContent, { buildRecommendationRequestKey } from '../ResultsContent';
 import type { OptionScoreBreakdown, Recommendation, TripData } from '@/lib/types';
 import { TRAVEL_PREFERENCES_STORAGE_KEY } from '@/lib/trip/travelPreferences';
@@ -264,6 +264,32 @@ function cityTripRecommendationForPreferenceToggle(
   };
 }
 
+function installResultsFetchMock(recommendation: Recommendation) {
+  const fetchMock = jest.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === '/api/recommendations') {
+      return Promise.resolve({
+        ok: true,
+        text: async () => JSON.stringify(recommendation),
+        json: async () => recommendation,
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      text: async () => '{}',
+      json: async () => ({ context: 'unavailable', weatherImpact: null }),
+    });
+  });
+
+  Object.defineProperty(global, 'fetch', {
+    configurable: true,
+    writable: true,
+    value: fetchMock,
+  });
+
+  return fetchMock;
+}
+
 describe('ResultsContent hook order', () => {
   const originalLiveRefresh = process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH;
 
@@ -443,14 +469,11 @@ describe('ResultsContent hook order', () => {
     await waitFor(() => {
       expect(screen.getByText('Parking is visible for comparison.')).toBeInTheDocument();
       expect(screen.getByText('More parking options')).toBeInTheDocument();
+      expect(screen.getByText('Parking filters')).toBeInTheDocument();
     });
     expect(screen.getAllByText('Test Garage Two').length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /Change preference/i }));
-
-    await waitFor(() => {
-      expect(screen.getAllByText('Car and parking preference').length).toBeGreaterThan(0);
-    });
+    expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
+    expect(screen.queryByText('Travel preferences')).not.toBeInTheDocument();
   });
 
   test('deduplicates Google rating chip on city parking cards', async () => {
@@ -498,24 +521,16 @@ describe('ResultsContent hook order', () => {
     expect(screen.getAllByText('★ 4.5 · 332 reviews')).toHaveLength(1);
   });
 
-  test('changing from no-parking to driving refreshes hero winner and preserves route timing', async () => {
+  test('switching stored travel mode to driving refreshes hero winner and preserves route timing', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const firstRecommendation = cityTripRecommendationForPreferenceToggle();
-    const unavailableRefresh = cityTripRecommendationForPreferenceToggle({
-      duration: 0,
-      routeUnavailable: true,
-      routeUnavailableReason: 'Route budget exceeded',
-      routeStatus: 'unavailable',
-      routeSource: 'unavailable',
-      sourceName: 'Route budget',
-    });
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
     let recommendationCalls = 0;
     const fetchMock = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url === '/api/recommendations') {
         recommendationCalls += 1;
-        const body = recommendationCalls === 1 ? firstRecommendation : unavailableRefresh;
+        const body = firstRecommendation;
         return Promise.resolve({
           ok: true,
           text: async () => JSON.stringify(body),
@@ -534,24 +549,25 @@ describe('ResultsContent hook order', () => {
       writable: true,
       value: fetchMock,
     });
+
+    const drivingTripParams = cityTripSearchParams({
+      destination: 'Neighborhood Cafe, Seattle, WA',
+      destinationName: 'Neighborhood Cafe',
+      destinationKind: 'restaurant',
+      parkingPreference: 'nearby',
+      originLat: '47.8554',
+      originLng: '-121.9709',
+      destinationLat: '47.6250',
+      destinationLng: '-122.3450',
+    });
+
     window.localStorage.setItem(
       TRAVEL_PREFERENCES_STORAGE_KEY,
       JSON.stringify({ businessTravelMode: 'no_parking', parkingFilters: {} }),
     );
 
-    render(
-      <ResultsContent
-        storedSearchParams={cityTripSearchParams({
-          destination: 'Neighborhood Cafe, Seattle, WA',
-          destinationName: 'Neighborhood Cafe',
-          destinationKind: 'restaurant',
-          parkingPreference: 'none',
-          originLat: '47.8554',
-          originLng: '-121.9709',
-          destinationLat: '47.6250',
-          destinationLng: '-122.3450',
-        })}
-      />,
+    const { unmount } = render(
+      <ResultsContent storedSearchParams={drivingTripParams} />,
     );
 
     await waitFor(() => {
@@ -560,13 +576,13 @@ describe('ResultsContent hook order', () => {
     expect(screen.getByText('Estimated drive time')).toBeInTheDocument();
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: /Change preference/i }));
+    unmount();
+    window.localStorage.setItem(
+      TRAVEL_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ businessTravelMode: 'standard', parkingFilters: {} }),
+    );
 
-    await waitFor(() => {
-      expect(screen.getAllByText('Car and parking preference').length).toBeGreaterThan(0);
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /I’m driving \/ need parking/i }));
+    render(<ResultsContent storedSearchParams={drivingTripParams} />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
@@ -579,7 +595,114 @@ describe('ResultsContent hook order', () => {
     });
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
     expect(screen.queryByText('Drive timing could not be confirmed for this result.')).not.toBeInTheDocument();
-    expect(screen.getByText('Driving / parking preference')).toBeInTheDocument();
+    expect(screen.getByText('Parking filters')).toBeInTheDocument();
+    expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
+  });
+
+  test('general-trip Details links target lower option detail sections', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationForPreferenceToggle();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+    const scrollIntoView = jest.fn();
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Neighborhood Cafe, Seattle, WA',
+          destinationName: 'Neighborhood Cafe',
+          destinationKind: 'restaurant',
+          originLat: '47.8554',
+          originLng: '-121.9709',
+          destinationLat: '47.6250',
+          destinationLng: '-122.3450',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
+    });
+
+    const detailsLinks = screen.getAllByRole('link', { name: 'Details' });
+    const hrefs = detailsLinks.map((link) => link.getAttribute('href'));
+
+    expect(hrefs).toContain('#customer-parking-details');
+    expect(hrefs).toContain('#paid-parking-details');
+    expect(hrefs).toContain('#rideshare-details');
+    expect(hrefs).toContain('#transit-details');
+    expect(hrefs).toContain('#park-ride-details');
+
+    for (const id of [
+      'customer-parking-details',
+      'paid-parking-details',
+      'rideshare-details',
+      'transit-details',
+      'park-ride-details',
+    ]) {
+      expect(document.getElementById(id)).toBeInTheDocument();
+    }
+
+    fireEvent.click(detailsLinks.find((link) => link.getAttribute('href') === '#customer-parking-details')!);
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+  });
+
+  test('customer parking card is compact and details section keeps verification warnings', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationForPreferenceToggle();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: jest.fn(),
+    });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Neighborhood Cafe, Seattle, WA',
+          destinationName: 'Neighborhood Cafe',
+          destinationKind: 'restaurant',
+          originLat: '47.8554',
+          originLng: '-121.9709',
+          destinationLat: '47.6250',
+          destinationLng: '-122.3450',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
+    });
+
+    const customerDetailsLink = screen
+      .getAllByRole('link', { name: 'Details' })
+      .find((link) => link.getAttribute('href') === '#customer-parking-details');
+    expect(customerDetailsLink).toBeDefined();
+
+    const customerCard = screen.getByRole('group', { name: 'Customer parking recommendation' });
+    expect(within(customerCard).getByText('Customer parking')).toBeInTheDocument();
+    expect(within(customerCard).getByText('Free? Verify')).toBeInTheDocument();
+    expect(within(customerCard).getByText('Verify signs before parking.')).toBeInTheDocument();
+    expect(
+      within(customerCard).queryByText('Check signs, validation, time limits, and towing rules'),
+    ).not.toBeInTheDocument();
+    expect(within(customerCard).queryByText('Validation rules')).not.toBeInTheDocument();
+    expect(within(customerCard).queryByText('Towing/private lot warning')).not.toBeInTheDocument();
+
+    const detailsSection = document.getElementById('customer-parking-details');
+    expect(detailsSection).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Check signs')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Validation rules')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Time limits')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Towing/private lot warning')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Not a booked/reserved space')).toBeInTheDocument();
   });
 
   test('city parking results attempt Google place enrichment', async () => {

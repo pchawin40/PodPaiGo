@@ -1,12 +1,12 @@
 import type { PointAbModeKey } from './pointAbRanking';
 
 export const POINT_AB_DETAILS_SECTION_IDS: Record<PointAbModeKey, string> = {
-  'destination-customer': 'details-destination-parking',
-  parking: 'details-destination-parking',
+  'destination-customer': 'customer-parking-details',
+  parking: 'paid-parking-details',
   'street-meter': 'details-street-meter',
-  rideshare: 'details-rideshare',
-  transit: 'details-transit',
-  'park-ride': 'details-park-ride',
+  rideshare: 'rideshare-details',
+  transit: 'transit-details',
+  'park-ride': 'park-ride-details',
 };
 
 export function scrollToPointAbDetailsSection(

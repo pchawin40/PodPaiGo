@@ -12,29 +12,23 @@ export type RecommendationStatus =
   | 'cheapest'
   | 'live_route_needed';
 
-export const RECOMMENDATION_STATUS_LABELS: Record<
-  'best_pick' | 'easy_backup' | 'cheapest' | 'fastest' | 'live_route_needed' | 'unavailable' | 'not_recommended',
-  string
-> = {
+export const RECOMMENDATION_STATUS_LABELS: Record<RecommendationStatus, string> = {
   best_pick: 'Best pick',
-  easy_backup: 'Easy backup',
-  cheapest: 'Cheapest',
-  fastest: 'Fastest',
-  live_route_needed: 'Route needed',
-  unavailable: 'Unavailable',
-  not_recommended: 'Not recommended',
-};
-
-const STATUS_LABEL_FALLBACKS: Partial<Record<RecommendationStatus, string>> = {
   budget_option: 'Budget',
+  fastest: 'Fastest',
   easiest: 'Easiest',
+  easy_backup: 'Easy backup',
   hidden_by_preference: 'Hidden',
   verify_rules: 'Verify',
+  unavailable: 'Unavailable',
+  not_recommended: 'Not recommended',
   route_needed: 'Route needed',
+  cheapest: 'Cheapest',
+  live_route_needed: 'Route needed',
 };
 
 export function recommendationStatusLabel(status: RecommendationStatus): string {
-  return RECOMMENDATION_STATUS_LABELS[status] ?? STATUS_LABEL_FALLBACKS[status] ?? '';
+  return RECOMMENDATION_STATUS_LABELS[status];
 }
 
 export function recommendationStatusBadgeClass(status: RecommendationStatus): string {

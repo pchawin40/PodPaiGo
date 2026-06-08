@@ -70,6 +70,8 @@ export function computeCityTripPointAbRanking(input: {
 
   const streetMeterParking = buildStreetMeterParkingOption({
     destination: input.destinationLabel,
+    destinationKind: input.tripData.destinationKind,
+    origin: input.tripData.origin,
     arrivalDate: arrivalContext.arrivalDate,
     arrivalTime: arrivalContext.arrivalTime,
     durationMinutes: parkingDurationMinutes,

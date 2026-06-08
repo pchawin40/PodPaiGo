@@ -371,7 +371,159 @@ describe('pointAbRanking', () => {
 
     expect(ranked.modes.some((mode) => mode.key === 'destination-customer')).toBe(false);
     expect(paidMode?.costNote).toBe('Best confirmed event parking');
-    expect(paidMode?.pros.join(' ')).toMatch(/Event-zone or special paid parking rules/i);
+    expect(paidMode?.pros.join(' ')).toMatch(/Event parking likely/i);
+  });
+
+  test('Lumen Field Seahawks trip prefers event parking over street meter hero', () => {
+    const lumenTrip = {
+      ...tripData,
+      origin: 'Bellevue, WA',
+      destination: 'Lumen Field, Seattle, WA',
+      destinationKind: 'stadium' as const,
+      parkingDuration: 180,
+    };
+    const eventLot = {
+      ...parkingOption,
+      id: 'lumen-event-lot',
+      name: 'Lumen Field Event Parking',
+      price: 42,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      providerSource: 'parkwhiz',
+      sourceName: 'ParkWhiz',
+      originToParkingMinutes: 28,
+      routeToParkingMinutes: 28,
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: lumenTrip,
+      sort: 'easiest',
+      destinationLabel: lumenTrip.destination,
+      noParkingPreferred: false,
+      bestParking: eventLot,
+      parkingOptions: [eventLot],
+      parkingTotal: 42,
+      parkingMinutes: 38,
+      bestRideOption: expensiveRide,
+      ridePrice: 55,
+      rideDuration: 32,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 48,
+      transitCostDisplay: '$3.25 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      streetMeterParking: {
+        applicable: true,
+        label: 'Fallback: street / meter',
+        name: 'Risky street / meter fallback',
+        cost: 0,
+        costDisplay: 'Likely free street parking',
+        costNote: 'Risky during events',
+        durationMinutes: 30,
+        timeDisplay: '30 min',
+        confidence: 'Low',
+        pros: [],
+        cons: ['Risky during events. Check posted signs, event-zone rules, time limits, and towing restrictions.'],
+        warnings: [],
+        verifyRequired: true,
+        sourceLabel: 'Seattle payment hours estimate',
+      },
+      driveMinutes: 28,
+    });
+
+    expect(ranked.modes.some((mode) => mode.key === 'destination-customer')).toBe(false);
+    expect(ranked.recommendationMode).toBe('parking');
+    expect(ranked.recommendedTitle).toBe('Book event parking first');
+    expect(ranked.recommendationMode).not.toBe('street-meter');
+    const streetMode = ranked.modes.find((mode) => mode.key === 'street-meter');
+    expect(streetMode?.label).toBe('Fallback: street / meter');
+    expect(streetMode?.status).not.toBe('best_pick');
+  });
+
+  test('Lumen Field transit can win when parking is unavailable', () => {
+    const lumenTrip = {
+      ...tripData,
+      destination: 'Lumen Field, Seattle, WA',
+      parkingDuration: 180,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: lumenTrip,
+      sort: 'easiest',
+      destinationLabel: lumenTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: expensiveRide,
+      ridePrice: 55,
+      rideDuration: 32,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 48,
+      transitCostDisplay: '$3.25 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 28,
+    });
+
+    expect(ranked.recommendationMode).toBe('transit');
+    expect(ranked.recommendedTitle).toBe('Take transit to the game');
+  });
+
+  test('Lumen Field no-parking preference allows rideshare hero', () => {
+    const lumenTrip = {
+      ...tripData,
+      destination: 'Lumen Field, Seattle, WA',
+      parkingDuration: 180,
+    };
+    const eventLot = {
+      ...parkingOption,
+      id: 'lumen-event-lot',
+      name: 'Lumen Field Event Parking',
+      price: 42,
+      parkingCategory: 'garage_paid' as const,
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+      originToParkingMinutes: 28,
+      routeToParkingMinutes: 28,
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: lumenTrip,
+      sort: 'easiest',
+      destinationLabel: lumenTrip.destination,
+      noParkingPreferred: true,
+      bestParking: eventLot,
+      parkingOptions: [eventLot],
+      parkingTotal: 42,
+      parkingMinutes: 38,
+      bestRideOption: expensiveRide,
+      ridePrice: 28,
+      rideDuration: 32,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 48,
+      transitCostDisplay: '$3.25 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 28,
+    });
+
+    expect(ranked.displayRecommendationMode).toBe('rideshare');
+    expect(ranked.recommendationMode).not.toBe('street-meter');
   });
 
   test('Seattle Sunday street parking may be free', () => {

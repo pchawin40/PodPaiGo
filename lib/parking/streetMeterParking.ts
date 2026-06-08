@@ -1,4 +1,5 @@
 import { evaluateLocalStreetParkingRules } from './localParkingRules';
+import { EVENT_STREET_METER_FALLBACK_CON, isEventVenueDestination } from './eventVenueDetection';
 import { estimateSeattleStreetMeterPricing } from './meterPricing';
 
 export type StreetMeterParkingPresentation = {
@@ -55,6 +56,8 @@ function freeStreetParkingPro(
 
 export function buildStreetMeterParkingOption(input: {
   destination: string;
+  destinationKind?: string | null;
+  origin?: string | null;
   arrivalDate?: string | null;
   arrivalTime?: string | null;
   durationMinutes: number;
@@ -62,6 +65,12 @@ export function buildStreetMeterParkingOption(input: {
   isAirportTrip?: boolean;
 }): StreetMeterParkingPresentation | null {
   if (!isSeattleLocalTrip(input.destination, input.isAirportTrip)) return null;
+
+  const eventVenue = isEventVenueDestination({
+    destination: input.destination,
+    destinationKind: input.destinationKind,
+    origin: input.origin,
+  });
 
   const localRules = evaluateLocalStreetParkingRules({
     destination: input.destination,
@@ -110,15 +119,19 @@ export function buildStreetMeterParkingOption(input: {
   }
   pros.push('You keep your car nearby');
 
-  const cons = [
-    'Street availability is not guaranteed',
-    localRules.verifyRequired ? 'Verify posted signs before leaving your car' : 'Check time limits',
-  ];
+  const cons = eventVenue
+    ? [EVENT_STREET_METER_FALLBACK_CON, 'Street availability is not guaranteed during events']
+    : [
+        'Street availability is not guaranteed',
+        localRules.verifyRequired ? 'Verify posted signs before leaving your car' : 'Check time limits',
+      ];
 
   return {
     applicable: true,
-    label: 'Street / meter parking',
-    name: localRules.headline || 'On-street parking near destination',
+    label: eventVenue ? 'Fallback: street / meter' : 'Street / meter parking',
+    name: eventVenue
+      ? 'Risky street / meter fallback'
+      : localRules.headline || 'On-street parking near destination',
     costDisplay: pricing.costDisplay,
     cost: pricing.total,
     costNote: pricing.costNote,
@@ -127,13 +140,14 @@ export function buildStreetMeterParkingOption(input: {
       totalMinutes != null
         ? formatMinutesLabel(totalMinutes)
         : 'Drive + search + walk',
-    confidence:
-      pricing.confidence === 'high'
+    confidence: eventVenue
+      ? 'Low'
+      : pricing.confidence === 'high'
         ? 'High'
         : pricing.confidence === 'medium'
           ? 'Medium'
           : 'Low',
-    pros,
+    pros: eventVenue ? [] : pros,
     cons,
     warnings: pricing.warnings,
     verifyRequired: localRules.verifyRequired,

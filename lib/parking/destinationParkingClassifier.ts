@@ -1,3 +1,9 @@
+import {
+  EVENT_PARKING_OUTLOOK_COPY,
+  isEventVenueDestination,
+  type EventVenueDetectionInput,
+} from './eventVenueDetection';
+
 export type DestinationParkingMode =
   | 'free_likely'
   | 'validated_possible'
@@ -28,11 +34,7 @@ export type DestinationParkingClassification = {
   shouldSearchPaidParking: boolean;
 };
 
-export type ClassifyDestinationParkingInput = {
-  destination?: string | null;
-  destinationKind?: string | null;
-  airportCode?: string | null;
-};
+export type ClassifyDestinationParkingInput = EventVenueDetectionInput;
 
 export const RETAIL_GROCERY_PATTERN =
   /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|walgreens|cvs|rite aid|pharmacy|grocer(?:y|ies)|supermarket)\b/i;
@@ -98,6 +100,18 @@ function normalizeDestination(value: string | null | undefined): string {
     .replace(/\s+/g, ' ');
 }
 
+function eventVenueClassification(): DestinationParkingClassification {
+  return {
+    mode: 'paid_likely',
+    accessType: 'event_only',
+    confidence: 'medium',
+    reason: EVENT_PARKING_OUTLOOK_COPY,
+    recommendedAction:
+      'Book official or prepaid event parking, use transit, or verified paid lots before relying on street parking.',
+    shouldSearchPaidParking: true,
+  };
+}
+
 function airportClassification(): DestinationParkingClassification {
   return {
     mode: 'airport',
@@ -145,6 +159,7 @@ export function inferDestinationCategory(
   const lower = destination.toLowerCase();
 
   if (classification.mode === 'airport') return 'airport';
+  if (isEventVenueDestination(input)) return 'stadium_event_venue';
   if (classification.mode === 'free_likely' && isRetailOrGroceryDestination(destination)) {
     return 'grocery_or_retail';
   }
@@ -169,6 +184,10 @@ export function classifyDestinationParking(
 
   if (destinationKind === 'airport') {
     return airportClassification();
+  }
+
+  if (isEventVenueDestination(input)) {
+    return eventVenueClassification();
   }
 
   const lower = destination.toLowerCase();

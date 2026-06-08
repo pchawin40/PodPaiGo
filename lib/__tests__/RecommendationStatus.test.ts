@@ -3,24 +3,27 @@ import {
   mapComparisonVerdictToStatus,
   recommendationStatusBadgeClass,
   recommendationStatusLabel,
+  type RecommendationStatus,
 } from '../recommendationStatusBadge';
 
 describe('RecommendationStatusBadge helpers', () => {
   test('labels cover all statuses', () => {
     expect(recommendationStatusLabel('best_pick')).toBe('Best pick');
+    expect(recommendationStatusLabel('budget_option')).toBe('Budget');
     expect(recommendationStatusLabel('easy_backup')).toBe('Easy backup');
     expect(recommendationStatusLabel('cheapest')).toBe('Cheapest');
     expect(recommendationStatusLabel('fastest')).toBe('Fastest');
+    expect(recommendationStatusLabel('hidden_by_preference')).toBe('Hidden');
+    expect(recommendationStatusLabel('verify_rules')).toBe('Verify');
+    expect(recommendationStatusLabel('route_needed')).toBe('Route needed');
     expect(recommendationStatusLabel('live_route_needed')).toBe('Route needed');
     expect(recommendationStatusLabel('unavailable')).toBe('Unavailable');
     expect(recommendationStatusLabel('not_recommended')).toBe('Not recommended');
-    expect(Object.keys(RECOMMENDATION_STATUS_LABELS)).toHaveLength(7);
+    expect(Object.keys(RECOMMENDATION_STATUS_LABELS)).toHaveLength(12);
   });
 
   test('badge classes are dark-mode readable and consistent', () => {
-    for (const status of Object.keys(RECOMMENDATION_STATUS_LABELS) as Array<
-      keyof typeof RECOMMENDATION_STATUS_LABELS
-    >) {
+    for (const status of Object.keys(RECOMMENDATION_STATUS_LABELS) as RecommendationStatus[]) {
       const className = recommendationStatusBadgeClass(status);
       expect(className).toContain('inline-flex');
       expect(className).toContain('h-7');

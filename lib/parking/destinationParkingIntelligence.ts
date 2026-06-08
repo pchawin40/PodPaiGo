@@ -5,6 +5,7 @@ import {
   isRetailOrGroceryDestination,
   type ClassifyDestinationParkingInput,
 } from './destinationParkingClassifier';
+import { EVENT_PARKING_OUTLOOK_COPY, isEventVenueDestination } from './eventVenueDetection';
 import { inferParkingCategoryFromSignals } from './googleParkingOptionsSignals';
 
 export type DestinationParkingVenueCategory =
@@ -117,6 +118,7 @@ export function inferDestinationParkingVenueCategory(
   const lower = destination.toLowerCase();
 
   if (lowerKind === 'airport') return 'airport';
+  if (isEventVenueDestination(input)) return 'stadium_event_venue';
   if (lowerKind === 'stadium' || lowerKind === 'event') return 'stadium_event_venue';
   if (lowerKind === 'restaurant') return 'restaurant_cafe_bar';
   if (lowerKind === 'hotel') return 'hotel';
@@ -229,6 +231,7 @@ export function buildDestinationParkingIntelligence(input: {
   destination: string;
   destinationKind?: string | null;
   airportCode?: string | null;
+  origin?: string | null;
   parkingOptions?: ParkingOption[];
 }): DestinationParkingIntelligence {
   const destination = normalize(input.destination);
@@ -286,7 +289,7 @@ export function buildDestinationParkingIntelligence(input: {
     paidOptionBackupLabel: customerCandidate ? 'Bookable paid backup' : 'Reliable paid backup',
     paidOptionBestLabel: eventRulesLikely ? 'Best confirmed event parking' : 'Best confirmed paid option',
     warning: eventRulesLikely
-      ? 'Event-zone or special paid parking rules may apply. Check venue-day signs and rates.'
+      ? EVENT_PARKING_OUTLOOK_COPY
       : paidParkingLikely && downtownOrCore
         ? 'Dense downtown/core destination; paid garages or meters are more likely.'
         : null,

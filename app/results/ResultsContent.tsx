@@ -82,7 +82,10 @@ import {
   POINT_AB_DETAILS_SECTION_IDS,
   scrollToPointAbDetailsSection,
 } from '../../lib/parking/pointAbDetailsScroll';
-import type { PointAbModeKey } from '../../lib/parking/pointAbRanking';
+import type {
+  PointAbModeKey,
+  PointAbModePresentation,
+} from '../../lib/parking/pointAbRanking';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -3186,6 +3189,202 @@ function ProviderDropdownSection({
   );
 }
 
+type PointAbDetailTimingLabels = {
+  drive?: string;
+  parkingBuffer?: string;
+  walk?: string;
+  pickupWait?: string;
+  total?: string;
+  totalFirst?: boolean;
+};
+
+function pointAbDetailTimingRows(
+  row: PointAbModePresentation | null | undefined,
+  labels: PointAbDetailTimingLabels = {},
+): Array<{ label: string; value: string }> {
+  const timing = row?.timing;
+  if (!timing) return [];
+
+  const detailRows = [
+    { label: labels.drive || 'Drive route', minutes: timing.driveMinutes },
+    { label: labels.parkingBuffer || 'Access/verify buffer', minutes: timing.parkingBufferMinutes },
+    { label: labels.walk || 'Walk to destination', minutes: timing.walkToDestinationMinutes },
+    { label: labels.pickupWait || 'Pickup wait', minutes: timing.pickupWaitMinutes },
+  ]
+    .filter((entry): entry is { label: string; minutes: number } =>
+      typeof entry.minutes === 'number' && Number.isFinite(entry.minutes),
+    )
+    .map((entry) => ({
+      label: entry.label,
+      value: formatMiniMinutes(entry.minutes),
+    }));
+
+  const totalMinutes = timing.totalOptionMinutes;
+  if (typeof totalMinutes !== 'number' || !Number.isFinite(totalMinutes)) {
+    return detailRows;
+  }
+
+  const totalRow = {
+    label: labels.total || 'Total to destination',
+    value: formatMiniMinutes(totalMinutes),
+  };
+
+  return labels.totalFirst ? [totalRow, ...detailRows] : [...detailRows, totalRow];
+}
+
+function PointAbModeDetailSummary({
+  row,
+  timingLabels,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  timingLabels?: PointAbDetailTimingLabels;
+}) {
+  if (!row) return null;
+
+  const timingRows = pointAbDetailTimingRows(row, timingLabels);
+  const pros = row.pros.filter(Boolean);
+  const cons = row.cons.filter(Boolean);
+
+  if (timingRows.length === 0 && pros.length === 0 && cons.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
+      {timingRows.length > 0 ? (
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Route breakdown</h3>
+          <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+            {timingRows.map((item) => (
+              <div
+                key={item.label}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-3 py-2"
+              >
+                <dt className="text-muted-foreground">{item.label}</dt>
+                <dd className="font-semibold text-foreground">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+
+      {(pros.length > 0 || cons.length > 0) ? (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {pros.length > 0 ? (
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Pros</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {pros.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {cons.length > 0 ? (
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Cons</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {cons.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CustomerParkingDetailsSection({
+  row,
+  directionsUrl,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  directionsUrl: string | null;
+}) {
+  if (!row) return null;
+
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS['destination-customer']}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card shadow-sm"
+    >
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2
+              data-details-heading
+              tabIndex={-1}
+              className="text-xl font-bold text-foreground"
+            >
+              Customer parking details
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">{row.name}</p>
+          </div>
+
+          {directionsUrl ? (
+            <a
+              href={directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Open directions
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <PointAbModeDetailSummary
+        row={row}
+        timingLabels={{
+          drive: 'Drive route',
+          parkingBuffer: 'Access/verify buffer',
+          walk: 'Walk to destination',
+          total: 'Total to destination',
+        }}
+      />
+
+      <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
+        <h3 className="font-semibold text-foreground">Verification checklist</h3>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <dt className="font-medium text-foreground">Check signs</dt>
+            <dd className="mt-1 text-muted-foreground">
+              Check posted signs before leaving your car.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-foreground">Validation rules</dt>
+            <dd className="mt-1 text-muted-foreground">
+              Customer-only parking may require shopping, validation, or business approval.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-foreground">Time limits</dt>
+            <dd className="mt-1 text-muted-foreground">
+              Confirm posted time limits for your full visit.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-foreground">Towing/private lot warning</dt>
+            <dd className="mt-1 text-muted-foreground">
+              Private lots may tow if you are not an eligible customer or you exceed posted rules.
+            </dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="font-medium text-foreground">Not a booked/reserved space</dt>
+            <dd className="mt-1 text-muted-foreground">
+              PodPaiGo is not booking or reserving this space. Verify access on arrival.
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  );
+}
+
 function formatPlannedAirportArrival(value?: string): string | null {
   if (!value) return null;
 
@@ -3878,8 +4077,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [showParkRideReason, setShowParkRideReason] = useState(false);
   const [expandedModeDetails, setExpandedModeDetails] = useState<string | null>(null);
   const [showParkingAnyway, setShowParkingAnyway] = useState(false);
-  const [isEditingTravelPreference, setIsEditingTravelPreference] = useState(false);
-  const [hasEditedTravelPreference, setHasEditedTravelPreference] = useState(false);
   const [travelPreferences, setTravelPreferences] = useState<TripTravelPreferences>(() =>
     typeof window === 'undefined' ? { businessTravelMode: 'standard', parkingFilters: {} } : readTravelPreferences(),
   );
@@ -5449,21 +5646,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const transportAvailability = (tripData as TripDataWithExtras).transportAvailability || 'all';
   const businessMode = travelPreferences.businessTravelMode;
   const rawTripParkingPreference = (tripData as TripDataWithExtras).parkingPreference;
-  const tripParkingPreference = hasEditedTravelPreference ? undefined : rawTripParkingPreference;
+  const tripParkingPreference = rawTripParkingPreference;
   const hasAppliedTravelPreference =
     Boolean(rawTripParkingPreference) ||
-    hasEditedTravelPreference ||
     travelPreferences.businessTravelMode !== 'standard';
-  const shouldShowFullPreferenceChooser =
-    isEditingTravelPreference || !hasAppliedTravelPreference;
   const pointAbEffectivePreference = resolvePointAbEffectivePreference({
     businessTravelMode: businessMode,
     tripParkingPreference,
     showParkingAnyway,
   });
   const noParkingPreferred = pointAbEffectivePreference.noParkingPreferred;
-  const compareAllPreferred =
-    businessMode === 'compare_all' || tripParkingPreference === 'destination';
   const parkingVisibilityMode = pointAbEffectivePreference.parkingVisibilityMode;
   const shouldRenderParkingSections =
     parkingVisibilityMode !== 'hidden_by_preference';
@@ -5696,6 +5888,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const cityTripParkRideModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'park-ride',
   );
+  const cityTripCustomerParkingModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'destination-customer',
+  );
+  const cityTripPaidParkingModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'parking',
+  );
+  const cityTripRideshareModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'rideshare',
+  );
+  const cityTripTransitModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'transit',
+  );
+  const cityTripDestinationRouteUrl =
+    isCityTrip && tripData?.origin && (cityDestinationText || tripData?.destination)
+      ? googleMapsDirectionsLink(
+          tripData.origin,
+          cityDestinationText || tripData.destination,
+        )
+      : null;
   const selectedParkingTimingOption =
     visibleSmartPickOption
       ? googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
@@ -7136,13 +7347,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           label={row.label}
                           name={row.name}
                           cost={row.cost}
-                          costNote={'costNote' in row ? row.costNote : undefined}
+                          costNote={row.key === 'destination-customer' ? undefined : 'costNote' in row ? row.costNote : undefined}
                           time={row.time}
                           timeLabel={'timeLabel' in row ? row.timeLabel : undefined}
                           timing={'timing' in row ? row.timing : undefined}
                           timingBreakdownLabels={timingBreakdownLabels}
                           pros={row.pros}
                           cons={row.cons}
+                          reason={row.key === 'destination-customer' ? 'Verify signs before parking.' : undefined}
                           status={'status' in row ? row.status : undefined}
                           verdict={row.verdict}
                           unavailable={row.unavailable}
@@ -7452,72 +7664,48 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </details>
         ) : null}
 
-        {shouldShowFullPreferenceChooser ? (
-          <details open className="group mt-6 rounded-2xl border border-border bg-card/80 shadow-sm">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
-              Car and parking preference
-              <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
-                ▾
-              </span>
-            </summary>
-            <div className="border-t border-border p-3">
-              <TravelPreferencesPanel
-                value={travelPreferences}
-                onChange={(next) => {
-                  setTravelPreferences(next);
-                  setHasEditedTravelPreference(true);
-                  setIsEditingTravelPreference(false);
-                }}
-                embedded
-                hideParkingFilters={!shouldRenderParkingSections}
-              />
-            </div>
-          </details>
-        ) : null}
-
-        {hasAppliedTravelPreference ? (
+        {hasAppliedTravelPreference && (noParkingPreferred || showParkingAnyway) ? (
           <section className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/80 p-4 text-sm text-blue-950 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="text-base font-semibold">
-                  {(noParkingPreferred || showParkingAnyway)
-                    ? showParkingAnyway
-                      ? 'Parking is visible for comparison.'
-                      : 'No parking needed / rideshare strategy'
-                    : compareAllPreferred
-                      ? 'Compare all travel options'
-                      : 'Driving / parking preference'}
+                  {showParkingAnyway
+                    ? 'Parking is visible for comparison.'
+                    : 'No parking needed / rideshare strategy'}
                 </div>
                 <p className="mt-1 leading-6">
-                  {(noParkingPreferred || showParkingAnyway)
-                    ? showParkingAnyway
-                      ? 'Parking options are visible for comparison. Ride providers, transit, and directions remain available.'
-                      : 'Parking is hidden. Use ride providers, transit, or directions for this trip.'
-                    : compareAllPreferred
-                      ? 'Parking, ride providers, transit, and directions are visible for comparison.'
-                      : 'Parking options are visible for this trip, alongside ride providers, transit, and directions.'}
+                  {showParkingAnyway
+                    ? 'Parking options are visible for comparison. Ride providers, transit, and directions remain available.'
+                    : 'Parking is hidden. Use ride providers, transit, or directions for this trip.'}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-                {(noParkingPreferred || showParkingAnyway) ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowParkingAnyway((current) => !current)}
-                    className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100"
-                  >
-                    {showParkingAnyway ? 'Hide parking again' : 'Show parking anyway'}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setIsEditingTravelPreference(true)}
-                  className="text-left text-sm font-semibold text-blue-800 underline-offset-4 hover:underline sm:text-right"
-                >
-                  Change preference
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowParkingAnyway((current) => !current)}
+                className="inline-flex shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100 sm:self-start"
+              >
+                {showParkingAnyway ? 'Hide parking again' : 'Show parking anyway'}
+              </button>
             </div>
           </section>
+        ) : null}
+
+        {shouldRenderParkingSections ? (
+          <div className="mt-6 rounded-2xl border border-border bg-card/80 p-3 shadow-sm">
+            <TravelPreferencesPanel
+              value={travelPreferences}
+              onChange={setTravelPreferences}
+              embedded
+              hideBusinessModeOptions
+            />
+          </div>
+        ) : null}
+
+        {shouldRenderParkingSections && isCityTrip ? (
+          <CustomerParkingDetailsSection
+            row={cityTripCustomerParkingModeRow}
+            directionsUrl={cityTripDestinationRouteUrl}
+          />
         ) : null}
 
         {
@@ -7540,7 +7728,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           shouldRenderParkingSections && showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
             <div
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section'}
-              className={`mt-6 scroll-mt-6${isCityTrip ? ' scroll-target' : ''}`}
+              className={`mt-6 scroll-mt-24${isCityTrip ? ' scroll-target' : ''}`}
             >
               <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h2
@@ -7553,6 +7741,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     : 'Parking options'}
                 </h2>
               </div>
+
+              {isCityTrip ? (
+                <PointAbModeDetailSummary
+                  row={cityTripPaidParkingModeRow}
+                  timingLabels={{
+                    drive: 'Drive to lot',
+                    parkingBuffer: 'Park/check-in buffer',
+                    walk: 'Walk to destination',
+                    total: 'Total to destination',
+                  }}
+                />
+              ) : null}
 
               {recommendation.parkingDiscoveryNotice ? (
                 <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
@@ -8055,7 +8255,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             {showRideProviders && (
               <section
                 id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.rideshare : undefined}
-                className={isCityTrip ? 'scroll-target' : undefined}
+                className={isCityTrip ? 'scroll-mt-24 scroll-target' : undefined}
               >
                 <ProviderDropdownSection
                   title="Ride providers"
@@ -8066,13 +8266,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     (isCityTrip && expandedModeDetails === 'rideshare')
                   }
                   detailsHeading={isCityTrip}
+                  footerContent={
+                    isCityTrip ? (
+                      <PointAbModeDetailSummary
+                        row={cityTripRideshareModeRow}
+                        timingLabels={{
+                          drive: 'Drive route',
+                          pickupWait: 'Pickup wait',
+                          total: 'Total rideshare time',
+                        }}
+                      />
+                    ) : undefined
+                  }
                 />
               </section>
             )}
 
             <section
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.transit : undefined}
-              className={isCityTrip ? 'scroll-target' : undefined}
+              className={isCityTrip ? 'scroll-mt-24 scroll-target' : undefined}
             >
               <ProviderDropdownSection
                 title="Transit options"
@@ -8086,17 +8298,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 tripData={tripData}
                 detailsHeading={isCityTrip}
                 footerContent={
-                  shouldRenderParkingSections && !isCityTrip ? (
-                    <TransitParkAndRideCards
-                      isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
-                      options={
-                        recommendation.accessStrategies?.options?.filter(
-                          (option) =>
-                            option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
-                        ) ?? []
-                      }
-                    />
-                  ) : undefined
+                  <>
+                    {isCityTrip ? (
+                      <PointAbModeDetailSummary
+                        row={cityTripTransitModeRow}
+                        timingLabels={{ total: 'Total transit time' }}
+                      />
+                    ) : null}
+                    {shouldRenderParkingSections && !isCityTrip ? (
+                      <TransitParkAndRideCards
+                        isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
+                        options={
+                          recommendation.accessStrategies?.options?.filter(
+                            (option) =>
+                              option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
+                          ) ?? []
+                        }
+                      />
+                    ) : null}
+                  </>
                 }
               />
             </section>
@@ -8120,7 +8340,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         {shouldRenderParkingSections && isCityTrip ? (
           <section
             id={POINT_AB_DETAILS_SECTION_IDS['park-ride']}
-            className="scroll-target mt-8 rounded-2xl border border-border bg-card shadow-sm"
+            className="scroll-mt-24 scroll-target mt-8 rounded-2xl border border-border bg-card shadow-sm"
           >
             <details
               className="group"

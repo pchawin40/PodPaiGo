@@ -69,6 +69,7 @@ export type OptionComparisonCardProps = {
   timingBreakdownLabels?: TimingBreakdownLabels;
   pros: string[];
   cons: string[];
+  reason?: string;
   status?: RecommendationStatus;
   verdict?: string;
   unavailable?: boolean;
@@ -83,6 +84,9 @@ export type OptionComparisonCardProps = {
   className?: string;
 };
 
+const DETAILS_LINK_CLASS =
+  'flex w-full min-h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-center text-sm font-semibold leading-tight whitespace-normal text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800';
+
 export default function OptionComparisonCard({
   label,
   name,
@@ -94,6 +98,7 @@ export default function OptionComparisonCard({
   timingBreakdownLabels,
   pros,
   cons,
+  reason,
   status,
   verdict,
   unavailable,
@@ -111,6 +116,11 @@ export default function OptionComparisonCard({
   const shortCon = cons[0] ?? '';
   const isHidden = Boolean(hiddenByPreference);
 
+  const detailsActionObj = actions?.find((a) => a.label === 'Details' || a.label === 'Why unavailable');
+  const nonDetailsActions = actions?.filter((a) => a !== detailsActionObj) ?? [];
+  const primaryAction = nonDetailsActions[0];
+  const hasDetailsToggle = Boolean(detailsActionObj);
+
   const cardClassName =
     'relative flex h-full min-h-[17.5rem] flex-col rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
     (isHidden
@@ -126,8 +136,14 @@ export default function OptionComparisonCard({
   const badgeVerdict = isHidden ? 'Hidden by preference' : verdict;
   const timingRows = isHidden ? [] : buildTimingRows(timing, timingBreakdownLabels);
 
+  const showInlineDetails = !hasDetailsToggle && !isHidden;
+  const detailsHref = detailsActionObj?.ariaControls
+    ? `#${detailsActionObj.ariaControls}`
+    : detailsActionObj?.href;
+  const detailsLabel = detailsActionObj?.label || 'Details';
+
   return (
-    <div className={cardClassName}>
+    <div className={cardClassName} role="group" aria-label={`${label} recommendation`}>
       <div className="absolute right-3 top-3">
         <RecommendationStatusBadge
           status={badgeStatus}
@@ -166,7 +182,11 @@ export default function OptionComparisonCard({
           </div>
         </div>
 
-        {timingRows.length > 0 ? (
+        {!isHidden && reason ? (
+          <div className="mt-2 text-xs text-muted-foreground">{reason}</div>
+        ) : null}
+
+        {showInlineDetails && timingRows.length > 0 ? (
           <div className="mt-2 rounded-xl border border-border bg-card/70 p-2 text-xs leading-5">
             {timingRows.map((row) => (
               <div key={row.label} className="flex items-center justify-between gap-2">
@@ -177,20 +197,22 @@ export default function OptionComparisonCard({
           </div>
         ) : null}
 
-        <div className="mt-3 space-y-2 text-xs leading-5">
-          {shortPro ? (
-            <div>
-              <span className="font-semibold text-foreground">Pro: </span>
-              <span className="text-muted-foreground">{shortPro}</span>
-            </div>
-          ) : null}
-          {shortCon ? (
-            <div>
-              <span className="font-semibold text-foreground">Con: </span>
-              <span className="text-muted-foreground">{shortCon}</span>
-            </div>
-          ) : null}
-        </div>
+        {showInlineDetails ? (
+          <div className="mt-3 space-y-2 text-xs leading-5">
+            {shortPro ? (
+              <div>
+                <span className="font-semibold text-foreground">Pro: </span>
+                <span className="text-muted-foreground">{shortPro}</span>
+              </div>
+            ) : null}
+            {shortCon ? (
+              <div>
+                <span className="font-semibold text-foreground">Con: </span>
+                <span className="text-muted-foreground">{shortCon}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-auto flex flex-col items-center gap-2 pt-4">
@@ -204,6 +226,36 @@ export default function OptionComparisonCard({
               Show parking anyway
             </button>
           ) : null
+        ) : hasDetailsToggle ? (
+          <>
+            {primaryAction ? (
+              <DestinationModeActions compact actions={[primaryAction]} />
+            ) : null}
+            {detailsHref ? (
+              <a
+                href={detailsHref}
+                onClick={(event) => {
+                  if (detailsActionObj?.onClick) {
+                    event.preventDefault();
+                    detailsActionObj.onClick();
+                  }
+                }}
+                aria-controls={detailsActionObj?.ariaControls}
+                className={DETAILS_LINK_CLASS}
+              >
+                {detailsLabel}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={detailsActionObj?.onClick}
+                aria-controls={detailsActionObj?.ariaControls}
+                className={DETAILS_LINK_CLASS}
+              >
+                {detailsLabel}
+              </button>
+            )}
+          </>
         ) : actions && actions.length > 0 ? (
           <DestinationModeActions compact actions={actions} />
         ) : null}

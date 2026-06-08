@@ -27,7 +27,11 @@ describe('OptionComparisonCard compact layout', () => {
         cons={['Verify posted signs', 'Weather exposure on transfer']}
         actions={[
           { label: 'Route to lot', href: 'https://maps.example/drive' },
-          { label: 'Details', onClick: () => undefined, ariaControls: 'details-park-ride' },
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
+          },
         ]}
       />,
     );
@@ -138,7 +142,7 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.getByText('6 min')).toBeInTheDocument();
   });
 
-  test('renders a Details action button', () => {
+  test('renders a Details action link when a target section is provided', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -151,15 +155,20 @@ describe('OptionComparisonCard compact layout', () => {
         actions={[
           { label: 'Open transit route', href: 'https://maps.example/transit' },
           { label: 'Compare schedule', href: 'https://soundtransit.org/' },
-          { label: 'Details', onClick: () => undefined },
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS.transit,
+          },
         ]}
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
+    const detailsLink = screen.getByRole('link', { name: 'Details' });
+    expect(detailsLink).toHaveAttribute('href', '#transit-details');
   });
 
-  test('Details button exposes aria-expanded and aria-controls', () => {
+  test('Details link exposes target href and aria-controls', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -176,45 +185,45 @@ describe('OptionComparisonCard compact layout', () => {
             label: 'Details',
             onClick: () => undefined,
             ariaControls: POINT_AB_DETAILS_SECTION_IDS.rideshare,
-            ariaExpanded: true,
           },
         ]}
       />,
     );
 
-    const detailsButton = screen.getByRole('button', { name: 'Details' });
-    expect(detailsButton).toHaveAttribute('aria-controls', 'details-rideshare');
-    expect(detailsButton).toHaveAttribute('aria-expanded', 'true');
+    const detailsLink = screen.getByRole('link', { name: 'Details' });
+    expect(detailsLink).toHaveAttribute('aria-controls', 'rideshare-details');
+    expect(detailsLink).toHaveAttribute('href', '#rideshare-details');
+    expect(detailsLink).not.toHaveAttribute('aria-expanded');
   });
 
   test('scroll helper focuses the section heading and updates hash', () => {
     document.body.innerHTML = `
-      <section id="details-transit" class="scroll-target">
+      <section id="transit-details" class="scroll-target">
         <h2 data-details-heading tabindex="-1">Transit options</h2>
       </section>
     `;
 
-    const section = document.getElementById('details-transit')!;
+    const section = document.getElementById('transit-details')!;
     const heading = section.querySelector<HTMLElement>('[data-details-heading]')!;
     const scrollIntoView = jest.fn();
     section.scrollIntoView = scrollIntoView;
     const focusSpy = jest.spyOn(heading, 'focus');
 
-    scrollToPointAbDetailsSection('details-transit');
+    scrollToPointAbDetailsSection('transit-details');
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
-    expect(window.location.hash).toBe('#details-transit');
+    expect(window.location.hash).toBe('#transit-details');
   });
 
   test('exposes stable section IDs for each Point A→B mode', () => {
     expect(POINT_AB_DETAILS_SECTION_IDS).toEqual({
-      'destination-customer': 'details-destination-parking',
-      parking: 'details-destination-parking',
+      'destination-customer': 'customer-parking-details',
+      parking: 'paid-parking-details',
       'street-meter': 'details-street-meter',
-      rideshare: 'details-rideshare',
-      transit: 'details-transit',
-      'park-ride': 'details-park-ride',
+      rideshare: 'rideshare-details',
+      transit: 'transit-details',
+      'park-ride': 'park-ride-details',
     });
   });
 
@@ -245,7 +254,7 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.getByText('Hidden')).toBeInTheDocument();
     expect(screen.queryByText('Best pick')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open directions' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
     expect(
       screen.getByText('Hidden by your No parking needed preference.'),
     ).toBeInTheDocument();
@@ -298,7 +307,7 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const actionContainer = screen.getByRole('button', { name: 'Details' }).parentElement;
+    const actionContainer = screen.getByRole('link', { name: 'Details' }).parentElement;
     expect(actionContainer).toHaveClass('flex-col');
   });
 
@@ -315,7 +324,11 @@ describe('OptionComparisonCard compact layout', () => {
         actions={[
           { label: 'View ride estimates', href: 'https://uber.com/' },
           { label: 'Open transit route', href: 'https://maps.example/transit' },
-          { label: 'Details', onClick: () => undefined },
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS.rideshare,
+          },
         ]}
       />,
     );
@@ -324,23 +337,12 @@ describe('OptionComparisonCard compact layout', () => {
     expect(card.querySelector('.flex-1')).toBeTruthy();
     expect(card.querySelector('.mt-auto')).toHaveClass('pt-4');
 
-    const primary = screen.getByRole('link', { name: 'View ride estimates' });
-    const secondary = screen.getByRole('link', { name: 'Open transit route' });
-    const tertiary = screen.getByRole('button', { name: 'Details' });
+    // Primary action and Details toggle are always visible
+    expect(screen.getByRole('link', { name: 'View ride estimates' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute('href', '#rideshare-details');
 
-    for (const action of [primary, secondary, tertiary]) {
-      expect(action).toHaveClass('flex');
-      expect(action).toHaveClass('w-full');
-      expect(action).toHaveClass('items-center');
-      expect(action).toHaveClass('justify-center');
-      expect(action).toHaveClass('text-center');
-      expect(action).toHaveClass('leading-tight');
-      expect(action).toHaveClass('whitespace-normal');
-    }
-
-    expect(primary).toHaveClass('min-h-12');
-    expect(secondary).toHaveClass('min-h-12');
-    expect(tertiary).toHaveClass('min-h-10');
+    // Secondary action belongs in the lower detail section, not the cramped card.
+    expect(screen.queryByRole('link', { name: 'Open transit route' })).not.toBeInTheDocument();
   });
 
   test('keeps Park & Ride long-form content out of the comparison card', () => {
@@ -380,7 +382,11 @@ describe('OptionComparisonCard compact layout', () => {
     expect(cardContainer.querySelector('details')).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Parking rules/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Routes served/i)).not.toBeInTheDocument();
-    expect(within(cardContainer).getByRole('link', { name: 'Rules' })).toBeInTheDocument();
+    expect(within(cardContainer).queryByRole('link', { name: 'Rules' })).not.toBeInTheDocument();
+    expect(within(cardContainer).getByRole('link', { name: 'Details' })).toHaveAttribute(
+      'href',
+      '#park-ride-details',
+    );
 
     const { container: detailsContainer } = render(
       <ParkAndRideDetailsPanel details={presentation!.details} />,

@@ -23,6 +23,7 @@ import {
   isPaidParkingOption,
   type DestinationParkingIntelligence,
 } from './destinationParkingIntelligence';
+import { EVENT_STREET_METER_FALLBACK_CON } from './eventVenueDetection';
 import {
   resolveCustomerParkingTiming,
   resolvePaidGarageTiming,
@@ -123,6 +124,10 @@ type RankPointAbModesInput = {
 const BIG = 999_999;
 /** Park & Ride score penalty when free customer parking is the obvious local choice. */
 const CUSTOMER_PARKING_OVER_PARK_RIDE_PENALTY = 52;
+/** Street/meter should not win hero at stadiums and major event venues. */
+const EVENT_STREET_METER_SCORE_PENALTY = 88;
+const EVENT_PARKING_SCORE_BONUS = 20;
+const EVENT_TRANSIT_SCORE_BONUS = 12;
 
 function normalizeTripLocation(value: string | null | undefined): string {
   return String(value || '').trim().replace(/\s+/g, ' ');
@@ -527,8 +532,10 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     destination: input.destinationLabel,
     destinationKind: input.tripData.destinationKind,
     airportCode: input.tripData.airportCode,
+    origin: input.tripData.origin,
     parkingOptions: input.parkingOptions ?? (input.bestParking ? [input.bestParking] : []),
   });
+  const eventRulesLikely = destinationIntelligence.eventRulesLikely;
   const customerCandidate = destinationIntelligence.customerCandidate;
   const deprioritizeParkRide = shouldDeprioritizeParkRideForCustomerParking({
     customerCandidate,
@@ -612,14 +619,16 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     input.streetMeterParking?.applicable
       ? {
           key: 'street-meter',
-          label: input.streetMeterParking.label,
+          label: eventRulesLikely
+            ? 'Fallback: street / meter'
+            : input.streetMeterParking.label,
           cost: finiteOr(input.streetMeterParking.cost, 0),
           minutes: finiteOr(streetMeterMinutes ?? input.streetMeterParking.durationMinutes),
           reliable: Boolean(
             input.streetMeterParking.durationMinutes != null || effectiveDriveMinutes != null,
           ),
-          confidence: input.streetMeterParking.confidence,
-          baseScore: -6,
+          confidence: eventRulesLikely ? 'Low' : input.streetMeterParking.confidence,
+          baseScore: eventRulesLikely ? -EVENT_STREET_METER_SCORE_PENALTY : -6,
         }
       : null,
     hasRideshareOption
@@ -640,6 +649,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           minutes: finiteOr(input.transitDuration),
           reliable: true,
           confidence: input.bestTransitOption?.trustStatus === 'verified-source' ? 'High' : 'Medium',
+          baseScore: eventRulesLikely ? EVENT_TRANSIT_SCORE_BONUS : undefined,
         }
       : null,
     input.pointAbParkRide || input.bestParkRideAccess
@@ -668,7 +678,10 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
 
   const parkingBonus =
     parkingGoogleSignalsBonus(input.bestParking) +
-    parkingLocalRulesBonus(input.bestParking, input.tripData, input.destinationLabel);
+    parkingLocalRulesBonus(input.bestParking, input.tripData, input.destinationLabel) +
+    (eventRulesLikely && input.bestParking && isPaidParkingOption(input.bestParking)
+      ? EVENT_PARKING_SCORE_BONUS
+      : 0);
 
   const objectiveScored = candidates.map((mode) => ({
     mode,
@@ -805,19 +818,27 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       ? [
           {
             key: 'street-meter' as const,
-            label: input.streetMeterParking.label,
-            name: input.streetMeterParking.name,
+            label: eventRulesLikely
+              ? 'Fallback: street / meter'
+              : input.streetMeterParking.label,
+            name: eventRulesLikely
+              ? 'Risky street / meter fallback'
+              : input.streetMeterParking.name,
             cost: input.streetMeterParking.costDisplay,
-            costNote: input.streetMeterParking.costNote,
+            costNote: eventRulesLikely
+              ? 'Risky during events'
+              : input.streetMeterParking.costNote,
             time:
               streetMeterMinutes != null
                 ? formatMinutesLabel(streetMeterMinutes)
                 : input.streetMeterParking.timeDisplay,
             timeLabel: 'Total time' as const,
             timing: streetMeterTiming,
-            confidence: input.streetMeterParking.confidence,
-            pros: input.streetMeterParking.pros,
-            cons: input.streetMeterParking.cons,
+            confidence: eventRulesLikely ? 'Low' : input.streetMeterParking.confidence,
+            pros: eventRulesLikely ? [] : input.streetMeterParking.pros,
+            cons: eventRulesLikely
+              ? [EVENT_STREET_METER_FALLBACK_CON, ...input.streetMeterParking.cons]
+              : input.streetMeterParking.cons,
             status: 'verify_rules' as const,
             unavailable: false,
             hiddenByPreference: false,
@@ -936,40 +957,62 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   })) as PointAbModePresentation[];
 
   const recommendedTitle =
-    recommendationMode === 'destination-customer'
-      ? 'Check customer parking first'
-      : recommendationMode === 'parking'
-      ? input.bestParking?.name
-        ? `Park at ${input.bestParking.name}`
-        : 'Park near your destination'
-      : recommendationMode === 'street-meter'
-        ? 'Try street / meter parking'
-        : recommendationMode === 'rideshare'
-          ? `Take ${input.bestRideOption?.name || 'rideshare'}`
-          : recommendationMode === 'transit'
-            ? 'Take transit'
-            : recommendationMode === 'park-ride'
-              ? 'Use Park & Ride'
-              : 'Compare options';
+    eventRulesLikely && recommendationMode === 'parking'
+      ? input.bestParking?.bookingProvider || input.bestParking?.providerSource
+        ? 'Book event parking first'
+        : 'Use prepaid event parking'
+      : eventRulesLikely && recommendationMode === 'transit'
+        ? 'Take transit to the game'
+        : eventRulesLikely && recommendationMode === 'street-meter'
+          ? 'Avoid street parking for this event'
+          : eventRulesLikely && recommendationMode === 'park-ride'
+            ? 'Use transit or event parking'
+            : eventRulesLikely && recommendationMode === 'rideshare'
+              ? 'Use rideshare pickup/dropoff'
+              : recommendationMode === 'destination-customer'
+                ? 'Check customer parking first'
+                : recommendationMode === 'parking'
+                  ? input.bestParking?.name
+                    ? `Park at ${input.bestParking.name}`
+                    : 'Park near your destination'
+                  : recommendationMode === 'street-meter'
+                    ? 'Try street / meter parking'
+                    : recommendationMode === 'rideshare'
+                      ? `Take ${input.bestRideOption?.name || 'rideshare'}`
+                      : recommendationMode === 'transit'
+                        ? 'Take transit'
+                        : recommendationMode === 'park-ride'
+                          ? 'Use Park & Ride'
+                          : 'Compare options';
 
   const recommendedReason =
-    recommendationMode === 'destination-customer'
-      ? 'Free or customer parking is plausible here, but it is not a reserved space. Verify signs, hours, and access rules on arrival.'
-      : recommendationMode === 'street-meter'
-      ? 'Best fit when a legal on-street stall is open and you can verify posted signs.'
-      : recommendationMode === 'parking' && input.noParkingPreferred && extremeCostGap
-      ? 'Drive and parking are much cheaper than rideshare, even though you marked parking as not needed.'
-      : recommendationMode === 'parking'
-        ? 'Best fit if you want to drive and use parking near your destination.'
-        : recommendationMode === 'rideshare'
-          ? input.noParkingPreferred
-            ? 'Best fit because you marked that parking is not needed for this trip.'
-            : 'Best fit if you want the lowest effort and do not want to leave a car parked.'
-          : recommendationMode === 'transit'
-            ? 'Best fit if cost matters most and your schedule has enough buffer.'
-            : recommendationMode === 'park-ride'
-              ? 'Best fit when lot rules allow same-day Park & Ride plus transit.'
-              : 'Open provider pricing before making a final decision.';
+    eventRulesLikely && recommendationMode === 'parking'
+      ? 'Event venues usually require official, prepaid, or verified paid parking. Street parking is risky during games and events.'
+      : eventRulesLikely && recommendationMode === 'transit'
+        ? 'Transit avoids event traffic and risky street parking near the venue.'
+        : eventRulesLikely && recommendationMode === 'street-meter'
+          ? 'Street parking near stadiums may be restricted, full, or tow-enforced during events. Prefer event parking or transit.'
+          : eventRulesLikely && recommendationMode === 'rideshare'
+            ? input.noParkingPreferred
+              ? 'Best fit because you marked that parking is not needed for this trip.'
+              : 'Dropoff avoids hunting for event parking, but expect post-event congestion.'
+            : recommendationMode === 'destination-customer'
+              ? 'Free or customer parking is plausible here, but it is not a reserved space. Verify signs, hours, and access rules on arrival.'
+              : recommendationMode === 'street-meter'
+                ? 'Best fit when a legal on-street stall is open and you can verify posted signs.'
+                : recommendationMode === 'parking' && input.noParkingPreferred && extremeCostGap
+                  ? 'Drive and parking are much cheaper than rideshare, even though you marked parking as not needed.'
+                  : recommendationMode === 'parking'
+                    ? 'Best fit if you want to drive and use parking near your destination.'
+                    : recommendationMode === 'rideshare'
+                      ? input.noParkingPreferred
+                        ? 'Best fit because you marked that parking is not needed for this trip.'
+                        : 'Best fit if you want the lowest effort and do not want to leave a car parked.'
+                      : recommendationMode === 'transit'
+                        ? 'Best fit if cost matters most and your schedule has enough buffer.'
+                        : recommendationMode === 'park-ride'
+                          ? 'Best fit when lot rules allow same-day Park & Ride plus transit.'
+                          : 'Open provider pricing before making a final decision.';
 
   const cheapestModeResult = cheapestMode
     ? {

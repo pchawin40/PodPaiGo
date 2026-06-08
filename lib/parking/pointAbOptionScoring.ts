@@ -456,6 +456,8 @@ export function buildPointAbOptionScoreBreakdowns(
         : undefined;
   const streetMeter = buildStreetMeterParkingOption({
     destination: destinationLabel,
+    destinationKind: input.tripData.destinationKind,
+    origin: input.tripData.origin,
     arrivalDate,
     arrivalTime,
     durationMinutes: parkingDurationMinutes,

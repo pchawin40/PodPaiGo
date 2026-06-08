@@ -12,6 +12,7 @@ import {
   toPointAbParkRidePresentation,
 } from '../parkAndRideSelection';
 import { buildPointAbModeActions } from '../pointAbModeActions';
+import { POINT_AB_DETAILS_SECTION_IDS } from '../pointAbDetailsScroll';
 import { rankPointAbModes } from '../pointAbRanking';
 import {
   SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
@@ -146,7 +147,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
     expect(result.best!.rulesUrl).not.toMatch(/how-to-ride\/park-and-ride/);
   });
 
-  test('viable Park & Ride actions use route, transit, and rules buttons', () => {
+  test('viable Park & Ride actions keep route primary and send details lower on page', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideDirectionsUrl: 'https://maps.example/drive',
@@ -154,6 +155,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       parkRideRulesUrl: SOUND_TRANSIT_PARKING_URL,
       parkRideViable: true,
       onDetails: () => undefined,
+      detailsSectionId: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
     });
 
     expect(actions[0]).toEqual({ label: 'Route to lot', href: 'https://maps.example/drive' });
@@ -161,27 +163,26 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       label: 'Transit to destination',
       href: 'https://maps.example/transit',
     });
-    expect(actions[2]).toEqual({
-      label: 'Rules',
-      href: SOUND_TRANSIT_PARKING_URL,
-    });
+    expect(actions[2].label).toBe('Details');
+    expect(actions[2].ariaControls).toBe('park-ride-details');
   });
 
-  test('unavailable Park & Ride actions open rules and why-unavailable details', () => {
+  test('unavailable Park & Ride actions keep rules primary and send details lower on page', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideRulesUrl: 'https://soundtransit.org/rules',
       parkRideTransitPlannerUrl: SOUND_TRANSIT_TRIP_PLANNER_URL,
       parkRideViable: false,
       onDetails: () => undefined,
+      detailsSectionId: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
     });
 
     expect(actions[0]).toEqual({
       label: 'Check lot rules',
       href: 'https://soundtransit.org/rules',
     });
-    expect(actions[1].label).toBe('Why unavailable');
-    expect(actions[1].ariaControls).toBeUndefined();
+    expect(actions[1].label).toBe('Details');
+    expect(actions[1].ariaControls).toBe('park-ride-details');
     expect(actions[2]).toEqual({
       label: 'Open transit planner',
       href: SOUND_TRANSIT_TRIP_PLANNER_URL,
@@ -272,7 +273,7 @@ describe('OptionComparisonCard layout', () => {
           {
             label: 'Details',
             onClick: () => undefined,
-            ariaControls: 'details-park-ride',
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
             ariaExpanded: false,
           },
         ]}
@@ -281,18 +282,18 @@ describe('OptionComparisonCard layout', () => {
 
     expect(screen.getByText('Park & Ride')).toBeInTheDocument();
     expect(screen.getByText('Verify')).toBeInTheDocument();
-    expect(screen.getByText('Lower parking cost')).toBeInTheDocument();
-    expect(screen.queryByText('Extra pro hidden')).not.toBeInTheDocument();
-    expect(screen.queryByText('Extra con hidden')).not.toBeInTheDocument();
+    // Primary action and Details toggle always visible
     expect(screen.getByRole('link', { name: 'Route to lot' })).toHaveAttribute(
       'href',
       'https://maps.example/drive',
     );
-    expect(screen.getByRole('link', { name: 'Transit to destination' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute(
-      'aria-controls',
-      'details-park-ride',
+    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute(
+      'href',
+      '#park-ride-details',
     );
+    // Pros, cons, and secondary action belong in the lower details section.
+    expect(screen.queryByText('Lower parking cost')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Transit to destination' })).not.toBeInTheDocument();
   });
 
   test('desktop cards share equal-height flex layout', () => {

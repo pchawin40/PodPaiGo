@@ -19,6 +19,7 @@ type TravelPreferencesPanelProps = {
   className?: string;
   embedded?: boolean;
   hideParkingFilters?: boolean;
+  hideBusinessModeOptions?: boolean;
 };
 
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
@@ -47,6 +48,7 @@ export default function TravelPreferencesPanel({
   className = '',
   embedded = false,
   hideParkingFilters = false,
+  hideBusinessModeOptions = false,
 }: TravelPreferencesPanelProps) {
   const [preferences, setPreferences] = useState<TripTravelPreferences>(
     value || DEFAULT_TRAVEL_PREFERENCES,
@@ -79,40 +81,44 @@ export default function TravelPreferencesPanel({
 
   const content = (
     <>
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        Travel preferences
-      </div>
-      <h3 className="mt-1 text-lg font-semibold text-foreground">Car and parking preference</h3>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Saved locally on this device.
-      </p>
+      {!hideBusinessModeOptions ? (
+        <>
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Travel preferences
+          </div>
+          <h3 className="mt-1 text-lg font-semibold text-foreground">Car and parking preference</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Saved locally on this device.
+          </p>
 
-      <div className="mt-4 grid gap-2">
-        {BUSINESS_MODE_OPTIONS.map((option) => {
-          const active = preferences.businessTravelMode === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() =>
-                updatePreferences({
-                  ...preferences,
-                  businessTravelMode: option.value,
-                })
-              }
-              className={
-                'rounded-2xl border px-4 py-3 text-left transition ' +
-                (active
-                  ? 'border-primary/30 bg-primary/10'
-                  : 'border-border bg-card hover:border-primary/20 hover:bg-muted/50')
-              }
-            >
-              <div className="font-semibold text-foreground">{option.label}</div>
-              <div className="mt-1 text-sm text-muted-foreground">{option.detail}</div>
-            </button>
-          );
-        })}
-      </div>
+          <div className="mt-4 grid gap-2">
+            {BUSINESS_MODE_OPTIONS.map((option) => {
+              const active = preferences.businessTravelMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() =>
+                    updatePreferences({
+                      ...preferences,
+                      businessTravelMode: option.value,
+                    })
+                  }
+                  className={
+                    'rounded-2xl border px-4 py-3 text-left transition ' +
+                    (active
+                      ? 'border-primary/30 bg-primary/10'
+                      : 'border-border bg-card hover:border-primary/20 hover:bg-muted/50')
+                  }
+                >
+                  <div className="font-semibold text-foreground">{option.label}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">{option.detail}</div>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
 
       {!hideParkingFilters ? (
         <div className="mt-6">
