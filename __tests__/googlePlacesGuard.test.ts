@@ -164,8 +164,8 @@ describe('googlePlacesGuard emergency safeguards', () => {
   test('recommendation engine calls destination parking for point A to B trips without airport code', async () => {
     const { RecommendationEngine } = await import('../lib/recommendationEngine');
     const getParkingOptionsSpy = jest
-      .spyOn(RecommendationEngine.provider, 'getParkingOptions')
-      .mockResolvedValue([]);
+      .spyOn(RecommendationEngine.provider, 'getParkingOptionsWithMetadata')
+      .mockResolvedValue({ options: [], metadata: undefined });
 
     await RecommendationEngine.generateRecommendations(CITY_TRIP);
 

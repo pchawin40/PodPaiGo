@@ -268,4 +268,35 @@ describe('Google destination parking discovery', () => {
 
     fetchMock.mockRestore();
   });
+
+  test('returns empty with cache_empty status when API key is missing and Supabase inventory is empty', async () => {
+    // Reproduces the Monroe→Dairy Queen production scenario: no GOOGLE_MAPS_SERVER_API_KEY
+    // on Vercel means Google Places text-search is skipped. If Supabase inventory also has
+    // no cached lots near the destination, the result is zero parking options.
+    applyLiveGoogleParkingEnv();
+    (getGoogleMapsServerApiKey as jest.Mock).mockReturnValue(null);
+    (getParkingLotsNearPoint as jest.Mock).mockResolvedValue([]);
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const result = await getDestinationParkingOptionsWithMetadata({
+      origin: 'Monroe, WA',
+      destination: 'Dairy Queen Grill & Chill Monroe',
+      dateTime: '2026-06-07T14:00:00.000Z',
+      parkingDurationMinutes: 60,
+      // No destinationLat / destinationLng — as happens for text-input trips without saved coords
+    });
+
+    // Google Places API (places:searchText endpoint) must not be called without a key
+    const googlePlacesCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('places:searchText'),
+    );
+    expect(googlePlacesCalls).toHaveLength(0);
+    expect(result.options).toEqual([]);
+    // provider_error (not cache_empty) when the API key itself is absent —
+    // distinguishable from an empty inventory so the UI can show "unavailable"
+    // rather than "no parking found yet."
+    expect(result.metadata.status).toBe('provider_error');
+
+    fetchMock.mockRestore();
+  });
 });

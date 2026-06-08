@@ -5897,7 +5897,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   <div className="mt-1 text-2xl font-bold text-foreground">
                     {heroDriveMinutes !== null
                       ? formatMinutes(heroDriveMinutes)
-                      : 'Open directions'}
+                      : tripData?.origin && cityDestinationText
+                        ? (
+                          <a
+                            href={googleMapsDirectionsLink(tripData.origin, cityDestinationText)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary underline hover:opacity-80"
+                          >
+                            Open directions ↗
+                          </a>
+                        )
+                        : 'Check route'}
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">
                     Origin to destination
@@ -5914,7 +5925,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           Drive route
                         </div>
                         <div className="mt-1 font-semibold text-foreground">
-                          {heroDriveMinutes !== null ? formatMinutes(heroDriveMinutes) : 'Open directions'}
+                          {heroDriveMinutes !== null
+                            ? formatMinutes(heroDriveMinutes)
+                            : tripData?.origin && cityDestinationText
+                              ? (
+                                <a
+                                  href={googleMapsDirectionsLink(tripData.origin, cityDestinationText)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="underline text-primary"
+                                >
+                                  Open directions
+                                </a>
+                              )
+                              : 'Check route'}
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-muted/40 p-3">
@@ -7456,7 +7480,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="text-base font-semibold">
-                  {noParkingPreferred
+                  {(noParkingPreferred || showParkingAnyway)
                     ? showParkingAnyway
                       ? 'Parking is visible for comparison.'
                       : 'No parking needed / rideshare strategy'
@@ -7465,7 +7489,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       : 'Driving / parking preference'}
                 </div>
                 <p className="mt-1 leading-6">
-                  {noParkingPreferred
+                  {(noParkingPreferred || showParkingAnyway)
                     ? showParkingAnyway
                       ? 'Parking options are visible for comparison. Ride providers, transit, and directions remain available.'
                       : 'Parking is hidden. Use ride providers, transit, or directions for this trip.'
@@ -7475,7 +7499,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </p>
               </div>
               <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-                {noParkingPreferred ? (
+                {(noParkingPreferred || showParkingAnyway) ? (
                   <button
                     type="button"
                     onClick={() => setShowParkingAnyway((current) => !current)}

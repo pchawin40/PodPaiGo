@@ -16,6 +16,7 @@ export type DestinationParkingVenueCategory =
   | 'stadium_event_venue'
   | 'airport'
   | 'downtown_neighborhood'
+  | 'local_service'
   | 'general';
 
 export type DestinationParkingDensitySignal =
@@ -101,6 +102,9 @@ const STADIUM_EVENT_PATTERN =
 const DOWNTOWN_NEIGHBORHOOD_PATTERN =
   /\b(downtown|central business district|\bcbd\b|urban core|city center|city centre|financial district|entertainment district|arts district|historic district|midtown|uptown|waterfront district)\b/i;
 
+const LOCAL_SERVICE_PATTERN =
+  /\b(gym|fitness|crossfit|health club|yoga studio|pilates|spin class|sports club|rec center|recreation center|church|chapel|mosque|temple|synagogue|cathedral|parish|congregation|school|elementary|middle school|high school|preschool|daycare|day care|tutoring|academy|learning center|dental|dentist|orthodontist|chiropractor|optometrist|pediatrician|urgent care|clinic|family medicine|physical therapy|massage)\b/i;
+
 function normalize(value: string | null | undefined): string {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
@@ -130,6 +134,7 @@ export function inferDestinationParkingVenueCategory(
   if (DOWNTOWN_NEIGHBORHOOD_PATTERN.test(lower) || isDenseUrbanDestination(destination)) {
     return 'downtown_neighborhood';
   }
+  if (LOCAL_SERVICE_PATTERN.test(lower)) return 'local_service';
 
   return 'general';
 }
@@ -171,7 +176,8 @@ function usuallyHasCustomerOrOnsiteParking(category: DestinationParkingVenueCate
     category === 'restaurant_cafe_bar' ||
     category === 'hotel' ||
     category === 'grocery_store_mall' ||
-    category === 'park_trailhead'
+    category === 'park_trailhead' ||
+    category === 'local_service'
   );
 }
 
@@ -182,6 +188,7 @@ function buildCustomerCandidate(args: {
   const highConfidence = args.googleFreeSignal || args.category === 'grocery_store_mall';
   const park = args.category === 'park_trailhead';
   const hotel = args.category === 'hotel';
+  const localService = args.category === 'local_service';
 
   return {
     label: 'Customer parking',
@@ -189,19 +196,25 @@ function buildCustomerCandidate(args: {
       ? 'Park or trailhead parking'
       : hotel
         ? 'Hotel / guest parking'
-        : 'Customer parking at destination',
+        : localService
+          ? 'On-site parking may be available'
+          : 'Customer parking at destination',
     cost: 0,
     costDisplay: 'Free? Verify',
     costNote: park
       ? 'Verify hours, passes, and posted rules'
-      : 'Check signs, validation, time limits, and towing rules',
+      : localService
+        ? 'Verify hours, access rules, and posted signs on arrival'
+        : 'Check signs, validation, time limits, and towing rules',
     confidence: highConfidence ? 'Medium' : 'Low',
     pros: park
       ? ['Dedicated or free lot may exist', 'Often closest when allowed by posted rules']
-      : [
-          hotel ? 'Guest or visitor parking may exist' : 'Customer or on-site parking may exist',
-          'Free or validated parking is plausible outside dense cores',
-        ],
+      : localService
+        ? ['On-site or adjacent parking common for this venue type', 'Free or low-cost outside dense urban areas']
+        : [
+            hotel ? 'Guest or visitor parking may exist' : 'Customer or on-site parking may exist',
+            'Free or validated parking is plausible outside dense cores',
+          ],
     cons: park
       ? ['Pass, gate, or hour rules may apply', 'Not a reserved space']
       : ['Not a booked space', 'Verify signs before leaving your car'],
@@ -237,15 +250,20 @@ export function buildDestinationParkingIntelligence(input: {
         : 'lower_density';
   const eventRulesLikely = category === 'stadium_event_venue';
   const googleFreeSignal = hasFreeCustomerSignal(parkingOptions);
+  // When the destination classifier says free_likely (e.g. retail, restaurant), the destination
+  // has its own customer lot separate from any nearby paid garages returned by the aggregator.
+  // Don't let manyPaidLotsNearby suppress the candidate in that case.
+  const classificationSaysFree = classification.mode === 'free_likely';
   const customerParkingPlausible =
     !eventRulesLikely &&
     category !== 'airport' &&
     usuallyHasCustomerOrOnsiteParking(category) &&
     !downtownOrCore &&
-    !manyPaidLotsNearby;
+    (!manyPaidLotsNearby || classificationSaysFree);
 
   const customerCandidate =
-    customerParkingPlausible || (googleFreeSignal && !downtownOrCore && !eventRulesLikely)
+    customerParkingPlausible ||
+    (googleFreeSignal && !downtownOrCore && !eventRulesLikely && category !== 'airport')
       ? buildCustomerCandidate({ category, googleFreeSignal })
       : null;
 

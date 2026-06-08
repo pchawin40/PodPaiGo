@@ -81,6 +81,14 @@ export function qualifiesForSuburbanCustomerParkingInference(
     return true;
   }
 
+  if (
+    /\b(gym|fitness|crossfit|health club|yoga|church|chapel|mosque|temple|synagogue|school|preschool|daycare|dental|dentist|clinic|urgent care|chiropractor|optometrist|physical therapy|massage)\b/i.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 

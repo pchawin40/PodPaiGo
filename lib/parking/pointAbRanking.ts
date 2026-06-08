@@ -539,9 +539,17 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     tripData: input.tripData,
     destinationLabel: input.destinationLabel,
   });
+  const rideshareTiming = resolveRideshareTiming({
+    driveMinutes: effectiveDriveMinutes,
+    rideshare: input.bestRideOption,
+  });
+  const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
+  const hasRideshareOption = Boolean(input.bestRideOption || rideshareTiming);
+  // When no direct route data but rideshare has drive timing, use it as a customer parking proxy
+  const effectiveCustomerDriveMinutes = effectiveDriveMinutes ?? rideshareTiming?.driveMinutes ?? null;
   const customerTiming = customerCandidate
     ? customerParkingTiming(
-        { ...input, driveMinutes: effectiveDriveMinutes },
+        { ...input, driveMinutes: effectiveCustomerDriveMinutes },
         customerCandidate.confidence,
       )
     : null;
@@ -572,12 +580,6 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     : null;
   const streetMeterMinutes =
     streetMeterTiming?.totalOptionMinutes ?? input.streetMeterParking?.durationMinutes ?? null;
-  const rideshareTiming = resolveRideshareTiming({
-    driveMinutes: effectiveDriveMinutes,
-    rideshare: input.bestRideOption,
-  });
-  const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
-  const hasRideshareOption = Boolean(input.bestRideOption || rideshareTiming);
   const parkingHasUsableTiming =
     Boolean(input.bestParking && !parkingRouteUnavailable) &&
     parkingTiming?.driveMinutes != null &&

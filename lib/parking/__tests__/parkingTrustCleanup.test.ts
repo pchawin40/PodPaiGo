@@ -57,7 +57,7 @@ describe('parking trust cleanup helpers', () => {
     const trust = resolveParkingPriceTrust(option, ROUND_TRIP);
 
     expect(line.primary).toMatch(/^Estimated/);
-    expect(line.secondary).toMatch(/Confirm at provider/);
+    expect(line.secondary).toMatch(/Provider controls final price/);
     expect(trust.kind).toBe('estimated_range');
     expect(trust.disclosure).toMatch(/Confirm at provider/);
   });

@@ -12,23 +12,29 @@ export type RecommendationStatus =
   | 'cheapest'
   | 'live_route_needed';
 
-export const RECOMMENDATION_STATUS_LABELS: Record<RecommendationStatus, string> = {
+export const RECOMMENDATION_STATUS_LABELS: Record<
+  'best_pick' | 'easy_backup' | 'cheapest' | 'fastest' | 'live_route_needed' | 'unavailable' | 'not_recommended',
+  string
+> = {
   best_pick: 'Best pick',
-  budget_option: 'Budget',
-  fastest: 'Fastest',
-  easiest: 'Easiest',
   easy_backup: 'Easy backup',
-  hidden_by_preference: 'Hidden',
-  verify_rules: 'Verify',
+  cheapest: 'Cheapest',
+  fastest: 'Fastest',
+  live_route_needed: 'Route needed',
   unavailable: 'Unavailable',
   not_recommended: 'Not recommended',
+};
+
+const STATUS_LABEL_FALLBACKS: Partial<Record<RecommendationStatus, string>> = {
+  budget_option: 'Budget',
+  easiest: 'Easiest',
+  hidden_by_preference: 'Hidden',
+  verify_rules: 'Verify',
   route_needed: 'Route needed',
-  cheapest: 'Budget',
-  live_route_needed: 'Route needed',
 };
 
 export function recommendationStatusLabel(status: RecommendationStatus): string {
-  return RECOMMENDATION_STATUS_LABELS[status];
+  return RECOMMENDATION_STATUS_LABELS[status] ?? STATUS_LABEL_FALLBACKS[status] ?? '';
 }
 
 export function recommendationStatusBadgeClass(status: RecommendationStatus): string {
@@ -85,11 +91,11 @@ export function mapComparisonVerdictToStatus(args: {
   }
 
   if (verdict === 'Live route needed' || verdict === 'Open app') {
-    return 'route_needed';
+    return 'live_route_needed';
   }
 
   if (verdict === 'Best pick') {
-    if (sort === 'cheapest' || isCheapestMode) return 'budget_option';
+    if (sort === 'cheapest' || isCheapestMode) return 'cheapest';
     if (sort === 'fastest' || isFastestMode) return 'fastest';
     return 'best_pick';
   }

@@ -6,6 +6,7 @@ jest.mock('../lib/db/client', () => ({
     connect: jest.fn(),
     query: jest.fn(),
   },
+  parkingDbCacheDisabledByConfig: jest.fn(() => false),
 }));
 
 jest.mock('../lib/env/googleMapsServerKey', () => ({

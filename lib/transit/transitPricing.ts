@@ -196,6 +196,6 @@ export function formatTransitCostDisplay(
     oneWay,
     includesReturnLeg: false,
     primary: formatResolvedTransitFarePrimary(fareResolution, tripTotal, false),
-    secondary: fareResolution.matchKind === 'city' ? fareResolution.sourceLabel : null,
+    secondary: fareResolution.matchKind === 'city' ? fareResolution.fareLabel : null,
   };
 }

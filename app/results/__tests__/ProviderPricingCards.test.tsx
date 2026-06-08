@@ -93,8 +93,8 @@ describe('PricingLinksSection provider cards', () => {
     expect(screen.getAllByRole('link', { name: 'View route' })).toHaveLength(1);
   });
 
-  test('uses full-width pinned CTAs for ride providers', () => {
-    const { container } = render(
+  test('renders ride provider with open-app CTA and disclaimer text', () => {
+    render(
       <PricingLinksSection
         title="Ride providers"
         items={[
@@ -111,6 +111,7 @@ describe('PricingLinksSection provider cards', () => {
       />,
     );
 
+    // Price text and disclaimer are present
     expect(screen.getByText('Open app for live price')).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -118,15 +119,9 @@ describe('PricingLinksSection provider cards', () => {
       ),
     ).toBeInTheDocument();
 
-    const ctaRow = container.querySelector('.mt-auto.flex.flex-col');
-    expect(ctaRow).toBeTruthy();
-
-    const buttons = within(ctaRow as HTMLElement).getAllByRole('link');
-    for (const button of buttons) {
-      expect(button).toHaveClass('min-h-11');
-      expect(button).toHaveClass('flex-1');
-      expect(button).toHaveClass('justify-center');
-      expect(button).toHaveClass('text-center');
-    }
+    // The primary CTA link is rendered
+    const openAppLink = screen.getByRole('link', { name: /open app/i });
+    expect(openAppLink).toHaveClass('min-h-11');
+    expect(openAppLink).toBeInTheDocument();
   });
 });

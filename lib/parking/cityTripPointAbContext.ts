@@ -157,7 +157,7 @@ export function computeCityTripPointAbRanking(input: {
     parkingTotal,
     parkingMinutes: parkingBreakdown?.totalMinutes ?? null,
     bestRideOption: bestRideOption ?? null,
-    ridePrice,
+    ridePrice: ridesharePriceUnavailable && input.noParkingPreferred ? 0 : ridePrice,
     rideDuration,
     bestTransitOption: bestTransitOption ?? null,
     transitCost,

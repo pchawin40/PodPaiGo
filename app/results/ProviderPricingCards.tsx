@@ -202,7 +202,7 @@ export function PricingLinksSection({
               ? getTransitPassAppliedBadge(transitPassContext)
               : transitPriceDisplay.includesReturnLeg
                 ? 'round-trip fare estimate'
-                : 'one-way fare estimate'
+                : transitPriceDisplay.secondary ?? 'one-way fare estimate'
             : isTransitSection && !transitPriceDisplay && typeof it.price === 'number'
               ? transitPayment === 'orca-pass'
                 ? getTransitPassAppliedBadge(transitPassContext)
@@ -219,6 +219,77 @@ export function PricingLinksSection({
             : isRideSection
               ? RIDESHARE_ESTIMATE_DISCLAIMER
               : null;
+
+        if (isRideSection) {
+          return (
+            <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-sky-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 dark:hover:border-sky-800 sm:p-4">
+                <div className="flex items-start gap-3 sm:gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-slate-900 ring-1 ring-sky-100 dark:bg-sky-950/50 dark:text-slate-100 dark:ring-sky-900 sm:h-12 sm:w-12">
+                    {providerIcon(it.name)}
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-100">
+                      {it.name}
+                    </div>
+
+                    {primaryPrice ? (
+                      <div className="text-lg font-bold leading-snug text-zinc-900 dark:text-zinc-100">
+                        {primaryPrice}
+                      </div>
+                    ) : null}
+
+                    {secondaryPrice && ridesharePricing?.secondary ? (
+                      <div className="text-sm font-medium leading-snug text-zinc-600 dark:text-zinc-300">
+                        {secondaryPrice}
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {rideshareConfidence ? (
+                        <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + rideshareConfidence.className}>
+                          {rideshareConfidence.label}
+                        </span>
+                      ) : null}
+                      <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
+                        {trust.label}
+                      </span>
+                    </div>
+
+                    <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                      {rideDisclaimer}
+                    </p>
+
+                    <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+                      {showSecondaryRouteButton && it.mapLink ? (
+                        <a
+                          href={it.mapLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-center text-sm font-medium leading-none text-zinc-800 hover:bg-zinc-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                        >
+                          View route
+                        </a>
+                      ) : null}
+
+                      {primaryHref ? (
+                        <a
+                          href={primaryHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-semibold leading-none text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                        >
+                          {primaryCta}
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
@@ -267,7 +338,7 @@ export function PricingLinksSection({
                   ) : null}
                 </div>
 
-                {secondaryPrice && !isRideSection ? (
+                {secondaryPrice && !isRideSection && !(isTransitSection && secondaryPrice === fareSublabel) ? (
                   <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
                     {secondaryPrice}
                   </p>

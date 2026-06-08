@@ -938,4 +938,530 @@ describe('pointAbRanking', () => {
     expect(parkRideMode?.status).not.toBe('best_pick');
     expect(ranked.canonicalWinners.cheapestWinner?.key).toBe('destination-customer');
   });
+
+  test('suburban restaurant with rideshare-only timing picks customer parking not rideshare', () => {
+    // No coordinates, no driveMinutes — only rideshare has drive timing.
+    // This is the core regression: rideshare.driveMinutes should be used as a
+    // proxy so customer parking candidate gets real minutes instead of BIG=999999.
+    const monroeTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe WA',
+      destination: 'Dairy Queen Monroe WA',
+      destinationKind: 'restaurant' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+    };
+    const rideOption = {
+      ...expensiveRide,
+      price: 15,
+      duration: 15,
+      driveMinutes: 10,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 15,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: monroeTrip,
+      sort: 'easiest',
+      destinationLabel: monroeTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: rideOption,
+      ridePrice: 15,
+      rideDuration: 15,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(ranked.recommendedTitle).toMatch(/customer parking/i);
+    const customerMode = ranked.modes.find((m) => m.key === 'destination-customer');
+    expect(customerMode?.unavailable).toBe(false);
+    expect(customerMode?.time).not.toBe('Drive + verify');
+  });
+
+  test('same suburban restaurant trip with no-parking preference allows rideshare to win', () => {
+    const monroeTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe WA',
+      destination: 'Dairy Queen Monroe WA',
+      destinationKind: 'restaurant' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+    };
+    const rideOption = {
+      ...expensiveRide,
+      price: 15,
+      duration: 15,
+      driveMinutes: 10,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 15,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: monroeTrip,
+      sort: 'easiest',
+      destinationLabel: monroeTrip.destination,
+      noParkingPreferred: true,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: rideOption,
+      ridePrice: 15,
+      rideDuration: 15,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    expect(ranked.displayRecommendationMode).toBe('rideshare');
+    const customerMode = ranked.modes.find((m) => m.key === 'destination-customer');
+    expect(customerMode?.hiddenByPreference).toBe(true);
+  });
+
+  test('dense downtown destination does not produce a customer parking candidate', () => {
+    const downtownTrip = {
+      type: 'general-trip' as const,
+      origin: 'Redmond, WA',
+      destination: 'Downtown Seattle Financial District',
+      destinationKind: 'downtown' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: downtownTrip,
+      sort: 'easiest',
+      destinationLabel: downtownTrip.destination,
+      noParkingPreferred: false,
+      bestParking: parkingOption,
+      parkingOptions: [parkingOption],
+      parkingTotal: 18,
+      parkingMinutes: 30,
+      bestRideOption: expensiveRide,
+      ridePrice: 28,
+      rideDuration: 25,
+      bestTransitOption: cheapTransit,
+      transitCost: 3.25,
+      transitDuration: 45,
+      transitCostDisplay: '$3.25',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 22,
+    });
+
+    expect(ranked.modes.some((m) => m.key === 'destination-customer')).toBe(false);
+  });
+
+  test('airport trip does not use customer parking hero logic', () => {
+    const airportTrip = {
+      type: 'one-way-departure' as const,
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport' as const,
+      airportCode: 'SEA',
+      departureDate: '2026-06-07',
+      departureTime: '06:00',
+      transportAvailability: 'car' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: airportTrip,
+      sort: 'easiest',
+      destinationLabel: airportTrip.destination,
+      noParkingPreferred: false,
+      bestParking: parkingOption,
+      parkingOptions: [parkingOption],
+      parkingTotal: 80,
+      parkingMinutes: 55,
+      bestRideOption: expensiveRide,
+      ridePrice: 45,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 35,
+    });
+
+    expect(ranked.modes.some((m) => m.key === 'destination-customer')).toBe(false);
+    expect(ranked.recommendationMode).not.toBe('destination-customer');
+  });
+
+  test('customer parking winner does not hide paid parking comparison section', () => {
+    const restaurantTrip = {
+      ...tripData,
+      destination: 'Local Grill & Diner, Kirkland WA',
+      destinationKind: 'restaurant' as const,
+      parkingDuration: 90,
+    };
+    const paidLot = {
+      ...parkingOption,
+      id: 'kirkland-paid',
+      name: 'Kirkland Parking Garage',
+      price: 14,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+      originToParkingMinutes: 20,
+      routeToParkingMinutes: 20,
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: restaurantTrip,
+      sort: 'easiest',
+      destinationLabel: restaurantTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLot,
+      parkingOptions: [paidLot],
+      parkingTotal: 14,
+      parkingMinutes: 28,
+      bestRideOption: expensiveRide,
+      ridePrice: 22,
+      rideDuration: 18,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 14,
+    });
+
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    const paidMode = ranked.modes.find((m) => m.key === 'parking');
+    expect(paidMode).toBeTruthy();
+    expect(paidMode?.hiddenByPreference).toBe(false);
+    expect(paidMode?.unavailable).toBe(false);
+    expect(paidMode?.costNote).toBe('Bookable paid backup');
+  });
+
+  test('suburban gym destination gets customer parking candidate', () => {
+    const gymTrip = {
+      type: 'general-trip' as const,
+      origin: 'Bothell, WA',
+      destination: 'Planet Fitness, Bothell WA',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '07:00',
+      parkingDuration: 90,
+      transportAvailability: 'all' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: gymTrip,
+      sort: 'easiest',
+      destinationLabel: gymTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: {
+        ...expensiveRide,
+        price: 12,
+        duration: 12,
+        driveMinutes: 8,
+        pickupWaitMinutes: 4,
+        totalOptionMinutes: 12,
+      },
+      ridePrice: 12,
+      rideDuration: 12,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    const customerMode = ranked.modes.find((m) => m.key === 'destination-customer');
+    expect(customerMode).toBeTruthy();
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(customerMode?.name).toMatch(/on-site parking/i);
+  });
+
+  test('Fred Meyer suburban retail with 3 paid nearby lots still builds customer parking candidate and wins hero', () => {
+    // Scenario: aggregator returns 3 ParkWhiz paid lots near Fred Meyer (manyPaidLotsNearby=true).
+    // Parking outlook correctly says "Free customer parking likely" via destination type inference.
+    // The hero must not say "Take UberX" — customer parking should win.
+    const fredMeyerTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe WA',
+      destination: 'Fred Meyer Monroe WA',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '10:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+    };
+
+    // 3 paid ParkWhiz lots found near Fred Meyer — triggers manyPaidLotsNearby=true
+    const paidLotBase = {
+      ...parkingOption,
+      price: 10,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+    const paidLots = [
+      { ...paidLotBase, id: 'pw-1', name: 'ParkWhiz Lot 1', originToParkingMinutes: 8, routeToParkingMinutes: 8 },
+      { ...paidLotBase, id: 'pw-2', name: 'ParkWhiz Lot 2', originToParkingMinutes: 9, routeToParkingMinutes: 9 },
+      { ...paidLotBase, id: 'pw-3', name: 'ParkWhiz Lot 3', originToParkingMinutes: 10, routeToParkingMinutes: 10 },
+    ] satisfies ParkingOption[];
+
+    const rideOption = {
+      ...expensiveRide,
+      price: 18,
+      duration: 9,
+      driveMinutes: 4,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 9,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: fredMeyerTrip,
+      sort: 'easiest',
+      destinationLabel: fredMeyerTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLots[0],
+      parkingOptions: paidLots,
+      parkingTotal: 10,
+      parkingMinutes: 16,
+      bestRideOption: rideOption,
+      ridePrice: 18,
+      rideDuration: 9,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    const customerMode = ranked.modes.find((m) => m.key === 'destination-customer');
+    const paidMode = ranked.modes.find((m) => m.key === 'parking');
+
+    // 1. Customer parking candidate must be visible
+    expect(customerMode).toBeTruthy();
+    // 2. Hero should be customer parking, not rideshare
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(ranked.recommendedTitle).toMatch(/customer parking/i);
+    // 3. Paid garage/lot remains visible as backup (not hidden)
+    expect(paidMode).toBeTruthy();
+    expect(paidMode?.hiddenByPreference).toBe(false);
+    expect(paidMode?.unavailable).toBe(false);
+    expect(paidMode?.costNote).toBe('Bookable paid backup');
+    // 4. Customer parking has usable timing (from rideshare drive proxy, not BIG=999999)
+    expect(customerMode?.time).not.toBe('Drive + verify');
+  });
+
+  test('Fred Meyer trip with no-parking preference keeps rideshare eligible to win', () => {
+    const fredMeyerTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe WA',
+      destination: 'Fred Meyer Monroe WA',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '10:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+    };
+    const paidLotBase = {
+      ...parkingOption,
+      price: 10,
+      parkingCategory: 'garage_paid' as const,
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+    const paidLots = [
+      { ...paidLotBase, id: 'pw-1', name: 'ParkWhiz Lot 1', originToParkingMinutes: 8, routeToParkingMinutes: 8 },
+      { ...paidLotBase, id: 'pw-2', name: 'ParkWhiz Lot 2', originToParkingMinutes: 9, routeToParkingMinutes: 9 },
+      { ...paidLotBase, id: 'pw-3', name: 'ParkWhiz Lot 3', originToParkingMinutes: 10, routeToParkingMinutes: 10 },
+    ] satisfies ParkingOption[];
+    const rideOption = {
+      ...expensiveRide,
+      price: 18,
+      duration: 9,
+      driveMinutes: 4,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 9,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: fredMeyerTrip,
+      sort: 'easiest',
+      destinationLabel: fredMeyerTrip.destination,
+      noParkingPreferred: true,
+      bestParking: paidLots[0],
+      parkingOptions: paidLots,
+      parkingTotal: 10,
+      parkingMinutes: 16,
+      bestRideOption: rideOption,
+      ridePrice: 18,
+      rideDuration: 9,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    expect(ranked.displayRecommendationMode).toBe('rideshare');
+    const customerMode = ranked.modes.find((m) => m.key === 'destination-customer');
+    expect(customerMode?.hiddenByPreference).toBe(true);
+  });
+
+  test('dense downtown with paid lots does not produce customer parking hero', () => {
+    const downtownTrip = {
+      type: 'general-trip' as const,
+      origin: 'Bellevue WA',
+      destination: 'Downtown Seattle Financial District WA',
+      destinationKind: 'downtown' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '10:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+    };
+    const paidLotBase = {
+      ...parkingOption,
+      price: 22,
+      parkingCategory: 'garage_paid' as const,
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+    const paidLots = [
+      { ...paidLotBase, id: 'dt-1', name: 'Downtown Garage 1', originToParkingMinutes: 30, routeToParkingMinutes: 30 },
+      { ...paidLotBase, id: 'dt-2', name: 'Downtown Garage 2', originToParkingMinutes: 32, routeToParkingMinutes: 32 },
+      { ...paidLotBase, id: 'dt-3', name: 'Downtown Garage 3', originToParkingMinutes: 34, routeToParkingMinutes: 34 },
+    ] satisfies ParkingOption[];
+
+    const ranked = rankPointAbModes({
+      tripData: downtownTrip,
+      sort: 'easiest',
+      destinationLabel: downtownTrip.destination,
+      noParkingPreferred: false,
+      bestParking: paidLots[0],
+      parkingOptions: paidLots,
+      parkingTotal: 22,
+      parkingMinutes: 40,
+      bestRideOption: expensiveRide,
+      ridePrice: 28,
+      rideDuration: 30,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 28,
+    });
+
+    expect(ranked.modes.some((m) => m.key === 'destination-customer')).toBe(false);
+    expect(ranked.recommendationMode).not.toBe('destination-customer');
+  });
+
+  test('airport trip with paid lots does not produce customer parking candidate', () => {
+    const airportTrip = {
+      type: 'one-way-departure' as const,
+      origin: 'Monroe WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport' as const,
+      airportCode: 'SEA',
+      departureDate: '2026-06-07',
+      departureTime: '06:00',
+      transportAvailability: 'car' as const,
+    };
+    const paidLotBase = {
+      ...parkingOption,
+      price: 22,
+      serviceAirportCode: 'SEA' as const,
+      parkingCategory: 'garage_paid' as const,
+      bookingProvider: 'ParkWhiz',
+      sourceName: 'ParkWhiz',
+    } satisfies ParkingOption;
+    const seaLots = [
+      { ...paidLotBase, id: 'sea-1', name: 'SEA Lot 1', originToParkingMinutes: 45, routeToParkingMinutes: 45 },
+      { ...paidLotBase, id: 'sea-2', name: 'SEA Lot 2', originToParkingMinutes: 47, routeToParkingMinutes: 47 },
+      { ...paidLotBase, id: 'sea-3', name: 'SEA Lot 3', originToParkingMinutes: 49, routeToParkingMinutes: 49 },
+    ] satisfies ParkingOption[];
+
+    const ranked = rankPointAbModes({
+      tripData: airportTrip,
+      sort: 'easiest',
+      destinationLabel: airportTrip.destination,
+      noParkingPreferred: false,
+      bestParking: seaLots[0],
+      parkingOptions: seaLots,
+      parkingTotal: 80,
+      parkingMinutes: 55,
+      bestRideOption: expensiveRide,
+      ridePrice: 45,
+      rideDuration: 40,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 38,
+    });
+
+    expect(ranked.modes.some((m) => m.key === 'destination-customer')).toBe(false);
+    expect(ranked.recommendationMode).not.toBe('destination-customer');
+  });
 });

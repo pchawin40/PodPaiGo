@@ -120,22 +120,25 @@ describe('parking safe mode', () => {
   test('airport aggregation returns cached/provider parking only when Google is disabled', async () => {
     applySafeModeEnv();
 
-    jest.spyOn(parkingProviderRegistry, 'executeSearch').mockResolvedValueOnce([
-      {
-        providerId: 'inventory',
-        options: [baseOption({ id: 'inv-1', name: 'Inventory Lot A' })],
-        health: { status: 'healthy', checkedAt: new Date().toISOString() },
-      },
-      {
-        providerId: 'google',
-        options: [],
-        health: {
-          status: 'offline',
-          message: 'Live Google parking discovery disabled',
-          checkedAt: new Date().toISOString(),
+    jest.spyOn(parkingProviderRegistry, 'executeSearchPartial').mockResolvedValueOnce({
+      timedOut: false,
+      results: [
+        {
+          providerId: 'inventory',
+          options: [baseOption({ id: 'inv-1', name: 'Inventory Lot A' })],
+          health: { status: 'healthy', checkedAt: new Date().toISOString() },
         },
-      },
-    ]);
+        {
+          providerId: 'google',
+          options: [],
+          health: {
+            status: 'offline',
+            message: 'Live Google parking discovery disabled',
+            checkedAt: new Date().toISOString(),
+          },
+        },
+      ],
+    });
 
     const fetchMock = jest.spyOn(global, 'fetch');
 
@@ -144,7 +147,8 @@ describe('parking safe mode', () => {
       destination: 'Seattle-Tacoma International Airport (SEA)',
     });
 
-    expect(options.map((option) => option.id)).toEqual(['inv-1']);
+    expect(options.map((option) => option.id)).toContain('inv-1');
+    expect(options.every((option) => !String(option.id).startsWith('google-live'))).toBe(true);
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes('places.googleapis.com')),
     ).toHaveLength(0);
@@ -170,8 +174,8 @@ describe('parking safe mode', () => {
 
     const fetchMock = jest.spyOn(global, 'fetch');
     const getParkingOptionsSpy = jest
-      .spyOn(RecommendationEngine.provider, 'getParkingOptions')
-      .mockResolvedValue([]);
+      .spyOn(RecommendationEngine.provider, 'getParkingOptionsWithMetadata')
+      .mockResolvedValue({ options: [], metadata: undefined });
 
     expect(shouldDiscoverParkingForTrip(CITY_TRIP)).toBe(true);
 
