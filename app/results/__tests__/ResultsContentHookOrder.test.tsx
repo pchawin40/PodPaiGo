@@ -290,6 +290,17 @@ function installResultsFetchMock(recommendation: Recommendation) {
   return fetchMock;
 }
 
+function getParkingPlanCard(sectionId = 'paid-parking-details'): HTMLElement {
+  const detailsSection = document.getElementById(sectionId);
+  expect(detailsSection).toBeInTheDocument();
+  const heading = within(detailsSection as HTMLElement).getByRole('heading', {
+    name: 'Parking plan',
+  });
+  const planCard = heading.closest('section');
+  expect(planCard).toBeInTheDocument();
+  return planCard as HTMLElement;
+}
+
 describe('ResultsContent hook order', () => {
   const originalLiveRefresh = process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH;
 
@@ -653,7 +664,7 @@ describe('ResultsContent hook order', () => {
     });
   });
 
-  test('customer parking card is compact and details section keeps verification warnings', async () => {
+  test('customer parking card is compact and details section keeps arrival checklist warnings', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationForPreferenceToggle();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -698,11 +709,153 @@ describe('ResultsContent hook order', () => {
 
     const detailsSection = document.getElementById('customer-parking-details');
     expect(detailsSection).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Check signs')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Validation rules')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Time limits')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Towing/private lot warning')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Not a booked/reserved space')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByRole('heading', { name: 'Parking plan' })).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Before you park')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Check customer-only signs')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Confirm validation rules')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Check time limits')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('Watch for towing/private lot restrictions')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByText('This is not a reserved space')).toBeInTheDocument();
+  });
+
+  test('paid parking details render a parking plan with recommendation, reasons, checklist, timing, and street note', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destinationName: 'Pike Place Market, Seattle, WA',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    const planCard = getParkingPlanCard();
+
+    expect(within(planCard).getByRole('heading', { name: 'Parking plan' })).toBeInTheDocument();
+    expect(within(planCard).queryByText('Parking options')).not.toBeInTheDocument();
+    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Why this option')).toBeInTheDocument();
+    expect(within(planCard).getByText('Before you park')).toBeInTheDocument();
+    expect(within(planCard).getByText('Timing')).toBeInTheDocument();
+    expect(within(planCard).getByText('Test Garage One')).toBeInTheDocument();
+    expect(within(planCard).getAllByText('Best confirmed paid option').length).toBeGreaterThan(0);
+    expect(within(planCard).getByText('Confirmed paid parking option')).toBeInTheDocument();
+    expect(within(planCard).getByText('More reliable than guessing street parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Confirm final price')).toBeInTheDocument();
+    expect(within(planCard).getByText('Check hours')).toBeInTheDocument();
+    expect(within(planCard).getByText('Check event or validation rules')).toBeInTheDocument();
+    expect(within(planCard).getByText('Check towing/private lot signs')).toBeInTheDocument();
+    expect(within(planCard).getByText('Drive to lot')).toBeInTheDocument();
+    expect(within(planCard).getByText('Park/check-in buffer')).toBeInTheDocument();
+    expect(within(planCard).getByText('Walk to destination')).toBeInTheDocument();
+    expect(within(planCard).getByRole('link', { name: 'Route to parking' })).toBeInTheDocument();
+    expect(within(planCard).getByText('Street parking note')).toBeInTheDocument();
+    expect(
+      within(planCard).getByText(
+        'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test('stadium parking plan labels street parking as a warning, not recommended parking', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+          originLat: '47.8554',
+          originLng: '-121.9709',
+          destinationLat: '47.5952',
+          destinationLng: '-122.3316',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    const planCard = getParkingPlanCard();
+
+    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Street parking warning')).toBeInTheDocument();
+    expect(
+      within(planCard).getByText(
+        'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(planCard).queryByText('Street / meter parking')).not.toBeInTheDocument();
+    expect(within(planCard).queryByText('Street parking note')).not.toBeInTheDocument();
+  });
+
+  test('parking plan omits timing section when route timing is missing', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    recommendation.parking = [
+      {
+        ...recommendation.parking[0],
+        routeUnavailable: true,
+        routeUnavailableReason: 'Route unavailable in test',
+        routeToParkingMinutes: undefined,
+        originToParkingMinutes: undefined,
+        driveMinutes: undefined,
+        duration: undefined,
+        totalOptionMinutes: undefined,
+        timingBreakdown: undefined,
+      },
+    ];
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    const planCard = getParkingPlanCard();
+
+    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).queryByText('Timing')).not.toBeInTheDocument();
+    expect(within(planCard).queryByText('Drive to lot')).not.toBeInTheDocument();
+    expect(within(planCard).queryByText('Park/check-in buffer')).not.toBeInTheDocument();
+    expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+  });
+
+  test('city trip with no parking data renders parking data unavailable plan', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendation();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('General trip')).toBeInTheDocument();
+    });
+
+    const planCard = getParkingPlanCard();
+    expect(within(planCard).getByText('Parking data unavailable')).toBeInTheDocument();
+    expect(
+      within(planCard).getByText('Open directions or search nearby parking to verify options.'),
+    ).toBeInTheDocument();
+    expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+    expect(within(planCard).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(within(planCard).getByRole('link', { name: 'Search nearby parking' })).toBeInTheDocument();
   });
 
   test('city parking results attempt Google place enrichment', async () => {

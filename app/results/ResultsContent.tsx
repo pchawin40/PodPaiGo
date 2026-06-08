@@ -3296,12 +3296,345 @@ function PointAbModeDetailSummary({
   );
 }
 
+function hasParkingPlanTiming(row: PointAbModePresentation | null | undefined): boolean {
+  const timing = row?.timing;
+  if (!timing) return false;
+
+  return [
+    timing.driveMinutes,
+    timing.parkingBufferMinutes,
+    timing.walkToDestinationMinutes,
+    timing.pickupWaitMinutes,
+  ].some((value) => typeof value === 'number' && Number.isFinite(value));
+}
+
+function ParkingPlanSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function ParkingPlanFacts({
+  facts,
+}: {
+  facts: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-3">
+      {facts.map((fact) => (
+        <div key={fact.label} className="border-l-2 border-border pl-3">
+          <dt className="text-xs font-semibold uppercase text-muted-foreground">{fact.label}</dt>
+          <dd className="mt-1 font-semibold text-foreground">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function ParkingPlanList({ items }: { items: string[] }) {
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+      {items.filter(Boolean).map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ParkingPlanTiming({
+  row,
+  timingLabels,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  timingLabels: PointAbDetailTimingLabels;
+}) {
+  if (!hasParkingPlanTiming(row)) return null;
+
+  const timingRows = pointAbDetailTimingRows(row, timingLabels);
+  if (timingRows.length === 0) return null;
+
+  return (
+    <ParkingPlanSection title="Timing">
+      <dl className="grid gap-2 sm:grid-cols-2">
+        {timingRows.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0"
+          >
+            <dt className="text-muted-foreground">{item.label}</dt>
+            <dd className="font-semibold text-foreground">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </ParkingPlanSection>
+  );
+}
+
+function StreetParkingPlanNote({
+  eventParkingLikely,
+  streetMeterRow,
+  showGeneralNote = false,
+}: {
+  eventParkingLikely: boolean;
+  streetMeterRow?: PointAbModePresentation | null;
+  showGeneralNote?: boolean;
+}) {
+  if (!eventParkingLikely && !streetMeterRow && !showGeneralNote) return null;
+
+  return (
+    <ParkingPlanSection title={eventParkingLikely ? 'Street parking warning' : 'Street parking note'}>
+      <p className="text-muted-foreground">
+        {eventParkingLikely
+          ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+          : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
+      </p>
+    </ParkingPlanSection>
+  );
+}
+
+function ParkingDataUnavailablePlanSection({
+  directionsUrl,
+  nearbyParkingSearchUrl,
+}: {
+  directionsUrl: string | null;
+  nearbyParkingSearchUrl: string;
+}) {
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS.parking}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card shadow-sm"
+    >
+      <div className="px-4 py-4 sm:px-5">
+        <h2
+          data-details-heading
+          tabIndex={-1}
+          className="text-xl font-bold text-foreground"
+        >
+          Parking plan
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          What should I do when I arrive?
+        </p>
+      </div>
+
+      <ParkingPlanSection title="Parking data unavailable">
+        <p className="text-muted-foreground">
+          Open directions or search nearby parking to verify options.
+        </p>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          {directionsUrl ? (
+            <a
+              href={directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Open directions
+            </a>
+          ) : null}
+          <a
+            href={nearbyParkingSearchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+          >
+            Search nearby parking
+          </a>
+        </div>
+      </ParkingPlanSection>
+    </section>
+  );
+}
+
+function PaidParkingPlanCard({
+  row,
+  parkingOption,
+  routeToParkingUrl,
+  directionsUrl,
+  nearbyParkingSearchUrl,
+  streetMeterRow,
+  eventParkingLikely,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  parkingOption: ParkingOption | null;
+  routeToParkingUrl: string | null;
+  directionsUrl: string | null;
+  nearbyParkingSearchUrl: string;
+  streetMeterRow?: PointAbModePresentation | null;
+  eventParkingLikely: boolean;
+}) {
+  const unavailable = !row || row.unavailable || !parkingOption;
+  const reason = eventParkingLikely
+    ? 'Best confirmed event parking'
+    : 'Best confirmed paid option';
+
+  return (
+    <section className="rounded-2xl border border-border bg-card shadow-sm">
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2
+              data-details-heading
+              tabIndex={-1}
+              className="text-xl font-bold text-foreground"
+            >
+              Parking plan
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What should I do when I arrive?
+            </p>
+          </div>
+
+          {!unavailable && routeToParkingUrl ? (
+            <a
+              href={routeToParkingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Route to parking
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      {unavailable ? (
+        <ParkingPlanSection title="Parking data unavailable">
+          <p className="text-muted-foreground">
+            Open directions or search nearby parking to verify options.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            {directionsUrl ? (
+              <a
+                href={directionsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Open directions
+              </a>
+            ) : null}
+            <a
+              href={nearbyParkingSearchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+            >
+              Search nearby parking
+            </a>
+          </div>
+        </ParkingPlanSection>
+      ) : (
+        <>
+          <ParkingPlanSection title="Recommended parking">
+            <div className="space-y-4">
+              <div>
+                <div className="text-base font-semibold text-foreground">
+                  {parkingOption.name || row.name}
+                </div>
+                <p className="mt-1 text-muted-foreground">{reason}</p>
+              </div>
+              <ParkingPlanFacts
+                facts={[
+                  { label: 'Cost', value: row.cost },
+                  { label: 'Total time', value: row.time },
+                  { label: 'Reason', value: reason },
+                ]}
+              />
+            </div>
+          </ParkingPlanSection>
+
+          <ParkingPlanSection title="Why this option">
+            <ParkingPlanList
+              items={[
+                'Confirmed paid parking option',
+                'You keep your car with you',
+                'More reliable than guessing street parking',
+              ]}
+            />
+          </ParkingPlanSection>
+
+          <ParkingPlanSection title="Before you park">
+            <ParkingPlanList
+              items={[
+                'Confirm final price',
+                'Check hours',
+                'Check event or validation rules',
+                'Check towing/private lot signs',
+              ]}
+            />
+          </ParkingPlanSection>
+
+          <ParkingPlanTiming
+            row={row}
+            timingLabels={{
+              drive: 'Drive to lot',
+              parkingBuffer: 'Park/check-in buffer',
+              walk: 'Walk to destination',
+              total: 'Total to destination',
+            }}
+          />
+
+          <ParkingPlanSection title="Backup options">
+            <ParkingPlanList
+              items={[
+                'Search nearby parking if this lot is full or the price changes.',
+                'Use destination directions if you decide not to park here.',
+                'Consider transit or rideshare if parking is expensive or unavailable.',
+              ]}
+            />
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {directionsUrl ? (
+                <a
+                  href={directionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+                >
+                  Open directions
+                </a>
+              ) : null}
+              <a
+                href={nearbyParkingSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+              >
+                Search nearby parking
+              </a>
+            </div>
+          </ParkingPlanSection>
+
+          <StreetParkingPlanNote
+            eventParkingLikely={eventParkingLikely}
+            streetMeterRow={streetMeterRow}
+            showGeneralNote
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
 function CustomerParkingDetailsSection({
   row,
   directionsUrl,
+  streetMeterRow,
+  eventParkingLikely,
 }: {
   row: PointAbModePresentation | null | undefined;
   directionsUrl: string | null;
+  streetMeterRow?: PointAbModePresentation | null;
+  eventParkingLikely: boolean;
 }) {
   if (!row) return null;
 
@@ -3318,9 +3651,11 @@ function CustomerParkingDetailsSection({
               tabIndex={-1}
               className="text-xl font-bold text-foreground"
             >
-              Customer parking details
+              Parking plan
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">{row.name}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What should I do when I arrive?
+            </p>
           </div>
 
           {directionsUrl ? (
@@ -3336,7 +3671,38 @@ function CustomerParkingDetailsSection({
         </div>
       </div>
 
-      <PointAbModeDetailSummary
+      <ParkingPlanSection title="Recommended parking">
+        <div className="space-y-4">
+          <div>
+            <div className="text-base font-semibold text-foreground">Customer parking</div>
+            <p className="mt-1 text-muted-foreground">
+              Customer or on-site parking may exist.
+            </p>
+          </div>
+          <ParkingPlanFacts
+            facts={[
+              { label: 'Cost', value: 'Free? Verify' },
+              { label: 'Total time', value: row.time },
+              { label: 'Reason', value: 'Customer or on-site parking may exist.' },
+            ]}
+          />
+        </div>
+      </ParkingPlanSection>
+
+      <ParkingPlanSection title="Before you park">
+        <ParkingPlanList
+          items={[
+            'Check customer-only signs',
+            'Confirm validation rules',
+            'Check time limits',
+            'Avoid overnight parking unless signs allow it',
+            'Watch for towing/private lot restrictions',
+            'This is not a reserved space',
+          ]}
+        />
+      </ParkingPlanSection>
+
+      <ParkingPlanTiming
         row={row}
         timingLabels={{
           drive: 'Drive route',
@@ -3346,41 +3712,19 @@ function CustomerParkingDetailsSection({
         }}
       />
 
-      <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
-        <h3 className="font-semibold text-foreground">Verification checklist</h3>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <dt className="font-medium text-foreground">Check signs</dt>
-            <dd className="mt-1 text-muted-foreground">
-              Check posted signs before leaving your car.
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium text-foreground">Validation rules</dt>
-            <dd className="mt-1 text-muted-foreground">
-              Customer-only parking may require shopping, validation, or business approval.
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium text-foreground">Time limits</dt>
-            <dd className="mt-1 text-muted-foreground">
-              Confirm posted time limits for your full visit.
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium text-foreground">Towing/private lot warning</dt>
-            <dd className="mt-1 text-muted-foreground">
-              Private lots may tow if you are not an eligible customer or you exceed posted rules.
-            </dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="font-medium text-foreground">Not a booked/reserved space</dt>
-            <dd className="mt-1 text-muted-foreground">
-              PodPaiGo is not booking or reserving this space. Verify access on arrival.
-            </dd>
-          </div>
-        </dl>
-      </div>
+      <ParkingPlanSection title="Backup options">
+        <ParkingPlanList
+          items={[
+            'Use a paid garage or lot if customer parking is full or restricted.',
+            'Use transit or rideshare if you do not want to verify parking rules.',
+          ]}
+        />
+      </ParkingPlanSection>
+
+      <StreetParkingPlanNote
+        eventParkingLikely={eventParkingLikely}
+        streetMeterRow={streetMeterRow}
+      />
     </section>
   );
 }
@@ -5858,6 +6202,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           durationMinutes: tripData.parkingDuration ?? undefined,
         })
       : null;
+  const cityTripEventParkingLikely = cityTripParkingOutlook?.headline === 'Event parking likely';
   const cityTripParkRideSelection = (() => {
     if (!isCityTrip || !tripData) return null;
 
@@ -5893,6 +6238,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   );
   const cityTripPaidParkingModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'parking',
+  );
+  const cityTripStreetMeterModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'street-meter',
   );
   const cityTripRideshareModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'rideshare',
@@ -7168,7 +7516,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               if (key === 'parking') {
                 return {
                   label: 'View parking details',
-                  onClick: () => scrollToBestSection('parking-options-section'),
+                  onClick: () =>
+                    scrollToBestSection(
+                      isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section',
+                    ),
                 };
               }
 
@@ -7705,22 +8056,31 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           <CustomerParkingDetailsSection
             row={cityTripCustomerParkingModeRow}
             directionsUrl={cityTripDestinationRouteUrl}
+            streetMeterRow={cityTripStreetMeterModeRow}
+            eventParkingLikely={cityTripEventParkingLikely}
           />
         ) : null}
 
         {
           shouldRenderParkingSections && showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !routeUnavailableBlocksParking && (
-            <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
-              <div>{parkingEmptyStateMessage}</div>
-              <a
-                href={nearbyParkingSearchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-              >
-                Search nearby parking
-              </a>
-            </div>
+            isCityTrip ? (
+              <ParkingDataUnavailablePlanSection
+                directionsUrl={cityTripDestinationRouteUrl}
+                nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+              />
+            ) : (
+              <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
+                <div>{parkingEmptyStateMessage}</div>
+                <a
+                  href={nearbyParkingSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                >
+                  Search nearby parking
+                </a>
+              </div>
+            )
           )
         }
 
@@ -7730,28 +8090,34 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section'}
               className={`mt-6 scroll-mt-24${isCityTrip ? ' scroll-target' : ''}`}
             >
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h2
-                  className="text-xl font-bold"
-                  data-details-heading={isCityTrip ? true : undefined}
-                  tabIndex={isCityTrip ? -1 : undefined}
-                >
-                  {allParkingRoutesUnavailable
-                    ? `Parking options near ${isCityTrip ? displayDestination : currentAirport.id}`
-                    : 'Parking options'}
-                </h2>
-              </div>
+              {!isCityTrip ? (
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="text-xl font-bold">
+                    {allParkingRoutesUnavailable
+                      ? `Parking options near ${currentAirport.id}`
+                      : 'Parking options'}
+                  </h2>
+                </div>
+              ) : null}
 
               {isCityTrip ? (
-                <PointAbModeDetailSummary
-                  row={cityTripPaidParkingModeRow}
-                  timingLabels={{
-                    drive: 'Drive to lot',
-                    parkingBuffer: 'Park/check-in buffer',
-                    walk: 'Walk to destination',
-                    total: 'Total to destination',
-                  }}
-                />
+                <div className="mb-4">
+                  <PaidParkingPlanCard
+                    row={cityTripPaidParkingModeRow}
+                    parkingOption={selectedParkingTimingOption}
+                    routeToParkingUrl={
+                      selectedParkingRouteLinks?.routeToParkingUrl ||
+                      selectedParkingTimingOption?.mapLink ||
+                      (tripData?.origin && selectedParkingTimingOption?.address
+                        ? googleMapsDirectionsLink(tripData.origin, selectedParkingTimingOption.address)
+                        : cityTripDestinationRouteUrl)
+                    }
+                    directionsUrl={cityTripDestinationRouteUrl}
+                    nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+                    streetMeterRow={cityTripStreetMeterModeRow}
+                    eventParkingLikely={cityTripEventParkingLikely}
+                  />
+                </div>
               ) : null}
 
               {recommendation.parkingDiscoveryNotice ? (
