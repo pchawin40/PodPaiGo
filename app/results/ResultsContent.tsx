@@ -671,10 +671,8 @@ function routeEstimateHelperText(estimate?: TrafficEstimate | null): string {
     : 'Based on available route data';
 }
 
-function routeEstimateHeroLabel(estimate?: TrafficEstimate | null): string {
-  if (!estimate || estimate.routeUnavailable) return 'Route time';
-  if (isStraightLineRouteEstimate(estimate)) return 'Fallback drive estimate';
-  return 'Estimated drive time';
+function routeEstimateHeroLabel(): string {
+  return 'Route time';
 }
 
 function weatherRiskText(weather: WeatherImpact): string {
@@ -5460,13 +5458,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     !isBackupRouteEstimate(recommendation.trafficEstimate) &&
     !isStraightLineRouteEstimate(recommendation.trafficEstimate);
 
-  const airportRouteUnavailableReason =
-    recommendation?.airportRouteUnavailableReason ||
-    recommendation?.trafficEstimate?.routeUnavailableReason ||
-    (isCityTrip
-      ? 'Drive time unavailable; open directions to confirm.'
-      : 'We could not calculate a ground route from this origin to the airport.');
-
   const extraRideProviders = useMemo(
     () => [
       {
@@ -6453,30 +6444,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {isCityTrip ? (
                 <div className="mt-4 rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {routeEstimateHeroLabel(recommendation.trafficEstimate)}
+                    {routeEstimateHeroLabel()}
                   </div>
                   <div className="mt-1 text-2xl font-bold text-foreground">
-                    {heroDriveMinutes !== null
-                      ? formatMinutes(heroDriveMinutes)
-                      : tripData?.origin && cityDestinationText
-                        ? (
-                          <a
-                            href={googleMapsDirectionsLink(tripData.origin, cityDestinationText)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary underline hover:opacity-80"
-                          >
-                            Open directions ↗
-                          </a>
-                        )
-                        : 'Check route'}
+                    {heroDriveMinutes !== null ? formatMinutes(heroDriveMinutes) : 'Couldn’t confirm'}
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">
-                    Origin to destination
-                    {isBackupRouteEstimate(recommendation.trafficEstimate) ||
-                    isStraightLineRouteEstimate(recommendation.trafficEstimate)
-                      ? ' · fallback estimate'
-                      : ''}
+                    {heroDriveMinutes !== null ? (
+                      <>
+                        Origin to destination
+                        {isBackupRouteEstimate(recommendation.trafficEstimate) ||
+                        isStraightLineRouteEstimate(recommendation.trafficEstimate)
+                          ? ' · fallback estimate'
+                          : ''}
+                      </>
+                    ) : (
+                      'Drive time unavailable'
+                    )}
                   </div>
 
                   {noParkingPreferred ? (
@@ -6488,18 +6472,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         <div className="mt-1 font-semibold text-foreground">
                           {heroDriveMinutes !== null
                             ? formatMinutes(heroDriveMinutes)
-                            : tripData?.origin && cityDestinationText
-                              ? (
-                                <a
-                                  href={googleMapsDirectionsLink(tripData.origin, cityDestinationText)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="underline text-primary"
-                                >
-                                  Open directions
-                                </a>
-                              )
-                              : 'Check route'}
+                            : 'Couldn’t confirm'}
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-muted/40 p-3">
@@ -6547,23 +6520,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
                     {isCityTrip
-                      ? recommendation.trafficEstimate?.duration
-                        ? 'Routing is degraded for this result.'
-                        : 'Drive timing could not be confirmed for this result.'
+                      ? 'Drive time couldn’t be confirmed'
                       : 'We could not calculate a real route from your starting location to this destination.'}
                   </div>
                   <div className="mt-1">
                     {isCityTrip
-                      ? recommendation.trafficEstimate?.duration
-                        ? 'Showing an estimated drive time. Open directions to confirm live traffic.'
-                        : 'Parking and provider options are still shown. Open directions to verify drive time.'
+                      ? 'Parking and provider options are still shown. Use map directions to verify timing before you leave.'
                       : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
-                  {airportRouteUnavailableReason && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {airportRouteUnavailableReason}
-                    </div>
-                  )}
                 </div>
               )}
 

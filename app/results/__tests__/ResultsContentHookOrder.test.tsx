@@ -301,6 +301,13 @@ function getParkingPlanCard(sectionId = 'paid-parking-details'): HTMLElement {
   return planCard as HTMLElement;
 }
 
+function getRouteTimeCard(): HTMLElement {
+  const label = screen.getByText('Route time');
+  const card = label.parentElement;
+  expect(card).toBeInTheDocument();
+  return card as HTMLElement;
+}
+
 describe('ResultsContent hook order', () => {
   const originalLiveRefresh = process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH;
 
@@ -465,7 +472,9 @@ describe('ResultsContent hook order', () => {
     });
 
     expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
-    expect(screen.getByText('Estimated drive time')).toBeInTheDocument();
+    const routeTimeCard = getRouteTimeCard();
+    expect(within(routeTimeCard).getAllByText('28 min').length).toBeGreaterThan(0);
+    expect(within(routeTimeCard).getByText('Origin to destination')).toBeInTheDocument();
     expect(screen.getAllByText('Drive route').length).toBeGreaterThan(0);
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pickup wait').length).toBeGreaterThan(0);
@@ -584,7 +593,8 @@ describe('ResultsContent hook order', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Take Rideshare').length).toBeGreaterThan(0);
     });
-    expect(screen.getByText('Estimated drive time')).toBeInTheDocument();
+    const firstRouteTimeCard = getRouteTimeCard();
+    expect(within(firstRouteTimeCard).getAllByText('28 min').length).toBeGreaterThan(0);
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
 
     unmount();
@@ -605,7 +615,7 @@ describe('ResultsContent hook order', () => {
       ).toHaveLength(2);
     });
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Drive timing could not be confirmed for this result.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Drive time couldn’t be confirmed')).not.toBeInTheDocument();
     expect(screen.getByText('Parking filters')).toBeInTheDocument();
     expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
   });
@@ -846,6 +856,41 @@ describe('ResultsContent hook order', () => {
     expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
   });
 
+  test('route time card shows unavailable timing without directions link or debug warning copy', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    recommendation.trafficEstimate = {
+      ...recommendation.trafficEstimate!,
+      duration: 0,
+      routeUnavailable: true,
+      routeUnavailableReason: 'Route budget exceeded; open map directions to confirm drive time.',
+      trustStatus: 'unavailable',
+    };
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    const routeTimeCard = getRouteTimeCard();
+    expect(within(routeTimeCard).getByText('Couldn’t confirm')).toBeInTheDocument();
+    expect(within(routeTimeCard).getByText('Drive time unavailable')).toBeInTheDocument();
+    expect(within(routeTimeCard).queryByRole('link', { name: /Open directions/i })).not.toBeInTheDocument();
+    expect(within(routeTimeCard).queryByText(/Open directions/i)).not.toBeInTheDocument();
+
+    expect(screen.getByText('Drive time couldn’t be confirmed')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Parking and provider options are still shown. Use map directions to verify timing before you leave.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Route budget exceeded/i)).not.toBeInTheDocument();
+    expect(getParkingPlanCard()).toBeInTheDocument();
+  });
+
   test('city trip with no parking data renders parking data unavailable plan', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendation();
@@ -859,11 +904,13 @@ describe('ResultsContent hook order', () => {
     });
 
     const planCard = getParkingPlanCard();
+    const routeTimeCard = getRouteTimeCard();
     expect(within(planCard).getByText('Parking data unavailable')).toBeInTheDocument();
     expect(
       within(planCard).getByText('Open directions or search nearby parking to verify options.'),
     ).toBeInTheDocument();
     expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+    expect(within(routeTimeCard).queryByRole('link', { name: /Open directions/i })).not.toBeInTheDocument();
     expect(within(planCard).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
     expect(within(planCard).getByRole('link', { name: 'Search nearby parking' })).toBeInTheDocument();
   });
