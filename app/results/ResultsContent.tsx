@@ -6516,17 +6516,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               ) : null}
 
-              {airportRouteUnavailable && (
+              {airportRouteUnavailable && !isCityTrip && (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
-                    {isCityTrip
-                      ? 'Drive time couldn’t be confirmed'
-                      : 'We could not calculate a real route from your starting location to this destination.'}
+                    We could not calculate a real route from your starting location to this destination.
                   </div>
                   <div className="mt-1">
-                    {isCityTrip
-                      ? 'Parking and provider options are still shown. Use map directions to verify timing before you leave.'
-                      : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
+                    {`Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
                 </div>
               )}

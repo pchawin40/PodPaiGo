@@ -881,12 +881,12 @@ describe('ResultsContent hook order', () => {
     expect(within(routeTimeCard).queryByRole('link', { name: /Open directions/i })).not.toBeInTheDocument();
     expect(within(routeTimeCard).queryByText(/Open directions/i)).not.toBeInTheDocument();
 
-    expect(screen.getByText('Drive time couldn’t be confirmed')).toBeInTheDocument();
+    expect(screen.queryByText('Drive time couldn’t be confirmed')).not.toBeInTheDocument();
     expect(
-      screen.getByText(
+      screen.queryByText(
         'Parking and provider options are still shown. Use map directions to verify timing before you leave.',
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/Route budget exceeded/i)).not.toBeInTheDocument();
     expect(getParkingPlanCard()).toBeInTheDocument();
   });
