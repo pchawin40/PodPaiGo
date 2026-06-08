@@ -717,6 +717,16 @@ describe('ResultsContent hook order', () => {
     expect(within(detailsSection as HTMLElement).getByText('Check time limits')).toBeInTheDocument();
     expect(within(detailsSection as HTMLElement).getByText('Watch for towing/private lot restrictions')).toBeInTheDocument();
     expect(within(detailsSection as HTMLElement).getByText('This is not a reserved space')).toBeInTheDocument();
+
+    expect(screen.getAllByRole('heading', { name: 'Parking plan' })).toHaveLength(1);
+    expect(within(detailsSection as HTMLElement).getByText('Customer parking')).toBeInTheDocument();
+    const paidParkingSection = document.getElementById('paid-parking-details');
+    expect(paidParkingSection).toBeInTheDocument();
+    expect(
+      within(paidParkingSection as HTMLElement).queryByRole('heading', { name: 'Parking plan' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Best confirmed paid option')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
   });
 
   test('paid parking details render a parking plan with recommendation, reasons, checklist, timing, and street note', async () => {

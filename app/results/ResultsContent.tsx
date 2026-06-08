@@ -6236,6 +6236,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const cityTripCustomerParkingModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'destination-customer',
   );
+  const cityTripCustomerParkingIsPrimary =
+    cityTripPointAbRanking?.displayRecommendationMode === 'destination-customer';
   const cityTripPaidParkingModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'parking',
   );
@@ -8052,7 +8054,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </div>
         ) : null}
 
-        {shouldRenderParkingSections && isCityTrip ? (
+        {shouldRenderParkingSections && isCityTrip && cityTripCustomerParkingIsPrimary ? (
           <CustomerParkingDetailsSection
             row={cityTripCustomerParkingModeRow}
             directionsUrl={cityTripDestinationRouteUrl}
@@ -8100,7 +8102,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               ) : null}
 
-              {isCityTrip ? (
+              {isCityTrip && !cityTripCustomerParkingIsPrimary ? (
                 <div className="mb-4">
                   <PaidParkingPlanCard
                     row={cityTripPaidParkingModeRow}
