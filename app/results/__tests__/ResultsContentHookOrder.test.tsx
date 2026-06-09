@@ -3,14 +3,19 @@
  */
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import ResultsContent, { buildRecommendationRequestKey } from '../ResultsContent';
+import ResultsContent, {
+  buildRecommendationRequestKey,
+  buildParkingTripIdentityKey,
+} from '../ResultsContent';
 import type { OptionScoreBreakdown, Recommendation, TripData } from '@/lib/types';
 import { TRAVEL_PREFERENCES_STORAGE_KEY } from '@/lib/trip/travelPreferences';
+
+const mockRouterReplace = jest.fn();
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({
     push: jest.fn(),
-    replace: jest.fn(),
+    replace: mockRouterReplace,
   }),
   usePathname: () => '/results',
   useSearchParams: () => new URLSearchParams(),
@@ -164,6 +169,33 @@ function cityTripRecommendationWithEstimatedParking(): Recommendation {
         priceNote: 'Estimated nearby garage range. Confirm live price before parking.',
       },
     ],
+  };
+}
+
+function namedParkingOption(name: string, id: string) {
+  return {
+    id,
+    name,
+    type: 'off-airport' as const,
+    price: 14,
+    distance: 5,
+    duration: 22,
+    routeToParkingMinutes: 16,
+    parkingBufferMinutes: 4,
+    walkToDestinationMinutes: 2,
+    availability: 88,
+    trustStatus: 'estimated' as const,
+    sourceName: 'Test parking',
+    lastUpdated: '2026-06-01T00:00:00.000Z',
+    assumptions: [],
+  };
+}
+
+function cityTripRecommendationWithNamedParking(name: string, id: string): Recommendation {
+  return {
+    ...cityTripRecommendationWithParking(),
+    parkingDataStatus: 'available',
+    parking: [namedParkingOption(name, id)],
   };
 }
 
@@ -357,12 +389,27 @@ function getRouteTimeCard(): HTMLElement {
   return card as HTMLElement;
 }
 
+function searchParamsFromResultsPath(path: string): URLSearchParams {
+  const query = path.split('?')[1];
+  if (query) return new URLSearchParams(query);
+
+  const match = path.match(/\/results\/([^/?#]+)/);
+  expect(match?.[1]).toBeTruthy();
+
+  const raw = window.localStorage.getItem(`podpaigo-trip-${decodeURIComponent(match![1])}`);
+  expect(raw).toBeTruthy();
+  const payload = JSON.parse(raw as string) as { query?: string };
+  expect(payload.query).toBeTruthy();
+  return new URLSearchParams(payload.query);
+}
+
 describe('ResultsContent hook order', () => {
   const originalLiveRefresh = process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH;
 
   afterEach(() => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = originalLiveRefresh;
     window.localStorage.clear();
+    mockRouterReplace.mockClear();
     jest.restoreAllMocks();
   });
 
@@ -591,6 +638,183 @@ describe('ResultsContent hook order', () => {
     expect(screen.queryByText('Parking search unavailable')).not.toBeInTheDocument();
   });
 
+  test('parking trip identity key is stable for sort-only changes but changes on trip identity', () => {
+    const baseTrip: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '19:30',
+      parkingDuration: 120,
+      parkingCheckInDate: '2026-06-07',
+      parkingCheckInTime: '19:30',
+      parkingCheckOutDate: '2026-06-07',
+      parkingCheckOutTime: '21:30',
+      transportAvailability: 'all',
+    };
+
+    const keyOf = (trip: TripData, params = new URLSearchParams()) =>
+      buildParkingTripIdentityKey({ tripData: trip, searchParams: params });
+
+    const baseKey = keyOf(baseTrip);
+
+    // Sort/control changes are not part of the parking identity key.
+    expect(keyOf(baseTrip, new URLSearchParams('sort=cheapest'))).toBe(
+      keyOf(baseTrip, new URLSearchParams('sort=fastest')),
+    );
+    expect(keyOf(baseTrip, new URLSearchParams('sort=cheapest'))).toBe(baseKey);
+
+    // Any identity / timing / window change must change the key.
+    expect(keyOf({ ...baseTrip, destination: 'Lumen Field, Seattle, WA' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, destinationName: 'Lumen Field' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, destinationKind: 'stadium' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, destinationLat: 47.5952, destinationLng: -122.3316 })).not.toBe(baseKey);
+    expect(
+      keyOf({ ...(baseTrip as TripData), destinationPlaceId: 'place-123' } as TripData),
+    ).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, origin: 'Bellevue, WA' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, arrivalDate: '2026-06-08' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, arrivalTime: '20:30' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, parkingCheckOutTime: '23:30' })).not.toBe(baseKey);
+    expect(keyOf({ ...baseTrip, parkingDuration: 240 })).not.toBe(baseKey);
+    expect(keyOf(baseTrip, new URLSearchParams('tripId=different'))).not.toBe(baseKey);
+  });
+
+  test('changing destination clears previous parking and never renders the old lot', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    const downtownRec = cityTripRecommendationWithNamedParking('Pier 66 Surface Lot', 'pier-66');
+    const stadiumRec = cityTripRecommendationWithNamedParking('Lumen Field Garage', 'lumen-garage');
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as TripData;
+          const rec = body.destination.includes('Lumen Field') ? stadiumRec : downtownRec;
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(rec),
+            json: async () => rec,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    const { rerender } = render(
+      <ResultsContent storedSearchParams={cityTripSearchParams()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Pier 66 Surface Lot').length).toBeGreaterThan(0);
+    });
+
+    rerender(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Lumen Field Garage').length).toBeGreaterThan(0);
+    });
+
+    // The previous destination's lot must not survive into the new trip.
+    expect(screen.queryByText('Pier 66 Surface Lot')).not.toBeInTheDocument();
+  });
+
+  test('stale live-refresh response cannot merge parking into a newer destination', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'true';
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const downtownRec = cityTripRecommendationWithNamedParking('Downtown Garage', 'downtown-garage');
+    const stadiumRec = cityTripRecommendationWithNamedParking('Lumen Field Garage', 'lumen-garage');
+
+    const downtownRefresh = deferred<{ ok: boolean; json: () => Promise<unknown> }>();
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = init?.body ? (JSON.parse(String(init.body)) as { destination?: string }) : {};
+
+        if (url === '/api/recommendations') {
+          const rec = String(body.destination).includes('Lumen Field') ? stadiumRec : downtownRec;
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(rec),
+            json: async () => rec,
+          });
+        }
+
+        if (url === '/api/parking/live-refresh') {
+          // The previous (downtown) refresh resolves late with a foreign lot.
+          if (String(body.destination).includes('Lumen Field')) {
+            return Promise.resolve({ ok: true, json: async () => ({ parking: [] }) });
+          }
+          return downtownRefresh.promise;
+        }
+
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    const { rerender } = render(
+      <ResultsContent storedSearchParams={cityTripSearchParams()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Downtown Garage').length).toBeGreaterThan(0);
+    });
+
+    // Switch to the stadium destination before the downtown refresh resolves.
+    rerender(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Lumen Field Garage').length).toBeGreaterThan(0);
+    });
+
+    // Now the stale downtown live-refresh arrives with "Pier 66 Surface Lot".
+    await act(async () => {
+      downtownRefresh.resolve({
+        ok: true,
+        json: async () => ({ parking: [namedParkingOption('Pier 66 Surface Lot', 'pier-66')] }),
+      });
+      await downtownRefresh.promise;
+    });
+
+    expect(screen.queryByText('Pier 66 Surface Lot')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Lumen Field Garage').length).toBeGreaterThan(0);
+  });
+
   test('estimated parking placeholder is labeled estimated, not confirmed', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithEstimatedParking();
@@ -670,6 +894,122 @@ describe('ResultsContent hook order', () => {
     });
     expect(screen.queryByText('Estimated Garage Placeholder')).not.toBeInTheDocument();
     expect(screen.getByText('Nearby parking options')).toBeInTheDocument();
+  });
+
+  test('general-trip edit panel has one clean heading and renders prefilled origin and destination inputs', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          arrivalDate: '2027-06-07',
+          destination: 'Pike Place Market, Seattle, WA',
+          destinationName: 'Pike Place Market',
+          destinationKind: 'downtown',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit trip' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit trip' }));
+
+    const panel = document.getElementById('edit-trip-panel');
+    expect(panel).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getAllByRole('heading', { name: 'Edit trip details' })).toHaveLength(1);
+    expect(within(panel as HTMLElement).queryByRole('heading', { name: 'Edit trip' })).not.toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByText('Adjust your timing, origin, or destination. We’ll recalculate instantly.'),
+    ).toBeInTheDocument();
+
+    const inputs = within(panel as HTMLElement).getAllByRole('combobox') as HTMLInputElement[];
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]).toHaveValue('Monroe, WA');
+    expect(inputs[1]).toHaveValue('Pike Place Market');
+  });
+
+  test('changing general-trip destination updates recalculation params and clears stale destination coordinates', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          arrivalDate: '2027-06-07',
+          destination: 'Pike Place Market, Seattle, WA',
+          destinationName: 'Pike Place Market',
+          destinationKind: 'downtown',
+          destinationLat: '47.6091',
+          destinationLng: '-122.3421',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit trip' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit trip' }));
+    const panel = document.getElementById('edit-trip-panel') as HTMLElement;
+    const inputs = within(panel).getAllByRole('combobox') as HTMLInputElement[];
+    const destinationInput = inputs[1];
+
+    fireEvent.change(destinationInput, {
+      target: { value: 'Brighton Jones, Seattle, WA' },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Recalculate' }));
+
+    await waitFor(() => {
+      expect(mockRouterReplace).toHaveBeenCalled();
+    });
+
+    const path = String(mockRouterReplace.mock.calls.at(-1)?.[0] || '');
+    const params = searchParamsFromResultsPath(path);
+    expect(params.get('destination')).toBe('Brighton Jones, Seattle, WA');
+    expect(params.get('destinationName')).toBe('Brighton Jones, Seattle, WA');
+    expect(params.get('destinationKind')).toBe('downtown');
+    expect(params.get('destinationLat')).toBeNull();
+    expect(params.get('destinationLng')).toBeNull();
+  });
+
+  test('airport trip edit form still only renders the origin address input', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendation();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+    const params = new URLSearchParams({
+      type: 'one-way-departure',
+      intent: 'flying-out',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      airportCode: 'SEA',
+      departureDate: '2027-06-07',
+      departureTime: '10:00',
+      transport: 'all',
+      transitPayment: 'normal',
+      parkingPreference: 'nearby',
+    });
+
+    render(<ResultsContent storedSearchParams={params.toString()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit trip' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit trip' }));
+    const panel = document.getElementById('edit-trip-panel');
+    expect(panel).toBeInTheDocument();
+    const addressInputs = within(panel as HTMLElement).getAllByRole('combobox') as HTMLInputElement[];
+    expect(addressInputs).toHaveLength(1);
+    expect(addressInputs[0]).toHaveValue('Monroe, WA');
+    expect(within(panel as HTMLElement).queryByText(/^Destination$/)).not.toBeInTheDocument();
   });
 
   test('hides more parking options while no-parking preference is active', async () => {

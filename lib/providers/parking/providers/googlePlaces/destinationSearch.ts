@@ -21,6 +21,8 @@ import {
   inferParkingCategoryFromSignals,
   parseGoogleParkingOptionsSignals,
 } from '../../../../parking/googleParkingOptionsSignals';
+import { isEventVenueDestination } from '../../../../parking/eventVenueDetection';
+import { haversineMiles } from '../../../../parking/routeMinutes';
 
 type GooglePlace = {
   id?: string;
@@ -87,12 +89,99 @@ function normalizeTextQuery(textQuery: string): string {
   return textQuery.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function buildDestinationSearchQueryPlan(destination: string): string[] {
-  return [
-    `parking near ${destination}`,
-    `parking garage near ${destination}`,
-    `public parking near ${destination}`,
-  ];
+/**
+ * Build the provider search queries, anchored to the most specific destination
+ * available. For event/stadium destinations we use venue-specific phrasing so
+ * the search stays near the venue instead of the broader city/downtown.
+ */
+function buildDestinationSearchQueryPlan(args: {
+  destination: string;
+  destinationName?: string;
+  isEventVenue: boolean;
+}): string[] {
+  const venueAnchor = (args.destinationName?.trim() || args.destination || '').trim();
+  const addressAnchor = (args.destination || '').trim();
+
+  const queries: string[] = [];
+  const push = (query: string) => {
+    const trimmed = query.trim();
+    if (
+      trimmed &&
+      !queries.some((existing) => normalizeTextQuery(existing) === normalizeTextQuery(trimmed))
+    ) {
+      queries.push(trimmed);
+    }
+  };
+
+  if (args.isEventVenue && venueAnchor) {
+    push(`event parking near ${venueAnchor}`);
+    push(`parking near ${venueAnchor}`);
+  } else if (venueAnchor) {
+    push(`parking near ${venueAnchor}`);
+    push(`parking garage near ${venueAnchor}`);
+    push(`public parking near ${venueAnchor}`);
+  }
+
+  // Secondary anchor: the full destination address when it differs from the
+  // venue name, so a specific name and its street address both contribute.
+  if (addressAnchor && normalizeTextQuery(addressAnchor) !== normalizeTextQuery(venueAnchor)) {
+    push(`parking near ${addressAnchor}`);
+  }
+
+  // Safety net so we never emit an empty plan.
+  if (queries.length === 0) {
+    push(`parking near ${args.destination}`);
+  }
+
+  return queries;
+}
+
+const WALK_SPEED_MPH = 3;
+
+/**
+ * Preferred walking radius from the destination. Lots within this are treated as
+ * primary destination parking; beyond it (up to the hard max) they are kept only
+ * as a labeled "farther backup".
+ */
+function preferredRadiusMiles(isEventVenue: boolean): number {
+  return isEventVenue ? 1.0 : 0.75;
+}
+
+/** Hard maximum radius. Beyond this, non Park & Ride lots are excluded. */
+function maxRadiusMiles(isEventVenue: boolean): number {
+  return isEventVenue ? 2.0 : 1.5;
+}
+
+function destinationSearchRadiusMeters(isEventVenue: boolean): number {
+  const envOverride = Number(process.env.DESTINATION_PARKING_SEARCH_RADIUS_METERS);
+  if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
+  // The API locationBias is only a soft hint used to gather candidates; the hard
+  // anchoring happens in the per-lot distance classification (preferred / backup
+  // / excluded). Event venues gather a little wider since reasonable event lots
+  // sit slightly farther out.
+  return isEventVenue ? 3200 : 2500;
+}
+
+function walkMinutesForDistanceMiles(distanceMiles: number): number {
+  if (!Number.isFinite(distanceMiles) || distanceMiles <= 0) return 2;
+  return Math.max(2, Math.round((distanceMiles / WALK_SPEED_MPH) * 60));
+}
+
+type LotDistanceDecision = 'within_preferred' | 'backup' | 'excluded';
+
+function classifyLotDistance(args: {
+  distanceMiles: number | null;
+  isEventVenue: boolean;
+  isParkAndRide: boolean;
+}): LotDistanceDecision {
+  // Park & Ride / transit-access lots are intentionally exempt from the
+  // destination-radius rules; they are handled as a separate access strategy.
+  if (args.isParkAndRide) return 'within_preferred';
+  // No coordinates to measure against — keep the lot rather than guess.
+  if (args.distanceMiles == null) return 'within_preferred';
+  if (args.distanceMiles <= preferredRadiusMiles(args.isEventVenue)) return 'within_preferred';
+  if (args.distanceMiles <= maxRadiusMiles(args.isEventVenue)) return 'backup';
+  return 'excluded';
 }
 
 function resolveParkingRateTiming(args: {
@@ -394,6 +483,8 @@ async function fetchPlacesForDestinationQuery(args: {
 export async function getDestinationParkingOptionsWithMetadata(args: {
   origin: string;
   destination: string;
+  destinationName?: string;
+  destinationKind?: string;
   dateTime: string;
   parkingDurationMinutes?: number;
   destinationLat?: number;
@@ -405,15 +496,42 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
 }): Promise<DestinationParkingSearchResult> {
   const key = getGoogleMapsServerApiKey();
 
-  const searchRadiusMeters = Number(
-    process.env.DESTINATION_PARKING_SEARCH_RADIUS_METERS || 2500,
-  );
+  const isEventVenue =
+    isEventVenueDestination({
+      destination: args.destination,
+      destinationKind: args.destinationKind,
+      origin: args.origin,
+    }) ||
+    isEventVenueDestination({
+      destination: args.destinationName,
+      destinationKind: args.destinationKind,
+      origin: args.origin,
+    });
+
+  const searchRadiusMeters = destinationSearchRadiusMeters(isEventVenue);
 
   const maxResults = Number(
     process.env.DESTINATION_PARKING_MAX_RESULTS || 20,
   );
 
-  const searchQueryPlan = buildDestinationSearchQueryPlan(args.destination);
+  const searchQueryPlan = buildDestinationSearchQueryPlan({
+    destination: args.destination,
+    destinationName: args.destinationName,
+    isEventVenue,
+  });
+
+  debugLog('destination_parking_discovery_anchor', {
+    parkingDiscoveryDestinationText: args.destinationName?.trim() || args.destination,
+    rawDestination: args.destination,
+    destinationKind: args.destinationKind ?? null,
+    parkingDiscoveryDestinationCoords:
+      typeof args.destinationLat === 'number' && typeof args.destinationLng === 'number'
+        ? { lat: args.destinationLat, lng: args.destinationLng }
+        : null,
+    eventVenue: isEventVenue,
+    searchRadiusMeters,
+    searchQueryPlan,
+  });
   const metrics: DestinationSearchMetrics = {
     cacheHits: 0,
     cacheMisses: 0,
@@ -546,10 +664,10 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         })
       : [];
 
-  const mapped = places
+  const mappedWithDistance = places
     .filter(isValidDestinationParkingPlace)
     .slice(0, maxResults)
-    .map((place: GooglePlace): ParkingOption => {
+    .map((place: GooglePlace) => {
       const name = place.displayName?.text || 'Parking near destination';
       const lowerName = name.toLowerCase();
 
@@ -559,6 +677,27 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
 
       const isParkAndRide = looksLikeParkAndRideTransitName(name);
       const walkToDestination = isParkAndRide ? 10 : 8;
+
+      // Anchor each lot to the actual destination coordinates so far-away
+      // downtown lots are measured, demoted, or excluded instead of all being
+      // treated as an equal 8-minute walk.
+      const placeLat = place.location?.latitude;
+      const placeLng = place.location?.longitude;
+      const distanceMiles =
+        typeof args.destinationLat === 'number' &&
+        typeof args.destinationLng === 'number' &&
+        typeof placeLat === 'number' &&
+        typeof placeLng === 'number'
+          ? haversineMiles(args.destinationLat, args.destinationLng, placeLat, placeLng)
+          : null;
+      const decision = classifyLotDistance({ distanceMiles, isEventVenue, isParkAndRide });
+      const isBackup = decision === 'backup';
+      const walkMinutes = isParkAndRide
+        ? 25
+        : distanceMiles != null
+          ? walkMinutesForDistanceMiles(distanceMiles)
+          : walkToDestination;
+
       const pricing = resolveCityParkingPricing({
         name,
         address: place.formattedAddress,
@@ -616,11 +755,11 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         lng: place.location?.longitude,
         routeDestination,
         routeUnavailable: false,
-        distance: 10,
+        distance: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : 10,
         parkingBufferMinutes: 8,
-        transferToTerminalMinutes: isParkAndRide ? 25 : walkToDestination,
+        transferToTerminalMinutes: walkMinutes,
         transferType: isParkAndRide ? 'transit' : 'walk',
-        walkingMinutes: undefined,
+        walkingMinutes: isParkAndRide ? undefined : walkMinutes,
         shuttleMinutes: undefined,
         shuttleWaitMinutes: undefined,
         bufferRiskMinutes: undefined,
@@ -641,11 +780,14 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
           isParkAndRide
             ? 'Park & Ride rules vary. Do not assume overnight parking unless verified.'
             : 'Walk time to your destination is estimated from the lot location.',
+          ...(isBackup
+            ? ['Farther from your destination — shown as a backup, not a primary option.']
+            : []),
         ].filter(Boolean),
         bestFor: [
           rating && rating >= 4.4 ? 'Best Reviews' : '',
           isGarage ? 'Covered' : '',
-          isParkAndRide ? 'Park & Ride' : 'City parking',
+          isBackup ? 'Farther backup' : isParkAndRide ? 'Park & Ride' : 'City parking',
         ].filter(Boolean),
         providerSource: 'google',
         fetchedAt: new Date().toISOString(),
@@ -659,11 +801,40 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         option = mergeLiveCityParkWhizPricing(option, liveMatch);
       }
 
-      return withAvailabilityScore(option);
+      debugLog('destination_parking_lot_distance', {
+        name,
+        address: place.formattedAddress ?? null,
+        coords:
+          typeof placeLat === 'number' && typeof placeLng === 'number'
+            ? { lat: placeLat, lng: placeLng }
+            : null,
+        distanceMiles: distanceMiles != null ? Number(distanceMiles.toFixed(3)) : null,
+        decision,
+        eventVenue: isEventVenue,
+        isParkAndRide,
+        included: decision !== 'excluded',
+      });
+
+      return { option: withAvailabilityScore(option), decision, distanceMiles };
     });
+
+  const rankDecision = (decision: LotDistanceDecision) =>
+    decision === 'within_preferred' ? 0 : 1;
+  const mapped = mappedWithDistance
+    .filter((entry) => entry.decision !== 'excluded')
+    .sort((a, b) => {
+      // Primary destination lots before farther backups, then nearest first.
+      const rankDiff = rankDecision(a.decision) - rankDecision(b.decision);
+      if (rankDiff !== 0) return rankDiff;
+      return (a.distanceMiles ?? Number.POSITIVE_INFINITY) - (b.distanceMiles ?? Number.POSITIVE_INFINITY);
+    })
+    .map((entry) => entry.option);
+  const excludedFarCount = mappedWithDistance.length - mapped.length;
 
   debugLog('destination_parking_search_summary', {
     destination: args.destination,
+    destinationName: args.destinationName ?? null,
+    eventVenue: isEventVenue,
     cachedInventoryCount: cachedInventoryOptions.length,
     searchTextCallsAttempted: metrics.searchTextCallsAttempted,
     cacheHits: metrics.cacheHits,
@@ -672,6 +843,7 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
     liveBlocked: metrics.liveBlocked,
     liveBlockReason: metrics.liveBlockReason,
     fallbackQueryCount: Math.max(0, executedQueries.length - 1),
+    excludedFarCount,
     finalGoogleResultCount: mapped.length,
   });
 
@@ -795,6 +967,8 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
 export async function getDestinationParkingOptions(args: {
   origin: string;
   destination: string;
+  destinationName?: string;
+  destinationKind?: string;
   dateTime: string;
   parkingDurationMinutes?: number;
   destinationLat?: number;

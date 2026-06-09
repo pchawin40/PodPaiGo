@@ -44,6 +44,7 @@ export async function POST(req: Request) {
     const isAirportTrip = destinationKind === 'airport';
 
     const destination = stringFromBody(body.destination);
+    const destinationName = stringFromBody(body.destinationName);
     const origin = stringFromBody(body.origin) || '';
     const checkInDate = stringFromBody(body.checkInDate);
     const checkOutDate = stringFromBody(body.checkOutDate);
@@ -86,6 +87,7 @@ export async function POST(req: Request) {
       destinationKind,
       airportCode: airport?.id ?? null,
       destination: destination || airport?.routingAddress || null,
+      destinationName: isAirportTrip ? null : destinationName || null,
       origin: isAirportTrip ? null : origin || null,
       destinationLat: roundedCoord(destinationLat),
       destinationLng: roundedCoord(destinationLng),
@@ -149,6 +151,8 @@ export async function POST(req: Request) {
           const parking = await getDestinationParkingOptions({
             origin,
             destination: destination!,
+            destinationName,
+            destinationKind,
             dateTime,
             parkingDurationMinutes,
             destinationLat,

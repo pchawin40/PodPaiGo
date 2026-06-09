@@ -750,6 +750,8 @@ export class RecommendationEngine {
           async () => {
             const parkingContext = {
               destinationKind: tripData.destinationKind ?? 'airport',
+              destinationName:
+                (tripData as TripDataWithTransport).destinationName || undefined,
               airportCode: isAirportTrip
                 ? ((tripData as TripDataWithTransport).airportCode || undefined)
                 : undefined,

@@ -4164,6 +4164,66 @@ function buildRecommendationRouteIdentityKey(args: {
   });
 }
 
+/**
+ * Strong identity key for parking-related local state (recommendation parking,
+ * Google enrichment, matched/APR prices, live refresh). Parking state may only
+ * be preserved across renders when this key is unchanged; any change to the
+ * trip's route, destination identity, timing, or parking window must clear it.
+ *
+ * Deliberately excludes sort and other display-only controls so that a sort-only
+ * change preserves and re-sorts existing parking instead of clearing it.
+ */
+export function buildParkingTripIdentityKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): string {
+  const { tripData, searchParams } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    type: tripData.type,
+    origin: tripData.origin,
+    originPlaceId: tripData.originPlaceId ?? null,
+    originLat: tripData.originLat ?? null,
+    originLng: tripData.originLng ?? null,
+    destination: tripData.destination,
+    destinationName: tripData.destinationName ?? null,
+    destinationKind: tripData.destinationKind ?? null,
+    destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+    destinationLat: tripData.destinationLat ?? null,
+    destinationLng: tripData.destinationLng ?? null,
+    tripId: searchParams.get('tripId') ?? null,
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+function logParkingStateScope(
+  event:
+    | 'preserve'
+    | 'clear'
+    | 'live_refresh_merge'
+    | 'live_refresh_ignored_stale'
+    | 'price_match_ignored_stale',
+  details: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.debug(`parking state ${event}`, details);
+}
+
 function hasResolvedTrafficEstimate(traffic: TrafficEstimate | null | undefined): traffic is TrafficEstimate {
   return Boolean(
     traffic &&
@@ -4529,6 +4589,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const recommendationsLoadedRouteKeyRef = useRef('');
   const liveRefreshInFlightKeyRef = useRef('');
   const liveRefreshLoadedKeyRef = useRef('');
+  // Active parking-state identity. Async parking writers (live refresh, price
+  // match) capture this at request time and must ignore their response if it no
+  // longer matches the active trip, so stale lots/prices never leak across trips.
+  const parkingTripIdentityKeyRef = useRef('');
   const priorQuickGoDriveMinutesRef = useRef<number | null>(null);
   const routeRequestSeq = useRef(0);
   const quickGoRouteRequestIdRef = useRef(0);
@@ -4981,12 +5045,32 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         tripData: data,
         searchParams,
       });
+      const parkingTripIdentityKey = buildParkingTripIdentityKey({
+        tripData: data,
+        searchParams,
+      });
       const currentRequest = recommendationsRequestRef.current;
 
       const isNewTripRequest = recommendationsLoadedKeyRef.current !== requestKey;
       const isNewRouteRequest = recommendationsLoadedRouteKeyRef.current !== routeIdentityKey;
+      // Drive parking-state clearing off the dedicated parking identity key so a
+      // sort-only change preserves parking, while any destination / origin /
+      // timing / parking-window change clears it immediately.
+      const previousParkingTripIdentityKey = parkingTripIdentityKeyRef.current;
+      const isNewParkingIdentity = previousParkingTripIdentityKey !== parkingTripIdentityKey;
 
-      if (isNewTripRequest && isNewRouteRequest) {
+      if (isNewParkingIdentity) {
+        logParkingStateScope('clear', {
+          previous: debugRequestId(previousParkingTripIdentityKey),
+          next: debugRequestId(parkingTripIdentityKey),
+          preserved: false,
+        });
+
+        // Point the active parking identity at the new trip *before* any async
+        // parking writer captures it, so stale in-flight responses for the prior
+        // trip can be detected and ignored.
+        parkingTripIdentityKeyRef.current = parkingTripIdentityKey;
+
         // Clear stale enrichment from previous airport/date/origin.
         // Prevents smaller-airport lots/photos/prices from leaking into SEA after edit recalculation.
         setReviewsParking(null);
@@ -5009,6 +5093,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setRouteHydrationState('not_started');
         priorQuickGoDriveMinutesRef.current = null;
         setPriorQuickGoDriveMinutes(null);
+      } else {
+        logParkingStateScope('preserve', {
+          parkingIdentity: debugRequestId(parkingTripIdentityKey),
+          preserved: true,
+        });
       }
 
       if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
@@ -5312,6 +5401,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       recommendationsRequestRef.current?.controller.abort();
       recommendationsLoadedKeyRef.current = '';
       recommendationsLoadedRouteKeyRef.current = '';
+      parkingTripIdentityKeyRef.current = '';
       setRecommendationsLoadedKey('');
       setRecommendationsLoadedRouteKey('');
       setRouteHydrationState('not_started');
@@ -5642,6 +5732,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       airportCode: isCityDestinationTrip(tripData) ? undefined : getTripAirportCode(tripData),
       origin: tripData.origin,
       destination: tripData.destination,
+      destinationName:
+        tripData.type === 'general-trip' ? tripData.destinationName : undefined,
       destinationKind: tripData.destinationKind ?? 'airport',
       destinationLat: tripData.destinationLat,
       destinationLng: tripData.destinationLng,
@@ -5652,7 +5744,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       checkInAt,
       checkOutAt,
     };
-    const refreshKey = JSON.stringify(body);
+    // Identity of the trip this refresh belongs to. Captured now and re-checked
+    // before merging so a response for a previous destination/date can never be
+    // merged into a newer trip's parking list.
+    const activeParkingIdentityKey = buildParkingTripIdentityKey({ tripData, searchParams });
+    const refreshKey = JSON.stringify({ identity: activeParkingIdentityKey, body });
 
     if (
       liveRefreshInFlightKeyRef.current === refreshKey ||
@@ -5662,7 +5758,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     const controller = new AbortController();
+    let cancelled = false;
     liveRefreshInFlightKeyRef.current = refreshKey;
+
+    const isStaleRefresh = () =>
+      cancelled ||
+      controller.signal.aborted ||
+      parkingTripIdentityKeyRef.current !== activeParkingIdentityKey;
 
     const refresh = async () => {
       try {
@@ -5678,13 +5780,35 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         }
 
         const data = await res.json();
+
+        // Ignore responses that arrived after the active trip changed. Without
+        // this, lots from a previous search (e.g. a downtown "Pier 66 Surface
+        // Lot") could merge into a newer stadium/event destination.
+        if (isStaleRefresh()) {
+          logParkingStateScope('live_refresh_ignored_stale', {
+            refreshIdentity: debugRequestId(activeParkingIdentityKey),
+            activeIdentity: debugRequestId(parkingTripIdentityKeyRef.current),
+            aborted: controller.signal.aborted,
+          });
+          return;
+        }
+
         liveRefreshLoadedKeyRef.current = refreshKey;
 
         if (Array.isArray(data?.parking) && data.parking.length > 0) {
+          const refreshed = data.parking as ParkingOption[];
+
+          logParkingStateScope('live_refresh_merge', {
+            refreshIdentity: debugRequestId(activeParkingIdentityKey),
+            lots: refreshed.length,
+          });
+
           setRecommendation((prev) => {
             if (!prev) return prev;
 
-            const refreshed = data.parking as ParkingOption[];
+            // Final guard against a same-tick trip switch between the check
+            // above and React applying the update.
+            if (isStaleRefresh()) return prev;
 
             return {
               ...prev,
@@ -5707,6 +5831,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     refresh();
 
     return () => {
+      cancelled = true;
       controller.abort();
       if (liveRefreshInFlightKeyRef.current === refreshKey) {
         liveRefreshInFlightKeyRef.current = '';
@@ -5714,6 +5839,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     };
   }, [
     tripData,
+    searchParams,
     loading,
     hasRecommendationForRefresh,
     recommendationRouteUnavailableForRefresh,
@@ -5760,6 +5886,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     if (priceMatchKeyRef.current === priceMatchKey) return;
     priceMatchKeyRef.current = priceMatchKey;
 
+    // Identity of the active trip; re-checked before applying matched prices so
+    // prices for a previous destination/date never leak onto a newer trip.
+    const activeParkingIdentityKey = buildParkingTripIdentityKey({ tripData, searchParams });
+    let cancelled = false;
+    const isStalePriceMatch = () =>
+      cancelled || parkingTripIdentityKeyRef.current !== activeParkingIdentityKey;
+
     setParkingPricesChecking(true);
 
     fetch('/api/parking/prices', {
@@ -5774,6 +5907,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     })
       .then((res) => res.json())
       .then((data) => {
+        if (isStalePriceMatch()) {
+          logParkingStateScope('price_match_ignored_stale', {
+            priceIdentity: debugRequestId(activeParkingIdentityKey),
+            activeIdentity: debugRequestId(parkingTripIdentityKeyRef.current),
+          });
+          return;
+        }
+
         const next: Record<string, {
           price: number;
           priceUnit?: PriceUnit;
@@ -5804,9 +5945,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         console.error('[parking price matches] failed', error);
       })
       .finally(() => {
+        if (isStalePriceMatch()) return;
         setParkingPricesChecking(false);
       });
-  }, [tripData, recommendation?.parking, recommendation?.weatherImpact]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripData, searchParams, recommendation?.parking, recommendation?.weatherImpact]);
 
   const { smartPickParkingOptions, cheapestSmartPickOptions } = useMemo(() => {
     if (!recommendation || !tripData) {
@@ -7972,7 +8118,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
-                  <p className="mt-1 text-sm text-zinc-600">Adjust your timing or origin. We’ll recalculate instantly.</p>
+                  <p className="mt-1 text-sm text-zinc-600">Adjust your timing, origin, or destination. We’ll recalculate instantly.</p>
                 </div>
                 <button
                   type="button"
@@ -7993,15 +8139,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       : 'border-zinc-200')
                   }
                 >
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-semibold text-zinc-950">Edit trip</h2>
-                      <p className="mt-1 text-sm text-zinc-600">
-                        Update your trip details and recalculate recommendations.
-                      </p>
-                    </div>
-                  </div>
-
                   <EditTripForm
                     initialData={editingData}
                     isSubmitting={isRecalculating || loading}
@@ -8905,6 +9042,8 @@ export function EditTripForm({
   isSubmitting?: boolean;
 }) {
   const [origin, setOrigin] = useState(initialData.origin);
+  const initialDestinationText = initialData.destinationName || initialData.destination;
+  const [destinationInput, setDestinationInput] = useState(initialDestinationText);
   const [selectedAirportCode, setSelectedAirportCode] = useState(
     ((airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA')).toUpperCase()
   );
@@ -8914,6 +9053,10 @@ export function EditTripForm({
       (airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA').toUpperCase()
     );
   }, [airportCode, initialData]);
+
+  useEffect(() => {
+    setDestinationInput(initialData.destinationName || initialData.destination);
+  }, [initialData]);
 
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>(
     initialData.transportAvailability || 'all'
@@ -9086,6 +9229,9 @@ export function EditTripForm({
     const now = new Date();
 
     if (!origin.trim()) next.push('Origin is required.');
+    if (isGeneralTripEdit && !destinationInput.trim()) {
+      next.push('Destination is required.');
+    }
 
     const validateCombinedDateTime = (dateString: string, timeString: string, label: string) => {
       if (!dateString) {
@@ -9212,7 +9358,7 @@ export function EditTripForm({
       ? null
       : getAirportById(selectedAirportCode) || getAirportById('SEA')!;
     const destination = isGeneralTripEdit
-      ? initialData.destination
+      ? destinationInput.trim()
       : selectedAirport!.routingAddress || selectedAirport!.destinationName;
 
     const normalizedDepartureDate = normalizeEditableDateInputValue(departureDate) || departureDate;
@@ -9232,6 +9378,13 @@ export function EditTripForm({
       normalizedEditedOrigin === normalizedInitialOrigin ||
       (Boolean(normalizedInitialOriginLabel) &&
         normalizedEditedOrigin === normalizedInitialOriginLabel);
+    const normalizedEditedDestination = destination.trim().toLowerCase();
+    const normalizedInitialDestination = initialData.destination.trim().toLowerCase();
+    const normalizedInitialDestinationLabel = (initialData.destinationName || '').trim().toLowerCase();
+    const destinationMatchesInitialSelection =
+      normalizedEditedDestination === normalizedInitialDestination ||
+      (Boolean(normalizedInitialDestinationLabel) &&
+        normalizedEditedDestination === normalizedInitialDestinationLabel);
 
     let data: TripData;
 
@@ -9259,9 +9412,14 @@ export function EditTripForm({
         originPlaceId: originMatchesInitialSelection ? initialData.originPlaceId : undefined,
         destination,
         destinationKind: initialData.destinationKind || 'general',
-        destinationName: initialData.destinationName || destination,
-        destinationLat: initialData.destinationLat,
-        destinationLng: initialData.destinationLng,
+        destinationName: destinationMatchesInitialSelection
+          ? initialData.destinationName || destination
+          : destination,
+        destinationLat: destinationMatchesInitialSelection ? initialData.destinationLat : undefined,
+        destinationLng: destinationMatchesInitialSelection ? initialData.destinationLng : undefined,
+        ...(destinationMatchesInitialSelection && (initialData as TripDataWithExtras).destinationPlaceId
+          ? { destinationPlaceId: (initialData as TripDataWithExtras).destinationPlaceId }
+          : {}),
         tripMode: initialData.tripMode,
         arrivalDate: normalizedArrivalDate,
         arrivalTime,
@@ -9602,6 +9760,17 @@ export function EditTripForm({
             placeholder="Start typing your address"
           />
         </div>
+
+        {isGeneralTripEdit ? (
+          <div className="sm:col-span-2">
+            <AddressInput
+              label="Destination"
+              value={destinationInput}
+              onChange={setDestinationInput}
+              placeholder="Start typing the destination"
+            />
+          </div>
+        ) : null}
 
         {isGeneralTripEdit && (
           <>

@@ -372,6 +372,7 @@ function resolveParkingTransferMeta(option: ParkingOption): {
 
 type ParkingOptionsRequestContext = {
   destinationKind?: DestinationKind;
+  destinationName?: string;
   airportCode?: string;
   destinationCoordinates?: RouteLatLng | null;
   destinationLat?: number;
@@ -2045,6 +2046,8 @@ export class MockProvider implements DataProvider {
         ? await getDestinationParkingOptionsWithMetadata({
             origin,
             destination,
+            destinationName: context?.destinationName,
+            destinationKind,
             dateTime,
             parkingDurationMinutes,
             destinationLat: destinationCoords?.lat ?? context?.destinationLat,
@@ -2060,6 +2063,8 @@ export class MockProvider implements DataProvider {
         : await getDestinationParkingOptions({
             origin,
             destination,
+            destinationName: context?.destinationName,
+            destinationKind,
             dateTime,
             parkingDurationMinutes,
             destinationLat: destinationCoords?.lat ?? context?.destinationLat,
