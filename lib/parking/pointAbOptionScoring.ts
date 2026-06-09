@@ -566,6 +566,9 @@ export function buildPointAbOptionScoreBreakdowns(
     parkingDurationMinutes,
     isAirportTrip: false,
     sort: 'easiest',
+    arrivalDate: input.tripData.type === 'general-trip' ? input.tripData.arrivalDate : undefined,
+    arrivalTime: input.tripData.type === 'general-trip' ? input.tripData.arrivalTime : undefined,
+    transitPayment: input.tripData.transitPayment,
     parkingTotal: bestParking ? getParkingTotalPrice(bestParking, input.tripData) ?? bestParking.price ?? null : null,
     weatherRisk: input.weatherRisk ?? undefined,
   });

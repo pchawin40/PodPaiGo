@@ -6459,6 +6459,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       parkingDurationMinutes: calculateParkingDuration(tripData),
       isAirportTrip: false,
       sort,
+      arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+      arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+      transitPayment: tripData.transitPayment,
       parkingTotal,
       weatherRisk: recommendation?.weatherImpact?.riskLevel,
     });
@@ -6536,12 +6539,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     recommendation.parkingDataStatus === 'unavailable'
       ? 'border-amber-200 bg-amber-50 text-amber-950'
       : 'border-sky-200 bg-sky-50 text-sky-950';
+  const parkingProviderTimedOut =
+    recommendation.parkingDiscoveryStatus === 'partial_timeout' ||
+    /parking search timed out|parking fetch timed out/i.test(
+      [
+        recommendation.parkingDataMessage,
+        recommendation.parkingDiscoveryMetadata?.message,
+        ...(recommendation.parkingDiscoveryMetadata?.providerErrors || []),
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
   const cityParkingPlanStatus: CityParkingPlanStatus =
     isRecalculating ||
     /still updating|refreshing|loading/i.test(recommendation.parkingDataMessage || '')
       ? 'loading'
       : recommendation.parkingDataStatus === 'unavailable'
-        ? 'unavailable'
+        ? parkingProviderTimedOut
+          ? 'empty'
+          : 'unavailable'
         : 'empty';
   const nearbyParkingSearchUrl = googleMapsSearchLink(
     `parking near ${isCityTrip ? displayDestination : currentAirport.label}`,
@@ -7258,6 +7274,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   parkingDurationMinutes: parkingDurationMinutes,
                   isAirportTrip: false,
                   sort,
+                  arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+                  arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+                  transitPayment: tripData.transitPayment,
                   parkingTotal,
                   weatherRisk: recommendation.weatherImpact?.riskLevel,
                 })

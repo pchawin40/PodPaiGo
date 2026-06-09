@@ -32,7 +32,8 @@
     "psql": "^0.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "rg": "^0.0.2"
+    "rg": "^0.0.2",
+    "vercel": "^54.10.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

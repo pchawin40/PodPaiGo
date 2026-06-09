@@ -11,39 +11,169 @@ import type {
   ParkAndRideOption,
 } from './parkAndRideTypes';
 
-function formatMinutesLabel(minutes: number | null | undefined): string {
+function formatMinutesLabel(minutes: number | null | undefined, estimated = false): string {
   if (minutes == null || !Number.isFinite(minutes)) return '—';
-  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const suffix = estimated ? ' est.' : '';
+  if (minutes < 60) return `${Math.round(minutes)} min${suffix}`;
   const hours = Math.floor(minutes / 60);
   const remainder = Math.round(minutes % 60);
-  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+  const label = remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+  return `${label}${suffix}`;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.filter((value, index, list) => list.indexOf(value) === index);
+}
+
+function isGenericOvernightRule(value: string | undefined): boolean {
+  return Boolean(value && /overnight rules vary by lot/i.test(value));
+}
+
+function shouldVerifyOvernightRules(facility?: ParkRideFacility, option?: ParkAndRideOption): boolean {
+  if (facility) return facility.overnightAllowed !== true;
+  if (option) return option.overnightAllowed !== true;
+  return true;
 }
 
 function buildParkingRuleSummary(facility?: ParkRideFacility, option?: ParkAndRideOption): string {
-  const parts = [
-    facility?.timeLimit,
+  const parts = uniqueStrings([
+    facility?.timeLimit && !isGenericOvernightRule(facility.timeLimit)
+      ? facility.timeLimit
+      : null,
     facility?.parkingCostExpectation === 'free'
-      ? 'Free during service hours; no overnight parking.'
+      ? 'Usually free during service hours; verify lot signs.'
       : null,
     facility?.parkingCostExpectation === 'permit' ? 'Permit or validation may apply.' : null,
     facility?.agencyName === 'WSDOT' ? 'WSDOT lots often have 48-hour max.' : null,
     facility?.agencyName === 'King County Metro' ? 'Metro permit suspended; FCFS parking.' : null,
     facility?.agencyName === 'CapMetro' ? 'Park only in designated CapMetro spaces.' : null,
-    option?.maxParkingDuration,
-  ].filter(Boolean);
+    option?.maxParkingDuration &&
+    option.maxParkingDuration !== facility?.timeLimit &&
+    !isGenericOvernightRule(option.maxParkingDuration)
+      ? option.maxParkingDuration
+      : null,
+    shouldVerifyOvernightRules(facility, option) ? 'Verify overnight rules.' : null,
+  ].filter(Boolean) as string[]);
 
   return parts.join(' ') || 'Same-day commuter parking is typical. Verify posted signs.';
 }
 
-function confidenceLabel(confidence: ParkAndRideOption['confidence']): string {
-  switch (confidence) {
-    case 'high':
-      return 'High confidence';
-    case 'medium':
-      return 'Medium confidence';
-    case 'low':
-      return 'Low confidence';
-  }
+function confidenceLabel(option: ParkAndRideOption): string {
+  if (option.confidence === 'low') return 'Low confidence';
+
+  const genericRules =
+    option.ruleConfidence !== 'confirmed' ||
+    option.parkingPriceConfidence !== 'verified' ||
+    option.scheduleConfidence !== 'scheduled';
+
+  if (genericRules) return 'Medium confidence';
+  return option.confidence === 'high' ? 'High confidence' : 'Medium confidence';
+}
+
+function confidenceDescription(option: ParkAndRideOption): string {
+  const hasTimingEstimate = option.scheduleConfidence !== 'scheduled';
+  const verifyRules =
+    option.ruleConfidence !== 'confirmed' || option.parkingPriceConfidence !== 'verified';
+
+  if (hasTimingEstimate && verifyRules) return 'Timing estimate; verify lot rules';
+  if (hasTimingEstimate) return 'Timing estimate; compare route';
+  if (verifyRules) return 'Verify lot rules';
+  return 'Lot and schedule data verified';
+}
+
+function maxDurationDisplay(value: string | undefined): string | undefined {
+  if (!value || isGenericOvernightRule(value)) return undefined;
+  return value;
+}
+
+function routeTimingLines(option: ParkAndRideOption): string[] {
+  return uniqueStrings(
+    [
+      option.timingBasisLabel ? `Timing basis: ${option.timingBasisLabel}` : null,
+      option.scheduleConfidenceLabel &&
+      option.scheduleConfidenceLabel !== option.timingBasisLabel
+        ? `Schedule: ${option.scheduleConfidenceLabel}`
+        : null,
+    ].filter(Boolean) as string[],
+  );
+}
+
+function timingIsEstimated(option: ParkAndRideOption): boolean {
+  return option.scheduleConfidence !== 'scheduled';
+}
+
+function formatOptionMinutes(option: ParkAndRideOption, minutes: number | null | undefined): string {
+  return formatMinutesLabel(minutes, timingIsEstimated(option));
+}
+
+function uniqueWarnings(option: ParkAndRideOption): string[] {
+  return uniqueStrings(option.warnings);
+}
+
+function buildLotCardConfidence(option: ParkAndRideOption): {
+  label: string;
+  description: string;
+} {
+  return {
+    label: confidenceLabel(option),
+    description: confidenceDescription(option),
+  };
+}
+
+function buildTimingCardLabels(option: ParkAndRideOption): {
+  transitTimeDisplay: string;
+  totalTimeDisplay: string;
+} {
+  return {
+    transitTimeDisplay: formatOptionMinutes(option, option.transitMinutes),
+    totalTimeDisplay: formatOptionMinutes(option, option.totalTimeMinutes),
+  };
+}
+
+function formatBreakdownLine(
+  option: ParkAndRideOption,
+  label: string,
+  minutes: number | null | undefined,
+): string {
+  return `${label}: ${formatOptionMinutes(option, minutes)}`;
+}
+
+function buildRouteBreakdownLines(option: ParkAndRideOption): string[] {
+  return [
+    formatBreakdownLine(option, 'Drive to lot', option.driveToLotMinutes),
+    formatBreakdownLine(option, 'Transit to destination', option.transitMinutes),
+    formatBreakdownLine(option, 'Walk', option.walkMinutes),
+    formatBreakdownLine(option, 'Wait/transfer buffer', option.waitMinutes),
+    formatBreakdownLine(option, 'Estimated total', option.totalTimeMinutes),
+    option.timeDeltaLabel ? `Compared to driving: ${option.timeDeltaLabel}` : null,
+    ...routeTimingLines(option),
+  ].filter(Boolean) as string[];
+}
+
+function buildFallbackDetailsPanel(
+  option: ParkAndRideOption,
+): Pick<ParkAndRideDetailsPanel, 'maxDuration' | 'timingBasisLabel' | 'scheduleConfidenceLabel' | 'warnings'> {
+  return {
+    maxDuration: maxDurationDisplay(option.maxParkingDuration),
+    timingBasisLabel: option.timingBasisLabel,
+    scheduleConfidenceLabel: option.scheduleConfidenceLabel,
+    warnings: uniqueWarnings(option),
+  };
+}
+
+function buildLotCardOption(option: ParkAndRideOption): Pick<
+  ParkAndRideLotCard,
+  'transitTimeDisplay' | 'totalTimeDisplay' | 'confidenceLabel' | 'confidenceDescription' | 'warnings'
+> {
+  const timing = buildTimingCardLabels(option);
+  const confidence = buildLotCardConfidence(option);
+
+  return {
+    ...timing,
+    confidenceLabel: confidence.label,
+    confidenceDescription: confidence.description,
+    warnings: uniqueWarnings(option),
+  };
 }
 
 function uniqueOptions(options: ParkAndRideOption[]): ParkAndRideOption[] {
@@ -75,6 +205,7 @@ export function buildParkAndRideLotCards(
         option.selectionReason ||
         option.unavailableReason ||
         'Verify signs before parking.';
+      const lotCard = buildLotCardOption(option);
 
       return {
         id: option.id,
@@ -85,12 +216,15 @@ export function buildParkAndRideLotCards(
         costDisplay: option.costEstimate?.parkingDisplay || 'Parking cost not estimated',
         parkingCostDisplay: option.costEstimate?.parkingDisplay || 'Parking cost not estimated',
         transitFareDisplay: option.costEstimate?.transitFareDisplay || 'Transit fare not estimated',
-        transitTimeDisplay: formatMinutesLabel(option.transitMinutes),
-        totalTimeDisplay: formatMinutesLabel(option.totalTimeMinutes),
+        transitTimeDisplay: lotCard.transitTimeDisplay,
+        totalTimeDisplay: lotCard.totalTimeDisplay,
         confidence: option.confidence,
-        confidenceLabel: confidenceLabel(option.confidence),
+        confidenceLabel: lotCard.confidenceLabel,
+        confidenceDescription: lotCard.confidenceDescription,
         statusLabel,
         timeDeltaLabel: option.timeDeltaLabel,
+        timingBasisLabel: option.timingBasisLabel,
+        scheduleConfidenceLabel: option.scheduleConfidenceLabel,
         rulesUrl,
         rulesLinkLabel: parkAndRideRulesLinkLabel({
           id: option.id,
@@ -100,7 +234,7 @@ export function buildParkAndRideLotCards(
         directionsToLotUrl: option.directionsToLotUrl,
         transitRouteUrl: option.transitRouteUrl,
         unavailableReason: reasonLine,
-        warnings: option.warnings,
+        warnings: lotCard.warnings,
       };
     });
 }
@@ -111,6 +245,7 @@ export function buildParkAndRideDetailsPanel(
   candidates: ParkAndRideOption[] = [option],
 ): ParkAndRideDetailsPanel {
   const parkingRuleSummary = buildParkingRuleSummary(facility, option);
+  const fallbackDetails = buildFallbackDetailsPanel(option);
   const rulesUrl = resolveParkAndRideRulesUrl({
     id: option.id,
     lotName: option.lotName,
@@ -131,8 +266,10 @@ export function buildParkAndRideDetailsPanel(
     rulesUrl,
     routesServed: option.routesServed,
     parkingRuleSummary,
-    maxDuration: option.maxParkingDuration,
+    maxDuration: fallbackDetails.maxDuration,
     verifySignsWarning: VERIFY_SIGNS_WARNING,
+    timingBasisLabel: fallbackDetails.timingBasisLabel,
+    scheduleConfidenceLabel: fallbackDetails.scheduleConfidenceLabel,
     routeBreakdown: {
       driveMinutes: option.driveToLotMinutes ?? null,
       transitMinutes: option.transitMinutes ?? null,
@@ -142,26 +279,19 @@ export function buildParkAndRideDetailsPanel(
     },
     selectionReason: option.selectionReason,
     unavailableReason: option.unavailableReason,
-    warnings: option.warnings,
+    warnings: fallbackDetails.warnings,
     lots,
     sections: [
       {
         title: 'Route breakdown',
-        lines: [
-          `Drive to lot: ${formatMinutesLabel(option.driveToLotMinutes)}`,
-          `Transit to destination: ${formatMinutesLabel(option.transitMinutes)}`,
-          `Walk: ${formatMinutesLabel(option.walkMinutes)}`,
-          `Wait/transfer buffer: ${formatMinutesLabel(option.waitMinutes)}`,
-          `Estimated total: ${formatMinutesLabel(option.totalTimeMinutes)}`,
-          option.timeDeltaLabel ? `Compared to driving: ${option.timeDeltaLabel}` : null,
-        ].filter(Boolean) as string[],
+        lines: buildRouteBreakdownLines(option),
       },
       {
         title: option.isRecommended ? 'Why this lot' : 'Why not recommended',
         lines: [whyLine],
       },
       ...(option.warnings.length > 0
-        ? [{ title: 'Warnings', lines: option.warnings }]
+        ? [{ title: 'Warnings', lines: fallbackDetails.warnings }]
         : []),
     ],
   };

@@ -342,6 +342,7 @@ export type ParkAndRideParkingRules = {
 
 export type ParkingDiscoveryStatus =
   | 'live_refreshed'
+  | 'partial_timeout'
   | 'cache_only_budget_limited'
   | 'cache_only_quota_limited'
   | 'cache_empty'

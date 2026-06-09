@@ -65,7 +65,7 @@ describe('resolveParkAndRideForTrip', () => {
     expect(result.best).not.toBeNull();
     expect(result.best?.agencyName).toBe('CapMetro');
     expect(result.availabilityTier).toMatch(/recommended|backup_available/);
-    expect(result.best?.costEstimate?.parkingDisplay).toBe('Free during service hours');
+    expect(result.best?.costEstimate?.parkingDisplay).toBe('Usually free; verify lot signs.');
   });
 
   test('Houston trip surfaces METRO Park & Ride option', () => {

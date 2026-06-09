@@ -554,7 +554,7 @@ function readPositiveTimeoutMs(name: string, fallback: number): number {
 }
 
 function getParkingOptionsReturnBudgetMs(): number {
-  const overall = readPositiveTimeoutMs('PARKING_FETCH_TIMEOUT_MS', 5000);
+  const overall = readPositiveTimeoutMs('PARKING_FETCH_TIMEOUT_MS', 15000);
   const reserve = readPositiveTimeoutMs('PARKING_FETCH_RETURN_RESERVE_MS', 700);
 
   return Math.max(1000, overall - reserve);

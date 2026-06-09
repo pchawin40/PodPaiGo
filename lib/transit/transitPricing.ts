@@ -161,7 +161,7 @@ export function formatTransitCostDisplay(
       tripTotal: 0,
       oneWay: 0,
       includesReturnLeg: false,
-      primary: '$0',
+      primary: '$0 with pass',
       secondary: getTransitPassCoveredLabel(context),
     };
   }
@@ -187,7 +187,7 @@ export function formatTransitCostDisplay(
       oneWay,
       includesReturnLeg: true,
       primary: formatResolvedTransitFarePrimary(fareResolution, tripTotal, true),
-      secondary: `$${formatFareAmount(oneWay)} one-way × 2`,
+      secondary: `$${formatFareAmount(oneWay)} one-way adult × 2`,
     };
   }
 

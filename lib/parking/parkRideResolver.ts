@@ -15,8 +15,12 @@ import type {
   ParkAndRideLotConfidence,
   ParkAndRideLotStatusLabel,
   ParkAndRideOption,
+  ParkAndRidePriceConfidence,
+  ParkAndRideScheduleConfidence,
   ParkAndRideSelectionInput,
   ParkAndRideSelectionResult,
+  ParkAndRideTimingBasis,
+  ParkAndRideTransitFareConfidence,
   ParkRideAvailabilityTier,
   ParkRideMetroStatus,
 } from './parkAndRideTypes';
@@ -134,20 +138,35 @@ function buildTimeDeltaLabel(
 }
 
 function buildParkingCostDisplay(facility: ParkRideFacility, parkingRange: { min: number; max: number }): string {
+  if (facility.parkingCostExpectation === 'unknown') {
+    return 'Usually free/low-cost; verify lot signs.';
+  }
+
   if (facility.parkingCostExpectation === 'free' || (parkingRange.min === 0 && parkingRange.max === 0)) {
-    return 'Free during service hours';
+    return 'Usually free; verify lot signs.';
   }
+
   if (parkingRange.min === parkingRange.max) {
-    return `$${formatFareDollars(parkingRange.min)} parking`;
+    return `$${formatFareDollars(parkingRange.min)} est.`;
   }
-  return `$${formatFareDollars(parkingRange.min)}–$${formatFareDollars(parkingRange.max)} parking`;
+
+  return `$${formatFareDollars(parkingRange.min)}–$${formatFareDollars(parkingRange.max)} est.`;
 }
 
-function buildTransitFareDisplay(transitRange: { min: number; max: number }): string {
-  if (transitRange.min === transitRange.max) {
-    return `$${formatFareDollars(transitRange.min)} transit fare`;
+function buildTransitFareDisplay(transitRange: TransitFareRange): string {
+  if (transitRange.confidence === 'pass') {
+    return '$0 with pass';
   }
-  return `$${formatFareDollars(transitRange.min)}–$${formatFareDollars(transitRange.max)} transit fare`;
+
+  if (transitRange.confidence === 'unknown') {
+    return 'Transit fare est.';
+  }
+
+  if (transitRange.min === transitRange.max) {
+    return `$${formatFareDollars(transitRange.min)} one-way adult est.`;
+  }
+
+  return `$${formatFareDollars(transitRange.min)}–$${formatFareDollars(transitRange.max)} one-way adult est.`;
 }
 
 function resolveAvailabilityTier(args: {
@@ -275,7 +294,20 @@ function estimateDirectDriveMinutes(
   return estimateDriveMinutesFromStraightLineMiles(miles);
 }
 
-function transitFareRange(facility: ParkRideFacility): { min: number; max: number } {
+type TransitFareRange = {
+  min: number;
+  max: number;
+  confidence: ParkAndRideTransitFareConfidence;
+};
+
+function transitFareRange(
+  facility: ParkRideFacility,
+  transitPayment: ParkAndRideSelectionInput['transitPayment'],
+): TransitFareRange {
+  if (transitPayment === 'orca-pass') {
+    return { min: 0, max: 0, confidence: 'pass' };
+  }
+
   const serviceModes = facilityTransitServiceModes(facility);
   const fare = resolveTransitFare({
     destination: `${facility.city}, ${facility.state}`,
@@ -283,8 +315,91 @@ function transitFareRange(facility: ParkRideFacility): { min: number; max: numbe
     serviceModes: serviceModes.length > 0 ? serviceModes : ['bus'],
   });
 
-  const oneWay = fare.oneWayDollars ?? 3;
-  return { min: oneWay, max: oneWay };
+  if (fare.oneWayDollars == null) {
+    return { min: 3, max: 6, confidence: 'unknown' };
+  }
+
+  const oneWay = fare.oneWayDollars;
+  return {
+    min: oneWay,
+    max: oneWay,
+    confidence: fare.confidence === 'low' ? 'estimated' : 'known',
+  };
+}
+
+function parkingPriceConfidence(facility: ParkRideFacility): ParkAndRidePriceConfidence {
+  return facility.parkingCostExpectation === 'unknown' ? 'unknown' : 'estimated';
+}
+
+function formatArrivalTimeLabel(time: string | undefined): string | null {
+  const match = String(time || '').match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return null;
+
+  const hour24 = Number(match[1]);
+  const minute = match[2];
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${minute} ${suffix}`;
+}
+
+function resolveTimingBasis(input: {
+  arrivalDate?: string;
+  arrivalTime?: string;
+}): {
+  timingBasis: ParkAndRideTimingBasis;
+  timingBasisLabel: string;
+  scheduleConfidence: ParkAndRideScheduleConfidence;
+  scheduleConfidenceLabel: string;
+} {
+  const timeLabel = formatArrivalTimeLabel(input.arrivalTime);
+
+  if (timeLabel) {
+    return {
+      timingBasis: 'selected_arrival_estimate',
+      timingBasisLabel: `Timed for arrival around ${timeLabel}`,
+      scheduleConfidence: 'unconfirmed',
+      scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
+    };
+  }
+
+  if (input.arrivalDate) {
+    return {
+      timingBasis: 'selected_trip_estimate',
+      timingBasisLabel: 'Estimated for your selected trip time',
+      scheduleConfidence: 'unconfirmed',
+      scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
+    };
+  }
+
+  return {
+    timingBasis: 'schedule_unconfirmed',
+    timingBasisLabel: 'Schedule not confirmed — compare route.',
+    scheduleConfidence: 'unconfirmed',
+    scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
+  };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.filter((value, index, list) => list.indexOf(value) === index);
+}
+
+function ensureSentence(value: string): string {
+  return /[.!?]$/.test(value) ? value : `${value}.`;
+}
+
+function shouldShowFacilityTimeLimit(timeLimit: string | undefined): boolean {
+  return Boolean(timeLimit && !/overnight rules vary by lot/i.test(timeLimit));
+}
+
+function buildWarnings(facility: ParkRideFacility): string[] {
+  return uniqueStrings(
+    [
+      shouldShowFacilityTimeLimit(facility.timeLimit) ? ensureSentence(facility.timeLimit!) : null,
+      facility.parkingCostExpectation === 'permit' ? 'Permit or validation may apply.' : null,
+      facility.overnightAllowed === true ? null : 'Verify overnight rules.',
+      VERIFY_SIGNS_WARNING,
+    ].filter(Boolean) as string[],
+  );
 }
 
 function scoreFacilityCandidate(args: {
@@ -300,6 +415,9 @@ function scoreFacilityCandidate(args: {
   sort: ParkAndRideSelectionInput['sort'];
   parkingTotal?: number | null;
   weatherRisk?: 'low' | 'medium' | 'high';
+  arrivalDate?: string;
+  arrivalTime?: string;
+  transitPayment?: ParkAndRideSelectionInput['transitPayment'];
 }): ParkAndRideOption {
   const {
     facility,
@@ -313,6 +431,9 @@ function scoreFacilityCandidate(args: {
     sort,
     parkingTotal,
     weatherRisk,
+    arrivalDate,
+    arrivalTime,
+    transitPayment,
   } = args;
 
   const driveMiles =
@@ -361,12 +482,14 @@ function scoreFacilityCandidate(args: {
   const hardBlocked = Boolean(unavailableReason);
 
   const parkingRange = parkingCostRange(facility.parkingCostExpectation);
-  const transitRange = transitFareRange(facility);
+  const transitRange = transitFareRange(facility, transitPayment);
   const costMin = parkingRange.min + transitRange.min;
   const costMax = parkingRange.max + transitRange.max;
   const parkingDisplay = buildParkingCostDisplay(facility, parkingRange);
   const transitFareDisplay = buildTransitFareDisplay(transitRange);
   const timeDeltaLabel = buildTimeDeltaLabel(totalTimeMinutes, directDriveMinutes);
+  const timingBasis = resolveTimingBasis({ arrivalDate, arrivalTime });
+  const priceConfidence = parkingPriceConfidence(facility);
 
   let score = totalTimeMinutes;
   if (driveMiles != null) score += driveMiles * 4;
@@ -391,11 +514,7 @@ function scoreFacilityCandidate(args: {
   const transitRouteUrl = googleMapsDirectionsLink(address, destination, 'transit');
   const rulesUrl = facility.sourceUrl || directionsToLotUrl;
 
-  const warnings = [
-    facility.timeLimit ? `${facility.timeLimit}.` : null,
-    facility.parkingCostExpectation === 'permit' ? 'Permit or validation may apply.' : null,
-    VERIFY_SIGNS_WARNING,
-  ].filter(Boolean) as string[];
+  const warnings = buildWarnings(facility);
 
   const selectionReason = !hardBlocked
     ? `Drive ${driveToLotMinutes} min · transit ${transitMinutes} min · ${timeDeltaLabel || `total ${totalTimeMinutes} min`}.`
@@ -431,10 +550,15 @@ function scoreFacilityCandidate(args: {
       parkingMax: parkingRange.max,
       transitFareMin: transitRange.min,
       transitFareMax: transitRange.max,
+      parkingPriceConfidence: priceConfidence,
+      transitFareConfidence: transitRange.confidence,
     },
     confidence: facility.confidence as ParkAndRideLotConfidence,
     ruleConfidence: facility.parkingCostExpectation === 'unknown' ? 'unknown' : 'estimated',
     overnightAllowed: overnightAllowedValue(facility.overnightAllowed),
+    parkingPriceConfidence: priceConfidence,
+    transitFareConfidence: transitRange.confidence,
+    ...timingBasis,
     warnings,
     isRecommended: isRecommended && !hardBlocked,
     unavailableReason: hardBlocked ? unavailableReason : undefined,
@@ -551,6 +675,9 @@ export function resolveParkAndRideForTrip(
         sort: input.sort,
         parkingTotal: input.parkingTotal,
         weatherRisk: input.weatherRisk,
+        arrivalDate: input.arrivalDate,
+        arrivalTime: input.arrivalTime,
+        transitPayment: input.transitPayment,
       }),
     )
     .sort((a, b) => (a.selectionScore ?? 9999) - (b.selectionScore ?? 9999));

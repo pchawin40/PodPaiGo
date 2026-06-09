@@ -1,5 +1,6 @@
 import { RecommendationEngine } from '../recommendationEngine';
 import { clearNwsWeatherCache } from '../weather/nws';
+import * as parkingInventory from '../parking/inventory';
 import type { DataProvider } from '../providers';
 import { getAirportById } from '../airports/catalog';
 import type {
@@ -69,6 +70,7 @@ function mockWeatherFetch(periods = [
 describe('RecommendationEngine passes destination coordinates to getTrafficEstimate', () => {
   const originalProvider = RecommendationEngine.provider;
   const originalParkingTimeout = process.env.PARKING_FETCH_TIMEOUT_MS;
+  const originalParkingTimeoutFallback = process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS;
   const originalRouteTimeout = process.env.ROUTE_FETCH_TIMEOUT_MS;
   const originalFetch = global.fetch;
 
@@ -91,6 +93,12 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     } else {
       process.env.ROUTE_FETCH_TIMEOUT_MS = originalRouteTimeout;
     }
+    if (originalParkingTimeoutFallback == null) {
+      delete process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS;
+    } else {
+      process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = originalParkingTimeoutFallback;
+    }
+    jest.restoreAllMocks();
   });
 
   test('general Quick Go trip forwards origin and destination coordinates', async () => {
@@ -514,8 +522,28 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(localRecommendation.trafficEstimate?.duration).not.toBe(35);
   });
 
-  test('slow parking provider returns partial results instead of blocking', async () => {
+  test('parking provider timeout returns cached partial results instead of empty parking', async () => {
     process.env.PARKING_FETCH_TIMEOUT_MS = '1';
+    process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = '100';
+    jest.spyOn(parkingInventory, 'getParkingLotsNearPoint').mockResolvedValue([
+      {
+        id: 42,
+        airportCode: 'GENERAL',
+        name: 'Bellevue Square Garage',
+        normalizedName: 'bellevue square garage',
+        address: 'Bellevue Square, Bellevue, WA',
+        latitude: 47.615,
+        longitude: -122.203,
+        source: 'destination-cache',
+        sourceId: 'cached-bellevue-square',
+        sourceUrl: 'https://maps.example/garage',
+        isOfficial: false,
+        confidence: 0.8,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+        distanceMiles: 0.2,
+      },
+    ]);
 
     const mockProvider: DataProvider = {
       getParkingOptions: async () => new Promise(() => {}) as Promise<never>,
@@ -534,6 +562,52 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       origin: 'Monroe, WA',
       destination: 'Bellevue Square',
       destinationKind: 'general',
+      destinationLat: 47.615,
+      destinationLng: -122.203,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '09:00',
+      transportAvailability: 'all',
+    };
+
+    const recommendation = await RecommendationEngine.generateRecommendations(tripData);
+
+    expect(recommendation.parking).toHaveLength(1);
+    expect(recommendation.parking[0]?.name).toBe('Bellevue Square Garage');
+    expect(recommendation.parking[0]?.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataStatus).toBe('available');
+    expect(recommendation.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataMessage).toBe(
+      'Live parking is still updating. Showing available parking estimates.',
+    );
+    expect(recommendation.parkingDiscoveryMetadata?.cachedCount).toBe(1);
+    expect(recommendation.parkingDiscoveryMetadata?.providerErrors).toContain('parking fetch timed out');
+    expect(recommendation.trafficEstimate?.duration).toBe(18);
+  });
+
+  test('parking provider timeout with no fallback results avoids partial-results copy', async () => {
+    process.env.PARKING_FETCH_TIMEOUT_MS = '1';
+    process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = '100';
+    jest.spyOn(parkingInventory, 'getParkingLotsNearPoint').mockResolvedValue([]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => new Promise(() => {}) as Promise<never>,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const tripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      destinationKind: 'general',
+      destinationLat: 47.615,
+      destinationLng: -122.203,
       arrivalDate: '2026-06-01',
       arrivalTime: '09:00',
       transportAvailability: 'all',
@@ -543,7 +617,11 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
 
     expect(recommendation.parking).toEqual([]);
     expect(recommendation.parkingDataStatus).toBe('unavailable');
-    expect(recommendation.parkingDataMessage).toMatch(/Live parking is still updating/);
+    expect(recommendation.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataMessage).toBe(
+      'Live parking search timed out. Use map search or street signs to verify nearby parking.',
+    );
+    expect(recommendation.parkingDataMessage).not.toMatch(/Showing partial results/i);
     expect(recommendation.trafficEstimate?.duration).toBe(18);
   });
 

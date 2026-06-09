@@ -1,4 +1,4 @@
-import type { ParkAndRideRuleConfidence } from '../types';
+import type { ParkAndRideRuleConfidence, TransitPaymentOption } from '../types';
 import type { PointAbSortMode } from './pointAbRanking';
 
 export type ParkRideMetroStatus =
@@ -30,6 +30,14 @@ export type ParkAndRideOperator =
   | 'Other';
 
 export type ParkAndRideLotConfidence = 'high' | 'medium' | 'low';
+export type ParkAndRidePriceConfidence = 'verified' | 'estimated' | 'unknown';
+export type ParkAndRideTransitFareConfidence = 'known' | 'estimated' | 'pass' | 'unknown';
+export type ParkAndRideTimingBasis =
+  | 'selected_arrival_estimate'
+  | 'selected_trip_estimate'
+  | 'current_estimate'
+  | 'schedule_unconfirmed';
+export type ParkAndRideScheduleConfidence = 'scheduled' | 'current' | 'unconfirmed';
 
 export type ParkAndRideCostEstimate = {
   min: number;
@@ -41,6 +49,8 @@ export type ParkAndRideCostEstimate = {
   parkingMax: number;
   transitFareMin: number;
   transitFareMax: number;
+  parkingPriceConfidence: ParkAndRidePriceConfidence;
+  transitFareConfidence: ParkAndRideTransitFareConfidence;
 };
 
 export type ParkAndRideOption = {
@@ -68,6 +78,12 @@ export type ParkAndRideOption = {
   confidence: ParkAndRideLotConfidence;
   ruleConfidence: ParkAndRideRuleConfidence;
   overnightAllowed: boolean;
+  parkingPriceConfidence: ParkAndRidePriceConfidence;
+  transitFareConfidence: ParkAndRideTransitFareConfidence;
+  timingBasis: ParkAndRideTimingBasis;
+  timingBasisLabel: string;
+  scheduleConfidence: ParkAndRideScheduleConfidence;
+  scheduleConfidenceLabel: string;
   warnings: string[];
   isRecommended: boolean;
   unavailableReason?: string;
@@ -98,10 +114,13 @@ export type ParkAndRideLotCard = {
   totalTimeDisplay: string;
   confidence: ParkAndRideLotConfidence;
   confidenceLabel: string;
+  confidenceDescription: string;
   statusLabel: ParkAndRideLotStatusLabel;
   parkingCostDisplay: string;
   transitFareDisplay: string;
   timeDeltaLabel?: string;
+  timingBasisLabel: string;
+  scheduleConfidenceLabel: string;
   rulesUrl: string;
   rulesLinkLabel: ParkAndRideRulesLinkLabel;
   directionsToLotUrl?: string;
@@ -119,6 +138,8 @@ export type ParkAndRideDetailsPanel = {
   parkingRuleSummary: string;
   maxDuration?: string;
   verifySignsWarning: string;
+  timingBasisLabel: string;
+  scheduleConfidenceLabel: string;
   routeBreakdown: {
     driveMinutes: number | null;
     transitMinutes: number | null;
@@ -143,6 +164,9 @@ export type ParkAndRideSelectionInput = {
   parkingDurationMinutes: number;
   isAirportTrip: boolean;
   sort?: PointAbSortMode;
+  arrivalDate?: string;
+  arrivalTime?: string;
+  transitPayment?: TransitPaymentOption;
   parkingTotal?: number | null;
   weatherRisk?: 'low' | 'medium' | 'high';
 };
@@ -171,6 +195,9 @@ export type PointAbParkRidePresentation = {
   recommended: boolean;
   availabilityTier: ParkRideAvailabilityTier;
   cardHeadline: string;
+  timingBasisLabel?: string;
+  scheduleConfidenceLabel?: string;
+  timingIsEstimated?: boolean;
   hasCandidates: boolean;
   unavailableReason?: string;
   pros: string[];

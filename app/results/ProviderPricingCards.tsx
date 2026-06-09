@@ -130,6 +130,9 @@ export function PricingLinksSection({
 
   const isRideSection = title.toLowerCase().includes('ride');
   const isTransitSection = title.toLowerCase().includes('transit');
+  const transitPassSelected =
+    isTransitSection &&
+    (transitPayment === 'orca-pass' || tripData?.transitPayment === 'orca-pass');
   const transitPassContext = resolveTransitPaymentRegionContext({
     airportCode: tripData?.airportCode ?? getTripAirportCode(tripData ?? null),
   });
@@ -159,8 +162,8 @@ export function PricingLinksSection({
           kind && !(isTransitSection && kind === 'check-live');
 
         const primaryPrice =
-          isTransitSection && transitPayment === 'orca-pass'
-            ? '$0'
+          transitPassSelected
+            ? '$0 with pass'
             : transitPriceDisplay
               ? transitPriceDisplay.primary
               : isRideSection
@@ -168,7 +171,7 @@ export function PricingLinksSection({
                 : price.primary;
 
         const secondaryPrice =
-          isTransitSection && transitPayment === 'orca-pass'
+          transitPassSelected
             ? getTransitPassCoveredLabel(transitPassContext)
             : transitPriceDisplay?.secondary
               ? transitPriceDisplay.secondary
@@ -198,15 +201,15 @@ export function PricingLinksSection({
 
         const fareSublabel =
           isTransitSection && transitPriceDisplay
-            ? transitPayment === 'orca-pass'
+            ? transitPassSelected
               ? getTransitPassAppliedBadge(transitPassContext)
               : transitPriceDisplay.includesReturnLeg
-                ? 'round-trip fare estimate'
-                : transitPriceDisplay.secondary ?? 'one-way fare estimate'
+                ? 'round-trip adult fare estimate'
+                : transitPriceDisplay.secondary ?? 'one-way adult fare estimate'
             : isTransitSection && !transitPriceDisplay && typeof it.price === 'number'
-              ? transitPayment === 'orca-pass'
+              ? transitPassSelected
                 ? getTransitPassAppliedBadge(transitPassContext)
-                : 'fare estimate'
+                : 'Transit fare est.'
               : isRideSection && ridesharePricing?.primary === 'Open app for live price'
                 ? 'live price unavailable'
               : isRideSection && typeof it.price === 'number'

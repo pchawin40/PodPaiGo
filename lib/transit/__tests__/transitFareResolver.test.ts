@@ -111,7 +111,7 @@ describe('formatTransitCostDisplay with resolved fares', () => {
 
     const display = formatTransitCostDisplay(transit, tripData);
 
-    expect(display.primary).toBe('$1.25 one-way est.');
+    expect(display.primary).toBe('$1.25 one-way adult est.');
     expect(display.secondary).toBe('Austin transit fare estimate: ~$1.25 one-way');
     expect(display.primary).not.toContain('3.25');
   });

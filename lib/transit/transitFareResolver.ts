@@ -198,9 +198,9 @@ export function formatResolvedTransitFarePrimary(
   }
 
   if (includesReturnLeg && tripTotal != null) {
-    return `$${formatFareDollars(tripTotal)} round-trip est.`;
+    return `$${formatFareDollars(tripTotal)} round-trip adult est.`;
   }
 
   const amount = tripTotal ?? resolution.oneWayDollars!;
-  return `$${formatFareDollars(amount)} one-way est.`;
+  return `$${formatFareDollars(amount)} one-way adult est.`;
 }

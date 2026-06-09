@@ -88,7 +88,7 @@ describe('Point A→B Park & Ride selection', () => {
     expect(result.best).not.toBeNull();
     expect(result.best?.isRecommended).toBe(true);
     expect(result.best?.totalTimeMinutes).toBeGreaterThan(0);
-    expect(result.best?.costEstimate?.display).toMatch(/\$[\d.]+ transit fare/);
+    expect(result.best?.costEstimate?.display).toMatch(/\$[\d.]+ one-way adult est\./);
     expect(
       result.best?.lotName.includes('Lynnwood') ||
         result.best?.lotName.includes('Northgate') ||
@@ -251,7 +251,7 @@ describe('Point A→B Park & Ride details and ranking', () => {
     const parkRideRow = ranking.modes.find((mode) => mode.key === 'park-ride');
     expect(parkRideRow?.name).toMatch(/Lynnwood|Northgate|Mountlake/);
     expect(parkRideRow?.time).not.toBe('Depends');
-    expect(parkRideRow?.cost).toMatch(/transit fare/);
+    expect(parkRideRow?.cost).toMatch(/one-way adult est|Transit fare est/);
   });
 });
 
@@ -375,8 +375,8 @@ describe('Austin CapMetro Park & Ride QA scenario', () => {
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.best).not.toBeNull();
     expect(result.availabilityTier).toMatch(/recommended|backup_available/);
-    expect(result.best?.costEstimate?.parkingDisplay).toBe('Free during service hours');
-    expect(result.best?.costEstimate?.transitFareDisplay).toBe('$3.50 transit fare');
+    expect(result.best?.costEstimate?.parkingDisplay).toBe('Usually free; verify lot signs.');
+    expect(result.best?.costEstimate?.transitFareDisplay).toBe('$3.50 one-way adult est.');
     expect(result.best?.costEstimate?.display).not.toMatch(/total/i);
   });
 
@@ -388,8 +388,8 @@ describe('Austin CapMetro Park & Ride QA scenario', () => {
     expect(presentation?.hasCandidates).toBe(true);
     expect(presentation?.displayName).not.toMatch(/unavailable/i);
     expect(presentation?.cardHeadline).not.toMatch(/unavailable/i);
-    expect(presentation?.costNote).toBe('Free during service hours');
-    expect(presentation?.costDisplay).toBe('$3.50 transit fare');
+    expect(presentation?.costNote).toBe('Usually free; verify lot signs.');
+    expect(presentation?.costDisplay).toBe('$3.50 one-way adult est.');
   });
 
   test('lot cards use descriptive labels instead of Not useful', () => {
@@ -441,7 +441,7 @@ describe('Austin CapMetro Park & Ride QA scenario', () => {
     const parkRideRow = ranking.modes.find((mode) => mode.key === 'park-ride');
     expect(parkRideRow?.unavailable).toBe(false);
     expect(parkRideRow?.name).not.toMatch(/unavailable/i);
-    expect(parkRideRow?.cost).toMatch(/transit fare/);
-    expect(parkRideRow?.costNote).toBe('Free during service hours');
+    expect(parkRideRow?.cost).toMatch(/one-way adult est|Transit fare est/);
+    expect(parkRideRow?.costNote).toBe('Usually free; verify lot signs.');
   });
 });

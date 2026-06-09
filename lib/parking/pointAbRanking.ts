@@ -465,6 +465,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
   recommended: boolean;
   availabilityTier: ParkRideAvailabilityTier;
   cardHeadline: string;
+  timingIsEstimated: boolean;
   hasCandidates: boolean;
   pros: string[];
   cons: string[];
@@ -482,6 +483,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       recommended: input.pointAbParkRide.recommended,
       availabilityTier: input.pointAbParkRide.availabilityTier,
       cardHeadline: input.pointAbParkRide.cardHeadline,
+      timingIsEstimated: Boolean(input.pointAbParkRide.timingIsEstimated),
       hasCandidates: input.pointAbParkRide.hasCandidates,
       pros: input.pointAbParkRide.pros,
       cons: input.pointAbParkRide.cons,
@@ -502,6 +504,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       cardHeadline: input.parkRideReliable
         ? 'Park & Ride option.'
         : 'Park & Ride found, but not recommended for this trip.',
+      timingIsEstimated: true,
       hasCandidates: true,
       pros: input.bestParkRideAccess.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
       cons: [input.bestParkRideAccess.overnightCaveat || 'Verify lot rules before leaving your car'],
@@ -519,6 +522,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
     recommended: false,
     availabilityTier: 'data_not_available',
     cardHeadline: 'Park & Ride data not available yet for this metro.',
+    timingIsEstimated: true,
     hasCandidates: false,
     pros: ['Good for same-day transit trips'],
     cons: ['Verify lot rules before leaving your car'],
@@ -904,9 +908,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       costNote: parkRide.costNote,
       time:
         parkRide.durationMinutes != null
-          ? formatMinutesLabel(parkRide.durationMinutes)
+          ? `${formatMinutesLabel(parkRide.durationMinutes)}${parkRide.timingIsEstimated ? ' est.' : ''}`
           : 'Not estimated',
-      timeLabel: 'Total time',
+      timeLabel: parkRide.timingIsEstimated ? 'Total time est.' : 'Total time',
       timing:
         parkRide.durationMinutes != null
           ? {

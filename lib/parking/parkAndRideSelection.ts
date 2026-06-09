@@ -24,6 +24,21 @@ function confidenceScoreFromLot(confidence: 'high' | 'medium' | 'low'): number {
   return 40;
 }
 
+function confidenceScoreFromOption(option: NonNullable<ParkAndRideSelectionResult['best']>): number {
+  const baseScore = confidenceScoreFromLot(option.confidence);
+  const scheduleCap = option.scheduleConfidence === 'scheduled' ? baseScore : Math.min(baseScore, 62);
+  const rulesCap =
+    option.ruleConfidence === 'confirmed' && option.parkingPriceConfidence === 'verified'
+      ? scheduleCap
+      : Math.min(scheduleCap, 58);
+
+  return rulesCap;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.filter((value, index, list) => list.indexOf(value) === index);
+}
+
 function confidenceScoreForTier(tier: ParkRideAvailabilityTier): number {
   switch (tier) {
     case 'recommended':
@@ -109,6 +124,8 @@ export function toPointAbParkRidePresentation(
         routesServed: [],
         parkingRuleSummary: 'Verify posted signs and lot rules.',
         verifySignsWarning: VERIFY_SIGNS_WARNING,
+        timingBasisLabel: 'Schedule not confirmed — compare route.',
+        scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
         routeBreakdown: {
           driveMinutes: null,
           transitMinutes: null,
@@ -134,6 +151,7 @@ export function toPointAbParkRidePresentation(
 
   const facility = getParkRideFacilityForOption(option);
   const details = buildParkAndRideDetailsPanel(option, facility, resolvedSelection.candidates);
+  const confidenceScore = confidenceScoreFromOption(option);
 
   return {
     lotName: option.lotName,
@@ -149,10 +167,13 @@ export function toPointAbParkRidePresentation(
         : null,
     durationMinutes: option.totalTimeMinutes ?? null,
     reliable: isPresentationReliable(availabilityTier),
-    confidenceScore: confidenceScoreFromLot(option.confidence),
+    confidenceScore,
     recommended: availabilityTier === 'recommended',
     availabilityTier,
     cardHeadline,
+    timingBasisLabel: option.timingBasisLabel,
+    scheduleConfidenceLabel: option.scheduleConfidenceLabel,
+    timingIsEstimated: option.scheduleConfidence !== 'scheduled',
     hasCandidates,
     unavailableReason: option.unavailableReason,
     pros: [
@@ -160,8 +181,8 @@ export function toPointAbParkRidePresentation(
       option.costEstimate?.parkingDisplay || 'Lower parking cost than downtown garages',
       'Useful when destination parking is expensive',
     ],
-    cons: [...option.warnings, VERIFY_SIGNS_WARNING],
-    warnings: option.warnings,
+    cons: uniqueStrings([...option.warnings, option.scheduleConfidenceLabel]),
+    warnings: uniqueStrings(option.warnings),
     rulesUrl: details.rulesUrl,
     directionsToLotUrl: option.directionsToLotUrl,
     transitRouteUrl: option.transitRouteUrl,

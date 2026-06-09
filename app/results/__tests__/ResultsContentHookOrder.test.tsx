@@ -1250,6 +1250,45 @@ describe('ResultsContent hook order', () => {
     });
   });
 
+  test('general-trip Park & Ride details show estimated rules, adult fare, and selected timing basis', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationForPreferenceToggle();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          origin: 'Lynnwood, WA',
+          originLat: '47.8209',
+          originLng: '-122.2931',
+          destination: 'Downtown Seattle, WA',
+          destinationName: 'Downtown Seattle',
+          destinationLat: '47.6062',
+          destinationLng: '-122.3321',
+          arrivalDate: '2027-06-07',
+          arrivalTime: '19:30',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById('park-ride-details')).toBeInTheDocument();
+    });
+
+    const section = document.getElementById('park-ride-details') as HTMLElement;
+
+    expect(within(section).getAllByText('$0–$5 est.').length).toBeGreaterThan(0);
+    expect(within(section).getAllByText('Verify overnight rules.').length).toBeGreaterThan(0);
+    expect(within(section).queryByText(/Overnight rules vary by lot/i)).not.toBeInTheDocument();
+    expect(within(section).getAllByText('$3 one-way adult est.').length).toBeGreaterThan(0);
+    expect(within(section).getAllByText('Timed for arrival around 7:30 PM').length).toBeGreaterThan(0);
+    expect(within(section).getAllByText('Schedule not confirmed — compare route.').length).toBeGreaterThan(0);
+    expect(within(section).getAllByText('Medium confidence').length).toBeGreaterThan(0);
+    expect(within(section).getAllByText('Timing estimate; verify lot rules').length).toBeGreaterThan(0);
+    expect(within(section).queryByText('High confidence')).not.toBeInTheDocument();
+  });
+
   test('customer parking card is compact and details section keeps arrival checklist warnings', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationForPreferenceToggle();
@@ -1511,6 +1550,50 @@ describe('ResultsContent hook order', () => {
     expect(within(planCard).getByText('Parking search unavailable')).toBeInTheDocument();
     expect(within(planCard).getByText('Open map search to verify nearby parking.')).toBeInTheDocument();
     expect(within(planCard).queryByText('Parking data unavailable')).not.toBeInTheDocument();
+  });
+
+  test('city trip parking timeout keeps customer and street fallback plan', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation: Recommendation = {
+      ...cityTripRecommendation(),
+      parkingDataStatus: 'unavailable',
+      parkingDataMessage:
+        'Live parking search timed out. Use map search or street signs to verify nearby parking.',
+      parkingDiscoveryStatus: 'partial_timeout',
+      parkingDiscoveryMetadata: {
+        status: 'partial_timeout',
+        cachedCount: 0,
+        liveCount: 0,
+        providerErrors: ['parking fetch timed out'],
+        message:
+          'Live parking search timed out. Use map search or street signs to verify nearby parking.',
+      },
+    };
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Neighborhood Cafe, Seattle, WA',
+          destinationName: 'Neighborhood Cafe',
+          destinationKind: 'restaurant',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('General trip')).toBeInTheDocument();
+    });
+
+    const planCard = getParkingPlanCard();
+    expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
+    expect(within(planCard).getByText('No bookable lots found yet')).toBeInTheDocument();
+    expect(
+      within(planCard).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
+    ).toBeInTheDocument();
+    expect(within(planCard).queryByText('Parking search unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing partial results/i)).not.toBeInTheDocument();
   });
 
   test('city parking results attempt Google place enrichment', async () => {

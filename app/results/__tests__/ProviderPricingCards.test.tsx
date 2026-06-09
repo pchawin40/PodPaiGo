@@ -51,11 +51,29 @@ describe('PricingLinksSection provider cards', () => {
     expect(card).toBeTruthy();
 
     const title = screen.getByText('Transit route to destination');
+    const primaryFare = screen.getByText('$1.25 one-way adult est.');
     const fare = screen.getByText('Austin transit fare estimate: ~$1.25 one-way');
 
     expect(title).toHaveClass('break-words');
+    expect(primaryFare.closest('.rounded-xl.border')).toBeTruthy();
     expect(fare.closest('.rounded-xl.border')).toBeTruthy();
     expect(title.parentElement).not.toBe(fare.parentElement);
+  });
+
+  test('shows pass-covered fare when transit pass is selected', () => {
+    render(
+      <PricingLinksSection
+        title="Transit options"
+        items={[austinTransitItem()]}
+        transitPayment="orca-pass"
+        tripData={{ ...austinTripData, transitPayment: 'orca-pass' }}
+      />,
+    );
+
+    expect(screen.getByText('$0 with pass')).toBeInTheDocument();
+    expect(screen.getByText('Covered by transit pass')).toBeInTheDocument();
+    expect(screen.getByText('Transit pass applied')).toBeInTheDocument();
+    expect(screen.queryByText('$1.25 one-way adult est.')).not.toBeInTheDocument();
   });
 
   test('renders a single View route CTA for transit when map and source differ', () => {

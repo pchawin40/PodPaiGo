@@ -142,6 +142,9 @@ export function computeCityTripPointAbRanking(input: {
     parkingDurationMinutes,
     isAirportTrip: false,
     sort: input.sort,
+    arrivalDate: arrivalContext.arrivalDate,
+    arrivalTime: arrivalContext.arrivalTime,
+    transitPayment: input.tripData.transitPayment,
     parkingTotal,
     weatherRisk: input.recommendation.weatherImpact?.riskLevel,
   });

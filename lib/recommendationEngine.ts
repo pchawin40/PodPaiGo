@@ -67,13 +67,15 @@ import {
 } from './access/parkAndRideAccess';
 import { rankAccessOptions } from './access/rankAccessOptions';
 import { buildPointAbOptionScoreBreakdowns } from './parking/pointAbOptionScoring';
+import { getParkingLotsNearPoint } from './parking/inventory';
+import { inventoryLotToDestinationParkingOption } from './parking/inventoryToParkingOption';
 
 /**
  * Resolve a promise, but fall back to a degraded value if it does not settle in
  * `ms`. Used to isolate slow live provider calls so the results page renders with
  * partial data instead of hanging on "Recalculating...". Never rejects.
  */
-function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T | Promise<T>): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) return promise;
 
   return new Promise<T>((resolve) => {
@@ -103,7 +105,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Pr
 
 function getParkingFetchTimeoutMs(): number {
   const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 5000;
+  return Number.isFinite(configured) && configured > 0 ? configured : 15000;
 }
 
 function readPositiveEnvMs(name: string, fallback: number): number {
@@ -136,7 +138,7 @@ function getProviderFetchTimeoutMs(provider: string): number {
 function providerFetch<T>(
   provider: string,
   fetcher: () => Promise<T>,
-  fallback: (error: unknown, timedOut: boolean) => T,
+  fallback: (error: unknown, timedOut: boolean) => T | Promise<T>,
   timeoutMs = getProviderFetchTimeoutMs(provider),
 ): Promise<T> {
   const startedAt = Date.now();
@@ -309,6 +311,94 @@ function hasCoordinateFallbackInputs(tripData: TripData): boolean {
     resolveFiniteCoordinate(tripData.originLat, tripData.originLng) &&
       resolveFiniteCoordinate(tripData.destinationLat, tripData.destinationLng),
   );
+}
+
+type ParkingFetchResult = {
+  options: ParkingOption[];
+  metadata?: ParkingDiscoveryMetadata;
+  failed: boolean;
+  timedOut: boolean;
+  message: string | null;
+};
+
+function parkingTimeoutMessage(hasFallbackResults: boolean): string {
+  return hasFallbackResults
+    ? 'Live parking is still updating. Showing available parking estimates.'
+    : 'Live parking search timed out. Use map search or street signs to verify nearby parking.';
+}
+
+async function loadDestinationParkingTimeoutFallback(args: {
+  tripData: TripData;
+  origin: string;
+  destination: string;
+  destinationLat?: number;
+  destinationLng?: number;
+  providerError: string;
+}): Promise<ParkingFetchResult> {
+  const coords = resolveFiniteCoordinate(args.destinationLat, args.destinationLng);
+
+  let options: ParkingOption[] = [];
+
+  if (coords) {
+    try {
+      options = await withTimeout(
+        Promise.resolve()
+          .then(() =>
+            getParkingLotsNearPoint({
+              lat: coords.lat,
+              lng: coords.lng,
+              limit: 8,
+              radiusMiles: 2.5,
+              destinationKind: args.tripData.destinationKind,
+            }),
+          )
+          .then((lots) =>
+            lots.map((lot) =>
+              inventoryLotToDestinationParkingOption({
+                lot,
+                origin: args.origin,
+                destination: args.destination,
+              }),
+            ),
+          ),
+        readPositiveEnvMs('PARKING_TIMEOUT_CACHE_FALLBACK_MS', 1200),
+        () => [] as ParkingOption[],
+      );
+    } catch (error) {
+      debugLog('parking_timeout_cache_fallback_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      options = [];
+    }
+  }
+
+  const hasFallbackResults = options.length > 0;
+  const message = parkingTimeoutMessage(hasFallbackResults);
+  const metadata: ParkingDiscoveryMetadata = {
+    status: 'partial_timeout',
+    cachedCount: options.length,
+    liveCount: 0,
+    providerErrors: [args.providerError],
+    liveRefreshPaused: true,
+    lastChecked: options
+      .map((option) => option.fetchedAt || option.lastUpdated)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1),
+    message,
+  };
+
+  return {
+    options: options.map((option) => ({
+      ...option,
+      parkingDiscoveryStatus: 'partial_timeout',
+      parkingDiscoveryMessage: 'Live availability not confirmed.',
+    })),
+    metadata,
+    failed: true,
+    timedOut: true,
+    message,
+  };
 }
 
 function isDefinitiveRouteImpossible(estimate: TrafficEstimate): boolean {
@@ -801,9 +891,9 @@ export class RecommendationEngine {
               failed: false,
               timedOut: false,
               message: null as string | null,
-            };
+            } satisfies ParkingFetchResult;
           },
-          (error, timedOut) => {
+          async (error, timedOut) => {
             const message = error instanceof Error ? error.message : String(error);
             console.warn('Parking fetch failed; continuing with non-parking recommendations', {
               tripType: tripData.type,
@@ -815,21 +905,32 @@ export class RecommendationEngine {
               timedOut,
             });
 
+            if (timedOut && !isAirportTrip) {
+              return loadDestinationParkingTimeoutFallback({
+                tripData,
+                origin: tripData.origin,
+                destination: tripData.destination,
+                destinationLat: effectiveDestinationLat,
+                destinationLng: effectiveDestinationLng,
+                providerError: message,
+              });
+            }
+
+            const fallbackMessage = timedOut
+              ? parkingTimeoutMessage(false)
+              : 'Parking data unavailable right now. Try again or open directions.';
+
             return {
               options: [] as ParkingOption[],
               metadata: {
-                status: 'provider_error',
+                status: timedOut ? 'partial_timeout' : 'provider_error',
                 providerErrors: [message],
-                message: timedOut
-                  ? 'Live parking is still updating. Showing partial results — open directions to confirm.'
-                  : 'Parking data unavailable right now. Try again or open directions.',
+                message: fallbackMessage,
               } satisfies ParkingDiscoveryMetadata,
               failed: true,
               timedOut,
-              message: timedOut
-                ? 'Live parking is still updating. Showing partial results — open directions to confirm.'
-                : 'Parking data unavailable right now. Try again or open directions.',
-            };
+              message: fallbackMessage,
+            } satisfies ParkingFetchResult;
           },
           getParkingFetchTimeoutMs(),
         )
@@ -839,7 +940,7 @@ export class RecommendationEngine {
           failed: false,
           timedOut: false,
           message: null as string | null,
-        });
+        } satisfies ParkingFetchResult);
 
     const [
       parkingResult,
@@ -1411,7 +1512,11 @@ export class RecommendationEngine {
             ? 'unavailable'
             : 'empty';
     const parkingDataMessage =
-      parkingResult.failed && !hasParkingResults
+      parkingResult.timedOut && hasParkingResults
+        ? parkingResult.message ||
+          parkingDiscoveryMetadata?.message ||
+          parkingTimeoutMessage(true)
+      : parkingResult.failed && !hasParkingResults
         ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
         : shouldLoadParking && !hasParkingResults
           ? parkingDiscoveryMetadata?.status === 'cache_empty'
@@ -1460,9 +1565,11 @@ export class RecommendationEngine {
       parkingDiscoveryNotice:
         shouldLoadParking
           ? parkingDiscoveryMetadata?.liveRefreshPaused && hasParkingResults
-            ? 'Live parking refresh paused to control API cost. Showing saved parking options.'
+            ? parkingResult.timedOut
+              ? parkingDiscoveryMetadata.message || parkingTimeoutMessage(true)
+              : 'Live parking refresh paused to control API cost. Showing saved parking options.'
             : parkingResult.timedOut && hasParkingResults
-            ? 'Some live parking details are still refreshing.'
+            ? parkingDiscoveryMetadata?.message || parkingTimeoutMessage(true)
             : isAirportTrip
               ? getParkingDiscoveryNotice(finalParking.length)
               : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
