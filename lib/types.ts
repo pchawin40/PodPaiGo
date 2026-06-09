@@ -135,6 +135,8 @@ type BaseTripData = {
    * timing should still behave like "go now" instead of a full planner target arrival.
    */
   tripMode?: 'quick-go';
+  quickGoPurpose?: string;
+  intent?: string;
 
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;

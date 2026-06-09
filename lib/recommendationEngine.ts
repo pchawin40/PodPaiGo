@@ -58,6 +58,7 @@ import {
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
 import { isEventVenueDestination } from './parking/eventVenueDetection';
+import { classifyDestinationParking } from './parking/destinationParkingClassifier';
 import { attachTrafficRouteMetadata } from './trip/quickGo';
 import { getAirportById } from './airports/catalog';
 import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
@@ -710,6 +711,36 @@ function hasDriveSegment(transit: TransitOption): boolean {
   return segs.some((s) => s.mode === 'drive');
 }
 
+function shouldDeferQuickGoPaidParkingDiscovery(args: {
+  tripData: TripData;
+  isAirportTrip: boolean;
+  isEventDestination: boolean;
+}): boolean {
+  const { tripData, isAirportTrip, isEventDestination } = args;
+  if (tripData.tripMode !== 'quick-go') return false;
+  if (isAirportTrip || isEventDestination) return false;
+
+  const destinationKind = String(tripData.destinationKind || '').toLowerCase();
+  if (destinationKind === 'airport' || destinationKind === 'downtown') return false;
+  if (destinationKind === 'stadium' || destinationKind === 'event') return false;
+
+  const purpose = String(tripData.quickGoPurpose || '').toLowerCase();
+  const intent = String(tripData.intent || '').toLowerCase();
+  if (
+    purpose === 'parking-trip' ||
+    /parking-(trip|options)|parking options|find parking|book parking/.test(intent)
+  ) {
+    return false;
+  }
+
+  const classification = classifyDestinationParking({
+    destination: tripData.destinationName || tripData.destination,
+    destinationKind: tripData.destinationKind,
+  });
+
+  return classification.mode === 'free_likely';
+}
+
 // Recommendation engine - testable domain logic
 export class RecommendationEngine {
   static provider: DataProvider = ActiveDataProvider;
@@ -824,7 +855,15 @@ export class RecommendationEngine {
 
     const noParkingNeeded = (tripData as TripDataWithTransport).parkingPreference === 'none';
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
-    const shouldLoadParking = allowCarOptions && shouldDiscoverParkingForTrip(tripData);
+    const deferQuickGoPaidParkingDiscovery = shouldDeferQuickGoPaidParkingDiscovery({
+      tripData,
+      isAirportTrip,
+      isEventDestination,
+    });
+    const shouldLoadParking =
+      allowCarOptions &&
+      shouldDiscoverParkingForTrip(tripData) &&
+      !deferQuickGoPaidParkingDiscovery;
     const allowRideshare =
       noParkingNeeded ||
       transportAvailability === 'rideshare' ||
@@ -842,6 +881,7 @@ export class RecommendationEngine {
       noParkingNeeded,
       allowCarOptions,
       shouldLoadParking,
+      deferQuickGoPaidParkingDiscovery,
       allowRideshare,
       allowTransit,
       hasOriginCoords: Boolean(mainOriginLatLng),
@@ -1502,6 +1542,14 @@ export class RecommendationEngine {
             cachedCount: finalParking.filter((option) => option.providerSource === 'destination-cache').length,
             liveCount: finalParking.filter((option) => option.providerSource !== 'destination-cache').length,
           } satisfies ParkingDiscoveryMetadata
+        : deferQuickGoPaidParkingDiscovery
+          ? {
+              status: 'cache_empty',
+              cachedCount: 0,
+              liveCount: 0,
+              liveRefreshPaused: true,
+              message: 'Customer parking likely — verify signs.',
+            } satisfies ParkingDiscoveryMetadata
         : undefined);
     const parkingDataStatus =
       !shouldLoadParking
@@ -1518,6 +1566,8 @@ export class RecommendationEngine {
           parkingTimeoutMessage(true)
       : parkingResult.failed && !hasParkingResults
         ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
+        : deferQuickGoPaidParkingDiscovery && !hasParkingResults
+          ? 'Customer parking likely — verify signs.'
         : shouldLoadParking && !hasParkingResults
           ? parkingDiscoveryMetadata?.status === 'cache_empty'
             ? 'No saved parking options found near this destination yet. Search nearby parking to verify current garages and lots.'

@@ -17,6 +17,7 @@ import {
   selectBestParkAndRideForPointAb,
   toPointAbParkRidePresentation,
 } from '../parkAndRideSelection';
+import type { PointAbParkRidePresentation } from '../parkAndRideTypes';
 
 const tripData = {
   type: 'general-trip' as const,
@@ -1450,6 +1451,93 @@ describe('pointAbRanking', () => {
     expect(paidMode?.costNote).toBe('Bookable paid backup');
     // 4. Customer parking has usable timing (from rideshare drive proxy, not BIG=999999)
     expect(customerMode?.time).not.toBe('Drive + verify');
+  });
+
+  test('static Park & Ride cannot win easiest when customer parking is likely', () => {
+    const fredMeyerTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe WA',
+      destination: 'Fred Meyer Monroe WA',
+      destinationKind: 'general' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '10:00',
+      parkingDuration: 60,
+      transportAvailability: 'all' as const,
+    };
+    const staticParkRide = {
+      lotName: 'Test Park & Ride',
+      displayName: 'Test Park & Ride',
+      costDisplay: '$3 one-way adult est.',
+      costNote: 'Usually free; verify lot signs.',
+      cost: 3,
+      durationMinutes: 18,
+      reliable: true,
+      confidenceScore: 58,
+      recommended: true,
+      availabilityTier: 'recommended',
+      cardHeadline: 'Park & Ride option.',
+      timingBasisLabel: 'Timed for arrival around 10:00 AM',
+      scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
+      timingIsEstimated: true,
+      hasCandidates: true,
+      pros: ['Useful when destination parking is expensive'],
+      cons: ['Schedule not confirmed — compare route.'],
+      warnings: ['Verify posted signs and lot rules before leaving your car.'],
+      details: {
+        lotName: 'Test Park & Ride',
+        operator: 'Test Transit',
+        address: 'Test Park & Ride',
+        rulesUrl: 'https://example.com/rules',
+        routesServed: [],
+        parkingRuleSummary: 'Usually free; verify lot signs.',
+        verifySignsWarning: 'Verify posted signs and lot rules before leaving your car.',
+        timingBasisLabel: 'Timed for arrival around 10:00 AM',
+        scheduleConfidenceLabel: 'Schedule not confirmed — compare route.',
+        routeBreakdown: {
+          driveMinutes: 8,
+          transitMinutes: 6,
+          walkMinutes: 2,
+          waitMinutes: 2,
+          totalMinutes: 18,
+        },
+        warnings: ['Verify posted signs and lot rules before leaving your car.'],
+        lots: [],
+        sections: [],
+      },
+    } satisfies PointAbParkRidePresentation;
+
+    const ranked = rankPointAbModes({
+      tripData: fredMeyerTrip,
+      sort: 'easiest',
+      destinationLabel: fredMeyerTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: expensiveRide,
+      ridePrice: 18,
+      rideDuration: 20,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      pointAbParkRide: staticParkRide,
+      parkRideCost: staticParkRide.cost,
+      parkRideDuration: staticParkRide.durationMinutes,
+      parkRideReliable: staticParkRide.reliable,
+      driveMinutes: 12,
+    });
+
+    const parkRideMode = ranked.modes.find((mode) => mode.key === 'park-ride');
+
+    expect(ranked.recommendationMode).toBe('destination-customer');
+    expect(ranked.displayRecommendationMode).toBe('destination-customer');
+    expect(ranked.recommendedTitle).toMatch(/customer parking/i);
+    expect(parkRideMode?.status).not.toBe('best_pick');
+    expect(parkRideMode?.cons).toContain('Schedule not confirmed — compare route.');
   });
 
   test('Fred Meyer trip with no-parking preference keeps rideshare eligible to win', () => {

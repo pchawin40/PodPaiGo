@@ -4,6 +4,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ResultsContent, {
+  buildRecommendationProviderRequestKey,
   buildRecommendationRequestKey,
   buildParkingTripIdentityKey,
 } from '../ResultsContent';
@@ -54,6 +55,45 @@ function cityTripSearchParams(overrides?: Record<string, string>): string {
     ...overrides,
   });
   return params.toString();
+}
+
+function quickGoCityTripSearchParams(overrides?: Record<string, string>): string {
+  return cityTripSearchParams({
+    type: 'quick-go',
+    tripMode: 'quick-go',
+    quickGoConfirmed: '1',
+    destination: 'Fred Meyer Monroe WA',
+    destinationName: 'Fred Meyer Monroe WA',
+    destinationKind: 'general',
+    originLat: '47.8554',
+    originLng: '-121.9709',
+    destinationLat: '47.8550',
+    destinationLng: '-121.9700',
+    ...overrides,
+  });
+}
+
+function fullDetailsFromQuickGoSearchParams(overrides?: Record<string, string>): string {
+  return cityTripSearchParams({
+    quickGoConfirmed: '1',
+    destination: 'Fred Meyer Monroe WA',
+    destinationName: 'Fred Meyer Monroe WA',
+    destinationKind: 'general',
+    originLat: '47.8554',
+    originLng: '-121.9709',
+    destinationLat: '47.8550',
+    destinationLng: '-121.9700',
+    ...overrides,
+  });
+}
+
+function getQuickGoSnapshotSessionStorageKey(): string {
+  const keys = Array.from({ length: window.sessionStorage.length }, (_, index) =>
+    window.sessionStorage.key(index),
+  ).filter((key): key is string => Boolean(key));
+  const key = keys.find((value) => value.startsWith('podpaigo-quickgo-recommendation:'));
+  expect(key).toBeTruthy();
+  return key as string;
 }
 
 function cityTripRecommendation(): Recommendation {
@@ -409,11 +449,12 @@ describe('ResultsContent hook order', () => {
   afterEach(() => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = originalLiveRefresh;
     window.localStorage.clear();
+    window.sessionStorage.clear();
     mockRouterReplace.mockClear();
     jest.restoreAllMocks();
   });
 
-  test('recommendation request key changes by route, sort, preference, and trip id', () => {
+  test('provider recommendation key ignores sort while display key can change by sort', () => {
     const baseTrip: TripData = {
       type: 'general-trip',
       origin: 'La Quinta Inn & Suites by Wyndham Austin Airport',
@@ -442,6 +483,10 @@ describe('ResultsContent hook order', () => {
       travelPreferences: preferences,
       showParkingAnyway: false,
     });
+    const austinProviderKey = buildRecommendationProviderRequestKey({
+      tripData: baseTrip,
+      searchParams: new URLSearchParams('tripId=austin&sort=easiest'),
+    });
     const monroeKey = buildRecommendationRequestKey({
       tripData: {
         ...baseTrip,
@@ -459,12 +504,30 @@ describe('ResultsContent hook order', () => {
       travelPreferences: preferences,
       showParkingAnyway: false,
     });
+    const monroeProviderKey = buildRecommendationProviderRequestKey({
+      tripData: {
+        ...baseTrip,
+        origin: 'Monroe, WA',
+        destination: 'Brighton Jones, Seattle, WA',
+        destinationName: 'Brighton Jones',
+        destinationKind: 'office',
+        originLat: 47.8554,
+        originLng: -121.9709,
+        destinationLat: 47.6097,
+        destinationLng: -122.3341,
+      },
+      searchParams: new URLSearchParams('tripId=monroe&sort=easiest'),
+    });
     const fastestKey = buildRecommendationRequestKey({
       tripData: baseTrip,
       searchParams: new URLSearchParams('tripId=austin&sort=fastest'),
       sort: 'fastest',
       travelPreferences: preferences,
       showParkingAnyway: false,
+    });
+    const fastestProviderKey = buildRecommendationProviderRequestKey({
+      tripData: baseTrip,
+      searchParams: new URLSearchParams('tripId=austin&sort=fastest'),
     });
     const noParkingKey = buildRecommendationRequestKey({
       tripData: baseTrip,
@@ -476,8 +539,14 @@ describe('ResultsContent hook order', () => {
       },
       showParkingAnyway: false,
     });
+    const noParkingProviderKey = buildRecommendationProviderRequestKey({
+      tripData: baseTrip,
+      searchParams: new URLSearchParams('tripId=austin&sort=easiest&parkingPreference=none'),
+    });
 
     expect(new Set([austinKey, monroeKey, fastestKey, noParkingKey]).size).toBe(4);
+    expect(fastestProviderKey).toBe(austinProviderKey);
+    expect(new Set([austinProviderKey, monroeProviderKey, noParkingProviderKey]).size).toBe(3);
   });
 
   test('transitions from loading to city trip results without adding hooks', async () => {
@@ -573,15 +642,9 @@ describe('ResultsContent hook order', () => {
     });
   });
 
-  test('sort recalculation keeps previous parking visible while refresh is pending and after an empty same-route response', async () => {
+  test('sort-only changes rerank locally without refetching recommendations', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
-    const secondRecommendationResponse = deferred<{
-      ok: boolean;
-      text: () => Promise<string>;
-      json: () => Promise<unknown>;
-    }>();
     const firstRecommendation = cityTripRecommendationWithActualParking();
-    const emptyRecommendation = cityTripRecommendation();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
     let recommendationCalls = 0;
 
@@ -599,7 +662,15 @@ describe('ResultsContent hook order', () => {
               json: async () => firstRecommendation,
             });
           }
-          return secondRecommendationResponse.promise;
+          return Promise.resolve({
+            ok: true,
+            text: async () => {
+              throw new Error('sort-only change should not refetch recommendations');
+            },
+            json: async () => {
+              throw new Error('sort-only change should not refetch recommendations');
+            },
+          });
         }
         return Promise.resolve({
           ok: true,
@@ -618,24 +689,223 @@ describe('ResultsContent hook order', () => {
     fireEvent.click(screen.getByRole('button', { name: /Cheapest/i }));
 
     await waitFor(() => {
-      expect(recommendationCalls).toBe(2);
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
     });
+    expect(recommendationCalls).toBe(1);
     expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
     expect(screen.queryByText('Parking search unavailable')).not.toBeInTheDocument();
+  });
 
-    await act(async () => {
-      secondRecommendationResponse.resolve({
-        ok: true,
-        text: async () => JSON.stringify(emptyRecommendation),
-        json: async () => emptyRecommendation,
-      });
-      await secondRecommendationResponse.promise;
+  test('Quick Go full details hydrates from a fresh session snapshot without refetching', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithActualParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    let recommendationCalls = 0;
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          recommendationCalls += 1;
+          if (recommendationCalls > 1) {
+            return Promise.resolve({
+              ok: false,
+              text: async () => 'unexpected duplicate recommendation fetch',
+              json: async () => ({}),
+            });
+          }
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(recommendation),
+            json: async () => recommendation,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
     });
+
+    const quickGoRender = render(
+      <ResultsContent storedSearchParams={quickGoCityTripSearchParams()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Go')).toBeInTheDocument();
+      expect(recommendationCalls).toBe(1);
+    });
+    expect(getQuickGoSnapshotSessionStorageKey()).toBeTruthy();
+
+    quickGoRender.unmount();
+
+    render(<ResultsContent storedSearchParams={fullDetailsFromQuickGoSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('General trip')).toBeInTheDocument();
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+    expect(recommendationCalls).toBe(1);
+  });
+
+  test('full details direct load without a Quick Go snapshot fetches normally', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithActualParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const fetchMock = installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={fullDetailsFromQuickGoSearchParams()} />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
     });
-    expect(screen.queryByText('Parking search unavailable')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === '/api/recommendations'),
+    ).toHaveLength(1);
+  });
+
+  test('expired Quick Go session snapshot is ignored and full details refetches', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithActualParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    let recommendationCalls = 0;
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          recommendationCalls += 1;
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(recommendation),
+            json: async () => recommendation,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    const quickGoRender = render(
+      <ResultsContent storedSearchParams={quickGoCityTripSearchParams()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Go')).toBeInTheDocument();
+      expect(recommendationCalls).toBe(1);
+    });
+
+    const snapshotKey = getQuickGoSnapshotSessionStorageKey();
+    const snapshot = JSON.parse(window.sessionStorage.getItem(snapshotKey) as string) as {
+      createdAt: number;
+    };
+    window.sessionStorage.setItem(
+      snapshotKey,
+      JSON.stringify({
+        ...snapshot,
+        createdAt: Date.now() - 5 * 60 * 1000 - 1,
+      }),
+    );
+
+    quickGoRender.unmount();
+    render(<ResultsContent storedSearchParams={fullDetailsFromQuickGoSearchParams()} />);
+
+    await waitFor(() => {
+      expect(recommendationCalls).toBe(2);
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+  });
+
+  test('Quick Go snapshot is rejected when trip timing identity changes', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithActualParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    let recommendationCalls = 0;
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          recommendationCalls += 1;
+          return Promise.resolve({
+            ok: true,
+            text: async () => JSON.stringify(recommendation),
+            json: async () => recommendation,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    const quickGoRender = render(
+      <ResultsContent storedSearchParams={quickGoCityTripSearchParams()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Go')).toBeInTheDocument();
+      expect(recommendationCalls).toBe(1);
+    });
+
+    quickGoRender.unmount();
+    render(
+      <ResultsContent
+        storedSearchParams={fullDetailsFromQuickGoSearchParams({
+          arrivalTime: '20:30',
+          parkingCheckInTime: '20:30',
+          parkingCheckOutTime: '22:30',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(recommendationCalls).toBe(2);
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+  });
+
+  test('customer-parking Quick Go skips parking live refresh follow-up', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'true';
+    const recommendation: Recommendation = {
+      ...cityTripRecommendation(),
+      parkingDataStatus: 'not_requested',
+      parkingDataMessage: 'Customer parking likely — verify signs.',
+    };
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const fetchMock = installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={quickGoCityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Quick Go')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === '/api/recommendations'),
+    ).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === '/api/parking/live-refresh'),
+    ).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input) === '/api/google-place-match'),
+    ).toHaveLength(0);
   });
 
   test('parking trip identity key is stable for sort-only changes but changes on trip identity', () => {
@@ -872,13 +1142,25 @@ describe('ResultsContent hook order', () => {
       }),
     });
 
-    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+    const { rerender } = render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Estimated Garage Placeholder').length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Cheapest/i }));
+    rerender(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          arrivalTime: '20:30',
+          parkingCheckInTime: '20:30',
+          parkingCheckOutTime: '22:30',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(recommendationCalls).toBe(2);
+    });
 
     await act(async () => {
       secondRecommendationResponse.resolve({

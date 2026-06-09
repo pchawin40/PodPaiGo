@@ -148,6 +148,83 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     );
   });
 
+  test('customer-parking Quick Go defers live paid parking discovery', async () => {
+    const parkingSpy = jest.fn(async () => []);
+    const trafficSpy = jest.fn(async () => okTraffic);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: parkingSpy,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      quickGoPurpose: 'general-destination',
+      intent: 'general-trip',
+      origin: 'Monroe, WA',
+      originLat: 47.8554,
+      originLng: -121.9709,
+      destination: 'Fred Meyer Monroe WA',
+      destinationName: 'Fred Meyer Monroe WA',
+      destinationKind: 'general',
+      destinationLat: 47.855,
+      destinationLng: -121.97,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).not.toHaveBeenCalled();
+    expect(trafficSpy).toHaveBeenCalled();
+    expect(recommendation.parking).toHaveLength(0);
+    expect(recommendation.parkingDataStatus).toBe('not_requested');
+    expect(recommendation.parkingDataMessage).toBe('Customer parking likely — verify signs.');
+  });
+
+  test('stadium Quick Go still runs parking discovery', async () => {
+    const parkingSpy = jest.fn(async () => []);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: parkingSpy,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      quickGoPurpose: 'general-destination',
+      intent: 'general-trip',
+      origin: 'Monroe, WA',
+      originLat: 47.8554,
+      originLng: -121.9709,
+      destination: 'Lumen Field, Seattle, WA',
+      destinationName: 'Lumen Field',
+      destinationKind: 'stadium',
+      destinationLat: 47.5952,
+      destinationLng: -122.3316,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '19:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).toHaveBeenCalled();
+  });
+
   test('general trip parking uses effective destination coordinates resolved by geocode fallback', async () => {
     const parkingSpy = jest.fn(async () => ({
       options: [],

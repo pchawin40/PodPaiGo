@@ -52,6 +52,7 @@ import {
   isQuickGoMode,
   logQuickGoClientRoute,
   mergeStoredTripSearchParams,
+  quickGoClassificationForTrip,
   quickGoRouteHydrationStateForFinalResult,
   resolveQuickGoDriveTime,
   shouldStartQuickGoRouteRefresh,
@@ -145,6 +146,7 @@ import {
   parkingRouteUnavailableReason,
   withStableParkingRouteStatus,
 } from '../../lib/parking/routeStatus';
+import { isEventVenueDestination } from '../../lib/parking/eventVenueDetection';
 import { RIDESHARE_ESTIMATE_DISCLAIMER, formatRidesharePriceDisplay } from '../../lib/rideshare/estimate';
 
 import {
@@ -4043,6 +4045,8 @@ const GOOGLE_PLACE_MATCH_CONCURRENCY = 2;
 const COLLAPSED_PARKING_DISPLAY_COUNT = 6;
 const PARKING_SHOW_MORE_INCREMENT = 10;
 const MAX_GOOGLE_PLACE_MATCH_LIMIT = 20;
+const QUICK_GO_RECOMMENDATION_SNAPSHOT_PREFIX = 'podpaigo-quickgo-recommendation';
+const QUICK_GO_RECOMMENDATION_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -4105,6 +4109,60 @@ export function buildRecommendationRequestKey(args: {
       businessTravelMode: travelPreferences.businessTravelMode,
       parkingFilters: travelPreferences.parkingFilters,
       parkingVisibilityOverride: showParkingAnyway ? 'show_parking_anyway' : null,
+      transitPayment:
+        searchParams.get('transitPayment') ??
+        tripExtras.transitPayment ??
+        null,
+      intent: searchParams.get('intent') ?? null,
+    },
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+export function buildRecommendationProviderRequestKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): string {
+  const { tripData, searchParams } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    trip: tripData,
+    identity: {
+      origin: tripData.origin,
+      originPlaceId: tripData.originPlaceId ?? null,
+      originLat: tripData.originLat ?? null,
+      originLng: tripData.originLng ?? null,
+      destination: tripData.destination,
+      destinationName: tripData.destinationName ?? null,
+      destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+      destinationLat: tripData.destinationLat ?? null,
+      destinationLng: tripData.destinationLng ?? null,
+      tripId: searchParams.get('tripId') ?? null,
+    },
+    controls: {
+      parkingPreference:
+        searchParams.get('parkingPreference') ??
+        tripExtras.parkingPreference ??
+        null,
+      transportAvailability:
+        searchParams.get('transport') ??
+        searchParams.get('transportAvailability') ??
+        tripData.transportAvailability ??
+        null,
       transitPayment:
         searchParams.get('transitPayment') ??
         tripExtras.transitPayment ??
@@ -4331,6 +4389,20 @@ function logRecommendationsFetch(
   });
 }
 
+function logRecommendationSortLocal(
+  from: SortTab,
+  to: SortTab,
+  details: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.debug('recommendations sort local_rerank', {
+    from,
+    to,
+    ...details,
+  });
+}
+
 type MatchedParkingPriceEntry = {
   price: number;
   priceUnit?: string;
@@ -4338,10 +4410,145 @@ type MatchedParkingPriceEntry = {
   sourceLink?: string;
 };
 
+type QuickGoRecommendationSnapshot = {
+  tripData: TripData;
+  recommendation: Recommendation;
+  rankedOptions: RankedRecommendation[];
+  createdAt: number;
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+  providerRequestKey: string;
+};
+
 type SmartPickParkingBundles = {
   smartPickParkingOptions: ParkingOption[];
   cheapestSmartPickOptions: ParkingOption[];
 };
+
+function quickGoRecommendationSnapshotStorageKey(args: {
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+}): string {
+  return [
+    QUICK_GO_RECOMMENDATION_SNAPSHOT_PREFIX,
+    debugRequestId(args.routeIdentityKey),
+    debugRequestId(args.parkingIdentityKey),
+  ].join(':');
+}
+
+function isQuickGoRecommendationSnapshot(value: unknown): value is QuickGoRecommendationSnapshot {
+  const snapshot = value as QuickGoRecommendationSnapshot | null;
+  return Boolean(
+    snapshot &&
+      typeof snapshot === 'object' &&
+      snapshot.tripData &&
+      snapshot.recommendation &&
+      Array.isArray(snapshot.rankedOptions) &&
+      typeof snapshot.createdAt === 'number' &&
+      typeof snapshot.routeIdentityKey === 'string' &&
+      typeof snapshot.parkingIdentityKey === 'string' &&
+      typeof snapshot.providerRequestKey === 'string',
+  );
+}
+
+function readQuickGoRecommendationSnapshot(args: {
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+  now?: number;
+}): QuickGoRecommendationSnapshot | null {
+  if (typeof window === 'undefined') return null;
+
+  const key = quickGoRecommendationSnapshotStorageKey(args);
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isQuickGoRecommendationSnapshot(parsed)) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+
+    if (
+      parsed.routeIdentityKey !== args.routeIdentityKey ||
+      parsed.parkingIdentityKey !== args.parkingIdentityKey
+    ) {
+      return null;
+    }
+
+    const now = args.now ?? Date.now();
+    if (now - parsed.createdAt > QUICK_GO_RECOMMENDATION_SNAPSHOT_TTL_MS) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeQuickGoRecommendationSnapshot(snapshot: QuickGoRecommendationSnapshot): void {
+  if (typeof window === 'undefined') return;
+
+  const key = quickGoRecommendationSnapshotStorageKey({
+    routeIdentityKey: snapshot.routeIdentityKey,
+    parkingIdentityKey: snapshot.parkingIdentityKey,
+  });
+
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    // Ignore quota/private-mode failures; the full details page can still fetch normally.
+  }
+}
+
+function shouldDeferQuickGoPaidParkingFollowups(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): boolean {
+  const { tripData, searchParams } = args;
+  if (!isQuickGoMode(searchParams)) return false;
+
+  const purpose = String(tripData.quickGoPurpose || searchParams.get('quickGoPurpose') || '').toLowerCase();
+  const intent = String(tripData.intent || searchParams.get('intent') || '').toLowerCase();
+  if (
+    purpose === 'parking-trip' ||
+    /parking-(trip|options)|parking options|find parking|book parking/.test(intent)
+  ) {
+    return false;
+  }
+
+  const destinationKind = String(tripData.destinationKind || '').toLowerCase();
+  if (
+    destinationKind === 'airport' ||
+    destinationKind === 'downtown' ||
+    destinationKind === 'stadium' ||
+    destinationKind === 'event'
+  ) {
+    return false;
+  }
+
+  const destination = tripData.destinationName || tripData.destination;
+  if (
+    isEventVenueDestination({
+      destination,
+      destinationKind: tripData.destinationKind,
+      origin: tripData.origin,
+    })
+  ) {
+    return false;
+  }
+
+  const classification = quickGoClassificationForTrip({
+    destination,
+    destinationKind: tripData.destinationKind,
+    airportCode: (tripData as TripDataWithExtras).airportCode,
+    detectedAirportCode: searchParams.get('detectedAirportCode'),
+  });
+
+  return classification.mode === 'free_likely';
+}
 
 type AirportCompanionCardData = {
   transportMode: AirportDayTransportMode;
@@ -4596,6 +4803,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const priorQuickGoDriveMinutesRef = useRef<number | null>(null);
   const routeRequestSeq = useRef(0);
   const quickGoRouteRequestIdRef = useRef(0);
+  const sortRef = useRef<SortTab>('easiest');
 
   function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
     const normalize = (value: string | null | undefined) =>
@@ -4759,6 +4967,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
     const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
 
@@ -4960,6 +5169,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   })();
 
   const [sort, setSort] = useState<SortTab>(initialSort);
+  useEffect(() => {
+    sortRef.current = sort;
+  }, [sort]);
   const resultsViewedTracked = useRef(false);
   const lastRecalcTrackedKey = useRef<string | null>(null);
   const lastParkingCardTrackedId = useRef<string | null>(null);
@@ -5006,6 +5218,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         accessToken,
         eventProperties: { sort: next },
       });
+      logRecommendationSortLocal(sort, next, {
+        providerRequestId: recommendationsLoadedKeyRef.current
+          ? debugRequestId(recommendationsLoadedKeyRef.current)
+          : null,
+        hasRecommendation: Boolean(recommendation),
+      });
     }
     setSort(next);
   };
@@ -5034,12 +5252,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     if (data) {
       const quickGoRequest = isQuickGoMode(searchParams);
-      const requestKey = buildRecommendationRequestKey({
+      const requestKey = buildRecommendationProviderRequestKey({
         tripData: data,
         searchParams,
-        sort,
-        travelPreferences,
-        showParkingAnyway,
       });
       const routeIdentityKey = buildRecommendationRouteIdentityKey({
         tripData: data,
@@ -5110,6 +5325,62 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           setLoading(false);
           return;
         }
+      }
+
+      const quickGoFullDetailsSnapshot =
+        !quickGoRequest && searchParams.get('quickGoConfirmed') === '1'
+          ? readQuickGoRecommendationSnapshot({
+              routeIdentityKey,
+              parkingIdentityKey: parkingTripIdentityKey,
+            })
+          : null;
+
+      if (quickGoFullDetailsSnapshot) {
+        if (currentRequest?.inFlight && !currentRequest.controller.signal.aborted) {
+          logRecommendationsFetch('abort', currentRequest.key, {
+            reason: 'quickgo-snapshot-hydration',
+          });
+          currentRequest.controller.abort();
+        }
+
+        const hydratedRecommendation = quickGoFullDetailsSnapshot.recommendation;
+        const hydratedRanked = rankRecommendations(
+          data,
+          hydratedRecommendation.parking,
+          hydratedRecommendation.rideshare,
+          hydratedRecommendation.transit,
+          hydratedRecommendation.tsaEstimate,
+          {
+            weatherImpact: hydratedRecommendation.weatherImpact,
+            familyFriendly:
+              searchParams.get('familyLuggageFriendly') === '1' ||
+              searchParams.get('bagPlan') === 'checked' ||
+              searchParams.get('bags') === 'yes',
+            preference: sortRef.current,
+          },
+        );
+
+        recommendationsRequestRef.current = null;
+        recommendationsLoadedKeyRef.current = requestKey;
+        recommendationsLoadedRouteKeyRef.current = routeIdentityKey;
+        setRecommendationsLoadedKey(requestKey);
+        setRecommendationsLoadedRouteKey(routeIdentityKey);
+        setInvalidTripMessage(null);
+        setFetchError(null);
+        setRecommendation(hydratedRecommendation);
+        setTripData(data);
+        setRankedOptions(hydratedRanked);
+        setLoading(false);
+        setIsRecalculating(false);
+        setShowTooLate(false);
+        logRecommendationsFetch('success', requestKey, {
+          source: 'quickgo-session-snapshot',
+          snapshotAgeMs: Date.now() - quickGoFullDetailsSnapshot.createdAt,
+          parking: hydratedRecommendation.parking?.length ?? 0,
+          rideshare: hydratedRecommendation.rideshare?.length ?? 0,
+          transit: hydratedRecommendation.transit?.length ?? 0,
+        });
+        return;
       }
 
       if (
@@ -5259,10 +5530,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 searchParams.get('familyLuggageFriendly') === '1' ||
                 searchParams.get('bagPlan') === 'checked' ||
                 searchParams.get('bags') === 'yes',
-              preference: sort,
+              preference: sortRef.current,
             },
           );
           setRankedOptions(ranked);
+          if (quickGoRequest) {
+            writeQuickGoRecommendationSnapshot({
+              tripData: data,
+              recommendation: recWithPreservedParking,
+              rankedOptions: ranked,
+              createdAt: Date.now(),
+              routeIdentityKey,
+              parkingIdentityKey: parkingTripIdentityKey,
+              providerRequestKey: requestKey,
+            });
+          }
           if (quickGoRequest) {
             const serverState = recWithPreservedParking.trafficEstimate;
             const resolvedDrive = resolveQuickGoDriveTime(serverState);
@@ -5413,7 +5695,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       setRankedOptions([]);
       setLoading(false);
     }
-  }, [searchParamsString, sort, travelPreferences, showParkingAnyway]);
+  }, [searchParamsString, travelPreferences, showParkingAnyway]);
 
   useEffect(() => {
     if (!tripData || !recommendation) return;
@@ -5705,6 +5987,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
     if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;

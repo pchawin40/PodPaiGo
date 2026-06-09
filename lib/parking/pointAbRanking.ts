@@ -545,6 +545,11 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     customerCandidate,
     noParkingPreferred: input.noParkingPreferred,
   });
+  const parkRideBackupOnlyForCustomerParking =
+    deprioritizeParkRide &&
+    input.sort === 'easiest' &&
+    !eventRulesLikely &&
+    parkRide.timingIsEstimated;
   const effectiveDriveMinutes = resolveEffectiveDriveMinutesForRanking({
     driveMinutes: input.driveMinutes,
     tripData: input.tripData,
@@ -662,7 +667,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           label: 'Park & Ride',
           cost: finiteOr(parkRide.cost),
           minutes: finiteOr(parkRide.durationMinutes),
-          reliable: parkRide.reliable,
+          reliable: parkRide.reliable && !parkRideBackupOnlyForCustomerParking,
           confidence:
             parkRide.confidenceScore >= 70
               ? 'High'
@@ -670,6 +675,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
                 ? 'Medium'
                 : 'Low',
           baseScore:
+            (parkRideBackupOnlyForCustomerParking ? -120 : 0) +
             (deprioritizeParkRide ? -CUSTOMER_PARKING_OVER_PARK_RIDE_PENALTY : 0) +
             (parkRide.confidenceScore < 50
               ? -20

@@ -409,6 +409,8 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         arrivalDate,
         arrivalTime,
         tripMode,
+        quickGoPurpose: searchParams.get('quickGoPurpose') || undefined,
+        intent: searchParams.get('intent') || undefined,
         parkingDuration: parkingWindow?.parkingDuration ?? resolvedParkingDuration,
         parkingCheckInDate: parkingWindow?.parkingCheckInDate || arrivalDate,
         parkingCheckInTime: parkingWindow?.parkingCheckInTime || arrivalTime,
