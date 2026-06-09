@@ -23,6 +23,7 @@ import {
 } from '../../../../parking/googleParkingOptionsSignals';
 import { isEventVenueDestination } from '../../../../parking/eventVenueDetection';
 import { haversineMiles } from '../../../../parking/routeMinutes';
+import { geocodeDestinationForParking } from './destinationGeocode';
 
 type GooglePlace = {
   id?: string;
@@ -287,13 +288,20 @@ function scoreGoogleParkingOption(p: ParkingOption): number {
   const transferMinutes = p.shuttleMinutes ?? p.walkingMinutes ?? p.transferToTerminalMinutes ?? 15;
   const estimatedPrice = p.price ?? 40;
   const availabilityScore = p.availabilityScore ?? p.availability ?? 50;
+  const distancePenalty = typeof p.distance === 'number' && Number.isFinite(p.distance)
+    ? p.distance * 25
+    : 12;
+  const transferPenalty = transferMinutes * 1.5;
+  const backupPenalty = p.bestFor?.includes('Farther backup') ? 80 : 0;
 
   return (
     reviewScore * 20 +
     Math.min(reviewCount / 100, 30) +
     availabilityScore * 0.15 -
-    transferMinutes -
-    estimatedPrice * 0.25
+    transferPenalty -
+    estimatedPrice * 0.25 -
+    distancePenalty -
+    backupPenalty
   );
 }
 
@@ -508,11 +516,33 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
       origin: args.origin,
     });
 
+  // Fuzzy text-input city/event trips often arrive without destinationLat/Lng.
+  // Geocode the venue/address once (server key, budget-guarded, independent of
+  // any traffic provider) so every lot can be measured against a real anchor
+  // instead of collapsing to an equal ~8-minute walk. Downstream reads of
+  // args.destinationLat/Lng then transparently use the resolved coordinates.
+  if (typeof args.destinationLat !== 'number' || typeof args.destinationLng !== 'number') {
+    const geocodedDestination = await geocodeDestinationForParking({
+      destination: args.destination,
+      destinationName: args.destinationName,
+    });
+    if (geocodedDestination) {
+      args = {
+        ...args,
+        destinationLat: geocodedDestination.lat,
+        destinationLng: geocodedDestination.lng,
+      };
+    }
+  }
+
   const searchRadiusMeters = destinationSearchRadiusMeters(isEventVenue);
 
-  const maxResults = Number(
+  const configuredMaxResults = Number(
     process.env.DESTINATION_PARKING_MAX_RESULTS || 20,
   );
+  const maxResults = isEventVenue
+    ? Math.max(configuredMaxResults, 30)
+    : configuredMaxResults;
 
   const searchQueryPlan = buildDestinationSearchQueryPlan({
     destination: args.destination,
@@ -621,6 +651,8 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
     args.checkOutDate
       ? await getParkWhizDestinationParkingOptions({
           destination: args.destination,
+          destinationKind: args.destinationKind,
+          isEventVenue,
           coordinates: { lat: args.destinationLat, lng: args.destinationLng },
           checkInDate: args.checkInDate,
           checkOutDate: args.checkOutDate,
@@ -664,9 +696,12 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         })
       : [];
 
+  const googleCandidateLimit = isEventVenue
+    ? Math.max(maxResults * 2, 60)
+    : maxResults;
   const mappedWithDistance = places
     .filter(isValidDestinationParkingPlace)
-    .slice(0, maxResults)
+    .slice(0, googleCandidateLimit)
     .map((place: GooglePlace) => {
       const name = place.displayName?.text || 'Parking near destination';
       const lowerName = name.toLowerCase();
@@ -676,11 +711,12 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         lowerName.includes('covered');
 
       const isParkAndRide = looksLikeParkAndRideTransitName(name);
-      const walkToDestination = isParkAndRide ? 10 : 8;
 
-      // Anchor each lot to the actual destination coordinates so far-away
+      // Anchor each lot to the resolved destination coordinates so far-away
       // downtown lots are measured, demoted, or excluded instead of all being
-      // treated as an equal 8-minute walk.
+      // treated as an equal 8-minute walk. When no anchor is available (e.g.
+      // geocoding unavailable) we leave distance/walk unset rather than invent a
+      // uniform value that makes every lot look equally close.
       const placeLat = place.location?.latitude;
       const placeLng = place.location?.longitude;
       const distanceMiles =
@@ -692,11 +728,12 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
           : null;
       const decision = classifyLotDistance({ distanceMiles, isEventVenue, isParkAndRide });
       const isBackup = decision === 'backup';
-      const walkMinutes = isParkAndRide
+      const distanceUnknown = !isParkAndRide && distanceMiles == null;
+      const walkMinutes: number | undefined = isParkAndRide
         ? 25
         : distanceMiles != null
           ? walkMinutesForDistanceMiles(distanceMiles)
-          : walkToDestination;
+          : undefined;
 
       const pricing = resolveCityParkingPricing({
         name,
@@ -755,7 +792,7 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
         lng: place.location?.longitude,
         routeDestination,
         routeUnavailable: false,
-        distance: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : 10,
+        distance: distanceMiles != null ? Number(distanceMiles.toFixed(2)) : undefined,
         parkingBufferMinutes: 8,
         transferToTerminalMinutes: walkMinutes,
         transferType: isParkAndRide ? 'transit' : 'walk',
@@ -779,7 +816,9 @@ export async function getDestinationParkingOptionsWithMetadata(args: {
           ...(pricing.assumptions || []),
           isParkAndRide
             ? 'Park & Ride rules vary. Do not assume overnight parking unless verified.'
-            : 'Walk time to your destination is estimated from the lot location.',
+            : distanceUnknown
+              ? "We couldn't pinpoint your destination's location, so distance and walk time aren't estimated for this lot — verify before you go."
+              : 'Walk time to your destination is estimated from the lot location.',
           ...(isBackup
             ? ['Farther from your destination — shown as a backup, not a primary option.']
             : []),

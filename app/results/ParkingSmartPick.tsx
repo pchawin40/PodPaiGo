@@ -14,7 +14,10 @@ import {
   parkingRouteLinks,
   parkingTimeBreakdown,
 } from '../../lib/parking/routeDisplay';
-import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
+import {
+  buildParkingDriveContextFromOption,
+  resolveWalkToDestinationMinutes,
+} from '../../lib/parking/routeMinutes';
 import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
 import { resolveTripParkingContext } from '../../lib/trip/tripContext';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
@@ -104,6 +107,29 @@ function transferDirectionLabel(option: ParkingOption, airportTrip: boolean): st
   }
   if (option.transferType === 'transit') return 'Take transit from lot to terminal';
   return 'Take shuttle from parking to terminal';
+}
+
+function parkingToDestinationTimeLabel(
+  option: ParkingOption,
+  airportTrip: boolean,
+  fallbackMinutes?: number,
+): string {
+  if (!airportTrip) {
+    const walkMinutes = resolveWalkToDestinationMinutes(option);
+    return walkMinutes != null
+      ? formatCompactMinutes(walkMinutes)
+      : 'Walk time not confirmed';
+  }
+
+  const transferMinutes =
+    option.transferToTerminalMinutes ??
+    option.shuttleMinutes ??
+    option.walkingMinutes ??
+    fallbackMinutes;
+
+  return typeof transferMinutes === 'number' && Number.isFinite(transferMinutes)
+    ? formatCompactMinutes(transferMinutes)
+    : 'Transfer time not confirmed';
 }
 
 function getWeatherScoreAdjustment(
@@ -1041,13 +1067,7 @@ export default function ParkingSmartPick({
                   2. Parking to {airportTrip ? 'terminal' : 'destination'}
                 </div>
                 <div className="mt-2 font-semibold text-foreground">
-                  {formatCompactMinutes(
-                    best.transferToTerminalMinutes ??
-                      best.shuttleMinutes ??
-                      best.walkingMinutes ??
-                      bestTime.parts[1]?.minutes ??
-                      0,
-                  )}
+                  {parkingToDestinationTimeLabel(best, airportTrip, bestTime.parts[1]?.minutes)}
                 </div>
                 <div className="mt-2 text-muted-foreground">
                   {transferDirectionLabel(best, airportTrip)}

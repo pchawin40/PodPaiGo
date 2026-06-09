@@ -160,4 +160,46 @@ describe('ParkingSmartPick fallback', () => {
       }),
     );
   });
+
+  test('does not show a fake exact walk time for city parking with unknown walk distance', () => {
+    const cityTripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Lumen Field',
+      destinationKind: 'stadium',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '18:00',
+    };
+    const cityParking: ParkingOption = {
+      ...routeUnavailableParking,
+      id: 'stadium-garage',
+      name: 'Stadium Garage',
+      serviceAirportCode: undefined,
+      type: 'official',
+      sourceName: 'Estimated city parking',
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      routeDestination: '100 Stadium Way, Seattle, WA',
+      transferType: 'walk',
+      transferToTerminalMinutes: undefined,
+      walkingMinutes: undefined,
+      shuttleMinutes: undefined,
+      distance: undefined,
+      parkingBufferMinutes: 8,
+      originToParkingMinutes: 35,
+      routeToParkingMinutes: 35,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[cityParking]}
+        selectedOption={cityParking}
+        tripData={cityTripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.getAllByText('Walk time not confirmed').length).toBeGreaterThan(0);
+    expect(screen.queryByText('5m')).not.toBeInTheDocument();
+  });
 });

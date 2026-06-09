@@ -390,7 +390,7 @@ export type ParkingOption = {
   priceNote?: string;
   priceSource?: ParkingPriceSource;
   priceConfidence?: PriceConfidence;
-  distance: number; // in minutes
+  distance?: number; // lot→destination distance in miles; unset when it cannot be measured
   /** Origin address to parking lot drive time (minutes). */
   originToParkingMinutes?: number;
   /** Same as originToParkingMinutes; used by route enrichment. */

@@ -29,6 +29,22 @@ function trustedParkingSourceLink(lot: ParkingOption): string | null {
     return link;
 }
 
+function parkingLotTransferText(lot: ParkingOption): string {
+    if (lot.transferType === 'shuttle') {
+        const minutes = lot.shuttleMinutes ?? lot.transferToTerminalMinutes;
+        return typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0
+            ? `Shuttle ${minutes} min`
+            : 'Shuttle time not confirmed';
+    }
+
+    if (lot.transferType === 'airport-garage') return 'Airport garage';
+
+    const minutes = lot.walkingMinutes ?? lot.transferToTerminalMinutes;
+    return typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0
+        ? `Walk ${minutes} min`
+        : 'Walk time not confirmed';
+}
+
 async function geocodeAddress(query: string): Promise<google.maps.LatLngLiteral | null> {
     const geocoder = new google.maps.Geocoder();
     const result = await geocoder.geocode({ address: query });
@@ -210,12 +226,7 @@ export default function ParkingLotsMap({
                             ? 'Unavailable'
                             : null;
 
-                const transferText =
-                    lot.transferType === 'shuttle'
-                        ? `Shuttle ${lot.shuttleMinutes ?? lot.transferToTerminalMinutes ?? 12} min`
-                        : lot.transferType === 'airport-garage'
-                            ? 'Airport garage'
-                            : `Walk ${lot.walkingMinutes ?? lot.transferToTerminalMinutes ?? 5} min`;
+                const transferText = parkingLotTransferText(lot);
                 const trustedSourceLink = trustedParkingSourceLink(lot);
 
                 const info = new google.maps.InfoWindow({

@@ -334,11 +334,22 @@ function coordinateFallbackTrafficEstimate(
   };
 }
 
-function resolveParkingTransferMeta(option: ParkingOption): {
+function resolveParkingTransferMeta(
+  option: ParkingOption,
+  context?: ParkingOptionsRequestContext,
+): {
   parkingBufferMinutes: number;
-  transferToTerminalMinutes: number;
-  transferType: 'walk' | 'shuttle' | 'airport-garage';
+  transferToTerminalMinutes?: number;
+  transferType?: ParkingOption['transferType'];
 } {
+  const isCityDestination = context?.destinationKind != null && context.destinationKind !== 'airport';
+  if (isCityDestination) {
+    return {
+      parkingBufferMinutes: option.type === 'park-and-ride' ? 10 : 8,
+      transferType: option.type === 'park-and-ride' ? 'transit' : option.transferType ?? 'walk',
+    };
+  }
+
   const id = (option.id || '').toLowerCase();
   const name = (option.name || '').toLowerCase();
 
@@ -2305,7 +2316,7 @@ export class MockProvider implements DataProvider {
           ),
         );
 
-        const meta = resolveParkingTransferMeta(option);
+        const meta = resolveParkingTransferMeta(option, context);
         const parkingBufferMinutes =
           option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
         const transferToTerminalMinutes =

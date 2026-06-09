@@ -227,6 +227,22 @@ export function resolveParkingDriveMinutesWithFallback(
   return resolveParkingDriveMinutesDetailed(option, context).minutes;
 }
 
+export function resolveWalkToDestinationMinutes(
+  option: Pick<ParkingOption, 'walkToDestinationMinutes' | 'walkingMinutes' | 'transferToTerminalMinutes'>,
+): number | null {
+  const candidates = [
+    option.walkToDestinationMinutes,
+    option.walkingMinutes,
+    option.transferToTerminalMinutes,
+  ];
+
+  const minutes = candidates.find(
+    (value) => typeof value === 'number' && Number.isFinite(value) && value > 0,
+  );
+
+  return minutes ?? null;
+}
+
 export function getParkingTerminalTimeMinutes(
   option: ParkingOption,
   context?: ParkingDriveContext,
@@ -237,12 +253,7 @@ export function getParkingTerminalTimeMinutes(
   const parkingBufferMinutes = option.parkingBufferMinutes ?? 0;
 
   if (tripContext === 'city_destination_trip') {
-    const walkToDestination =
-      typeof option.transferToTerminalMinutes === 'number' && option.transferToTerminalMinutes > 0
-        ? option.transferToTerminalMinutes
-        : typeof option.walkingMinutes === 'number' && option.walkingMinutes > 0
-          ? option.walkingMinutes
-          : 8;
+    const walkToDestination = resolveWalkToDestinationMinutes(option) ?? 8;
 
     return driveMinutes + parkingBufferMinutes + walkToDestination;
   }

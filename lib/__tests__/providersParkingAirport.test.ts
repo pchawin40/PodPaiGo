@@ -23,7 +23,7 @@ function wrongAirportLot(serviceAirportCode: string): ParkingOption {
   };
 }
 
-function destinationLot(): ParkingOption {
+function destinationLot(overrides: Partial<ParkingOption> = {}): ParkingOption {
   return {
     id: 'destination-lot',
     name: 'Downtown Destination Garage',
@@ -42,6 +42,7 @@ function destinationLot(): ParkingOption {
     address: '100 Pike St, Seattle, WA',
     lat: 47.609,
     lng: -122.34,
+    ...overrides,
   };
 }
 
@@ -140,6 +141,94 @@ describe('MockProvider airport parking pipeline', () => {
       }),
     );
     expect(getLiveParkingOptions).not.toHaveBeenCalled();
+  });
+
+  it('general-trip enrichment preserves computed destination walk timing', async () => {
+    (getDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
+      destinationLot({
+        id: 'near-destination-lot',
+        name: 'Near Destination Lot',
+        distance: 0.12,
+        walkingMinutes: 3,
+        transferToTerminalMinutes: 3,
+        lat: 47.5954,
+        lng: -122.3315,
+      }),
+      destinationLot({
+        id: 'far-destination-lot',
+        name: 'Far Destination Lot',
+        distance: 0.85,
+        walkingMinutes: 17,
+        transferToTerminalMinutes: 17,
+        lat: 47.6075,
+        lng: -122.3315,
+      }),
+    ]);
+
+    const provider = new MockProvider();
+    const parking = await provider.getParkingOptions(
+      'Monroe, WA',
+      'Lumen Field',
+      '2026-06-01T18:00:00.000Z',
+      180,
+      {
+        destinationKind: 'stadium',
+        destinationLat: 47.5952,
+        destinationLng: -122.3316,
+      },
+    );
+
+    const near = parking.find((option) => option.id === 'near-destination-lot');
+    const far = parking.find((option) => option.id === 'far-destination-lot');
+    expect(near?.distance).toBe(0.12);
+    expect(far?.distance).toBe(0.85);
+    expect(near?.walkingMinutes).toBe(3);
+    expect(near?.transferToTerminalMinutes).toBe(3);
+    expect(far?.walkingMinutes).toBe(17);
+    expect(far?.transferToTerminalMinutes).toBe(17);
+  });
+
+  it('general-trip enrichment does not add airport transfer defaults when destination walk is unknown', async () => {
+    (getDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
+      destinationLot({
+        id: 'unknown-off-airport-lot',
+        name: 'Unknown Off Airport Lot',
+        type: 'off-airport',
+        distance: undefined,
+        walkingMinutes: undefined,
+        transferToTerminalMinutes: undefined,
+        transferType: 'walk',
+      }),
+      destinationLot({
+        id: 'unknown-official-garage',
+        name: 'Unknown Official Garage',
+        type: 'official',
+        distance: undefined,
+        walkingMinutes: undefined,
+        transferToTerminalMinutes: undefined,
+        transferType: 'walk',
+      }),
+    ]);
+
+    const provider = new MockProvider();
+    const parking = await provider.getParkingOptions(
+      'Monroe, WA',
+      'Seattle Stadium, Occidental Avenue South, Seattle, WA',
+      '2026-06-01T18:00:00.000Z',
+      180,
+      {
+        destinationKind: 'stadium',
+      },
+    );
+
+    expect(parking).toHaveLength(2);
+    for (const option of parking) {
+      expect(option.distance).toBeUndefined();
+      expect(option.walkingMinutes).toBeUndefined();
+      expect(option.transferToTerminalMinutes).toBeUndefined();
+      expect(option.transferToTerminalMinutes).not.toBe(5);
+      expect(option.transferToTerminalMinutes).not.toBe(12);
+    }
   });
 
   it('airport trips still use getLiveParkingOptions', async () => {

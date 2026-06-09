@@ -57,6 +57,7 @@ import {
   buildTransitTransferLegs,
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
+import { isEventVenueDestination } from './parking/eventVenueDetection';
 import { attachTrafficRouteMetadata } from './trip/quickGo';
 import { getAirportById } from './airports/catalog';
 import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
@@ -629,6 +630,18 @@ export class RecommendationEngine {
 
   static async generateRecommendations(tripData: TripData): Promise<Recommendation> {
     const isAirportTrip = !isGeneralTrip(tripData);
+    const isEventDestination =
+      !isAirportTrip &&
+      (isEventVenueDestination({
+        destination: tripData.destination,
+        destinationKind: tripData.destinationKind,
+        origin: tripData.origin,
+      }) ||
+        isEventVenueDestination({
+          destination: (tripData as TripDataWithTransport).destinationName,
+          destinationKind: tripData.destinationKind,
+          origin: tripData.origin,
+        }));
 
     const generationStartedAt = Date.now();
     debugLog('recommendation_generation_start', {
@@ -1152,6 +1165,25 @@ export class RecommendationEngine {
         : t.assumptions,
     }));
 
+    const eventDestinationProximityPenalty = (p: ParkingOption) => {
+      if (!isEventDestination) return 0;
+
+      const walkMinutes =
+        p.walkingMinutes ??
+        p.transferToTerminalMinutes ??
+        p.shuttleMinutes ??
+        18;
+      const distanceMiles =
+        typeof p.distance === 'number' && Number.isFinite(p.distance)
+          ? p.distance
+          : 1.5;
+      const fartherBackupPenalty = p.bestFor?.includes('Farther backup') ? 80 : 0;
+      const providerFarPenalty =
+        p.bookingProvider === 'ParkWhiz' && distanceMiles > 0.75 ? 20 : 0;
+
+      return walkMinutes * 1.5 + distanceMiles * 45 + fartherBackupPenalty + providerFarPenalty;
+    };
+
     const sortedParking = parkingWithCosts.sort((a, b) => {
       const weatherScore = (p: ParkingOption) => {
         if (!weatherImpact) return 0;
@@ -1168,8 +1200,8 @@ export class RecommendationEngine {
       };
 
       return (
-        (a.calculatedCost - weatherScore(a)) -
-        (b.calculatedCost - weatherScore(b))
+        (a.calculatedCost - weatherScore(a) + eventDestinationProximityPenalty(a)) -
+        (b.calculatedCost - weatherScore(b) + eventDestinationProximityPenalty(b))
       );
     });
     const sortedRideshare = rideshareWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
@@ -1304,7 +1336,8 @@ export class RecommendationEngine {
       }
 
       return (
-        (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
+        ((a.trueTotalCost ?? a.calculatedCost) + eventDestinationProximityPenalty(a)) -
+          ((b.trueTotalCost ?? b.calculatedCost) + eventDestinationProximityPenalty(b)) ||
         (a.stressScore ?? 50) - (b.stressScore ?? 50) ||
         (a.walkingBurdenScore ?? 50) - (b.walkingBurdenScore ?? 50)
       );

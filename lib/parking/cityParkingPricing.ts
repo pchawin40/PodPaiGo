@@ -238,6 +238,16 @@ export function mergeLiveCityParkWhizPricing(
     return option;
   }
   const photoFields = selectBestParkingPhotoFields(option, liveOption);
+  const isShuttle = liveOption.transferType === 'shuttle';
+  const mergedWalkingMinutes = isShuttle
+    ? undefined
+    : option.walkingMinutes ?? liveOption.walkingMinutes;
+  const mergedTransferToTerminalMinutes = isShuttle
+    ? liveOption.transferToTerminalMinutes
+    : option.transferToTerminalMinutes ??
+      option.walkingMinutes ??
+      liveOption.walkingMinutes ??
+      liveOption.transferToTerminalMinutes;
 
   return {
     ...option,
@@ -254,21 +264,18 @@ export function mergeLiveCityParkWhizPricing(
     ...photoFields,
     reviewScore: option.reviewScore ?? liveOption.reviewScore,
     reviewCount: option.reviewCount ?? liveOption.reviewCount,
+    distance: option.distance ?? liveOption.distance,
     lat: option.lat ?? liveOption.lat,
     lng: option.lng ?? liveOption.lng,
-    transferType: liveOption.transferType === 'shuttle' ? 'shuttle' : 'walk',
-    shuttleMinutes: liveOption.transferType === 'shuttle' ? liveOption.shuttleMinutes : undefined,
+    transferType: isShuttle ? 'shuttle' : 'walk',
+    shuttleMinutes: isShuttle ? liveOption.shuttleMinutes : undefined,
     shuttleWaitMinutes: undefined,
     bufferRiskMinutes: undefined,
-    walkingMinutes:
-      liveOption.transferType === 'shuttle'
-        ? undefined
-        : liveOption.walkingMinutes ?? option.walkingMinutes,
-    transferToTerminalMinutes:
-      liveOption.transferType === 'shuttle'
-        ? liveOption.transferToTerminalMinutes
-        : liveOption.walkingMinutes ?? liveOption.transferToTerminalMinutes ?? option.transferToTerminalMinutes,
+    walkingMinutes: mergedWalkingMinutes,
+    transferToTerminalMinutes: mergedTransferToTerminalMinutes,
+    bestFor: Array.from(new Set([...(option.bestFor || []), ...(liveOption.bestFor || [])])),
     assumptions: [
+      ...(option.assumptions || []),
       ...(liveOption.assumptions || []),
       'Live ParkWhiz quote used instead of generic city estimate.',
     ],

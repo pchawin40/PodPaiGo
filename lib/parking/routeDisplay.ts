@@ -44,7 +44,13 @@ type ParkingLotDestinationResult = {
   source: ParkingDestinationSource;
 };
 
-import { resolveParkingDriveMinutesDetailed, buildParkingDriveContextFromOption, formatDriveToLotMinutes, type ParkingDriveContext } from './routeMinutes';
+import {
+  resolveParkingDriveMinutesDetailed,
+  buildParkingDriveContextFromOption,
+  formatDriveToLotMinutes,
+  resolveWalkToDestinationMinutes,
+  type ParkingDriveContext,
+} from './routeMinutes';
 import { getParkingRouteCoordinates } from './parkingCoordinates';
 import type { TripParkingContext } from '../trip/tripContext';
 
@@ -83,12 +89,7 @@ export function parkingTimeBreakdown(
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
 
   if (tripContext === 'city_destination_trip') {
-    const walkToDestination =
-      typeof option.transferToTerminalMinutes === 'number' && option.transferToTerminalMinutes > 0
-        ? option.transferToTerminalMinutes
-        : typeof option.walkingMinutes === 'number' && option.walkingMinutes > 0
-          ? option.walkingMinutes
-          : 8;
+    const walkToDestination = resolveWalkToDestinationMinutes(option);
 
     const parts = [
       {
@@ -97,7 +98,9 @@ export function parkingTimeBreakdown(
         display: driveDisplay,
       },
       ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
-      { label: 'Walk to destination', minutes: walkToDestination },
+      walkToDestination != null
+        ? { label: 'Walk to destination', minutes: walkToDestination }
+        : { label: 'Walk to destination', minutes: 8, display: 'Walk time not confirmed' },
     ];
 
     const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
