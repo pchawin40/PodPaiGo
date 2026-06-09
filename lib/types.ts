@@ -42,6 +42,51 @@ export type BagPlan = 'none' | 'checked' | 'oversized';
 
 export type TransitPaymentOption = 'normal' | 'orca-pass';
 export type ParkingPreference = 'none' | 'destination' | 'nearby';
+
+/**
+ * Drive route intelligence (Phase 1).
+ *
+ * These are user inputs that influence how we ask the traffic provider for
+ * toll-aware / HOV / express-lane driving guidance. They never change parking
+ * provider logic and are additive: when absent, routing keeps its existing
+ * standard behavior.
+ */
+export type DriveRouteProfile =
+  | 'standard'
+  | 'avoid_tolls'
+  | 'toll_allowed'
+  | 'hov_possible'
+  | 'express_possible';
+
+export type VehicleOccupancy = 1 | 2 | 3 | 4;
+
+export type DriveRoutePreferences = {
+  avoidTolls: boolean;
+  hasTollPass: boolean;
+  hovEligible: boolean;
+  vehicleOccupancy: VehicleOccupancy;
+  showExpressLaneNotes: boolean;
+};
+
+/**
+ * A single comparable driving route option. Toll cost is always an estimate and
+ * HOV/express eligibility is never guaranteed — copy must stay cautious.
+ */
+export type DriveRouteOption = {
+  id: string;
+  label: string;
+  profile: DriveRouteProfile;
+  durationMinutes: number;
+  staticDurationMinutes?: number;
+  distanceMeters?: number;
+  tollEstimated: boolean;
+  tollCostMin?: number;
+  tollCostMax?: number;
+  tollPassRequired?: boolean;
+  expressLaneNote?: string;
+  trustStatus: TrustStatus;
+  sourceName: string;
+};
 export type ParkingFeatureConfidence = 'verified' | 'provider_claimed' | 'inferred' | 'unknown';
 export type ParkingFeatureKey =
   | 'covered'
@@ -94,6 +139,12 @@ type BaseTripData = {
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;
   parkingPreference?: ParkingPreference;
+
+  /**
+   * Optional driving route intelligence inputs (toll / HOV / express lane).
+   * Additive: when omitted, routing keeps existing standard-only behavior.
+   */
+  driveRoutePreferences?: DriveRoutePreferences;
 
   /**
    * Parking is always stored in minutes internally.
@@ -774,6 +825,9 @@ export type Recommendation = {
   leaveByTime?: string | null;
   tripDuration?: number;
   trafficEstimate?: TrafficEstimate;
+  /** Optional toll/HOV/express drive route comparison (Phase 1, gated). */
+  driveRouteOptions?: DriveRouteOption[];
+  driveRoutePreferences?: DriveRoutePreferences;
   flightInfo?: FlightInfo;
   locationInfo?: LocationInfo;
   parkingDiscoveryNotice?: string;

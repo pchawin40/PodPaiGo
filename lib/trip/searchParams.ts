@@ -8,6 +8,8 @@ import type {
   TransportAvailability,
   TransitPaymentOption,
   ParkingPreference,
+  DriveRoutePreferences,
+  VehicleOccupancy,
   TripData,
   TripType,
 } from '../types';
@@ -49,6 +51,42 @@ function addMinutesToLocalDateTime(
   return {
     date: `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`,
     time: `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
+  };
+}
+
+function parseBoolParam(value: string | null): boolean {
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+/**
+ * Parse optional drive route intelligence preferences. Returns undefined when
+ * none are present so existing trips/URLs keep their standard-only behavior.
+ */
+export function parseDriveRoutePreferencesFromSearchParams(
+  searchParams: URLSearchParams,
+): DriveRoutePreferences | undefined {
+  const keys = [
+    'avoidTolls',
+    'hasTollPass',
+    'hovEligible',
+    'vehicleOccupancy',
+    'showExpressLaneNotes',
+  ];
+  const anyPresent = keys.some((key) => searchParams.get(key) !== null);
+  if (!anyPresent) return undefined;
+
+  const occupancyRaw = Number(searchParams.get('vehicleOccupancy') ?? '1');
+  const vehicleOccupancy: VehicleOccupancy =
+    occupancyRaw === 2 || occupancyRaw === 3 || occupancyRaw === 4
+      ? (occupancyRaw as VehicleOccupancy)
+      : 1;
+
+  return {
+    avoidTolls: parseBoolParam(searchParams.get('avoidTolls')),
+    hasTollPass: parseBoolParam(searchParams.get('hasTollPass')),
+    hovEligible: parseBoolParam(searchParams.get('hovEligible')),
+    vehicleOccupancy,
+    showExpressLaneNotes: parseBoolParam(searchParams.get('showExpressLaneNotes')),
   };
 }
 
@@ -388,6 +426,11 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   if (data) {
     data = { ...data, transitPayment } as TripData;
 
+    const driveRoutePreferences = parseDriveRoutePreferencesFromSearchParams(searchParams);
+    if (driveRoutePreferences) {
+      data = { ...data, driveRoutePreferences };
+    }
+
     if (
       typeof originLat === 'number' &&
       Number.isFinite(originLat) &&
@@ -508,6 +551,18 @@ export function tripDataToSearchParams(
 
   if (data.destinationKind) {
     params.set('destinationKind', data.destinationKind);
+  }
+
+  const driveRoutePreferences = data.driveRoutePreferences;
+  if (driveRoutePreferences) {
+    params.set('avoidTolls', driveRoutePreferences.avoidTolls ? '1' : '0');
+    params.set('hasTollPass', driveRoutePreferences.hasTollPass ? '1' : '0');
+    params.set('hovEligible', driveRoutePreferences.hovEligible ? '1' : '0');
+    params.set('vehicleOccupancy', String(driveRoutePreferences.vehicleOccupancy));
+    params.set(
+      'showExpressLaneNotes',
+      driveRoutePreferences.showExpressLaneNotes ? '1' : '0',
+    );
   }
 
   if (options?.preserve?.get('tripMode')) {

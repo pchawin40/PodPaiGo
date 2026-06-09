@@ -65,6 +65,7 @@ import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import OptionComparisonCard from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
+import DriveRouteOptionsSection from './DriveRouteOptionsSection';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { buildPointAbModeActions } from './DestinationModeActions';
 import { rankPointAbModes } from '../../lib/parking/pointAbRanking';
@@ -3399,13 +3400,40 @@ function StreetParkingPlanNote({
   );
 }
 
-function ParkingDataUnavailablePlanSection({
+type CityParkingPlanStatus = 'loading' | 'empty' | 'unavailable';
+
+function cityParkingStatusCopy(status: CityParkingPlanStatus): { title: string; body: string } {
+  switch (status) {
+    case 'loading':
+      return {
+        title: 'Finding nearby parking…',
+        body: 'Checking garages, lots, and street rules.',
+      };
+    case 'empty':
+      return {
+        title: 'No bookable lots found yet',
+        body: 'Street parking, transit, or rideshare may still be useful. Verify signs and map results.',
+      };
+    case 'unavailable':
+    default:
+      return {
+        title: 'Parking search unavailable',
+        body: 'Open map search to verify nearby parking.',
+      };
+  }
+}
+
+function CityParkingStatusPlanSection({
+  status,
   directionsUrl,
   nearbyParkingSearchUrl,
 }: {
+  status: CityParkingPlanStatus;
   directionsUrl: string | null;
   nearbyParkingSearchUrl: string;
 }) {
+  const copy = cityParkingStatusCopy(status);
+
   return (
     <section
       id={POINT_AB_DETAILS_SECTION_IDS.parking}
@@ -3424,9 +3452,9 @@ function ParkingDataUnavailablePlanSection({
         </p>
       </div>
 
-      <ParkingPlanSection title="Parking data unavailable">
+      <ParkingPlanSection title={copy.title}>
         <p className="text-muted-foreground">
-          Open directions or search nearby parking to verify options.
+          {copy.body}
         </p>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           {directionsUrl ? (
@@ -3471,9 +3499,31 @@ function PaidParkingPlanCard({
   eventParkingLikely: boolean;
 }) {
   const unavailable = !row || row.unavailable || !parkingOption;
-  const reason = eventParkingLikely
-    ? 'Best confirmed event parking'
-    : 'Best confirmed paid option';
+  const priceTrust = parkingOption ? resolveParkingPriceTrust(parkingOption, null) : null;
+  const estimatedParking =
+    priceTrust?.kind === 'estimated_range' ||
+    parkingOption?.priceDisplay === 'estimated' ||
+    parkingOption?.pricingConfidence === 'estimated' ||
+    parkingOption?.priceSource === 'estimated';
+  const reason = estimatedParking
+    ? 'Estimated paid parking option'
+    : eventParkingLikely
+      ? 'Best confirmed event parking'
+      : 'Best confirmed paid option';
+  const recommendedSectionTitle = estimatedParking
+    ? 'Estimated parking nearby'
+    : 'Nearby parking options';
+  const whyItems = estimatedParking
+    ? [
+        'Nearby garages or lots may be available. Confirm live price and rules before parking.',
+        'Useful as a planning estimate while live provider details update.',
+        'More reliable than guessing street parking, but not a reserved space.',
+      ]
+    : [
+        'Confirmed paid parking option',
+        'You keep your car with you',
+        'More reliable than guessing street parking',
+      ];
 
   return (
     <section className="rounded-2xl border border-border bg-card shadow-sm">
@@ -3506,9 +3556,9 @@ function PaidParkingPlanCard({
       </div>
 
       {unavailable ? (
-        <ParkingPlanSection title="Parking data unavailable">
+        <ParkingPlanSection title="Parking search unavailable">
           <p className="text-muted-foreground">
-            Open directions or search nearby parking to verify options.
+            Open map search to verify nearby parking.
           </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             {directionsUrl ? (
@@ -3533,8 +3583,13 @@ function PaidParkingPlanCard({
         </ParkingPlanSection>
       ) : (
         <>
-          <ParkingPlanSection title="Recommended parking">
+          <ParkingPlanSection title={recommendedSectionTitle}>
             <div className="space-y-4">
+              {estimatedParking ? (
+                <p className="text-muted-foreground">
+                  Nearby garages or lots may be available. Confirm live price and rules before parking.
+                </p>
+              ) : null}
               <div>
                 <div className="text-base font-semibold text-foreground">
                   {parkingOption.name || row.name}
@@ -3553,11 +3608,7 @@ function PaidParkingPlanCard({
 
           <ParkingPlanSection title="Why this option">
             <ParkingPlanList
-              items={[
-                'Confirmed paid parking option',
-                'You keep your car with you',
-                'More reliable than guessing street parking',
-              ]}
+              items={whyItems}
             />
           </ParkingPlanSection>
 
@@ -4164,6 +4215,30 @@ function preserveTrafficEstimateForSameRoute(args: {
     },
     airportRouteUnavailable: false,
     airportRouteUnavailableReason: undefined,
+  };
+}
+
+function preserveParkingForSameRoute(args: {
+  sameRouteIdentity: boolean;
+  previous: Recommendation | null;
+  next: Recommendation;
+}): Recommendation {
+  const previousParking = args.previous?.parking ?? [];
+  const nextParking = args.next.parking ?? [];
+
+  if (!args.sameRouteIdentity || nextParking.length > 0 || previousParking.length === 0) {
+    return args.next;
+  }
+
+  return {
+    ...args.next,
+    parking: previousParking,
+    parkingDataStatus: 'available',
+    parkingDataMessage: undefined,
+    parkingDiscoveryNotice:
+      args.next.parkingDiscoveryNotice ||
+      args.previous?.parkingDiscoveryNotice ||
+      'Showing previously found parking while nearby lots refresh.',
   };
 }
 
@@ -5035,6 +5110,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             return;
           }
 
+          if (recommendationsRequestRef.current?.controller !== controller) {
+            logRecommendationsFetch('abort', requestKey, {
+              reason: 'stale-success',
+            });
+            return;
+          }
+
           if (
             isQuickGoMode(searchParams) &&
             routeRequestId !== quickGoRouteRequestIdRef.current
@@ -5053,6 +5135,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             previous: recommendation,
             next: rec,
           });
+          const recWithPreservedParking = preserveParkingForSameRoute({
+            sameRouteIdentity: !isNewRouteRequest,
+            previous: recommendation,
+            next: recForState,
+          });
 
           recommendationsLoadedKeyRef.current = requestKey;
           recommendationsLoadedRouteKeyRef.current = routeIdentityKey;
@@ -5068,17 +5155,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               },
             });
           }
-          setRecommendation(recForState);
+          setRecommendation(recWithPreservedParking);
           setTripData(data);
 
           const ranked = rankRecommendations(
             data,
-            recForState.parking,
-            recForState.rideshare,
-            recForState.transit,
-            recForState.tsaEstimate,
+            recWithPreservedParking.parking,
+            recWithPreservedParking.rideshare,
+            recWithPreservedParking.transit,
+            recWithPreservedParking.tsaEstimate,
             {
-              weatherImpact: recForState.weatherImpact,
+              weatherImpact: recWithPreservedParking.weatherImpact,
               familyFriendly:
                 searchParams.get('familyLuggageFriendly') === '1' ||
                 searchParams.get('bagPlan') === 'checked' ||
@@ -5088,7 +5175,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           );
           setRankedOptions(ranked);
           if (quickGoRequest) {
-            const serverState = recForState.trafficEstimate;
+            const serverState = recWithPreservedParking.trafficEstimate;
             const resolvedDrive = resolveQuickGoDriveTime(serverState);
             if (resolvedDrive.minutes != null && !resolvedDrive.unavailable) {
               priorQuickGoDriveMinutesRef.current = resolvedDrive.minutes;
@@ -5123,9 +5210,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             }
           }
           logRecommendationsFetch('success', requestKey, {
-            parking: recForState.parking?.length ?? 0,
-            rideshare: recForState.rideshare?.length ?? 0,
-            transit: recForState.transit?.length ?? 0,
+            parking: recWithPreservedParking.parking?.length ?? 0,
+            rideshare: recWithPreservedParking.rideshare?.length ?? 0,
+            transit: recWithPreservedParking.transit?.length ?? 0,
           });
         })
         .catch((error) => {
@@ -5896,11 +5983,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   }
 
   if (loading) {
+    const loadingCityParking = Boolean(
+      quickGoTripDataFromParams && isCityDestinationTrip(quickGoTripDataFromParams),
+    );
+
     return (
       <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
         <div className="text-lg text-zinc-700">
-          {isRecalculating ? 'Recalculating…' : 'Loading options…'}
+          {loadingCityParking
+            ? 'Finding nearby parking…'
+            : isRecalculating
+              ? 'Recalculating…'
+              : 'Loading options…'}
         </div>
+        {loadingCityParking ? (
+          <div className="mt-2 text-sm text-zinc-600">
+            Checking garages, lots, and street rules.
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -6290,6 +6390,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     recommendation.parkingDataStatus === 'unavailable'
       ? 'border-amber-200 bg-amber-50 text-amber-950'
       : 'border-sky-200 bg-sky-50 text-sky-950';
+  const cityParkingPlanStatus: CityParkingPlanStatus =
+    isRecalculating ||
+    /still updating|refreshing|loading/i.test(recommendation.parkingDataMessage || '')
+      ? 'loading'
+      : recommendation.parkingDataStatus === 'unavailable'
+        ? 'unavailable'
+        : 'empty';
   const nearbyParkingSearchUrl = googleMapsSearchLink(
     `parking near ${isCityTrip ? displayDestination : currentAirport.label}`,
   );
@@ -6882,6 +6989,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
           )}
         </div>
+
+        {recommendation.driveRouteOptions &&
+          recommendation.driveRouteOptions.length > 0 && (
+            <div className="mt-3">
+              <DriveRouteOptionsSection
+                options={recommendation.driveRouteOptions}
+                prefs={recommendation.driveRoutePreferences}
+              />
+            </div>
+          )}
 
         {/* APR Loading / Warning States */}
         {/* {aprLiveChecking && (
@@ -8024,9 +8141,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         ) : null}
 
         {
-          shouldRenderParkingSections && showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !routeUnavailableBlocksParking && (
+          shouldRenderParkingSections &&
+          showParkingProviders &&
+          shouldDiscoverParkingForTrip(tripData) &&
+          (isCityTrip ? cityParkingPlanStatus === 'loading' || parkingEmptyStateMessage : parkingEmptyStateMessage) &&
+          parkingDisplayOptions.length === 0 &&
+          !routeUnavailableBlocksParking && (
             isCityTrip ? (
-              <ParkingDataUnavailablePlanSection
+              <CityParkingStatusPlanSection
+                status={cityParkingPlanStatus}
                 directionsUrl={cityTripDestinationRouteUrl}
                 nearbyParkingSearchUrl={nearbyParkingSearchUrl}
               />

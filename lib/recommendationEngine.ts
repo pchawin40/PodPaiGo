@@ -13,6 +13,7 @@ import {
   LocationInfo,
 } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { shouldComputeDriveRouteOptions } from './routes/driveRouteProfiles';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
 import {
@@ -943,6 +944,30 @@ export class RecommendationEngine {
       : trafficEstimate;
     const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimateForDisplay);
 
+    // Optional toll/HOV/express drive route comparison (Phase 1). Only runs when
+    // the feature is enabled or the user chose a toll/HOV option, so we never
+    // make extra route calls by default.
+    const driveRoutePreferences = (tripData as TripData).driveRoutePreferences;
+    const driveRouteRanking =
+      this.provider.getDriveRouteOptions &&
+      shouldComputeDriveRouteOptions({ prefs: driveRoutePreferences })
+        ? await providerFetch(
+            'drive_route_options',
+            () =>
+              this.provider.getDriveRouteOptions!(
+                tripData.origin,
+                tripData.destination,
+                mainRouteDepartureIso,
+                driveRoutePreferences,
+                {
+                  originLatLng: mainOriginLatLng,
+                  destinationLatLng: mainDestinationLatLng,
+                },
+              ),
+            () => null,
+          )
+        : null;
+
     if (replaceUnavailableTrafficWithCoordinateFallback) {
       debugLog('route_unavailable_replaced_with_coordinate_fallback', {
         type: tripData.type,
@@ -1417,6 +1442,8 @@ export class RecommendationEngine {
       leaveByTime,
       tripDuration,
       trafficEstimate: effectiveTrafficEstimate,
+      driveRouteOptions: driveRouteRanking?.options,
+      driveRoutePreferences,
       flightInfo: flightInfo ?? undefined,
       locationInfo: locationInfo ?? undefined,
       parkingDataStatus,

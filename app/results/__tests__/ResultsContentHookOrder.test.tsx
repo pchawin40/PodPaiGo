@@ -143,6 +143,55 @@ function cityTripRecommendationWithParking(): Recommendation {
   };
 }
 
+function cityTripRecommendationWithEstimatedParking(): Recommendation {
+  const recommendation = cityTripRecommendationWithParking();
+  return {
+    ...recommendation,
+    parking: [
+      {
+        ...recommendation.parking[0],
+        id: 'estimated-garage-placeholder',
+        name: 'Estimated Garage Placeholder',
+        price: 12,
+        priceMin: 10,
+        priceMax: 18,
+        priceDisplay: 'estimated',
+        priceSource: 'estimated',
+        pricingConfidence: 'estimated',
+        priceConfidence: 'medium',
+        trustStatus: 'estimated',
+        sourceName: 'Estimated parking',
+        priceNote: 'Estimated nearby garage range. Confirm live price before parking.',
+      },
+    ],
+  };
+}
+
+function cityTripRecommendationWithActualParking(): Recommendation {
+  const recommendation = cityTripRecommendationWithParking();
+  return {
+    ...recommendation,
+    parking: [
+      {
+        ...recommendation.parking[0],
+        id: 'actual-live-garage',
+        name: 'Actual Live Garage',
+        price: 11,
+        priceDisplay: 'live',
+        priceUnit: 'total',
+        priceSource: 'marketplace-link',
+        pricingConfidence: 'live',
+        priceConfidence: 'high',
+        trustStatus: 'live',
+        sourceName: 'ParkWhiz',
+        bookingProvider: 'ParkWhiz',
+        sourceLink: 'https://example.test/actual-live-garage',
+        priceNote: 'Live marketplace quote for this parking window.',
+      },
+    ],
+  };
+}
+
 function scoreBreakdown(
   overrides: Partial<OptionScoreBreakdown> & Pick<OptionScoreBreakdown, 'optionId' | 'mode'>,
 ): OptionScoreBreakdown {
@@ -413,7 +462,7 @@ describe('ResultsContent hook order', () => {
 
     render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
 
-    expect(screen.getByText(/Loading options|Recalculating/)).toBeInTheDocument();
+    expect(screen.getByText('Finding nearby parking…')).toBeInTheDocument();
 
     await act(async () => {
       recommendationResponse.resolve({
@@ -434,6 +483,193 @@ describe('ResultsContent hook order', () => {
       ),
     );
     expect(hookOrderErrors).toHaveLength(0);
+  });
+
+  test('city trip loading without prior parking shows staged parking loading copy', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendationResponse = deferred<{
+      ok: boolean;
+      text: () => Promise<string>;
+      json: () => Promise<unknown>;
+    }>();
+    const recommendation = cityTripRecommendation();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          return recommendationResponse.promise;
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    expect(screen.getByText('Finding nearby parking…')).toBeInTheDocument();
+    expect(screen.getByText('Checking garages, lots, and street rules.')).toBeInTheDocument();
+
+    await act(async () => {
+      recommendationResponse.resolve({
+        ok: true,
+        text: async () => JSON.stringify(recommendation),
+        json: async () => recommendation,
+      });
+      await recommendationResponse.promise;
+    });
+  });
+
+  test('sort recalculation keeps previous parking visible while refresh is pending and after an empty same-route response', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const secondRecommendationResponse = deferred<{
+      ok: boolean;
+      text: () => Promise<string>;
+      json: () => Promise<unknown>;
+    }>();
+    const firstRecommendation = cityTripRecommendationWithActualParking();
+    const emptyRecommendation = cityTripRecommendation();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    let recommendationCalls = 0;
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          recommendationCalls += 1;
+          if (recommendationCalls === 1) {
+            return Promise.resolve({
+              ok: true,
+              text: async () => JSON.stringify(firstRecommendation),
+              json: async () => firstRecommendation,
+            });
+          }
+          return secondRecommendationResponse.promise;
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Cheapest/i }));
+
+    await waitFor(() => {
+      expect(recommendationCalls).toBe(2);
+    });
+    expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Parking search unavailable')).not.toBeInTheDocument();
+
+    await act(async () => {
+      secondRecommendationResponse.resolve({
+        ok: true,
+        text: async () => JSON.stringify(emptyRecommendation),
+        json: async () => emptyRecommendation,
+      });
+      await secondRecommendationResponse.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Parking search unavailable')).not.toBeInTheDocument();
+  });
+
+  test('estimated parking placeholder is labeled estimated, not confirmed', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithEstimatedParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Estimated parking nearby')).toBeInTheDocument();
+    });
+
+    const planCard = getParkingPlanCard();
+    expect(within(planCard).getByText('Estimated Garage Placeholder')).toBeInTheDocument();
+    expect(
+      within(planCard).getAllByText('Nearby garages or lots may be available. Confirm live price and rules before parking.').length,
+    ).toBeGreaterThan(0);
+    expect(within(planCard).queryByText('Best confirmed paid option')).not.toBeInTheDocument();
+    expect(within(planCard).queryByText('Confirmed paid parking option')).not.toBeInTheDocument();
+  });
+
+  test('actual priced lots replace estimated placeholder when returned', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const secondRecommendationResponse = deferred<{
+      ok: boolean;
+      text: () => Promise<string>;
+      json: () => Promise<unknown>;
+    }>();
+    const estimatedRecommendation = cityTripRecommendationWithEstimatedParking();
+    const actualRecommendation = cityTripRecommendationWithActualParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    let recommendationCalls = 0;
+
+    Object.defineProperty(global, 'fetch', {
+      configurable: true,
+      writable: true,
+      value: jest.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/recommendations') {
+          recommendationCalls += 1;
+          if (recommendationCalls === 1) {
+            return Promise.resolve({
+              ok: true,
+              text: async () => JSON.stringify(estimatedRecommendation),
+              json: async () => estimatedRecommendation,
+            });
+          }
+          return secondRecommendationResponse.promise;
+        }
+        return Promise.resolve({
+          ok: true,
+          text: async () => '{}',
+          json: async () => ({ context: 'unavailable', weatherImpact: null }),
+        });
+      }),
+    });
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Estimated Garage Placeholder').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Cheapest/i }));
+
+    await act(async () => {
+      secondRecommendationResponse.resolve({
+        ok: true,
+        text: async () => JSON.stringify(actualRecommendation),
+        json: async () => actualRecommendation,
+      });
+      await secondRecommendationResponse.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Estimated Garage Placeholder')).not.toBeInTheDocument();
+    expect(screen.getByText('Nearby parking options')).toBeInTheDocument();
   });
 
   test('hides more parking options while no-parking preference is active', async () => {
@@ -761,7 +997,7 @@ describe('ResultsContent hook order', () => {
 
     expect(within(planCard).getByRole('heading', { name: 'Parking plan' })).toBeInTheDocument();
     expect(within(planCard).queryByText('Parking options')).not.toBeInTheDocument();
-    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
     expect(within(planCard).getByText('Why this option')).toBeInTheDocument();
     expect(within(planCard).getByText('Before you park')).toBeInTheDocument();
     expect(within(planCard).getByText('Timing')).toBeInTheDocument();
@@ -811,7 +1047,7 @@ describe('ResultsContent hook order', () => {
 
     const planCard = getParkingPlanCard();
 
-    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
     expect(within(planCard).getByText('Street parking warning')).toBeInTheDocument();
     expect(
       within(planCard).getByText(
@@ -849,7 +1085,7 @@ describe('ResultsContent hook order', () => {
 
     const planCard = getParkingPlanCard();
 
-    expect(within(planCard).getByText('Recommended parking')).toBeInTheDocument();
+    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
     expect(within(planCard).queryByText('Timing')).not.toBeInTheDocument();
     expect(within(planCard).queryByText('Drive to lot')).not.toBeInTheDocument();
     expect(within(planCard).queryByText('Park/check-in buffer')).not.toBeInTheDocument();
@@ -891,7 +1127,7 @@ describe('ResultsContent hook order', () => {
     expect(getParkingPlanCard()).toBeInTheDocument();
   });
 
-  test('city trip with no parking data renders parking data unavailable plan', async () => {
+  test('city trip with no parking data renders empty parking plan', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendation();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -905,14 +1141,36 @@ describe('ResultsContent hook order', () => {
 
     const planCard = getParkingPlanCard();
     const routeTimeCard = getRouteTimeCard();
-    expect(within(planCard).getByText('Parking data unavailable')).toBeInTheDocument();
+    expect(within(planCard).getByText('No bookable lots found yet')).toBeInTheDocument();
     expect(
-      within(planCard).getByText('Open directions or search nearby parking to verify options.'),
+      within(planCard).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
     ).toBeInTheDocument();
     expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
     expect(within(routeTimeCard).queryByRole('link', { name: /Open directions/i })).not.toBeInTheDocument();
     expect(within(planCard).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
     expect(within(planCard).getByRole('link', { name: 'Search nearby parking' })).toBeInTheDocument();
+  });
+
+  test('city trip unavailable parking response renders search unavailable only when no fallback exists', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation: Recommendation = {
+      ...cityTripRecommendation(),
+      parkingDataStatus: 'unavailable',
+      parkingDataMessage: 'Parking data unavailable right now. Try again or open directions.',
+    };
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('General trip')).toBeInTheDocument();
+    });
+
+    const planCard = getParkingPlanCard();
+    expect(within(planCard).getByText('Parking search unavailable')).toBeInTheDocument();
+    expect(within(planCard).getByText('Open map search to verify nearby parking.')).toBeInTheDocument();
+    expect(within(planCard).queryByText('Parking data unavailable')).not.toBeInTheDocument();
   });
 
   test('city parking results attempt Google place enrichment', async () => {

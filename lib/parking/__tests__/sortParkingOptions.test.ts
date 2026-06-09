@@ -69,6 +69,146 @@ describe('sortParkingOptionsForMode', () => {
     expect(ids(sorted)).toEqual(['free', 'cheap', 'pricey']);
   });
 
+  test('cheapest sorts known $11 before known $13 when timing is equal', () => {
+    const eleven = lot({
+      id: 'eleven',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 9,
+      walkingMinutes: 2,
+    });
+    const thirteen = lot({
+      id: 'thirteen',
+      price: 13,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 9,
+      walkingMinutes: 2,
+    });
+
+    const sorted = sortParkingOptionsForMode([thirteen, eleven], 'cheapest');
+    expect(ids(sorted)).toEqual(['eleven', 'thirteen']);
+  });
+
+  test('cheapest sorts same-price lots by shorter total time', () => {
+    const slow = lot({
+      id: 'slow',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 14,
+      walkingMinutes: 2,
+    });
+    const fast = lot({
+      id: 'fast',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 7,
+      walkingMinutes: 2,
+    });
+
+    const sorted = sortParkingOptionsForMode([slow, fast], 'cheapest');
+    expect(ids(sorted)).toEqual(['fast', 'slow']);
+  });
+
+  test('cheapest uses total time and proximity for close prices within $2', () => {
+    const slowerEleven = lot({
+      id: 'slower-eleven',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 14,
+      walkingMinutes: 2,
+    });
+    const fasterThirteen = lot({
+      id: 'faster-thirteen',
+      price: 13,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 7,
+      walkingMinutes: 2,
+    });
+    const closerTwelve = lot({
+      id: 'closer-twelve',
+      price: 12,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 7,
+      walkingMinutes: 2,
+      distanceToAirport: 0.1,
+    });
+    const fartherTwelve = lot({
+      id: 'farther-twelve',
+      price: 12,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 7,
+      walkingMinutes: 2,
+      distanceToAirport: 1.2,
+    });
+
+    expect(ids(sortParkingOptionsForMode([slowerEleven, fasterThirteen], 'cheapest'))).toEqual([
+      'faster-thirteen',
+      'slower-eleven',
+    ]);
+    expect(ids(sortParkingOptionsForMode([fartherTwelve, closerTwelve], 'cheapest'))).toEqual([
+      'closer-twelve',
+      'farther-twelve',
+    ]);
+  });
+
+  test('cheapest keeps actual prices ahead of estimated range and check-live prices', () => {
+    const actual = lot({
+      id: 'actual',
+      price: 20,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 12,
+    });
+    const estimatedRange = lot({
+      id: 'estimated-range',
+      price: 10,
+      priceMin: 9,
+      priceMax: 12,
+      priceDisplay: 'estimated',
+      priceConfidence: 'low',
+      originToParkingMinutes: 4,
+    });
+    const checkLive = lot({
+      id: 'check-live',
+      price: 1,
+      priceDisplay: 'check-live',
+      originToParkingMinutes: 3,
+    });
+
+    const sorted = sortParkingOptionsForMode([checkLive, estimatedRange, actual], 'cheapest');
+    expect(ids(sorted)).toEqual(['actual', 'estimated-range', 'check-live']);
+  });
+
+  test('cheapest does not let missing time beat known short time when price is tied', () => {
+    const missingTime = lot({
+      id: 'missing-time',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      walkingMinutes: 1,
+      distanceToAirport: 0.1,
+    });
+    const knownShortTime = lot({
+      id: 'known-short-time',
+      price: 11,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      originToParkingMinutes: 7,
+      walkingMinutes: 2,
+    });
+
+    const sorted = sortParkingOptionsForMode([missingTime, knownShortTime], 'cheapest');
+    expect(ids(sorted)).toEqual(['known-short-time', 'missing-time']);
+  });
+
   test('fastest puts lowest totalTimeToTerminalMinutes first, not proximity', () => {
     const slow = lot({
       id: 'slow',

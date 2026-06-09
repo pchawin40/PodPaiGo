@@ -10,7 +10,12 @@ import {
   TsaEstimate,
   SecurityOption,
   TripData,
+  DriveRoutePreferences,
 } from './types';
+import {
+  computeDriveRouteOptions,
+} from './routes/computeDriveRouteOptions';
+import type { DriveRouteRanking } from './routes/driveRouteProfiles';
 import { mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
@@ -392,6 +397,13 @@ type RouteRequestContext = {
   targetTerminalArrivalTime?: string;
 };
 
+type DriveRouteOptionsContext = {
+  originLatLng?: RouteLatLng | null;
+  destinationLatLng?: RouteLatLng | null;
+  /** Feature flag override; when omitted falls back to the env flag. */
+  featureEnabled?: boolean;
+};
+
 export interface TrafficProvider {
   getTrafficEstimate(
     origin: string,
@@ -400,6 +412,18 @@ export interface TrafficProvider {
     destinationLatLng?: RouteLatLng | null,
     routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate>;
+  /**
+   * Optional toll/HOV/express drive route comparison (Phase 1). Returns null
+   * when not enabled/chosen so no extra route calls are made. Optional so
+   * lightweight mock providers need not implement it.
+   */
+  getDriveRouteOptions?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    prefs: DriveRoutePreferences | null | undefined,
+    context?: DriveRouteOptionsContext,
+  ): Promise<DriveRouteRanking | null>;
 }
 
 export interface ParkingProvider {
@@ -769,6 +793,53 @@ export class LiveTrafficProvider implements TrafficProvider {
       } catch {
         return null;
       }
+    });
+  }
+
+  /**
+   * Toll/HOV/express drive route comparison (Phase 1). Returns null without any
+   * network call when the feature is disabled and the user did not choose a
+   * toll/HOV option. Never makes the toll route Best Overall when the user
+   * chose avoidTolls; never guarantees HOV/express eligibility.
+   */
+  async getDriveRouteOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    prefs: DriveRoutePreferences | null | undefined,
+    context?: DriveRouteOptionsContext,
+  ): Promise<DriveRouteRanking | null> {
+    // Cheap gate first: avoid geocoding / network when not enabled or chosen.
+    const { shouldComputeDriveRouteOptions } = await import(
+      './routes/driveRouteProfiles'
+    );
+    if (
+      !shouldComputeDriveRouteOptions({
+        prefs,
+        featureEnabled: context?.featureEnabled,
+      })
+    ) {
+      return null;
+    }
+
+    if (!this.serverKey) return null;
+
+    const [originLatLng, destinationLatLng] = await Promise.all([
+      context?.originLatLng
+        ? Promise.resolve(context.originLatLng)
+        : this.geocodeAddress(origin),
+      context?.destinationLatLng
+        ? Promise.resolve(context.destinationLatLng)
+        : this.geocodeAddress(destination),
+    ]);
+
+    return computeDriveRouteOptions({
+      origin: originLatLng ?? origin,
+      destination: destinationLatLng ?? destination,
+      departureTime: dateTime,
+      prefs,
+      apiKey: this.serverKey,
+      featureEnabled: context?.featureEnabled,
     });
   }
 
