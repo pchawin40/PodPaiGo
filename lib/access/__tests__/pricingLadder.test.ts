@@ -94,7 +94,7 @@ describe('pricingLadder', () => {
       price: 210,
       priceUnit: 'total',
       priceDisplay: 'live',
-      priceSource: 'marketplace-link',
+      priceSource: 'parkwhiz-live',
       bookingProvider: 'ParkWhiz',
       trustStatus: 'live',
     });

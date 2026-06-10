@@ -63,12 +63,16 @@ describe('/api/recommendations guardrails', () => {
     process.env.RECOMMENDATIONS_CACHE_TTL_SECONDS = '0';
     process.env.RECOMMENDATIONS_RATE_LIMIT_WINDOW_MS = '60000';
     process.env.RECOMMENDATIONS_RATE_LIMIT_MAX = '300';
+    delete process.env.RECOMMENDATIONS_CACHE_MAX_ENTRIES;
+    delete process.env.RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES;
   });
 
   afterEach(() => {
     delete process.env.RECOMMENDATIONS_CACHE_TTL_SECONDS;
     delete process.env.RECOMMENDATIONS_RATE_LIMIT_WINDOW_MS;
     delete process.env.RECOMMENDATIONS_RATE_LIMIT_MAX;
+    delete process.env.RECOMMENDATIONS_CACHE_MAX_ENTRIES;
+    delete process.env.RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES;
   });
 
   test('returns friendly rate limit response', async () => {
@@ -126,5 +130,38 @@ describe('/api/recommendations guardrails', () => {
       }),
       expect.anything(),
     );
+  });
+
+  test('caps the in-memory recommendation response cache', async () => {
+    process.env.RECOMMENDATIONS_CACHE_TTL_SECONDS = '60';
+    process.env.RECOMMENDATIONS_CACHE_MAX_ENTRIES = '1';
+    generateRecommendations.mockResolvedValue(recommendation);
+
+    const route = await import('../route');
+
+    const first = await route.POST(request({ ...tripData, destination: 'Downtown Seattle' }));
+    const second = await route.POST(request({ ...tripData, destination: 'Capitol Hill Seattle' }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(route.getRecommendationCacheSizeForTests()).toBeLessThanOrEqual(1);
+  });
+
+  test('caps the in-memory recommendation rate-limit map', async () => {
+    process.env.RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES = '1';
+    const guard = await import('../../../../lib/apiUsage/recommendationsGuard');
+
+    guard.checkRecommendationsRateLimit(
+      new NextRequest('http://localhost/api/recommendations', {
+        headers: { 'x-forwarded-for': '203.0.113.20' },
+      }),
+    );
+    guard.checkRecommendationsRateLimit(
+      new NextRequest('http://localhost/api/recommendations', {
+        headers: { 'x-forwarded-for': '203.0.113.21' },
+      }),
+    );
+
+    expect(guard.getRecommendationsRateLimitEntryCountForTests()).toBeLessThanOrEqual(1);
   });
 });

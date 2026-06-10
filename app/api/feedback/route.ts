@@ -9,6 +9,14 @@ import {
   validateBetaFeedbackPayload,
 } from '@/lib/feedback/betaFeedback';
 import { sendFeedbackAdminEmailNotification } from '@/lib/feedback/feedbackEmail';
+import {
+  checkFeedbackEmailThrottle,
+  resetFeedbackEmailThrottleForTests,
+} from '@/lib/apiUsage/feedbackEmailThrottle';
+import {
+  checkPublicEndpointRateLimit,
+  publicRateLimitResponse,
+} from '@/lib/apiUsage/publicRateLimit';
 
 export const runtime = 'nodejs';
 
@@ -54,7 +62,20 @@ async function storeFeedbackEvent(
   }
 }
 
-async function notifyFeedbackAdmins(payload: BetaFeedbackPayload): Promise<void> {
+async function notifyFeedbackAdmins(
+  payload: BetaFeedbackPayload,
+  request: NextRequest,
+): Promise<void> {
+  const throttle = checkFeedbackEmailThrottle(request);
+  if (throttle.limited) {
+    console.info('[feedback] admin email notification skipped', {
+      provider: 'resend',
+      reason: 'email_throttled',
+      retryAfterSeconds: throttle.retryAfterSeconds,
+    });
+    return;
+  }
+
   try {
     const result = await sendFeedbackAdminEmailNotification(payload);
     if (result.sent) {
@@ -77,6 +98,11 @@ async function notifyFeedbackAdmins(payload: BetaFeedbackPayload): Promise<void>
 }
 
 export async function POST(request: NextRequest) {
+  const rateLimit = checkPublicEndpointRateLimit('/api/feedback', request);
+  if (rateLimit.limited) {
+    return publicRateLimitResponse(rateLimit);
+  }
+
   let body: unknown;
 
   try {
@@ -92,11 +118,15 @@ export async function POST(request: NextRequest) {
 
   const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || null;
   const storeResult = await storeFeedbackEvent(payload, accessToken);
-  await notifyFeedbackAdmins(payload);
+  await notifyFeedbackAdmins(payload, request);
 
   return NextResponse.json({
     ok: true,
     stored: storeResult.stored,
     ...(storeResult.reason ? { reason: storeResult.reason } : {}),
   });
+}
+
+export function resetFeedbackRouteStateForTests(): void {
+  resetFeedbackEmailThrottleForTests();
 }

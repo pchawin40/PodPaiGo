@@ -544,6 +544,38 @@ describe('destination-specific parking discovery', () => {
     expect(nearOption?.walkingMinutes).toBeLessThan(backupOption?.walkingMinutes ?? 0);
     expect(nearOption?.transferToTerminalMinutes).toBe(nearOption?.walkingMinutes);
     expect(backupOption?.bestFor).toContain('Farther backup');
+    expect(nearOption?.price).toBe(18);
+    expect(nearOption?.priceSource).toBe('parkwhiz-live');
+
+    fetchMock.mockRestore();
+  });
+
+  test('ParkWhiz city quotes without any provider price are dropped', async () => {
+    const actualParkWhiz = jest.requireActual('../../providers/parkWhiz') as typeof import('../../providers/parkWhiz');
+    const near = milesNorth(0.1);
+    const quoteWithPrice = parkWhizQuote('no-price', 'ParkWhiz No Price Garage', near.lat, near.lng, 18);
+    const { price: _price, ...optionWithoutPrice } = quoteWithPrice.purchase_options[0];
+    const noPriceQuote = {
+      ...quoteWithPrice,
+      purchase_options: [optionWithoutPrice],
+    };
+
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => [noPriceQuote],
+    } as Response);
+
+    const options = await actualParkWhiz.getParkWhizDestinationParkingOptions({
+      destination: 'Lumen Field',
+      coordinates: { lat: VENUE_LAT, lng: VENUE_LNG },
+      destinationKind: 'stadium',
+      isEventVenue: true,
+      checkInDate: '2026-06-01',
+      checkOutDate: '2026-06-01',
+    });
+
+    expect(options).toHaveLength(0);
+    expect(options.some((option) => option.price === 999)).toBe(false);
 
     fetchMock.mockRestore();
   });

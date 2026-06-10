@@ -5,6 +5,7 @@ import { runWithSearchBudget } from '../../../lib/apiUsage/searchBudget';
 import { runWithPlacesRequestBudget } from '../../../lib/apiUsage/placesRequestBudget';
 import {
   checkRecommendationsRateLimit,
+  getRecommendationsCacheMaxEntries,
   getRecommendationsCacheTtlMs,
   hashRecommendationRequest,
 } from '../../../lib/apiUsage/recommendationsGuard';
@@ -13,6 +14,21 @@ export const runtime = 'nodejs';
 
 const recommendationInFlight = new Map<string, Promise<Recommendation>>();
 const recommendationCache = new Map<string, { expiresAt: number; recommendation: Recommendation }>();
+
+function pruneRecommendationCache(now = Date.now()): void {
+  for (const [key, entry] of recommendationCache) {
+    if (entry.expiresAt <= now) {
+      recommendationCache.delete(key);
+    }
+  }
+
+  const maxEntries = getRecommendationsCacheMaxEntries();
+  while (recommendationCache.size > maxEntries) {
+    const oldestKey = recommendationCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    recommendationCache.delete(oldestKey);
+  }
+}
 
 function jsonError(
   status: number,
@@ -92,6 +108,7 @@ export async function POST(request: NextRequest) {
 
     const requestKey = hashRecommendationRequest(bodyText);
     const now = Date.now();
+    pruneRecommendationCache(now);
     const cached = recommendationCache.get(requestKey);
     if (cached && cached.expiresAt > now) {
       void trackServerEvent(
@@ -153,6 +170,7 @@ export async function POST(request: NextRequest) {
         expiresAt: Date.now() + cacheTtlMs,
         recommendation,
       });
+      pruneRecommendationCache();
     }
 
     return NextResponse.json(recommendation);
@@ -166,4 +184,13 @@ export async function POST(request: NextRequest) {
       error
     );
   }
+}
+
+export function resetRecommendationRouteStateForTests(): void {
+  recommendationInFlight.clear();
+  recommendationCache.clear();
+}
+
+export function getRecommendationCacheSizeForTests(): number {
+  return recommendationCache.size;
 }

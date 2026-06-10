@@ -119,6 +119,7 @@ export function resolvePricingConfidence(
   }
 
   const isProviderSelectedDate =
+    option.priceSource === 'parkwhiz-live' ||
     option.priceSource === 'marketplace-link' ||
     provider.includes('parkwhiz') ||
     provider.includes('airportparkingreservations');

@@ -3,6 +3,7 @@ import type { ParkingSearchContext, ParkingProvider, ProviderHealth } from '../.
 import { tagParkingFreshness, inferPriceFreshness } from '../../types';
 import { getAirportById } from '../../../../airports/catalog';
 import { getParkingLotsByAirport, getParkingLotsNearPoint } from '../../../../parking/inventory';
+import { getAirportParkingMaxDistanceMiles } from '../../../../parking/airportValidation';
 import {
   inventoryLotToDestinationParkingOption,
   inventoryLotToParkingOption,
@@ -32,7 +33,11 @@ export class InventoryParkingProvider implements ParkingProvider {
       const airportCode = context.airportCode.toUpperCase();
       const airport = getAirportById(airportCode);
 
-      const inventoryLots = await getParkingLotsByAirport(airportCode, 50).catch((error) => {
+      const inventoryLots = await getParkingLotsByAirport(
+        airportCode,
+        50,
+        getAirportParkingMaxDistanceMiles(airportCode),
+      ).catch((error) => {
         console.warn('[inventory-provider] Parking airport inventory read failed', error);
         return [];
       });

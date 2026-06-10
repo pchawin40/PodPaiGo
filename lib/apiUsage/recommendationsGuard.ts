@@ -1,4 +1,10 @@
 import { createHash } from 'crypto';
+import {
+  checkInMemoryRateLimit,
+  readPositiveInt,
+  requestRateLimitIdentity,
+  type InMemoryRateLimitEntry,
+} from './inMemoryRateLimiter';
 
 type HeaderReadable = {
   headers: {
@@ -6,17 +12,7 @@ type HeaderReadable = {
   };
 };
 
-type RateLimitEntry = {
-  count: number;
-  resetAt: number;
-};
-
-const rateLimitEntries = new Map<string, RateLimitEntry>();
-
-function readPositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
+const rateLimitEntries = new Map<string, InMemoryRateLimitEntry>();
 
 export function getRecommendationsRateLimitConfig(env: NodeJS.ProcessEnv = process.env) {
   const production = env.NODE_ENV === 'production';
@@ -29,6 +25,7 @@ export function getRecommendationsRateLimitConfig(env: NodeJS.ProcessEnv = proce
       env.RECOMMENDATIONS_RATE_LIMIT_MAX,
       production ? 30 : 300,
     ),
+    maxEntries: readPositiveInt(env.RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES, 5000),
   };
 }
 
@@ -38,30 +35,16 @@ export function getRecommendationsCacheTtlMs(env: NodeJS.ProcessEnv = process.en
   return seconds * 1000;
 }
 
+export function getRecommendationsCacheMaxEntries(env: NodeJS.ProcessEnv = process.env): number {
+  return readPositiveInt(env.RECOMMENDATIONS_CACHE_MAX_ENTRIES, 500);
+}
+
 export function hashRecommendationRequest(bodyText: string): string {
   return createHash('sha256').update(bodyText).digest('hex');
 }
 
-function firstHeaderValue(value: string | null): string | null {
-  if (!value) return null;
-  return value.split(',')[0]?.trim() || null;
-}
-
 export function recommendationRateLimitKey(request: HeaderReadable): string {
-  const sessionId =
-    request.headers.get('x-podpaigo-session-id') ||
-    request.headers.get('x-session-id');
-  if (sessionId?.trim()) return `session:${sessionId.trim().slice(0, 120)}`;
-
-  const forwardedFor = firstHeaderValue(request.headers.get('x-forwarded-for'));
-  if (forwardedFor) return `ip:${forwardedFor}`;
-
-  const realIp =
-    request.headers.get('x-real-ip') ||
-    request.headers.get('cf-connecting-ip');
-  if (realIp?.trim()) return `ip:${realIp.trim()}`;
-
-  return 'ip:unknown';
+  return requestRateLimitIdentity(request);
 }
 
 export function checkRecommendationsRateLimit(
@@ -75,33 +58,13 @@ export function checkRecommendationsRateLimit(
   max: number;
 } {
   const config = getRecommendationsRateLimitConfig();
-  const key = recommendationRateLimitKey(request);
-  const current = rateLimitEntries.get(key);
-
-  if (!current || current.resetAt <= now) {
-    rateLimitEntries.set(key, {
-      count: 1,
-      resetAt: now + config.windowMs,
-    });
-    return {
-      limited: false,
-      retryAfterSeconds: 0,
-      key,
-      ...config,
-    };
-  }
-
-  current.count += 1;
-  const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
-
-  return {
-    limited: current.count > config.max,
-    retryAfterSeconds,
-    key,
-    ...config,
-  };
+  return checkInMemoryRateLimit(rateLimitEntries, request, config, 'recommendations', now);
 }
 
 export function resetRecommendationsRateLimitForTests(): void {
   rateLimitEntries.clear();
+}
+
+export function getRecommendationsRateLimitEntryCountForTests(): number {
+  return rateLimitEntries.size;
 }

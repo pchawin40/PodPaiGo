@@ -41,6 +41,9 @@ describe('/api/feedback', () => {
     jest.resetModules();
     sendFeedbackAdminEmailNotificationMock.mockReset();
     insertMock.mockReset();
+    delete process.env.PUBLIC_API_RATE_LIMIT_MAX;
+    delete process.env.PUBLIC_API_RATE_LIMIT_WINDOW_MS;
+    delete process.env.FEEDBACK_EMAIL_THROTTLE_MS;
     insertMock.mockResolvedValue({ error: null });
     jest.spyOn(console, 'info').mockImplementation(() => {});
     sendFeedbackAdminEmailNotificationMock.mockResolvedValue({
@@ -52,6 +55,9 @@ describe('/api/feedback', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    delete process.env.PUBLIC_API_RATE_LIMIT_MAX;
+    delete process.env.PUBLIC_API_RATE_LIMIT_WINDOW_MS;
+    delete process.env.FEEDBACK_EMAIL_THROTTLE_MS;
   });
 
   test('stores explicit feedback fields and attempts admin email notification', async () => {
@@ -176,6 +182,37 @@ describe('/api/feedback', () => {
       expect.objectContaining({ message: 'resend down' }),
     );
     warnSpy.mockRestore();
+  });
+
+  test('stores repeated feedback but throttles repeated admin email notifications per key', async () => {
+    process.env.FEEDBACK_EMAIL_THROTTLE_MS = '60000';
+
+    const { POST } = await import('../app/api/feedback/route');
+    const buildRequest = (message: string) =>
+      new NextRequest('http://localhost/api/feedback', {
+        method: 'POST',
+        headers: {
+          'x-forwarded-for': '198.51.100.44',
+          'user-agent': 'Jest Browser',
+        },
+        body: JSON.stringify({
+          issueType: 'app_bug',
+          message,
+          context: {
+            pageUrl: 'https://podpaigo.test/results?type=general-trip',
+            pagePath: '/results',
+            tripType: 'general-trip',
+          },
+        }),
+      });
+
+    const first = await POST(buildRequest('The first feedback message.'));
+    const second = await POST(buildRequest('The second feedback message.'));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(insertMock).toHaveBeenCalledTimes(2);
+    expect(sendFeedbackAdminEmailNotificationMock).toHaveBeenCalledTimes(1);
   });
 });
 

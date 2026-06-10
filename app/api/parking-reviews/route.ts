@@ -16,6 +16,10 @@ import {
   SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
 } from '../../../lib/parking/googlePlacesSafeMode';
 import { debugLog } from '../../../lib/utils/debug';
+import {
+  checkPublicEndpointRateLimit,
+  publicRateLimitResponse,
+} from '../../../lib/apiUsage/publicRateLimit';
 
 const MISSING_GOOGLE_REVIEW_INPUT_MESSAGE = 'Missing Google place id or lot name.';
 
@@ -44,21 +48,19 @@ function buildReviewResponse(
   const googleMapsUri = place?.googleMapsUri;
   const liveFetchEnabled = config.liveReviewsEnabled && !isGooglePlaceReviewsLiveBlocked();
 
-  if (process.env.NODE_ENV !== 'test') {
-    console.log('[parking-reviews debug]', {
-      placeId: request?.placeId ?? placeId ?? null,
-      name: request?.name ?? place?.googlePlaceName ?? place?.lotName ?? null,
-      resolvedPlaceId: placeId ?? null,
-      resolvedName: place?.googlePlaceName || place?.lotName || null,
-      rating: place?.rating ?? null,
-      reviewCount: place?.reviewCount ?? null,
-      reviewsLength: reviews.length,
-      firstReview: reviews[0] ?? null,
-      source,
-      safeMode: !liveFetchEnabled,
-      liveFetchEnabled,
-    });
-  }
+  debugLog('[parking-reviews debug]', {
+    placeId: request?.placeId ?? placeId ?? null,
+    name: request?.name ?? place?.googlePlaceName ?? place?.lotName ?? null,
+    resolvedPlaceId: placeId ?? null,
+    resolvedName: place?.googlePlaceName || place?.lotName || null,
+    rating: place?.rating ?? null,
+    reviewCount: place?.reviewCount ?? null,
+    reviewsLength: reviews.length,
+    firstReview: reviews[0] ?? null,
+    source,
+    safeMode: !liveFetchEnabled,
+    liveFetchEnabled,
+  });
 
   return NextResponse.json({
     reviews,
@@ -186,6 +188,11 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
 }
 
 export async function GET(req: NextRequest) {
+  const rateLimit = checkPublicEndpointRateLimit('/api/parking-reviews', req);
+  if (rateLimit.limited) {
+    return publicRateLimitResponse(rateLimit);
+  }
+
   const placeId = req.nextUrl.searchParams.get('placeId');
   const name = req.nextUrl.searchParams.get('name');
   const airport = req.nextUrl.searchParams.get('airport');
@@ -204,6 +211,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const rateLimit = checkPublicEndpointRateLimit('/api/parking-reviews', req);
+  if (rateLimit.limited) {
+    return publicRateLimitResponse(rateLimit);
+  }
+
   const form = await req.formData().catch(() => null);
 
   const placeId = getString(form?.get('placeId') ?? null);

@@ -24,9 +24,31 @@ export type WeatherContext =
   | 'invalid-travel-time'
   | 'unavailable';
 
+export type WeatherUnavailableReason =
+  | 'missing-coordinates'
+  | 'missing-time'
+  | 'invalid-date'
+  | 'out-of-window'
+  | 'point-lookup-failed'
+  | 'forecast-url-missing'
+  | 'forecast-fetch-failed'
+  | 'empty-forecast'
+  | 'timeout'
+  | 'provider-failure'
+  | 'unknown-airport';
+
 export type WeatherLookupResult = {
   weatherImpact: WeatherImpact | null;
   context: WeatherContext;
+  unavailableReason?: WeatherUnavailableReason;
+  diagnostics?: {
+    reason?: WeatherUnavailableReason;
+    locationSource?: 'airport' | 'destination' | 'missing';
+    provider?: string;
+    status?: number;
+    cacheStatus?: 'hit' | 'miss' | 'stale';
+    message?: string;
+  };
   targetDateTime?: string;
   forecastRangeStart?: string;
   forecastRangeEnd?: string;

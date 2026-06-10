@@ -1,8 +1,17 @@
 // app/api/weather/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  checkPublicEndpointRateLimit,
+  publicRateLimitResponse,
+} from '../../../lib/apiUsage/publicRateLimit';
 import { getWeatherForAirport, getWeatherForPoint } from '../../../lib/weather/nws';
 
 export async function GET(req: NextRequest) {
+  const rateLimit = checkPublicEndpointRateLimit('/api/weather', req);
+  if (rateLimit.limited) {
+    return publicRateLimitResponse(rateLimit);
+  }
+
   const { searchParams } = new URL(req.url);
 
   const airport = searchParams.get('airport') || 'SEA';

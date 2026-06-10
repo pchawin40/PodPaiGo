@@ -28,6 +28,27 @@ export function getParkingMaxDistanceMiles(): number {
   return Number(process.env.PARKING_MAX_DISTANCE_MILES || 25);
 }
 
+const AIRPORT_SPECIFIC_MAX_DISTANCE_MILES: Record<string, number> = {
+  PAE: 8,
+};
+
+function readPositiveNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getAirportParkingMaxDistanceMiles(airportCode?: string | null): number {
+  const code = airportCode?.toUpperCase() || '';
+  const airportDefault = AIRPORT_SPECIFIC_MAX_DISTANCE_MILES[code];
+  const globalDefault = getParkingMaxDistanceMiles();
+  const fallback = airportDefault ?? globalDefault;
+
+  return readPositiveNumber(
+    process.env[`PARKING_MAX_DISTANCE_MILES_${code}`],
+    fallback,
+  );
+}
+
 export function computeDistanceToAirport(
   option: Pick<ParkingOption, 'lat' | 'lng'>,
   airportCoordinates?: AirportCoordinates,
@@ -51,7 +72,7 @@ export function filterParkingByAirport(
   airportCoordinates?: AirportCoordinates,
 ): ParkingOption[] {
   const selected = airportCode.toUpperCase();
-  const maxDistanceMiles = getParkingMaxDistanceMiles();
+  const maxDistanceMiles = getAirportParkingMaxDistanceMiles(selected);
 
   return options.filter((option) => {
     const serviceCode = option.serviceAirportCode?.toUpperCase();

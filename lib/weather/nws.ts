@@ -1,10 +1,12 @@
 // lib/weather/nws.ts
 import { getAirportById } from '../airports/catalog';
-import { WeatherImpact, WeatherLookupResult } from './types';
+import { debugLog } from '../utils/debug';
+import { WeatherImpact, WeatherLookupResult, WeatherUnavailableReason } from './types';
 
 const NWS_USER_AGENT =
   process.env.NWS_USER_AGENT || 'PodPaiGo/1.0 (https://podpaigo.com; support@podpaigo.com)';
 const NWS_CACHE_TTL_MS = 10 * 60 * 1000;
+const NEAR_TERM_BEFORE_FORECAST_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 type NwsHourlyPeriod = {
   startTime: string;
@@ -65,24 +67,32 @@ function pointCacheKey(lat: number, lng: number): string {
   return `${lat.toFixed(4)},${lng.toFixed(4)}`;
 }
 
-async function fetchNwsPointProperties(lat: number, lng: number): Promise<NwsPointProperties | null> {
+async function fetchNwsPointProperties(lat: number, lng: number): Promise<{
+  properties: NwsPointProperties | null;
+  status?: number;
+  cacheStatus: 'hit' | 'miss';
+}> {
   const cacheKey = pointCacheKey(lat, lng);
   const cached = cacheGet(pointCache, cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return { properties: cached, cacheStatus: 'hit' };
 
   const pointRes = await fetch(`https://api.weather.gov/points/${lat},${lng}`, {
     headers: nwsHeaders(),
   });
 
-  if (!pointRes.ok) return cacheSet(pointCache, cacheKey, null);
+  if (!pointRes.ok) {
+    cacheSet(pointCache, cacheKey, null);
+    return { properties: null, status: pointRes.status, cacheStatus: 'miss' };
+  }
 
   const pointData = await pointRes.json();
   const properties = pointData?.properties;
   if (!properties || typeof properties !== 'object') {
-    return cacheSet(pointCache, cacheKey, null);
+    cacheSet(pointCache, cacheKey, null);
+    return { properties: null, cacheStatus: 'miss' };
   }
 
-  return cacheSet(pointCache, cacheKey, {
+  const mapped = cacheSet(pointCache, cacheKey, {
     forecastHourly:
       typeof properties.forecastHourly === 'string'
         ? properties.forecastHourly
@@ -100,18 +110,30 @@ async function fetchNwsPointProperties(lat: number, lng: number): Promise<NwsPoi
         ? properties.timeZone
         : undefined,
   });
+
+  return { properties: mapped, cacheStatus: 'miss' };
 }
 
-async function fetchNwsPeriods(url: string): Promise<NwsHourlyPeriod[] | null> {
+async function fetchNwsPeriods(url: string): Promise<{
+  periods: NwsHourlyPeriod[] | null;
+  status?: number;
+  cacheStatus: 'hit' | 'miss';
+}> {
   const cached = cacheGet(forecastCache, url);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return { periods: cached, cacheStatus: 'hit' };
 
   const forecastRes = await fetch(url, { headers: nwsHeaders() });
-  if (!forecastRes.ok) return cacheSet(forecastCache, url, null);
+  if (!forecastRes.ok) {
+    cacheSet(forecastCache, url, null);
+    return { periods: null, status: forecastRes.status, cacheStatus: 'miss' };
+  }
 
   const forecastData = await forecastRes.json();
   const periods = forecastData?.properties?.periods;
-  return cacheSet(forecastCache, url, Array.isArray(periods) ? periods : null);
+  return {
+    periods: cacheSet(forecastCache, url, Array.isArray(periods) ? periods : null),
+    cacheStatus: 'miss',
+  };
 }
 
 function parseWindMph(windSpeed?: string): number | undefined {
@@ -169,10 +191,20 @@ function buildWeatherImpact(period: NwsHourlyPeriod): WeatherImpact {
   };
 }
 
-function unavailableWeatherResult(targetDateTime?: string): WeatherLookupResult {
+function unavailableWeatherResult(
+  targetDateTime: string | undefined,
+  reason: WeatherUnavailableReason,
+  diagnostics: WeatherLookupResult['diagnostics'] = {},
+): WeatherLookupResult {
   return {
     weatherImpact: null,
     context: 'unavailable',
+    unavailableReason: reason,
+    diagnostics: {
+      provider: 'weather.gov / National Weather Service',
+      reason,
+      ...diagnostics,
+    },
     targetDateTime,
   };
 }
@@ -184,7 +216,9 @@ function resolveForecastFromPeriods(args: {
   currentContext: WeatherLookupResult['context'];
 }): WeatherLookupResult {
   const periods = args.periods;
-  if (periods.length === 0) return unavailableWeatherResult(args.targetDateTime);
+  if (periods.length === 0) {
+    return unavailableWeatherResult(args.targetDateTime, 'empty-forecast');
+  }
 
   const firstPeriod = periods[0];
   const lastPeriod = periods[periods.length - 1];
@@ -192,7 +226,9 @@ function resolveForecastFromPeriods(args: {
   const lastTime = new Date(lastPeriod.startTime).getTime();
 
   if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime)) {
-    return unavailableWeatherResult(args.targetDateTime);
+    return unavailableWeatherResult(args.targetDateTime, 'provider-failure', {
+      message: 'Forecast periods had invalid timestamps.',
+    });
   }
 
   if (args.targetDateTime) {
@@ -201,16 +237,52 @@ function resolveForecastFromPeriods(args: {
       return {
         weatherImpact: null,
         context: 'invalid-travel-time',
+        unavailableReason: 'invalid-date',
+        diagnostics: {
+          provider: 'weather.gov / National Weather Service',
+          reason: 'invalid-date',
+        },
         targetDateTime: args.targetDateTime,
         forecastRangeStart: firstPeriod.startTime,
         forecastRangeEnd: lastPeriod.startTime,
       };
     }
 
-    if (targetTime < firstTime || targetTime > lastTime) {
+    if (targetTime < firstTime) {
+      if (firstTime - targetTime <= NEAR_TERM_BEFORE_FORECAST_WINDOW_MS) {
+        return {
+          weatherImpact: buildWeatherImpact(firstPeriod),
+          context: 'travel-time-forecast',
+          targetDateTime: args.targetDateTime,
+          forecastRangeStart: firstPeriod.startTime,
+          forecastRangeEnd: lastPeriod.startTime,
+        };
+      }
+
+      return {
+        weatherImpact: null,
+        context: 'unavailable',
+        unavailableReason: 'invalid-date',
+        diagnostics: {
+          provider: 'weather.gov / National Weather Service',
+          reason: 'invalid-date',
+          message: 'Target time was before available forecast range.',
+        },
+        targetDateTime: args.targetDateTime,
+        forecastRangeStart: firstPeriod.startTime,
+        forecastRangeEnd: lastPeriod.startTime,
+      };
+    }
+
+    if (targetTime > lastTime) {
       return {
         weatherImpact: null,
         context: 'forecast-unavailable',
+        unavailableReason: 'out-of-window',
+        diagnostics: {
+          provider: 'weather.gov / National Weather Service',
+          reason: 'out-of-window',
+        },
         targetDateTime: args.targetDateTime,
         forecastRangeStart: firstPeriod.startTime,
         forecastRangeEnd: lastPeriod.startTime,
@@ -220,7 +292,7 @@ function resolveForecastFromPeriods(args: {
     const targetPeriod = findFirstPeriodAtOrAfter(periods, targetTime);
     if (!targetPeriod) {
       return {
-        ...unavailableWeatherResult(args.targetDateTime),
+        ...unavailableWeatherResult(args.targetDateTime, 'empty-forecast'),
         forecastRangeStart: firstPeriod.startTime,
         forecastRangeEnd: lastPeriod.startTime,
       };
@@ -378,32 +450,60 @@ export async function getWeatherForAirport(args: {
 }): Promise<WeatherLookupResult> {
   const airport = getAirportById(args.airportCode);
   if (!airport) {
-    return {
-      weatherImpact: null,
-      context: 'unavailable',
-      targetDateTime: args.targetDateTime,
-    };
+    return unavailableWeatherResult(args.targetDateTime, 'unknown-airport', {
+      locationSource: 'missing',
+    });
   }
 
   const { lat, lng } = airport.geoLocation;
 
   try {
-    const point = await fetchNwsPointProperties(lat, lng);
+    const pointLookup = await fetchNwsPointProperties(lat, lng);
+    const point = pointLookup.properties;
     const hourlyUrl = point?.forecastHourly;
 
     if (!hourlyUrl) {
-      return unavailableWeatherResult(args.targetDateTime);
+      const reason: WeatherUnavailableReason = point ? 'forecast-url-missing' : 'point-lookup-failed';
+      return unavailableWeatherResult(args.targetDateTime, reason, {
+        locationSource: 'airport',
+        status: pointLookup.status,
+        cacheStatus: pointLookup.cacheStatus,
+      });
     }
 
-    const periods = await fetchNwsPeriods(hourlyUrl);
-    return resolveForecastFromPeriods({
-      periods: periods ?? [],
+    const forecastLookup = await fetchNwsPeriods(hourlyUrl);
+    if (forecastLookup.status && !forecastLookup.periods) {
+      return unavailableWeatherResult(args.targetDateTime, 'forecast-fetch-failed', {
+        locationSource: 'airport',
+        status: forecastLookup.status,
+        cacheStatus: forecastLookup.cacheStatus,
+      });
+    }
+
+    const result = resolveForecastFromPeriods({
+      periods: forecastLookup.periods ?? [],
       targetDateTime: args.targetDateTime,
       timeZone: point?.timeZone,
       currentContext: 'current-airport-weather',
     });
+    return {
+      ...result,
+      diagnostics: {
+        provider: 'weather.gov / National Weather Service',
+        locationSource: 'airport',
+        status: forecastLookup.status,
+        cacheStatus: forecastLookup.cacheStatus,
+        ...result.diagnostics,
+      },
+    };
   } catch {
-    return unavailableWeatherResult(args.targetDateTime);
+    debugLog('weather_provider_exception', {
+      locationSource: 'airport',
+      airportCode: args.airportCode,
+    });
+    return unavailableWeatherResult(args.targetDateTime, 'provider-failure', {
+      locationSource: 'airport',
+    });
   }
 }
 
@@ -414,30 +514,59 @@ export async function getWeatherForPoint(args: {
   currentContext?: WeatherLookupResult['context'];
 }): Promise<WeatherLookupResult> {
   if (!Number.isFinite(args.lat) || !Number.isFinite(args.lng)) {
-    return {
-      weatherImpact: null,
-      context: 'unavailable',
-      targetDateTime: args.targetDateTime,
-    };
+    return unavailableWeatherResult(args.targetDateTime, 'missing-coordinates', {
+      locationSource: 'missing',
+    });
   }
 
   try {
-    const point = await fetchNwsPointProperties(args.lat, args.lng);
+    const pointLookup = await fetchNwsPointProperties(args.lat, args.lng);
+    const point = pointLookup.properties;
     const hourlyUrl = point?.forecastHourly;
 
     if (!hourlyUrl) {
-      return unavailableWeatherResult(args.targetDateTime);
+      const reason: WeatherUnavailableReason = point ? 'forecast-url-missing' : 'point-lookup-failed';
+      return unavailableWeatherResult(args.targetDateTime, reason, {
+        locationSource: 'destination',
+        status: pointLookup.status,
+        cacheStatus: pointLookup.cacheStatus,
+      });
     }
 
-    const periods = await fetchNwsPeriods(hourlyUrl);
-    return resolveForecastFromPeriods({
-      periods: periods ?? [],
+    const forecastLookup = await fetchNwsPeriods(hourlyUrl);
+    if (forecastLookup.status && !forecastLookup.periods) {
+      return unavailableWeatherResult(args.targetDateTime, 'forecast-fetch-failed', {
+        locationSource: 'destination',
+        status: forecastLookup.status,
+        cacheStatus: forecastLookup.cacheStatus,
+      });
+    }
+
+    const result = resolveForecastFromPeriods({
+      periods: forecastLookup.periods ?? [],
       targetDateTime: args.targetDateTime,
       timeZone: point?.timeZone,
       currentContext: args.currentContext || 'current-destination-weather',
     });
+    return {
+      ...result,
+      diagnostics: {
+        provider: 'weather.gov / National Weather Service',
+        locationSource: 'destination',
+        status: forecastLookup.status,
+        cacheStatus: forecastLookup.cacheStatus,
+        ...result.diagnostics,
+      },
+    };
   } catch {
-    return unavailableWeatherResult(args.targetDateTime);
+    debugLog('weather_provider_exception', {
+      locationSource: 'destination',
+      lat: args.lat,
+      lng: args.lng,
+    });
+    return unavailableWeatherResult(args.targetDateTime, 'provider-failure', {
+      locationSource: 'destination',
+    });
   }
 }
 

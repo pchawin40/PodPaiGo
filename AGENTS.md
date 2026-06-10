@@ -523,6 +523,108 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Set `RESEND_API_KEY`, `FEEDBACK_FROM_EMAIL`, and `ADMIN_EMAILS` in Vercel, then submit a beta feedback item and confirm the admin email arrives.
 
+### 2026-06-09 20:53 PDT — Weather, validation report RLS, and PAE parking bounds fixes
+
+**Summary**
+- Weather lookups now carry explicit unavailable reasons and diagnostics from weather.gov through the recommendation response.
+- Full trip details only shows `Forecast becomes available closer to your trip.` for true forecast-window misses, not provider failures or missing coordinates.
+- Quick Go-shaped general trips with usable destination coordinates now fetch near-term weather, including first available hourly forecast when the requested time is just before the first provider period.
+- Parking validation reports now insert through the server-side service role API path instead of anon/auth RLS writes.
+- PAE airport parking searches now use a tighter default max distance and Google Places search radius, excluding Tacoma-area lots upstream before ranking/rendering.
+
+**Files changed**
+- `app/api/parking/validation-report/route.ts`
+- `app/results/ResultsContent.tsx`
+- `lib/recommendationEngine.ts`
+- `lib/types.ts`
+- `lib/weather/nws.ts`
+- `lib/weather/types.ts`
+- `lib/weather/display.ts`
+- `lib/parking/airportValidation.ts`
+- `lib/providers/parking/providers/googlePlaces/airportSearch.ts`
+- `lib/providers/parking/providers/inventory/provider.ts`
+- `supabase/migrations/20260610120000_parking_validation_reports_server_insert.sql`
+- `lib/weather/__tests__/nws.test.ts`
+- `lib/weather/__tests__/display.test.ts`
+- `lib/__tests__/recommendationEngineTrafficDestination.test.ts`
+- `__tests__/parkingFeedbackFoundation.test.ts`
+- `__tests__/parkingValidationReportRoute.test.ts`
+- `lib/parking/__tests__/airportValidation.test.ts`
+- `lib/providers/parking/providers/googlePlaces/__tests__/airportSearch.test.ts`
+- `AGENTS.md`
+
+**Why**
+- Production Quick Go/full details weather could show the out-of-window message for generic weather failures or missing destination coordinates.
+- Parking report inserts were failing against `parking_validation_reports` RLS policies.
+- PAE airport parking searches could surface far-away lots, including Tacoma-area results, instead of staying geographically bounded to Everett/PAE.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/weather/__tests__/nws.test.ts lib/weather/__tests__/display.test.ts lib/__tests__/recommendationEngineTrafficDestination.test.ts __tests__/parkingFeedbackFoundation.test.ts __tests__/parkingValidationReportRoute.test.ts lib/parking/__tests__/airportValidation.test.ts lib/providers/parking/providers/googlePlaces/__tests__/airportSearch.test.ts --runInBand` passed, 63 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Weather lookup timeout is an engine-level timeout; the underlying fetch may still finish in the background.
+- `parking_validation_reports` production DB needs the new migration applied so direct anon/auth inserts are revoked and service-role API insert is the intended path.
+- PAE default max airport parking radius is 8 miles and can be overridden with `PARKING_MAX_DISTANCE_MILES_PAE`.
+
+**Next recommended step**
+- Deploy the migration and verify in production: Quick Go/full details weather for a near-term trip, parking report submission, and PAE parking results with no Tacoma-area lots.
+
+### 2026-06-09 21:10 PDT — Cron fail-closed, public API rate limits, and ParkWhiz price cleanup
+
+**Summary**
+- Cron parking discovery and refresh routes now fail closed with 401 in production when `CRON_SECRET` is unset, while local/dev can still run without the secret.
+- Added shared bounded in-memory public endpoint rate limiting and applied it to feedback, parking validation reports, parking reviews, and weather.
+- Added per-key feedback admin email throttling so accepted feedback is still stored but repeated submissions do not inbox-bomb admins.
+- Replaced parking reviews' unconditional debug console log with the existing `debugLog` gate.
+- ParkWhiz live quotes now use `parkwhiz-live` price provenance, and ParkWhiz quotes with no provider price are dropped instead of becoming `$999` sentinel options.
+- Bounded `/api/recommendations` in-memory response cache and rate-limit map to prevent unbounded growth.
+
+**Files changed**
+- `app/api/cron/discover-parking/route.ts`
+- `app/api/cron/refresh-parking/route.ts`
+- `app/api/feedback/route.ts`
+- `app/api/parking-reviews/route.ts`
+- `app/api/parking/validation-report/route.ts`
+- `app/api/weather/route.ts`
+- `app/api/recommendations/route.ts`
+- `lib/auth/cron.ts`
+- `lib/apiUsage/inMemoryRateLimiter.ts`
+- `lib/apiUsage/publicRateLimit.ts`
+- `lib/apiUsage/feedbackEmailThrottle.ts`
+- `lib/apiUsage/recommendationsGuard.ts`
+- `lib/providers/parkWhiz.ts`
+- `lib/types.ts`
+- `lib/access/pricingLadder.ts`
+- `__tests__/feedbackRoute.test.ts`
+- `__tests__/publicEndpointRateLimit.test.ts`
+- `app/api/cron/__tests__/auth.test.ts`
+- `app/api/recommendations/__tests__/route.test.ts`
+- `lib/parking/__tests__/destinationSearch.test.ts`
+- `lib/access/__tests__/pricingLadder.test.ts`
+- `__tests__/parkingPriceDisplay.test.ts`
+- `AGENTS.md`
+
+**Why**
+- Scheduled production cron endpoints should not become unauthenticated when a secret is missing.
+- Public beta endpoints need lightweight abuse protection without changing scoring, ranking, provider fetching, or paywall behavior.
+- Feedback email notifications should remain best-effort and not become an admin inbox abuse vector.
+- Normal production logs should not include parking review debug payloads unless debug logging is enabled.
+- ParkWhiz no-price quotes must not be displayed, sorted, or scored as fake high-price options.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath __tests__/feedbackRoute.test.ts __tests__/publicEndpointRateLimit.test.ts app/api/cron/__tests__/auth.test.ts app/api/recommendations/__tests__/route.test.ts lib/parking/__tests__/destinationSearch.test.ts lib/access/__tests__/pricingLadder.test.ts __tests__/parkingPriceDisplay.test.ts` passed, 48 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Public endpoint rate limits, feedback email throttling, and recommendation cache/rate-limit caps are in-memory per server process, not distributed across Vercel instances.
+- Production should set `CRON_SECRET`; without it, cron routes now intentionally reject requests in production.
+
+**Next recommended step**
+- Configure beta env values for `CRON_SECRET`, `PUBLIC_API_RATE_LIMIT_WINDOW_MS`, `PUBLIC_API_RATE_LIMIT_MAX`, `PUBLIC_API_RATE_LIMIT_MAX_ENTRIES`, `FEEDBACK_EMAIL_THROTTLE_MS`, `RECOMMENDATIONS_CACHE_MAX_ENTRIES`, and `RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES`, then verify cron auth and 429 responses in Vercel.
+
 ---
 
 # Final Response Requirement for Agents

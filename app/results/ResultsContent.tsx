@@ -231,6 +231,7 @@ import { getOrCreateSessionId } from '../../lib/analytics/analyticsIds';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import { PricingLinksSection, type ProviderLinkItem } from './ProviderPricingCards';
 import { resolveWeatherDestinationLabel } from '../../lib/weather/destinationLabel';
+import { weatherSectionDetail } from '../../lib/weather/display';
 import {
   getParkingReviewSummary,
   normalizeParkingReviewSummary,
@@ -868,26 +869,6 @@ function weatherSectionTitle(
     return 'Seasonal weather guidance';
   }
   return nearDestination || 'Weather unavailable';
-}
-
-function weatherSectionDetail(context?: WeatherContext): string {
-  if (context === 'forecast-unavailable') {
-    return 'Forecast becomes available closer to your trip.';
-  }
-
-  if (context === 'current-airport-weather') {
-    return 'Showing current conditions because a valid travel time was not provided.';
-  }
-
-  if (context === 'current-destination-weather') {
-    return 'Showing current destination conditions because a valid travel time was not provided.';
-  }
-
-  if (context === 'invalid-travel-time') {
-    return 'We could not read the selected travel date/time for weather.';
-  }
-
-  return 'Weather data is currently unavailable.';
 }
 
 async function copyTextThenOpen(text: string, url: string) {
@@ -7778,7 +7759,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           })}
                         </span>
                         <span className="text-xs text-zinc-500">
-                          {weatherSectionDetail(recommendation.weatherContext)}
+                          {weatherSectionDetail(
+                            recommendation.weatherContext,
+                            recommendation.weatherUnavailableReason,
+                          )}
                         </span>
                       </>
                     )}

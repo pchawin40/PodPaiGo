@@ -2,6 +2,7 @@ import {
   milesBetween,
   filterParkingByAirport,
   computeDistanceToAirport,
+  getAirportParkingMaxDistanceMiles,
 } from '../airportValidation';
 import { ParkingOption } from '../../types';
 
@@ -22,6 +23,16 @@ function lot(overrides: Partial<ParkingOption> = {}): ParkingOption {
 }
 
 describe('airportValidation', () => {
+  const originalPaeMax = process.env.PARKING_MAX_DISTANCE_MILES_PAE;
+
+  afterEach(() => {
+    if (originalPaeMax == null) {
+      delete process.env.PARKING_MAX_DISTANCE_MILES_PAE;
+    } else {
+      process.env.PARKING_MAX_DISTANCE_MILES_PAE = originalPaeMax;
+    }
+  });
+
   it('computes milesBetween for known coordinates', () => {
     const sea = { lat: 47.4502, lng: -122.3088 };
     const pae = { lat: 47.9063, lng: -122.2816 };
@@ -56,6 +67,34 @@ describe('airportValidation', () => {
 
     const filtered = filterParkingByAirport([nearby, far], 'SEA', airport);
     expect(filtered.map((o) => o.id)).toEqual(['near']);
+  });
+
+  it('uses a tighter PAE radius and excludes Tacoma-area airport parking', () => {
+    const pae = { lat: 47.9063, lng: -122.2816 };
+    const nearEverett = lot({
+      id: 'pae-near',
+      name: 'Paine Field Economy Parking',
+      serviceAirportCode: 'PAE',
+      lat: 47.907,
+      lng: -122.28,
+    });
+    const tacoma = lot({
+      id: 'tacoma',
+      name: 'Tacoma Airport Parking',
+      serviceAirportCode: 'PAE',
+      lat: 47.2529,
+      lng: -122.4443,
+    });
+
+    expect(getAirportParkingMaxDistanceMiles('PAE')).toBe(8);
+    expect(filterParkingByAirport([nearEverett, tacoma], 'PAE', pae).map((o) => o.id)).toEqual([
+      'pae-near',
+    ]);
+  });
+
+  it('allows airport-specific distance env override', () => {
+    process.env.PARKING_MAX_DISTANCE_MILES_PAE = '12';
+    expect(getAirportParkingMaxDistanceMiles('PAE')).toBe(12);
   });
 
   it('computeDistanceToAirport returns undefined without lot coordinates', () => {

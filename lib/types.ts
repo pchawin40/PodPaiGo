@@ -1,4 +1,4 @@
-import { WeatherContext, WeatherImpact } from './weather/types';
+import { WeatherContext, WeatherImpact, WeatherUnavailableReason } from './weather/types';
 import type { OptionIntelligence } from './intelligence/optionIntelligence';
 import type { TransitFareResolution } from './transit/transitFareResolver';
 
@@ -263,6 +263,7 @@ export type ParkingRateResolution = {
 export type ParkingPriceSource =
   | 'official-rate'
   | 'direct-lot-rate'
+  | 'parkwhiz-live'
   | 'marketplace-link'
   | 'google-places'
   | 'estimated';
@@ -868,6 +869,7 @@ export type Recommendation = {
   airportRouteUnavailableReason?: string;
   weatherImpact?: WeatherImpact | null;
   weatherContext?: WeatherContext;
+  weatherUnavailableReason?: WeatherUnavailableReason;
   weatherForecastRangeStart?: string;
   weatherForecastRangeEnd?: string;
   leaveByTime?: string | null;

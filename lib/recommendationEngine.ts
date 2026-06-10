@@ -42,7 +42,7 @@ import {
   rankRecommendations
 } from './domain';
 import { getWeatherForAirport, getWeatherForPoint } from './weather/nws';
-import type { WeatherLookupResult } from './weather/types';
+import type { WeatherLookupResult, WeatherUnavailableReason } from './weather/types';
 import {
   getTransitPassAssumption,
   getTransitPassPriceNote,
@@ -122,6 +122,28 @@ function getTrafficFetchTimeoutMs(): number {
   const mapboxTimeoutMs = readPositiveEnvMs('MAPBOX_ROUTE_TIMEOUT_MS', 5000);
 
   return googleTimeoutMs + mapboxTimeoutMs + 1500;
+}
+
+function getWeatherFetchTimeoutMs(): number {
+  return readPositiveEnvMs('WEATHER_FETCH_TIMEOUT_MS', 3500);
+}
+
+function unavailableWeatherLookup(
+  reason: WeatherUnavailableReason,
+  targetDateTime?: string,
+  message?: string,
+): WeatherLookupResult {
+  return {
+    weatherImpact: null,
+    context: 'unavailable',
+    unavailableReason: reason,
+    diagnostics: {
+      reason,
+      provider: 'weather.gov / National Weather Service',
+      ...(message ? { message } : {}),
+    },
+    targetDateTime,
+  };
 }
 
 function getProviderFetchTimeoutMs(provider: string): number {
@@ -1177,38 +1199,53 @@ export class RecommendationEngine {
         ? undefined
         : tripDateTime;
 
+    const weatherTimeoutMs = getWeatherFetchTimeoutMs();
     const weatherResult = isAirportTrip
-      ? await getWeatherForAirport({
-        airportCode,
-        targetDateTime: weatherTargetDateTime,
-      }).catch((): WeatherLookupResult => ({
-        weatherImpact: null,
-        context: 'unavailable' as const,
-      }))
-      : mainDestinationLatLng
-        ? await getWeatherForPoint({
-          lat: mainDestinationLatLng.lat,
-          lng: mainDestinationLatLng.lng,
+      ? await withTimeout(
+        getWeatherForAirport({
+          airportCode,
           targetDateTime: weatherTargetDateTime,
-          currentContext: 'current-destination-weather',
-        }).catch((): WeatherLookupResult => ({
-          weatherImpact: null,
-          context: 'unavailable' as const,
-        }))
-        : {
-          weatherImpact: null,
-          context: 'forecast-unavailable' as const,
-        };
+        }).catch((error): WeatherLookupResult =>
+          unavailableWeatherLookup(
+            'provider-failure',
+            weatherTargetDateTime,
+            error instanceof Error ? error.message : String(error),
+          ),
+        ),
+        weatherTimeoutMs,
+        () => unavailableWeatherLookup('timeout', weatherTargetDateTime),
+      )
+      : mainDestinationLatLng
+        ? await withTimeout(
+          getWeatherForPoint({
+            lat: mainDestinationLatLng.lat,
+            lng: mainDestinationLatLng.lng,
+            targetDateTime: weatherTargetDateTime,
+            currentContext: 'current-destination-weather',
+          }).catch((error): WeatherLookupResult =>
+            unavailableWeatherLookup(
+              'provider-failure',
+              weatherTargetDateTime,
+              error instanceof Error ? error.message : String(error),
+            ),
+          ),
+          weatherTimeoutMs,
+          () => unavailableWeatherLookup('timeout', weatherTargetDateTime),
+        )
+        : unavailableWeatherLookup('missing-coordinates', weatherTargetDateTime);
 
     debugLog('weather_lookup_result', {
       type: tripData.type,
       destinationText: tripData.destination,
       isAirportTrip,
       targetDateTime: weatherTargetDateTime ?? tripDateTime,
+      weatherTimeoutMs,
       destinationCoordsPresent: Boolean(mainDestinationLatLng),
       destinationResolvedViaGeocode:
         Boolean(resolvedDestinationCoords) && typeof tripData.destinationLat !== 'number',
       context: weatherResult.context,
+      unavailableReason: weatherResult.unavailableReason,
+      diagnostics: weatherResult.diagnostics,
       hasWeatherImpact: Boolean(weatherResult.weatherImpact),
       forecastRangeStart: weatherResult.forecastRangeStart,
       forecastRangeEnd: weatherResult.forecastRangeEnd,
@@ -1629,6 +1666,7 @@ export class RecommendationEngine {
       airportRouteUnavailableReason: effectiveTrafficEstimate.routeUnavailableReason,
       weatherImpact,
       weatherContext: weatherResult.context,
+      weatherUnavailableReason: weatherResult.unavailableReason,
       weatherForecastRangeStart: weatherResult.forecastRangeStart,
       weatherForecastRangeEnd: weatherResult.forecastRangeEnd,
       leaveByTime,

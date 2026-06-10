@@ -68,7 +68,25 @@ describe('weather forecast availability', () => {
     });
 
     expect(result.context).toBe('forecast-unavailable');
+    expect(result.unavailableReason).toBe('out-of-window');
     expect(result.weatherImpact).toBeNull();
+  });
+
+  test('near-term target before first hourly period uses the first forecast instead of out-of-window', async () => {
+    mockWeatherFetch([
+      { startTime: '2026-06-07T12:00:00-07:00', shortForecast: 'Near-term Seattle forecast', temperature: 66 },
+      { startTime: '2026-06-07T13:00:00-07:00', shortForecast: 'Later Seattle forecast', temperature: 68 },
+    ]);
+
+    const result = await getWeatherForPoint({
+      lat: 47.6097,
+      lng: -122.3425,
+      targetDateTime: '2026-06-07T11:30',
+    });
+
+    expect(result.context).toBe('travel-time-forecast');
+    expect(result.weatherImpact?.summary).toBe('Near-term Seattle forecast');
+    expect(result.unavailableReason).toBeUndefined();
   });
 
   test('tomorrow Seattle point trip uses forecast in NWS local timezone', async () => {
@@ -165,6 +183,7 @@ describe('weather forecast availability', () => {
       expect.any(Object),
     );
     expect(result.context).toBe('unavailable');
+    expect(result.unavailableReason).toBe('point-lookup-failed');
     expect(result.weatherImpact).toBeNull();
   });
 });

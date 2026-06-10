@@ -827,6 +827,49 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(recommendation.weatherImpact?.summary).toBe('Seattle morning forecast');
   });
 
+  test('Quick Go trip with destination coordinates fetches near-term weather', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+    const trafficSpy = jest.fn(async () => okTraffic);
+    const fetchMock = mockWeatherFetch([
+      { startTime: `${tomorrowDate}T18:00:00-07:00`, shortForecast: 'Quick Go forecast' },
+    ]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      origin: 'Everett, WA',
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      destinationLat: 47.6097,
+      destinationLng: -122.3425,
+      arrivalDate: tomorrowDate,
+      arrivalTime: '18:00',
+      quickGoPurpose: 'general-destination',
+      transportAvailability: 'all',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.weather.gov/points/47.6097,-122.3425',
+      expect.any(Object),
+    );
+    expect(recommendation.weatherContext).toBe('travel-time-forecast');
+    expect(recommendation.weatherUnavailableReason).toBeUndefined();
+    expect(recommendation.weatherImpact?.summary).toBe('Quick Go forecast');
+  });
+
   test('Monroe -> Fred Meyer with geocoded coords falls back to a small straight-line time (not unknown, not 35)', async () => {
     process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
 
