@@ -699,6 +699,72 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Re-run the Brighton Jones / downtown Seattle general trip in the UI: confirm no card text overflow, the Cost tile shows `Verify signs`/`Check meter`, the quick read no longer says "cheapest around $0", and the long outlook renders under the Street parking note in Details.
 
+### 2026-06-09 22:20 PDT — Google Places cache write flooding + unstable cache keys fixed
+
+**Summary**
+- Root cause of `cache_write_queue_depth { pendingWrites: 38 }` + repeated `cache_write_failed`/timeout spam on a downtown Seattle general-trip search: ParkWhiz/general-trip lot ids embed a request-specific UUID/option-id suffix (e.g. `destination-parkwhiz-parkwhiz-65141-<optionId>`), which fragmented the Google Places cache key per request, so the same lot enqueued dozens of distinct cache writes that each missed cache and timed out.
+- Cache key now drops unstable UUID/request-specific ids and prefers a stable identity: clean numeric DB id, else `<provider>-<stableLocationId>` extracted from marketplace synthetic ids (e.g. `parkwhiz-65141`), else normalized name + address. The `name:`/`addr:` portions are byte-identical to the old format, so existing cached rows for non-synthetic-id lots still match (no migration miss storm). Airport (`SEA|…`) vs city (`UNKNOWN|…`) namespaces stay separate.
+- Cache write queue now: (a) coalesces in-flight/pending writes by stable cacheKey so duplicates share one write; (b) is bounded by `GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING` (default 50) and drops the lowest-priority pending write when full (coords/photos/reviews/fresh rank highest); (c) keeps writes best-effort/non-blocking; (d) replaces per-write `cache_write_queue_depth` and per-key `cache_write_failed` logs with a single throttled `cache_write_queue_pressure` summary (active/pending/dropped/coalesced/failed/timedOut).
+- `resolveParkingGooglePlace` now coalesces concurrent identical lookups (cacheKey + lookup profile) in-flight, so a cache-read timeout cannot fan out into repeated DB reads/live calls for the same place during one search. Cache-read failures are aggregated into one throttled `cache_read_failures` summary instead of one warning per lot.
+- Did not change recommendation scoring/ranking, did not increase Google API quota/call volume, and kept airport/city/event parking logic separate.
+
+**Files changed**
+- `lib/parking/googlePlaceMatchUtils.ts` (stable cache key + new `deriveStableParkingLotIdToken`)
+- `lib/parking/googlePlacesCacheWrite.ts` (coalesce by key, bounded queue + low-priority drop, summarized pressure logging, priority helper, expanded test state)
+- `lib/parking/googlePlacesCache.ts` (in-flight resolve dedup, throttled cache-read-failure logging, reset helper)
+- `lib/parking/__tests__/googlePlacesCacheKeyStability.test.ts` (new)
+- `__tests__/googlePlacesCacheWrite.test.ts` (coalesce / cap-drop / failure tests)
+- `__tests__/googlePlacesCacheWriteIntegration.test.ts` (concurrent resolve dedup + single coalesced write)
+- `AGENTS.md`
+
+**Why**
+- One results page should not enqueue dozens of duplicate Supabase cache writes or print a scary failure line per lot; the duplicate writes were caused by unstable cache keys plus an unbounded, non-deduped write queue.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/parking/__tests__/googlePlacesCacheKeyStability.test.ts __tests__/googlePlacesCacheWrite.test.ts __tests__/googlePlacesCacheWriteIntegration.test.ts lib/parking/__tests__/googlePlaceMatchUtils.test.ts --runInBand` → 21 passed.
+- Regression: `googlePlacesCacheQuota`, `googlePlacesQuotaEfficiency`, `googlePlaceReviewsGuard`, `googlePlacePhotoRoute`, `destinationSearch`, `destinationSearchCache`, `googleUsageSummary` → 50 passed.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- The cache key intentionally does NOT switch its primary identity to `googlePlaceId` (placeId is discovered mid-flow); place-id identity is still covered by the existing `getCachedRecordByPlaceId` fallback, so adding it to the primary key would fragment rows without reducing live calls. Documented as a deliberate decision.
+- Coalescing is first-write-wins per cacheKey: if a coords-only write is already in flight and a reviews write for the same lot is coalesced away, reviews persist on the next request (still shown in-memory this request via the request cache). Acceptable best-effort behavior.
+- Queue cap, coalescing, and failure/read summaries are in-memory per server process (beta guardrails, not distributed across Vercel instances).
+
+**Next recommended step**
+- Re-run the downtown Seattle general-trip search in localhost/Vercel and confirm logs now show a single throttled `cache_write_queue_pressure` summary (low/zero pending), no per-lot `cache_write_failed` spam, and stable repeated cache keys (no UUID suffixes) for ParkWhiz lots. Tune `GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING` if needed.
+
+### 2026-06-09 22:42 PDT — Repeated live SearchText for the same no-match lot eliminated (negative cache)
+
+**Summary**
+- Even with stable cache keys, logs still showed repeated `[google-places-live] { endpoint: 'searchText', route: 'searchGooglePlace', reason: 'place_match_search_legacy' }` for the same no-match lot (e.g. `[A653] 1727 Harvard Ave. Lot`) within one downtown general-trip run. Root cause: the legacy SearchText path in `searchGooglePlace` is not query-cached, and `resolveParkingGooglePlace` did not remember a no-match, so every repeat lookup for a miss lot re-hit Google.
+- Added a short-lived, process-level **negative match cache** keyed by the stable lot cacheKey (`GOOGLE_PLACES_NEGATIVE_MATCH_TTL_MS`, default 60s). After a live search returns no match (and no cached metadata), the lot key is remembered; subsequent non-discovery lookups for that key short-circuit and return null before any DB read or live SearchText. The TTL keeps it short-lived, and a later successful match clears the entry, so it never permanently blocks a future match.
+- Discovery/review lookups (`requireDiscovery: true`) intentionally bypass the negative cache (both check and set), so review matching is never blocked by a prior standard-path miss.
+- Concurrent identical lookups already share one in-flight `resolveParkingGooglePlace` promise (cacheKey + lookup profile); added an `inFlightShares` counter and a throttled `[google-places-cache] place_search_dedupe_summary` diagnostic (`negativeCacheSkips`, `inFlightShares`, `negativeCacheEntries`).
+- The legacy SearchText guard log now includes the stable `cacheKey` (was `cacheKey: null`), so diagnostics can prove dedupe is working.
+- Did not undo the stable-key fix, did not change scoring/ranking, did not increase Google call volume (this strictly reduces it), kept airport/city/event logic separate (negative cache is namespaced by the airport/city cacheKey), and cache read/write failures remain non-blocking.
+
+**Files changed**
+- `lib/parking/googlePlacesCache.ts` (negative match cache + TTL, in-flight share counter, `place_search_dedupe_summary`, stable cacheKey in legacy search guard log, `getGooglePlacesSearchDedupeStatsForTests`, reset helper)
+- `__tests__/googlePlacesNegativeSearchCache.test.ts` (new)
+- `AGENTS.md`
+
+**Why**
+- One result-generation run should not make repeated live SearchText calls for the same lot, especially when the first attempt already missed/no-matched; the legacy search path had no per-lot memoization.
+
+**Tests run and result**
+- `npx jest --runTestsByPath __tests__/googlePlacesNegativeSearchCache.test.ts --runInBand` → 5 passed (same no-match hits Google once; concurrent in-flight shared; negative cache expires after TTL; airport success not negatively cached; city no-match does not block same-named airport lot).
+- Regression: `googlePlacesQuotaEfficiency`, `googlePlacesCacheWrite`, `googlePlacesCacheWriteIntegration`, `googlePlaceReviewsGuard`, `googlePlacesGuard`, `googlePlacesCacheKeyStability`, `destinationSearch`, `googleUsageSummary` → 72 passed total.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Negative cache is in-memory per server process (beta guardrail, not distributed across Vercel instances); default TTL 60s, override with `GOOGLE_PLACES_NEGATIVE_MATCH_TTL_MS`.
+- A lot that is genuinely matchable but missed due to a transient blocked/budget-exhausted search is also negatively cached for the TTL window; it self-heals after expiry and discovery lookups bypass it.
+
+**Next recommended step**
+- Re-run the downtown Seattle general-trip search and confirm `place_match_search_legacy` no longer repeats for the same lot, the live search log now carries a non-null `cacheKey`, and `place_search_dedupe_summary` shows non-zero `negativeCacheSkips`/`inFlightShares`.
+
 ---
 
 # Final Response Requirement for Agents

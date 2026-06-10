@@ -2,6 +2,16 @@ import { TimeoutError, withTimeout } from '../utils/asyncTimeout';
 
 const MAX_CONCURRENT_CACHE_WRITES = 2;
 const FAILED_WRITE_COOLDOWN_MS = 60_000;
+const DEFAULT_MAX_PENDING_CACHE_WRITES = 50;
+const QUEUE_PRESSURE_LOG_INTERVAL_MS = 10_000;
+
+/** Raised when a queued write is dropped because the bounded queue is full. */
+class DroppedCacheWriteError extends Error {
+  constructor(cacheKey: string) {
+    super(`Google Places cache write dropped (queue full): ${cacheKey}`);
+    this.name = 'DroppedCacheWriteError';
+  }
+}
 
 type CacheWriteRecord = {
   cacheKey: string;
@@ -22,10 +32,24 @@ type EnqueueGooglePlacesCacheWriteArgs = {
   write: () => Promise<void>;
 };
 
+type PendingCacheWrite = {
+  cacheKey: string;
+  priority: number;
+  begin: () => void;
+  drop: () => void;
+};
+
 let activeWrites = 0;
-const pendingWrites: Array<() => void> = [];
-const loggedWriteFailures = new Set<string>();
+const pendingWrites: PendingCacheWrite[] = [];
+/** Stable identity (cacheKey) of every write that is reserved, queued, or running. */
+const inFlightOrQueuedKeys = new Set<string>();
 const recentFailedWriteKeys = new Map<string, number>();
+
+let droppedWriteCount = 0;
+let coalescedWriteCount = 0;
+let failedWriteCount = 0;
+let timedOutWriteCount = 0;
+let lastQueuePressureLogAt = 0;
 
 export function getGooglePlacesCacheWriteTimeoutMs(): number {
   const configured = Number(process.env.GOOGLE_PLACES_CACHE_WRITE_TIMEOUT_MS);
@@ -39,6 +63,27 @@ export function getGooglePlacesCacheWriteTimeoutMs(): number {
   }
 
   return process.env.NODE_ENV === 'production' ? 5000 : 10_000;
+}
+
+export function getGooglePlacesCacheWriteMaxPending(): number {
+  const configured = Number(process.env.GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_MAX_PENDING_CACHE_WRITES;
+}
+
+/**
+ * Higher priority writes are kept when the bounded queue is full. Writes that
+ * add usable coordinates, photos, reviews, or fresh data are most valuable.
+ */
+export function googlePlacesCacheWritePriority(record: CacheWriteRecord): number {
+  let priority = 0;
+  if (hasUsablePlaceCoords(record)) priority += 3;
+  if (hasPhotoMetadata(record)) priority += 2;
+  if ((record.reviews?.length ?? 0) > 0) priority += 2;
+  if (isFreshRecord(record)) priority += 1;
+  return priority;
 }
 
 function hasPhotoMetadata(record: Pick<CacheWriteRecord, 'photoName' | 'photoNames'>): boolean {
@@ -99,45 +144,37 @@ export function shouldSkipGooglePlacesCacheWrite(
   return !incomingImprovesGooglePlacesCache(existing, incoming);
 }
 
-function logCacheWrite(
-  event:
-    | 'cache_write_attempt'
-    | 'cache_write_success'
-    | 'cache_write_timeout'
-    | 'cache_write_skipped_existing_fresh'
-    | 'cache_write_skipped_recent_failure'
-    | 'cache_write_queue_depth',
-  details: Record<string, unknown>,
-): void {
+/**
+ * Summarized, throttled queue-pressure log. Replaces the previous per-write
+ * `cache_write_queue_depth` / per-key `cache_write_failed` lines so one results
+ * page no longer prints a scary log for every failed/queued write.
+ */
+function logQueuePressure(force = false): void {
   if (process.env.NODE_ENV === 'test') return;
-  console.info(`[google-places-cache] ${event}`, details);
-}
-
-function logQueueDepth(): void {
-  logCacheWrite('cache_write_queue_depth', {
+  const now = Date.now();
+  if (!force && now - lastQueuePressureLogAt < QUEUE_PRESSURE_LOG_INTERVAL_MS) return;
+  lastQueuePressureLogAt = now;
+  console.info('[google-places-cache] cache_write_queue_pressure', {
     activeWrites,
     pendingWrites: pendingWrites.length,
+    droppedWrites: droppedWriteCount,
+    coalescedWrites: coalescedWriteCount,
+    failedWrites: failedWriteCount,
+    timedOutWrites: timedOutWriteCount,
   });
 }
 
 function markWriteFailure(cacheKey: string, error: unknown): void {
   recentFailedWriteKeys.set(cacheKey, Date.now());
 
-  if (loggedWriteFailures.has(cacheKey)) {
-    return;
-  }
-
-  loggedWriteFailures.add(cacheKey);
-
   if (error instanceof TimeoutError) {
-    logCacheWrite('cache_write_timeout', { cacheKey });
-    return;
+    timedOutWriteCount += 1;
+  } else {
+    failedWriteCount += 1;
   }
 
-  console.warn('[google-places-cache] cache_write_failed', {
-    cacheKey,
-    error: error instanceof Error ? error.message : String(error),
-  });
+  // Best-effort, summarized only. Individual failures are not logged per key.
+  logQueuePressure();
 }
 
 function shouldSkipRecentFailure(cacheKey: string): boolean {
@@ -150,30 +187,67 @@ function shouldSkipRecentFailure(cacheKey: string): boolean {
   return true;
 }
 
-function runQueuedWrite<T>(task: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const run = () => {
-      activeWrites += 1;
-      logQueueDepth();
+function dropLowestPriorityPending(): PendingCacheWrite | null {
+  if (pendingWrites.length === 0) return null;
+  let lowestIndex = 0;
+  for (let i = 1; i < pendingWrites.length; i += 1) {
+    if (pendingWrites[i].priority < pendingWrites[lowestIndex].priority) {
+      lowestIndex = i;
+    }
+  }
+  return pendingWrites.splice(lowestIndex, 1)[0] ?? null;
+}
 
-      task()
+function runQueuedWrite(opts: {
+  cacheKey: string;
+  priority: number;
+  task: () => Promise<void>;
+}): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const begin = () => {
+      activeWrites += 1;
+      opts
+        .task()
         .then(resolve)
         .catch(reject)
         .finally(() => {
           activeWrites -= 1;
-          logQueueDepth();
           const next = pendingWrites.shift();
-          if (next) next();
+          if (next) next.begin();
         });
     };
 
     if (activeWrites < MAX_CONCURRENT_CACHE_WRITES) {
-      run();
+      begin();
       return;
     }
 
-    pendingWrites.push(run);
-    logQueueDepth();
+    const entry: PendingCacheWrite = {
+      cacheKey: opts.cacheKey,
+      priority: opts.priority,
+      begin,
+      drop: () => reject(new DroppedCacheWriteError(opts.cacheKey)),
+    };
+
+    // Cap the queue so it cannot grow unbounded. When full, drop the
+    // lowest-priority write (the incoming one if it is the least valuable).
+    if (pendingWrites.length >= getGooglePlacesCacheWriteMaxPending()) {
+      const lowest = dropLowestPriorityPending();
+      if (lowest && lowest.priority < entry.priority) {
+        droppedWriteCount += 1;
+        lowest.drop();
+        pendingWrites.push(entry);
+      } else {
+        if (lowest) pendingWrites.push(lowest);
+        droppedWriteCount += 1;
+        entry.drop();
+      }
+      logQueuePressure(true);
+      return;
+    }
+
+    pendingWrites.push(entry);
+    logQueuePressure();
   });
 }
 
@@ -183,43 +257,52 @@ export async function enqueueGooglePlacesCacheWrite(
   const { cacheKey } = args;
 
   if (shouldSkipRecentFailure(cacheKey)) {
-    logCacheWrite('cache_write_skipped_recent_failure', { cacheKey });
     return;
   }
 
-  let existing = args.existing ?? null;
-  if (existing === null && args.loadExisting) {
-    try {
-      existing = await args.loadExisting();
-    } catch {
-      existing = null;
-    }
-  }
-
-  if (shouldSkipGooglePlacesCacheWrite(existing, args.incoming)) {
-    logCacheWrite('cache_write_skipped_existing_fresh', { cacheKey });
+  // Coalesce duplicate writes for the same lot/place: multiple requests for the
+  // same identity during one search share a single pending/in-flight write.
+  if (inFlightOrQueuedKeys.has(cacheKey)) {
+    coalescedWriteCount += 1;
+    logQueuePressure();
     return;
   }
 
-  logCacheWrite('cache_write_attempt', {
-    cacheKey,
-    queueDepth: pendingWrites.length,
-    activeWrites,
-  });
+  inFlightOrQueuedKeys.add(cacheKey);
 
   try {
-    await runQueuedWrite(() =>
-      withTimeout(
-        args.write(),
-        getGooglePlacesCacheWriteTimeoutMs(),
-        'Google Places cache write',
-      ),
-    );
-    recentFailedWriteKeys.delete(cacheKey);
-    loggedWriteFailures.delete(cacheKey);
-    logCacheWrite('cache_write_success', { cacheKey });
-  } catch (error) {
-    markWriteFailure(cacheKey, error);
+    let existing = args.existing ?? null;
+    if (existing === null && args.loadExisting) {
+      try {
+        existing = await args.loadExisting();
+      } catch {
+        existing = null;
+      }
+    }
+
+    if (shouldSkipGooglePlacesCacheWrite(existing, args.incoming)) {
+      return;
+    }
+
+    try {
+      await runQueuedWrite({
+        cacheKey,
+        priority: googlePlacesCacheWritePriority(args.incoming),
+        task: () =>
+          withTimeout(
+            args.write(),
+            getGooglePlacesCacheWriteTimeoutMs(),
+            'Google Places cache write',
+          ),
+      });
+      recentFailedWriteKeys.delete(cacheKey);
+    } catch (error) {
+      if (!(error instanceof DroppedCacheWriteError)) {
+        markWriteFailure(cacheKey, error);
+      }
+    }
+  } finally {
+    inFlightOrQueuedKeys.delete(cacheKey);
   }
 }
 
@@ -230,10 +313,18 @@ export function scheduleGooglePlacesCacheWrite(args: EnqueueGooglePlacesCacheWri
 export function getGooglePlacesCacheWriteQueueStateForTests(): {
   activeWrites: number;
   pendingWrites: number;
+  droppedWrites: number;
+  coalescedWrites: number;
+  failedWrites: number;
+  timedOutWrites: number;
 } {
   return {
     activeWrites,
     pendingWrites: pendingWrites.length,
+    droppedWrites: droppedWriteCount,
+    coalescedWrites: coalescedWriteCount,
+    failedWrites: failedWriteCount,
+    timedOutWrites: timedOutWriteCount,
   };
 }
 
@@ -251,6 +342,11 @@ export async function flushGooglePlacesCacheWriteQueueForTests(): Promise<void> 
 export function resetGooglePlacesCacheWriteForTests(): void {
   activeWrites = 0;
   pendingWrites.length = 0;
-  loggedWriteFailures.clear();
+  inFlightOrQueuedKeys.clear();
   recentFailedWriteKeys.clear();
+  droppedWriteCount = 0;
+  coalescedWriteCount = 0;
+  failedWriteCount = 0;
+  timedOutWriteCount = 0;
+  lastQueuePressureLogAt = 0;
 }

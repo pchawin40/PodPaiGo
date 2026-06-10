@@ -14,7 +14,10 @@ describe('googlePlacesCacheWrite', () => {
     resetGooglePlacesCacheWriteForTests();
     delete process.env.GOOGLE_PLACES_CACHE_WRITE_TIMEOUT_MS;
     delete process.env.GOOGLE_PLACE_DB_WRITE_TIMEOUT_MS;
+    delete process.env.GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING;
   });
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   test('defaults write timeout to 10s outside production', () => {
     const originalEnv = process.env.NODE_ENV;
@@ -132,6 +135,89 @@ describe('googlePlacesCacheWrite', () => {
     await flushGooglePlacesCacheWriteQueueForTests();
 
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  test('coalesces duplicate in-flight writes for the same cache key', async () => {
+    const write = jest.fn(async () => {
+      await delay(30);
+    });
+
+    const incoming = {
+      cacheKey: 'SEA|name:dup',
+      googlePlaceId: 'place-1',
+      lat: 47.4,
+      lng: -122.3,
+    };
+
+    const a = enqueueGooglePlacesCacheWrite({ cacheKey: 'SEA|name:dup', incoming, write });
+    const b = enqueueGooglePlacesCacheWrite({ cacheKey: 'SEA|name:dup', incoming, write });
+    const c = enqueueGooglePlacesCacheWrite({ cacheKey: 'SEA|name:dup', incoming, write });
+
+    await Promise.all([a, b, c]);
+    await flushGooglePlacesCacheWriteQueueForTests();
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(getGooglePlacesCacheWriteQueueStateForTests().coalescedWrites).toBeGreaterThanOrEqual(2);
+  });
+
+  test('caps the queue and drops the lowest-priority pending write when full', async () => {
+    process.env.GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING = '1';
+
+    const makeWrite = () =>
+      jest.fn(async () => {
+        await delay(40);
+      });
+
+    const w1 = makeWrite();
+    const w2 = makeWrite();
+    const wLow = makeWrite();
+    const wHigh = makeWrite();
+
+    const highValue = (cacheKey: string) => ({
+      cacheKey,
+      googlePlaceId: 'place',
+      lat: 47.4,
+      lng: -122.3,
+      photoNames: ['photos/1'],
+    });
+    const lowValue = (cacheKey: string) => ({ cacheKey });
+
+    // Two slow writes occupy the active slots (max concurrent = 2).
+    const p1 = enqueueGooglePlacesCacheWrite({ cacheKey: 'k1', incoming: highValue('k1'), write: w1 });
+    const p2 = enqueueGooglePlacesCacheWrite({ cacheKey: 'k2', incoming: highValue('k2'), write: w2 });
+    // Low-priority write fills the single pending slot.
+    const pLow = enqueueGooglePlacesCacheWrite({ cacheKey: 'k-low', incoming: lowValue('k-low'), write: wLow });
+    // High-priority write arrives while the queue is full -> evicts the low one.
+    const pHigh = enqueueGooglePlacesCacheWrite({ cacheKey: 'k-high', incoming: highValue('k-high'), write: wHigh });
+
+    await Promise.all([p1, p2, pLow, pHigh]);
+    await flushGooglePlacesCacheWriteQueueForTests();
+
+    expect(wLow).not.toHaveBeenCalled();
+    expect(w1).toHaveBeenCalledTimes(1);
+    expect(w2).toHaveBeenCalledTimes(1);
+    expect(wHigh).toHaveBeenCalledTimes(1);
+    expect(getGooglePlacesCacheWriteQueueStateForTests().droppedWrites).toBeGreaterThanOrEqual(1);
+
+    delete process.env.GOOGLE_PLACES_CACHE_WRITE_MAX_PENDING;
+  });
+
+  test('write failure is swallowed and does not reject the caller', async () => {
+    const write = jest.fn(async () => {
+      throw new Error('connection timeout exceeded when trying to connect');
+    });
+
+    await expect(
+      enqueueGooglePlacesCacheWrite({
+        cacheKey: 'SEA|name:fail',
+        incoming: { cacheKey: 'SEA|name:fail' },
+        write,
+      }),
+    ).resolves.toBeUndefined();
+    await flushGooglePlacesCacheWriteQueueForTests();
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(getGooglePlacesCacheWriteQueueStateForTests().failedWrites).toBeGreaterThanOrEqual(1);
   });
 
   test('skips enqueue when existing row is already fresh and complete', async () => {
