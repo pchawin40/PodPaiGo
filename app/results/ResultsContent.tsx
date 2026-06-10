@@ -69,6 +69,7 @@ import OptionComparisonCard from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import BetaFeedbackButton from './BetaFeedbackButton';
+import { DATA_TRANSPARENCY_DISCLOSURE } from '../../lib/marketing/publicCopy';
 import DriveRouteOptionsSection from './DriveRouteOptionsSection';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
@@ -142,6 +143,10 @@ import {
   buildParkingProviderHandoff,
   formatParkingHandoffDuration,
 } from '../../lib/parking/providerHandoff';
+import {
+  resolveProviderReserveLabel,
+  resolveProviderViewLabel,
+} from '../../lib/monetization/providerUrls';
 import {
   groupOfficialSeaGarageOptions,
   resolveOfficialSeaGarageCtas,
@@ -2722,12 +2727,19 @@ function OptionCard({
               rank={rank}
               priceTotal={parkingActionPriceTotal}
               priceLabel={parkingPrice?.primary ?? visiblePrice.primary ?? null}
+              priceSource={(opt as ParkingOption).priceSource ?? null}
               driveToLotMinutes={parkingActionDriveMinutes}
               walkMinutes={parkingActionWalkMinutes}
               tripId={tripId || null}
               accessToken={accessToken}
+              affiliateAttached={(opt as ParkingOption).outboundAffiliateAttached ?? false}
+              outboundSubIdParam={(opt as ParkingOption).outboundSubIdParam ?? null}
               onReserve={() => setBookingHelperOpen(true)}
-              reserveLabel={officialSeaCtas?.reserveLabel}
+              reserveLabel={
+                officialSeaCtas?.reserveLabel ||
+                resolveProviderReserveLabel(opt as ParkingOption)
+              }
+              viewProviderLabel={resolveProviderViewLabel(opt as ParkingOption)}
               infoOnlyBooking={officialSeaCtas?.isInfoOnly}
             />
           ) : compact ? (
@@ -9758,14 +9770,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </section>
         ) : null}
 
-        <div className="mt-10 flex justify-center">
-          <Link
-            href="/trip"
-            onClick={handleNewTripClick}
-            className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-          >
-            Plan another trip
-          </Link>
+        <div className="mt-10 space-y-6">
+          <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-muted-foreground">
+            {DATA_TRANSPARENCY_DISCLOSURE}
+          </p>
+          <div className="flex justify-center">
+            <Link
+              href="/trip"
+              onClick={handleNewTripClick}
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Plan another trip
+            </Link>
+          </div>
         </div>
       </main>
       {tripData && recommendation ? (

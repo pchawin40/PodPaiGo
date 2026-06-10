@@ -460,6 +460,10 @@ export type ParkingOption = {
   routeDestination?: string;
   sourceName: string;
   sourceLink?: string;
+  /** True when the outbound provider link carries configured affiliate/referral attribution. */
+  outboundAffiliateAttached?: boolean;
+  /** Provider sub-id query param name configured server-side for click correlation. */
+  outboundSubIdParam?: string;
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];

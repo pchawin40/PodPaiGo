@@ -51,16 +51,16 @@ export default function AboutPage() {
           <section>
             <h2 className="text-xl font-semibold text-foreground">Trust model</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
-              PodPaiGo is an early draft. Some data may be live or verified, while other details are
-              estimated, cached, or used as fallback logic. Street parking rules vary by block,
-              posted signs always win, and provider prices or availability should be verified before
-              you park or travel.
+              PodPaiGo is in public beta. Some data is live or provider-linked, while other details
+              are estimated, cached, or shown as fallback guidance. Street parking rules vary by
+              block, posted signs always win, and provider prices or availability should be verified
+              before you park or travel.
             </p>
           </section>
         </TravelCard>
 
         <PrimaryButton href="/trip" className="mt-8">
-          Plan a trip
+          Plan trip
         </PrimaryButton>
       </div>
     </main>

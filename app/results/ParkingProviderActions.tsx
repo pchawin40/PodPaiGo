@@ -6,6 +6,10 @@ import {
   type OutboundClickPayload,
 } from '../../lib/monetization/outboundClickTypes';
 import {
+  appendClickCorrelationToOutboundUrl,
+  extractSanitizedTargetHost,
+} from '../../lib/monetization/providerUrls';
+import {
   copyTextThenOpenWithTracking,
   openTrackedUrl,
 } from '../../lib/monetization/trackOutboundClick';
@@ -28,20 +32,54 @@ type ParkingProviderActionsProps = {
   rank?: number | null;
   priceTotal?: number | null;
   priceLabel?: string | null;
+  priceSource?: string | null;
   driveToLotMinutes?: number | null;
   walkMinutes?: number | null;
   tripId?: string | null;
   accessToken?: string | null;
+  affiliateAttached?: boolean;
+  outboundSubIdParam?: string | null;
   compact?: boolean;
   onReserve?: () => void;
   reserveLabel?: string;
+  viewProviderLabel?: string;
   infoOnlyBooking?: boolean;
 };
+
+function createOutboundClickId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  }
+  return `ppg${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function finalizeTrackedOutboundUrl(
+  url: string | null,
+  props: ParkingProviderActionsProps,
+  clickId: string,
+): string | null {
+  if (!url) return null;
+
+  const { url: trackedUrl } = appendClickCorrelationToOutboundUrl(
+    url,
+    {
+      provider: props.provider,
+      airportCode: props.airportCode,
+      tripType: props.tripType,
+      parkingLotId: props.parkingLotId,
+      clickId,
+    },
+    props.outboundSubIdParam,
+  );
+
+  return trackedUrl;
+}
 
 function buildTracking(
   eventType: string,
   destinationUrl: string | null,
   props: ParkingProviderActionsProps,
+  clickId: string,
 ): OutboundClickPayload {
   return {
     eventType,
@@ -59,8 +97,12 @@ function buildTracking(
       rank: props.rank ?? undefined,
       priceTotal: props.priceTotal ?? undefined,
       priceLabel: props.priceLabel ?? undefined,
+      priceSource: props.priceSource ?? undefined,
       driveToLotMinutes: props.driveToLotMinutes ?? undefined,
       walkMinutes: props.walkMinutes ?? undefined,
+      affiliateAttached: props.affiliateAttached ?? false,
+      targetHost: extractSanitizedTargetHost(destinationUrl),
+      outboundClickId: clickId,
     },
   };
 }
@@ -76,8 +118,10 @@ function buildAnalyticsMetadata(props: ParkingProviderActionsProps, ctaType: str
     rank: props.rank ?? undefined,
     priceTotal: props.priceTotal ?? undefined,
     priceLabel: props.priceLabel ?? undefined,
+    priceSource: props.priceSource ?? undefined,
     driveToLotMinutes: props.driveToLotMinutes ?? undefined,
     walkMinutes: props.walkMinutes ?? undefined,
+    affiliateAttached: props.affiliateAttached ?? undefined,
     sourcePage: 'results',
     ctaType,
   };
@@ -89,6 +133,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
     providerUrl: props.providerUrl,
     directionsUrl: props.routeToParkingUrl,
     reserveLabel: props.reserveLabel,
+    viewProviderLabel: props.viewProviderLabel,
     infoOnlyBooking: props.infoOnlyBooking,
   });
 
@@ -104,6 +149,22 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
   const secondaryButtonClass =
     buttonClass +
     ' border border-slate-200 bg-white text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800';
+
+  const openProviderUrl = (url: string | null, eventType: string, ctaType: string) => {
+    const clickId = createOutboundClickId();
+    const trackedUrl = finalizeTrackedOutboundUrl(url, props, clickId);
+    if (!trackedUrl) return;
+
+    trackEvent('parking_cta_clicked', {
+      accessToken: props.accessToken,
+      eventProperties: buildAnalyticsMetadata(props, ctaType),
+    });
+    openTrackedUrl(
+      trackedUrl,
+      buildTracking(eventType, trackedUrl, props, clickId),
+      props.accessToken,
+    );
+  };
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -123,10 +184,13 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
               props.onReserve();
               return;
             }
+            const clickId = createOutboundClickId();
+            const trackedUrl = finalizeTrackedOutboundUrl(ctas.reserveUrl, props, clickId);
+            if (!trackedUrl) return;
             void copyTextThenOpenWithTracking(
               props.searchQuery,
-              ctas.reserveUrl!,
-              buildTracking('reserve_parking', ctas.reserveUrl, props),
+              trackedUrl,
+              buildTracking('reserve_parking', trackedUrl, props, clickId),
               props.accessToken,
             );
           }}
@@ -137,17 +201,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
       ) : ctas.viewProviderEnabled ? (
         <button
           type="button"
-          onClick={() => {
-            trackEvent('parking_cta_clicked', {
-              accessToken: props.accessToken,
-              eventProperties: buildAnalyticsMetadata(props, 'view_provider'),
-            });
-            openTrackedUrl(
-              ctas.viewProviderUrl!,
-              buildTracking('view_provider', ctas.viewProviderUrl, props),
-              props.accessToken,
-            );
-          }}
+          onClick={() => openProviderUrl(ctas.viewProviderUrl, 'view_provider', 'view_provider')}
           className={secondaryButtonClass}
         >
           {ctas.viewProviderLabel}
@@ -179,7 +233,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
             });
             openTrackedUrl(
               ctas.directionsUrl!,
-              buildTracking('route_to_parking', ctas.directionsUrl, props),
+              buildTracking('route_to_parking', ctas.directionsUrl, props, createOutboundClickId()),
               props.accessToken,
             );
           }}
@@ -203,7 +257,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
             });
             openTrackedUrl(
               transferUrl,
-              buildTracking('parking_to_terminal', transferUrl, props),
+              buildTracking('parking_to_terminal', transferUrl, props, createOutboundClickId()),
               props.accessToken,
             );
           }}

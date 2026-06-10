@@ -68,7 +68,8 @@ export default function HowItWorksPage() {
         <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold">Important note</h2>
           <p className="mt-3 leading-7 text-slate-600">
-            The current draft may have deeper support for some airports and cities than others.
+            Coverage is strongest where PodPaiGo has been tested most deeply, and support varies by
+            airport and city.
             Some prices, availability, shuttle times, traffic, weather, and TSA estimates can
             change. Street parking rules vary by block, posted signs always win, and live
             refreshes may be rate-limited. Always confirm critical details with the parking

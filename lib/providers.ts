@@ -48,6 +48,7 @@ import {
   applyCanonicalCoordinatesToOption,
   resolveCanonicalParkingCoordinates,
 } from './parking/resolveCanonicalCoordinates';
+import { enrichParkingOptionsOutboundUrls } from './monetization/providerUrls';
 import {
   buildRouteEstimateCacheKey,
   shortRequestKey,
@@ -2095,7 +2096,14 @@ export class MockProvider implements DataProvider {
     }
     if (remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
       return {
-        options: withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout'),
+        options: enrichParkingOptionsOutboundUrls(
+          withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout'),
+          {
+            airportCode,
+            tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+            searchQuery: context?.destinationName || destination,
+          },
+        ),
         metadata: parkingDiscoveryMetadata,
       };
     }
@@ -2121,7 +2129,14 @@ export class MockProvider implements DataProvider {
 
     if (canonicalTimedOut && remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
       return {
-        options: withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout'),
+        options: enrichParkingOptionsOutboundUrls(
+          withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout'),
+          {
+            airportCode,
+            tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+            searchQuery: context?.destinationName || destination,
+          },
+        ),
         metadata: parkingDiscoveryMetadata,
       };
     }
@@ -2719,7 +2734,14 @@ export class MockProvider implements DataProvider {
       }),
     );
 
-    return { options: enriched, metadata: parkingDiscoveryMetadata };
+    return {
+      options: enrichParkingOptionsOutboundUrls(enriched, {
+        airportCode,
+        tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+        searchQuery: context?.destinationName || destination,
+      }),
+      metadata: parkingDiscoveryMetadata,
+    };
   }
 
   async getRideshareOptions(

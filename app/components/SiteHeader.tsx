@@ -23,14 +23,7 @@ const DESKTOP_LINKS = [
   { href: '/about', label: 'About' },
 ];
 
-const MOBILE_LINKS = [
-  { href: '/trip', label: 'Plan trip' },
-  { href: '/quick-go', label: 'Quick Go' },
-  { href: '/airports', label: 'Airports' },
-  { href: '/how-it-works', label: 'How it works' },
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/roadmap', label: 'Roadmap' },
-];
+const MOBILE_LINKS = DESKTOP_LINKS;
 
 function navLinkClass(active: boolean, mobile = false): string {
   const base = mobile

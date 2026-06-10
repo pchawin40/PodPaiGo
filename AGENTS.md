@@ -765,6 +765,116 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Re-run the downtown Seattle general-trip search and confirm `place_match_search_legacy` no longer repeats for the same lot, the live search log now carries a non-null `cacheKey`, and `place_search_dedupe_summary` shows non-zero `negativeCacheSkips`/`inFlightShares`.
 
+### 2026-06-09 22:55 PDT — Admin parking submissions load fixed for validation reports
+
+**Summary**
+- Fixed `/admin/parking-submissions` loading 500 after public parking validation report submissions moved to server-side service-role inserts into `parking_validation_reports`.
+- Root cause: the admin route only read/moderated `user_parking_spaces` through the direct Postgres pool, while the public report route now writes `parking_validation_reports` through the Supabase service-role client. Environments without working `DATABASE_URL`, or with reports in only the validation table, could fail the admin list path.
+- Admin submissions API now uses the server-side Supabase service-role client, lists both `parking_validation_reports` and legacy `user_parking_spaces`, maps validation reports into the existing safe admin card shape, tolerates null optional fields, and returns `200 { parking: [] }` for empty filters.
+- Admin moderation first updates `parking_validation_reports.status`, then falls back to legacy `user_parking_spaces` moderation. Invalid statuses still fail validation before DB access.
+- Errors are logged server-side with a generic client response; service-role key remains server-only, public users/non-admins remain blocked, and public validation report submission behavior is unchanged.
+
+**Files changed**
+- `app/api/admin/parking-submissions/route.ts`
+- `app/api/admin/parking-submissions/__tests__/route.test.ts`
+- `__tests__/userParkingSpacesSecurity.test.ts`
+- `AGENTS.md`
+
+**Why**
+- Admins need to view submitted parking validation reports without a 500, while keeping reads/updates admin-only and keeping public submission inserts server-side.
+
+**Tests run and result**
+- `npx jest --runTestsByPath app/api/admin/parking-submissions/__tests__/route.test.ts __tests__/parkingValidationReportRoute.test.ts --runInBand` passed, 11 tests.
+- `npx jest --runTestsByPath app/api/admin/parking-submissions/__tests__/route.test.ts __tests__/parkingValidationReportRoute.test.ts __tests__/userParkingSpacesSecurity.test.ts lib/parking/__tests__/userParkingSpacesTypes.test.ts lib/admin/__tests__/adminAuth.test.ts --runInBand` passed, 38 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- `parking_validation_reports` currently stores only `status` for moderation; rejection/needs-more-info notes from the admin UI are preserved for legacy `user_parking_spaces` but not persisted on validation reports because that table has no `rejection_reason`/review note column.
+- If both `parking_validation_reports` and `user_parking_spaces` service-role reads fail, the admin API returns a generic `500 list_failed` and logs the server-side error message.
+
+**Next recommended step**
+- Verify in production with an allowlisted admin account: submit a parking validation report, open `/admin/parking-submissions`, confirm the row appears, test empty filters, and verify non-admin access remains denied.
+
+### 2026-06-09 23:15 PDT — Centralized provider outbound URL builder with affiliate attribution
+
+**Summary**
+- Added `lib/monetization/providerUrls.ts` as the shared outbound URL builder for ParkWhiz, APR/AirportParkingReservations, and SpotHero/marketplace links.
+- Server-side parking option enrichment now appends configured affiliate/sub-id/UTM params to `sourceLink` without changing pricing provenance, scoring, or live/cached labels.
+- `ParkingProviderActions` now finalizes outbound URLs at click time with opaque click-correlation sub-ids when configured, and records `affiliateAttached`, `targetHost`, `priceSource`, and `outboundClickId` in outbound analytics metadata.
+- Provider-specific reserve/view labels are now honest: ParkWhiz live → `Reserve`, APR → `Check live price`, SpotHero generic → `Compare on SpotHero`.
+- SpotHero generic URLs can safely upgrade to the existing `/search?search=` deep-link pattern when only airport-parking landing pages exist.
+- Documented optional affiliate env vars in `.env.example`; missing env vars preserve original provider URLs.
+
+**Files changed**
+- `lib/monetization/providerUrls.ts` (new)
+- `lib/monetization/__tests__/providerUrls.test.ts` (new)
+- `lib/monetization/outboundClickTypes.ts`
+- `lib/providers.ts`
+- `lib/types.ts`
+- `lib/analytics/sanitizeAnalytics.ts`
+- `app/results/ParkingProviderActions.tsx`
+- `app/results/ResultsContent.tsx`
+- `.env.example`
+- `AGENTS.md`
+
+**Why**
+- Outbound parking clicks were logged but provider URLs lacked consistent affiliate/referral/sub-id attribution, so clicks were not reliably monetizable.
+- Affiliate IDs must stay env-configured server-side; URLs must not include raw origin addresses or secrets.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/monetization/__tests__/providerUrls.test.ts lib/monetization/__tests__/parkingCtas.test.ts lib/monetization/__tests__/outboundClick.test.ts app/results/__tests__/ParkingProviderActions.test.tsx lib/analytics/__tests__/sanitizeAnalytics.test.ts __tests__/outboundClickRoute.test.ts --runInBand` passed, 25 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Affiliate/sub-id param names are not guessed; both `*_AFFILIATE_ID` and `*_AFFILIATE_PARAM` must be configured for provider-specific affiliate attachment.
+- UTM params attach when affiliate params are attached or when `PODPAIGO_UTM_*` env vars are explicitly set.
+- Click-correlation sub-ids append at click time only when a configured sub-id param name was exposed on the parking option from server enrichment.
+- Needs live verification with real ParkWhiz/APR/SpotHero affiliate env values in Vercel to confirm partner attribution survives provider handoff and checkout.
+
+**Next recommended step**
+- Set `PARKWHIZ_AFFILIATE_ID`/`PARKWHIZ_AFFILIATE_PARAM` (and APR/SpotHero equivalents if available) in Vercel, run an airport and general-trip search, click Reserve/Compare, and confirm outbound URLs carry affiliate params while `/api/monetization/outbound-click` stores `affiliateAttached: true` with sanitized `targetHost`.
+
+### 2026-06-09 23:45 PDT — Public beta polish for partner outreach (nav, pricing, README, disclosures)
+
+**Summary**
+- Cleaned public navbar: Admin remains admin-gated; desktop and mobile nav now share the same link set (Quick Go, Airports, How it works, Pricing, Roadmap, About) with a single primary CTA (`Plan trip`); mobile menu no longer duplicates Plan trip as a nav item.
+- Rewrote `/pricing` as beta-friendly: free during beta, paid plans planned later, no billing active, honest live/estimated/cached pricing notes; removed Stripe/placeholder dev copy.
+- Rewrote `README.md` for agents, developers, partners, and future repo context: product status, data sources, honesty rules, setup, testing checklist, deployment guardrails, and monetization status.
+- Added shared public disclosure copy in `lib/marketing/publicCopy.ts` and surfaced it on home, pricing, and results footer.
+- Polished About and How it works trust language (`public beta` instead of `early draft`).
+
+**Files changed**
+- `lib/marketing/publicCopy.ts` (new)
+- `lib/marketing/__tests__/publicCopy.test.tsx` (new)
+- `app/components/SiteHeader.tsx`
+- `app/components/__tests__/SiteHeader.test.tsx`
+- `app/pricing/page.tsx`
+- `app/page.tsx`
+- `app/about/page.tsx`
+- `app/how-it-works/page.tsx`
+- `app/results/ResultsContent.tsx`
+- `README.md`
+- `AGENTS.md`
+
+**Why**
+- Public app needed partner-demo-safe marketing copy and nav before parking provider outreach; dev-facing Stripe/placeholder language undermined trust.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/marketing/__tests__/publicCopy.test.tsx app/components/__tests__/SiteHeader.test.tsx --runInBand` passed, 9 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+- README changes validated by review; no separate README test file added.
+
+**Known remaining issues**
+- Results page header CTA intentionally remains `New trip` on `/results` while the global default CTA is `Plan trip`.
+- Home hero still uses `Plan a trip` button label on the landing page; global header CTA is `Plan trip`.
+- Roadmap and privacy pages were not rewritten in this pass.
+
+**Next recommended step**
+- Do a quick visual pass on mobile nav + pricing + results footer in localhost, then use the README testing checklist before the first partner outreach email or demo.
+
 ---
 
 # Final Response Requirement for Agents

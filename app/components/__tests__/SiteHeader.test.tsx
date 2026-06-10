@@ -100,6 +100,19 @@ describe('SiteHeader', () => {
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
   });
 
+  test('renders public nav links without admin for non-admin users', () => {
+    renderHeader();
+
+    expect(screen.getByRole('link', { name: 'Quick Go' })).toHaveAttribute('href', '/quick-go');
+    expect(screen.getByRole('link', { name: 'Airports' })).toHaveAttribute('href', '/airports');
+    expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', '/how-it-works');
+    expect(screen.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', '/pricing');
+    expect(screen.getByRole('link', { name: 'Roadmap' })).toHaveAttribute('href', '/roadmap');
+    expect(screen.getByRole('link', { name: 'About' })).toHaveAttribute('href', '/about');
+    expect(screen.getByRole('link', { name: 'Plan trip' })).toHaveAttribute('href', '/trip');
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
   test('shows admin nav for signed-in admin', async () => {
     useAuth.mockReturnValue({
       user: { id: 'admin-1', email: 'admin@example.com' },

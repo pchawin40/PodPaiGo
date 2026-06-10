@@ -12,6 +12,7 @@ import SectionHeader from './components/ui/SectionHeader';
 import StatusPill from './components/ui/StatusPill';
 import TravelCard from './components/ui/TravelCard';
 import HomeAnalytics from './components/HomeAnalytics';
+import { DATA_TRANSPARENCY_DISCLOSURE } from '../lib/marketing/publicCopy';
 
 const featureChips = [
   'Airport trips',
@@ -134,10 +135,7 @@ export default function Home() {
             </div>
           </div>
 
-          <p className="mt-4 text-sm text-muted-foreground">
-            Some prices and availability are estimates. Street parking rules vary by block,
-            posted signs always win, and cached options may be shown when live refresh is rate-limited.
-          </p>
+          <p className="mt-4 text-sm text-muted-foreground">{DATA_TRANSPARENCY_DISCLOSURE}</p>
         </div>
 
         <div className="relative">
