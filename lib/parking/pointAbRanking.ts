@@ -67,7 +67,10 @@ export type PointAbModePresentation = {
   label: string;
   name: string;
   cost: string;
+  /** Short, scannable secondary label shown inside the compact cost tile. */
   costNote?: string;
+  /** Long-form outlook/explanation. Belongs in Details/evidence, never in the compact cost tile. */
+  detailNote?: string;
   time: string;
   timeLabel?: 'Drive time' | 'Total time';
   timing?: PointToPointTiming | null;
@@ -91,6 +94,14 @@ export type PointAbRankingResult = {
   objectiveBestMode: PointAbModeKey | null;
   /** When cheapest mode differs from best overall (e.g. transit is cheapest). */
   cheapestVsBestNote: string | null;
+  /**
+   * True when the cheapest option is street/meter parking but its price is not
+   * trustworthy. The quick-read summary uses this to avoid a confident
+   * "cheapest around $0" claim.
+   */
+  cheapestStreetMeterUncertain: boolean;
+  /** Cheapest reliable non-street option, used to hedge uncertain street/meter copy. */
+  cheapestReliableAlternative: { key: PointAbModeKey; label: string; cost: number } | null;
   canonicalWinners: PointAbCanonicalWinners;
 };
 
@@ -835,9 +846,14 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
               ? 'Risky street / meter fallback'
               : input.streetMeterParking.name,
             cost: input.streetMeterParking.costDisplay,
+            // Compact tile keeps a short, scannable label; the long parking
+            // outlook copy is moved to detailNote for the Details/evidence panel.
             costNote: eventRulesLikely
               ? 'Risky during events'
-              : input.streetMeterParking.costNote,
+              : input.streetMeterParking.verifyRequired
+                ? 'Verify signs'
+                : 'Check meter',
+            detailNote: eventRulesLikely ? undefined : input.streetMeterParking.costNote,
             time:
               streetMeterMinutes != null
                 ? formatMinutesLabel(streetMeterMinutes)
@@ -1033,6 +1049,33 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       }
     : null;
 
+  const streetMeterPriceUncertain = Boolean(
+    input.streetMeterParking?.applicable &&
+      (input.streetMeterParking.verifyRequired ||
+        input.streetMeterParking.confidence !== 'High' ||
+        input.streetMeterParking.cost == null ||
+        input.streetMeterParking.cost <= 0),
+  );
+  const cheapestStreetMeterUncertain =
+    cheapestMode?.key === 'street-meter' && streetMeterPriceUncertain;
+  const visibleCandidateKeys = new Set(canonicalWinners.visibleOptionKeys);
+  const cheapestReliableAlternative = cheapestStreetMeterUncertain
+    ? (() => {
+        const alternative = candidates
+          .filter(
+            (mode) =>
+              mode.key !== 'street-meter' &&
+              visibleCandidateKeys.has(mode.key) &&
+              mode.reliable &&
+              mode.cost < BIG,
+          )
+          .sort((a, b) => a.cost - b.cost)[0];
+        return alternative
+          ? { key: alternative.key, label: alternative.label, cost: alternative.cost }
+          : null;
+      })()
+    : null;
+
   const resolvedRecommendationMode = recommendationMode ?? 'compare';
   const displayRecommendationMode = resolvePointAbDisplayRecommendationMode({
     recommendationMode: resolvedRecommendationMode,
@@ -1055,6 +1098,8 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       cheapestMode: cheapestModeResult,
       recommendationMode: displayRecommendationMode,
     }),
+    cheapestStreetMeterUncertain,
+    cheapestReliableAlternative,
     canonicalWinners,
   };
 }

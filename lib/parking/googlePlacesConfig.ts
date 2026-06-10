@@ -157,6 +157,9 @@ export function logGooglePlacesRequestSummary(summary: GooglePlacesRequestSummar
 export function logGoogleUsageSummary(summary: GooglePlacesRequestSummary): void {
   if (process.env.NODE_ENV === 'test') return;
 
+  // dailyCounts now reflects real Routes/Geocoding usage: recordApiUsage bumps
+  // the routes/geocoding daily counters here too, so they are no longer hard
+  // zeros that falsely implied route/geocode requests were never attempted.
   console.info('google_usage_summary', {
     route: summary.route ?? 'unknown',
     requestKey: summary.requestKey,

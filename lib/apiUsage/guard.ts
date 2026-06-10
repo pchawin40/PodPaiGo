@@ -9,6 +9,7 @@ import {
 } from './config';
 import { getRecentProviderCalls, logProviderCall } from './logging';
 import { getActiveSearchBudget } from './searchBudget';
+import { recordGooglePlacesDailyCall } from './googlePlacesDailyBudget';
 import {
   incrementApiUsageCounter,
   readApiUsageCounter,
@@ -125,6 +126,16 @@ export async function recordApiUsage(provider: ApiProvider, estimatedCost?: numb
   const cost = estimatedCost ?? ESTIMATED_COST_USD[provider];
   bumpInMemoryCounter(provider, cost);
   sessionStats.liveCalls += 1;
+
+  // Keep the Google daily-count snapshot honest for routes/geocoding. These
+  // endpoints are not guarded through recordGooglePlacesDailyCall elsewhere, so
+  // without this their daily counts stayed at 0 and the google_usage_summary
+  // log falsely implied route/geocode requests were never attempted.
+  if (provider === 'google_routes') {
+    recordGooglePlacesDailyCall('routes');
+  } else if (provider === 'geocoding') {
+    recordGooglePlacesDailyCall('geocoding');
+  }
 
   void incrementApiUsageCounter({
     provider,

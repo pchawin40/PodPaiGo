@@ -155,6 +155,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const destinationLngRaw = searchParams.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
   const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
+  const destinationPlaceId = searchParams.get('destinationPlaceId')?.trim() || undefined;
 
   const transportRaw = searchParams.get('transport') || 'all';
   const transportAvailability: TransportAvailability = isOneOf(
@@ -444,6 +445,7 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
 
     if (originName) data = { ...data, originName };
     if (originPlaceId) data = { ...data, originPlaceId };
+    if (destinationPlaceId) data = { ...data, destinationPlaceId };
 
     const isAirportStyleTrip =
       data.destinationKind === 'airport' ||
@@ -590,6 +592,7 @@ export function tripDataToSearchParams(
     params.set('airportCheckinNote', selectedAirport.checkinNote || '');
     params.set('airportLat', String(selectedAirport.geoLocation.lat));
     params.set('airportLng', String(selectedAirport.geoLocation.lng));
+    params.delete('destinationPlaceId');
   } else {
     params.set('destination', data.destination);
     if (typeof data.destinationLat === 'number' && Number.isFinite(data.destinationLat)) {
@@ -601,6 +604,11 @@ export function tripDataToSearchParams(
       params.set('destinationLng', String(data.destinationLng));
     } else {
       params.delete('destinationLng');
+    }
+    if (data.destinationPlaceId) {
+      params.set('destinationPlaceId', data.destinationPlaceId);
+    } else {
+      params.delete('destinationPlaceId');
     }
   }
 

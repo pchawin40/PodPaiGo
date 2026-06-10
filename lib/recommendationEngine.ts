@@ -69,6 +69,7 @@ import {
 import { rankAccessOptions } from './access/rankAccessOptions';
 import { buildPointAbOptionScoreBreakdowns } from './parking/pointAbOptionScoring';
 import { getParkingLotsNearPoint } from './parking/inventory';
+import { resolveGooglePlaceCoordinates } from './parking/googlePlacesCache';
 import { inventoryLotToDestinationParkingOption } from './parking/inventoryToParkingOption';
 
 /**
@@ -200,9 +201,13 @@ function getCoordinateResolveTimeoutMs(): number {
 }
 
 /**
- * Resolve coordinates for a trip endpoint: use existing lat/lng when present,
- * otherwise geocode the address text (cached + budget-guarded by the provider,
- * bounded by a short timeout so it never blocks the results render). Returns
+ * Resolve coordinates for a trip endpoint. Order of preference:
+ *   1. Existing lat/lng when present.
+ *   2. The Google place_id when present (autocomplete predictions carry a
+ *      place_id but no coordinates), resolved via the budget-guarded getPlace
+ *      path — cheaper and more reliable than re-geocoding free text.
+ *   3. Geocoding the address text (cached + budget-guarded by the provider).
+ * Bounded by a short timeout so it never blocks the results render. Returns
  * undefined when coordinates cannot be resolved. Never throws.
  */
 async function resolveTripCoordinate(
@@ -210,6 +215,7 @@ async function resolveTripCoordinate(
   text: string | undefined,
   existingLat: number | undefined,
   existingLng: number | undefined,
+  placeId?: string,
 ): Promise<{ lat: number; lng: number } | undefined> {
   if (
     typeof existingLat === 'number' &&
@@ -220,16 +226,26 @@ async function resolveTripCoordinate(
     return { lat: existingLat, lng: existingLng };
   }
 
-  const address = text?.trim();
-  if (!address || typeof provider.geocodeAddress !== 'function') return undefined;
+  const resolve = (async (): Promise<{ lat: number; lng: number } | undefined> => {
+    const trimmedPlaceId = placeId?.trim();
+    if (trimmedPlaceId) {
+      const fromPlace = await resolveGooglePlaceCoordinates(trimmedPlaceId, {
+        reason: 'trip_coordinate',
+      }).catch(() => null);
+      if (fromPlace) return fromPlace;
+    }
 
-  const geocode = provider.geocodeAddress(address).then(
-    (result) => result ?? undefined,
-    () => undefined,
-  );
+    const address = text?.trim();
+    if (!address || typeof provider.geocodeAddress !== 'function') return undefined;
+
+    return provider.geocodeAddress(address).then(
+      (result) => result ?? undefined,
+      () => undefined,
+    );
+  })();
 
   return withTimeout<{ lat: number; lng: number } | undefined>(
-    geocode,
+    resolve,
     getCoordinateResolveTimeoutMs(),
     () => undefined,
   );
@@ -811,7 +827,13 @@ export class RecommendationEngine {
       ? resolveAirportCoordinate(tripData)
       : undefined;
     const [resolvedOriginCoords, resolvedDestinationCoords] = await Promise.all([
-      resolveTripCoordinate(this.provider, tripData.origin, tripData.originLat, tripData.originLng),
+      resolveTripCoordinate(
+        this.provider,
+        tripData.origin,
+        tripData.originLat,
+        tripData.originLng,
+        tripData.originPlaceId,
+      ),
       airportDestinationCoords
         ? Promise.resolve(airportDestinationCoords)
         : resolveTripCoordinate(
@@ -819,6 +841,7 @@ export class RecommendationEngine {
             tripData.destination,
             tripData.destinationLat,
             tripData.destinationLng,
+            tripData.destinationPlaceId,
           ),
     ]);
 

@@ -173,7 +173,9 @@ export default function OptionComparisonCard({
             <div className="text-muted-foreground">Cost</div>
             <div className="mt-0.5 font-semibold text-foreground">{cost}</div>
             {costNote ? (
-              <div className="mt-1 text-[11px] text-muted-foreground">{costNote}</div>
+              <div className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">
+                {costNote}
+              </div>
             ) : null}
           </div>
           <div className="rounded-xl border border-border bg-card/80 p-2">

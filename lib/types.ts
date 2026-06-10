@@ -131,6 +131,13 @@ type BaseTripData = {
   destinationLng?: number;
 
   /**
+   * Optional destination Google place_id from autocomplete. Lets the engine
+   * resolve confirmed coordinates without a separate Geocoding API call when
+   * the selected prediction did not carry lat/lng.
+   */
+  destinationPlaceId?: string;
+
+  /**
    * Optional flow marker. Quick Go is stored as a general trip for results, but
    * timing should still behave like "go now" instead of a full planner target arrival.
    */

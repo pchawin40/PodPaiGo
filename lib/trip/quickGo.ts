@@ -66,6 +66,7 @@ export type QuickGoDestinationSelection = {
   destinationSource: QuickGoDestinationSource;
   destinationLat?: number;
   destinationLng?: number;
+  destinationPlaceId?: string;
   destinationConfidence?: 'high' | 'medium' | 'low';
   detectedAirportCode?: string;
 };
@@ -87,6 +88,7 @@ export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
   'destinationSource',
   'destinationLat',
   'destinationLng',
+  'destinationPlaceId',
   'destinationConfidence',
   'destinationKind',
   'intent',
@@ -393,6 +395,7 @@ export function readQuickGoDestinationFromSearchParams(
   const destinationLngRaw = params.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
   const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
+  const destinationPlaceId = params.get('destinationPlaceId')?.trim() || undefined;
   const destinationConfidenceRaw = params.get('destinationConfidence');
   const destinationConfidence =
     destinationConfidenceRaw === 'high' ||
@@ -416,6 +419,7 @@ export function readQuickGoDestinationFromSearchParams(
         : 'typed',
     destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
     destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
+    destinationPlaceId,
     destinationConfidence,
     detectedAirportCode: params.get('detectedAirportCode')?.trim() || undefined,
   };
@@ -441,6 +445,12 @@ export function applyQuickGoDestinationToSearchParams(
     params.set('destinationLng', String(destination.destinationLng));
   } else {
     params.delete('destinationLng');
+  }
+
+  if (destination.destinationPlaceId) {
+    params.set('destinationPlaceId', destination.destinationPlaceId);
+  } else {
+    params.delete('destinationPlaceId');
   }
 
   if (destination.destinationConfidence) {

@@ -625,6 +625,80 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Configure beta env values for `CRON_SECRET`, `PUBLIC_API_RATE_LIMIT_WINDOW_MS`, `PUBLIC_API_RATE_LIMIT_MAX`, `PUBLIC_API_RATE_LIMIT_MAX_ENTRIES`, `FEEDBACK_EMAIL_THROTTLE_MS`, `RECOMMENDATIONS_CACHE_MAX_ENTRIES`, and `RECOMMENDATIONS_RATE_LIMIT_MAX_ENTRIES`, then verify cron auth and 429 responses in Vercel.
 
+### 2026-06-09 21:45 PDT — Quick Go missing destination coordinates (route + weather) fixed
+
+**Summary**
+- Root-caused Monroe → Brighton Jones Quick Go showing no route time and weather "needs a confirmed destination location."
+- Two misleading signals corrected:
+  - `google_usage_summary` `routes:0`/`geocoding:0` was a measurement artifact — those daily counters in `googlePlacesDailyBudget` were never incremented (`recordGooglePlacesDailyCall` only ever maps to `searchText`/`getPlace`/`photoMedia`). Real Routes/Geocoding usage lives in `recordApiUsage`/`getApiUsageDiagnostics`. Now `recordApiUsage('google_routes'|'geocoding')` also bumps the snapshot counters, so the summary reflects reality.
+  - `UNKNOWN|...` place-match cache keys are just the airport-code slot defaulting for non-airport trips; unrelated.
+- Real root cause: named destinations selected from `/api/geocode/autocomplete` carry a `place_id` but no lat/lng, and `applyQuickGoDestinationToSearchParams` dropped the `place_id`. The destination reached the engine as text only, so `mainDestinationLatLng` was undefined → weather `missing-coordinates` and fragile route timing dependent on the Geocoding API (which can be unauthorized/blocked while Places-based parking still works).
+- Fixes (server + client, per user choice):
+  - Added `destinationPlaceId` plumbing mirroring `originPlaceId` (`TripData`, Quick Go selection/param-key/apply/read, `parseTripDataFromSearchParams` read + reverse write).
+  - Engine `resolveTripCoordinate` now resolves coords from `place_id` (via budget-guarded `getPlace`) before falling back to text geocoding; call sites pass `originPlaceId`/`destinationPlaceId`.
+  - New `resolveGooglePlaceCoordinates(placeId)` helper in `googlePlacesCache.ts` and new `GET /api/geocode/place` endpoint.
+  - `QuickGoPanel` resolves coordinates on submit when the destination has a `place_id` but no lat/lng, so coords land in the results URL immediately.
+
+**Files changed**
+- `lib/parking/googlePlacesCache.ts` (new `resolveGooglePlaceCoordinates`)
+- `lib/types.ts`, `lib/trip/quickGo.ts`, `lib/trip/searchParams.ts` (destinationPlaceId plumbing)
+- `lib/recommendationEngine.ts` (place_id coord resolution + call sites)
+- `app/api/geocode/place/route.ts` (new endpoint)
+- `app/components/QuickGoPanel.tsx` (client coord resolution on submit)
+- `lib/apiUsage/guard.ts` (recordApiUsage bumps routes/geocoding daily counters)
+- `lib/parking/googlePlacesConfig.ts` (summary comment; snapshot now accurate)
+- Tests: `lib/trip/__tests__/quickGoDestinationCoords.test.ts`, `lib/__tests__/recommendationEngineDestinationPlaceId.test.ts`, `app/api/geocode/place/__tests__/route.test.ts`, `lib/parking/__tests__/googleUsageSummary.test.ts`
+
+**Why**
+- Restore honest route timing and weather for general/city Quick Go trips whose destination was chosen from autocomplete, without depending on a separate Geocoding API call, and stop the always-zero diagnostics from misleading future debugging.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/trip/__tests__/quickGoDestinationCoords.test.ts lib/__tests__/recommendationEngineDestinationPlaceId.test.ts app/api/geocode/place/__tests__/route.test.ts lib/parking/__tests__/googleUsageSummary.test.ts --runInBand` → 12 passed.
+- Regression: `recommendationEngineTrafficDestination`, `quickGo`, `searchParamsFlightDate`, `destinationSearch`, `lib/apiUsage`, `providersParkingAirport`, `app/api/recommendations`, `QuickGoPanel` → all passed (80 + 44 + 11).
+- `npm run build` passed (`/api/geocode/place` registered). `git diff --check` clean.
+
+**Known remaining issues**
+- `/api/geocode/place` and the engine `place_id` resolver consume one budget-guarded `getPlace` call per uncached named destination (replaces the prior failing geocode; counts against `GOOGLE_GETPLACE_DAILY_LIMIT`).
+- Typed destinations with neither coords nor `place_id` still rely on the server text geocode; if the Geocoding API key is unauthorized/blocked, those remain coordinate-less (separate env/config concern).
+
+**Next recommended step**
+- Re-run the Monroe → Brighton Jones Quick Go in localhost/Vercel: confirm the results URL now carries `destinationPlaceId` (or `destinationLat/Lng`), route time and weather render, and `google_usage_summary` shows non-zero `routes`/`geocoding` when live calls happen.
+
+### 2026-06-09 21:58 PDT — Smart Recommendation street/meter card overflow + misleading $0 quick read fixed
+
+**Summary**
+- Fixed Smart Recommendation card overflow for general/city trips (e.g. Brighton Jones / downtown Seattle). The Street / meter card no longer jams the long Seattle paid-hours paragraph into the compact Cost tile.
+- Street/meter compact `costNote` is now a short, scannable label (`Verify signs` when verification is required, otherwise `Check meter`; events keep `Risky during events`). The long parking-outlook paragraph moved to a new `detailNote` field surfaced in Details/evidence (`StreetParkingPlanNote`), which now also carries the `details-street-meter` scroll id.
+- Quick read no longer presents uncertain street/meter as a confident "cheapest around $0". When street/meter is cheapest but its price is not trustworthy (medium/low confidence, verify-required, or $0/unknown), the copy hedges to the cheapest reliable option ("Cheapest reliable option appears to be Paid garage/lot around $12. Street / meter parking may be cheaper if legal and available.") or to "Street / meter may be cheapest, but signs and paid-hour rules need verification." when no reliable alternative exists.
+- Added defensive `line-clamp-2 break-words` on the cost-tile note in `OptionComparisonCard` and the inline airport card so any future long copy cannot overflow the metric tile.
+- Airport, city, and event/stadium parking logic kept separate; no backend provider fetching changed.
+
+**Files changed**
+- `lib/parking/pointAbQuickRead.ts` (hedged cheapest clause + new optional inputs `cheapestUncertainStreetMeter`, `reliableAlternative`)
+- `lib/parking/pointAbRanking.ts` (short street/meter `costNote`, new `detailNote`, `cheapestStreetMeterUncertain` + `cheapestReliableAlternative` on the result)
+- `app/results/ResultsContent.tsx` (pass new quick-read inputs, plumb `detailNote`, render long outlook + scroll id in `StreetParkingPlanNote`, clamp inline cost note)
+- `app/components/OptionComparisonCard.tsx` (clamp/break the cost-tile note)
+- `lib/parking/__tests__/streetMeterSmartCard.test.ts` (new)
+- `app/components/__tests__/OptionComparisonCard.test.tsx` (cost-tile clamp test)
+- `AGENTS.md`
+
+**Why**
+- The Street / meter card overflowed because `meterPricing` `costNote` (the long `localStreetParkingRules.detail` paragraph) was rendered directly inside the small Cost metric tile.
+- A $0 free/uncertain street estimate made it the "cheapest" winner, producing the misleading "Street / meter parking is cheapest around $0" quick read even though signs and downtown paid-hour rules are unverified.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/parking/__tests__/streetMeterSmartCard.test.ts lib/parking/__tests__/pointAbQuickRead.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/streetMeterParking.test.ts app/components/__tests__/OptionComparisonCard.test.tsx --runInBand` → passed (72 tests).
+- Regression: `pointAbCanonicalFlow`, `pointAbOptionScoring`, `pointAbLocalTripCleanup`, `parkAndRidePointAb`, `ResultsContentHookOrder`, `ParkingSmartPick` → passed (72 tests).
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- `streetMeterParking.verifyRequired` is effectively always true today, so street/meter is treated as uncertain whenever it is cheapest; that is intentional product behavior but means the hedged copy nearly always applies for street/meter winners.
+- Needs visual verification in localhost/Vercel that the Brighton Jones / downtown Seattle Street / meter card now shows a short Cost note and that the full Seattle paid-hours paragraph appears in the parking-plan Details section.
+
+**Next recommended step**
+- Re-run the Brighton Jones / downtown Seattle general trip in the UI: confirm no card text overflow, the Cost tile shows `Verify signs`/`Check meter`, the quick read no longer says "cheapest around $0", and the long outlook renders under the Street parking note in Details.
+
 ---
 
 # Final Response Requirement for Agents

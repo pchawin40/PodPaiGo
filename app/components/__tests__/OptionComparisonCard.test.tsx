@@ -63,6 +63,28 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.queryByText('Route timing unavailable')).not.toBeInTheDocument();
   });
 
+  test('clamps the cost-tile note so long copy cannot overflow the metric tile', () => {
+    const longNote =
+      'Between 8 PM and 10 PM, some Seattle neighborhoods still require payment, and posted signs may set time limits or restrict parking entirely.';
+    render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Street / meter parking"
+        name="Check signs / special rules possible"
+        cost="Check meter"
+        costNote={longNote}
+        time="35 min"
+        timeLabel="Total time"
+        pros={['Evening blocks may still have open stalls']}
+        cons={['Verify posted signs before leaving your car']}
+      />,
+    );
+
+    const noteEl = screen.getByText(longNote);
+    expect(noteEl).toHaveClass('line-clamp-2');
+    expect(noteEl).toHaveClass('break-words');
+  });
+
   test('renders paid parking timing decomposition when provided', () => {
     render(
       <OptionComparisonCard

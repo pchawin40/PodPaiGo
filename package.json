@@ -51,6 +51,7 @@
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.4.1",
     "nodemon": "^3.1.14",
+    "supabase": "^2.105.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
     "typescript": "^5"

@@ -1133,6 +1133,50 @@ async function fetchGooglePlaceDetails(
   }
 }
 
+/**
+ * Resolve a Google place_id to coordinates using the cached + budget-guarded
+ * getPlace path. Returns null when the id is empty, the place has no usable
+ * location, or the live call is blocked/unavailable. Never throws.
+ *
+ * This lets trip endpoints that were selected from an autocomplete prediction
+ * (place_id only, no coordinates) get a confirmed location without an extra
+ * Geocoding API call.
+ */
+export async function resolveGooglePlaceCoordinates(
+  placeId: string | undefined | null,
+  context?: { reason?: string; cacheKey?: string | null },
+): Promise<{ lat: number; lng: number } | null> {
+  const normalizedPlaceId = placeId?.trim();
+  if (!normalizedPlaceId) return null;
+
+  let details: GoogleLegacyPlaceDetailsResult | null = null;
+  try {
+    details = await fetchGooglePlaceDetails(normalizedPlaceId, {
+      purpose: 'coordinates',
+      reason: context?.reason ?? 'destination_coordinates',
+      cacheKey: context?.cacheKey ?? normalizedPlaceId,
+    });
+  } catch {
+    return null;
+  }
+
+  if (!details) return null;
+
+  const lat = details.lat ?? details.geometry?.location?.lat;
+  const lng = details.lng ?? details.geometry?.location?.lng;
+
+  if (
+    typeof lat === 'number' &&
+    Number.isFinite(lat) &&
+    typeof lng === 'number' &&
+    Number.isFinite(lng)
+  ) {
+    return { lat, lng };
+  }
+
+  return null;
+}
+
 function buildSearchQueryCacheKey(args: {
   query: string;
   lotName: string;

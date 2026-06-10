@@ -164,6 +164,57 @@ function dateFromLocalDateTimeInput(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function hasFiniteDestinationCoords(selection: QuickGoDestinationSelection): boolean {
+  return (
+    typeof selection.destinationLat === 'number' &&
+    Number.isFinite(selection.destinationLat) &&
+    typeof selection.destinationLng === 'number' &&
+    Number.isFinite(selection.destinationLng)
+  );
+}
+
+/**
+ * Autocomplete predictions carry a place_id but no coordinates. Resolve them to
+ * a confirmed location before navigating so route timing and weather have
+ * destination coordinates immediately, instead of relying on a server-side
+ * geocode fallback. Returns the selection unchanged on any failure (the engine
+ * still resolves coordinates from the propagated place_id as a backstop).
+ */
+async function ensureDestinationCoordinates(
+  selection: QuickGoDestinationSelection,
+): Promise<QuickGoDestinationSelection> {
+  if (hasFiniteDestinationCoords(selection)) return selection;
+
+  const placeId = selection.destinationPlaceId?.trim();
+  if (!placeId) return selection;
+
+  try {
+    const response = await fetch(
+      `/api/geocode/place?placeId=${encodeURIComponent(placeId)}`,
+    );
+    if (!response.ok) return selection;
+
+    const data = (await response.json()) as {
+      location?: { lat?: number; lng?: number } | null;
+    };
+    const lat = data.location?.lat;
+    const lng = data.location?.lng;
+
+    if (
+      typeof lat === 'number' &&
+      Number.isFinite(lat) &&
+      typeof lng === 'number' &&
+      Number.isFinite(lng)
+    ) {
+      return { ...selection, destinationLat: lat, destinationLng: lng };
+    }
+  } catch {
+    // Ignore; fall back to the propagated place_id / server geocode.
+  }
+
+  return selection;
+}
+
 export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const router = useRouter();
   const quickGoStartedTracked = useRef(false);
@@ -511,6 +562,8 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
     rememberRecentDestination(destination.destination);
     setError(null);
 
+    const destinationForRoute = await ensureDestinationCoordinates(destination);
+
     trackEvent('quick_go_submitted', {
       eventProperties: {
         airportCode: destination.detectedAirportCode ?? detectedAirportCode ?? undefined,
@@ -523,7 +576,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
 
     router.push(
       buildQuickGoResultsPath({
-        destination,
+        destination: destinationForRoute,
         origin,
         continueAsQuickGo,
         transportAvailability,

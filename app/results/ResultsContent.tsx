@@ -3649,14 +3649,22 @@ function StreetParkingPlanNote({
 }) {
   if (!eventParkingLikely && !streetMeterRow && !showGeneralNote) return null;
 
+  const outlookDetail =
+    !eventParkingLikely && streetMeterRow?.detailNote ? streetMeterRow.detailNote : null;
+
   return (
-    <ParkingPlanSection title={eventParkingLikely ? 'Street parking warning' : 'Street parking note'}>
-      <p className="text-muted-foreground">
-        {eventParkingLikely
-          ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
-          : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
-      </p>
-    </ParkingPlanSection>
+    <div id={POINT_AB_DETAILS_SECTION_IDS['street-meter']} className="scroll-mt-24">
+      <ParkingPlanSection title={eventParkingLikely ? 'Street parking warning' : 'Street parking note'}>
+        <p className="text-muted-foreground">
+          {eventParkingLikely
+            ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+            : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
+        </p>
+        {outlookDetail ? (
+          <p className="mt-2 text-muted-foreground">{outlookDetail}</p>
+        ) : null}
+      </ParkingPlanSection>
+    </div>
   );
 }
 
@@ -8225,6 +8233,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   name: mode.name,
                   cost: mode.cost,
                   costNote: mode.costNote,
+                  detailNote: mode.detailNote,
                   time: mode.time,
                   timeLabel: mode.timeLabel,
                   timing: mode.timing,
@@ -8418,6 +8427,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 }
               : null;
 
+            const quickReadReliableAlternative =
+              pointAbRanking?.cheapestReliableAlternative &&
+              visibleModeKeys.has(pointAbRanking.cheapestReliableAlternative.key)
+                ? pointAbRanking.cheapestReliableAlternative
+                : null;
             const quickReadMessage = buildPointAbQuickReadMessage({
               parkingHidden: !shouldRenderParkingSections,
               sort,
@@ -8425,6 +8439,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               cheapest: quickReadCheapestMode,
               fastest: quickReadFastestMode,
               transitCostDisplay,
+              cheapestUncertainStreetMeter:
+                pointAbRanking?.cheapestStreetMeterUncertain ?? false,
+              reliableAlternative: quickReadReliableAlternative,
               formatMinutes,
             });
 
@@ -8732,7 +8749,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                               {row.cost}
                             </div>
                             {'costNote' in row && row.costNote ? (
-                              <div className="mt-1 text-[11px] text-muted-foreground">{row.costNote}</div>
+                              <div className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">
+                                {row.costNote}
+                              </div>
                             ) : null}
                           </div>
                           <div className="rounded-xl border border-border bg-card/80 p-2">
