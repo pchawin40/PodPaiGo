@@ -39,6 +39,24 @@ export default function AboutPage() {
           </section>
 
           <section>
+            <h2 className="text-xl font-semibold text-foreground">Why PodPaiGo?</h2>
+            <p className="mt-2 leading-7 text-muted-foreground">
+              PodPaiGo started from a Thai-English phrase: <span className="font-medium text-foreground">ปลอดภัย Go</span>{' '}
+              meaning &quot;go safely.&quot;
+            </p>
+            <p className="mt-3 leading-7 text-muted-foreground">
+              The idea is simple: before you leave, you should feel confident about how you are
+              getting there, where you might park, what it may cost, and what risks to watch for.
+            </p>
+            <p className="mt-3 leading-7 text-muted-foreground">
+              That is why PodPaiGo compares route time, parking, transit, rideshare, airport
+              options, weather, and local parking rules in one place. It is not just about finding
+              the cheapest option. It is about helping you make a safer, clearer, less stressful
+              trip decision before you go.
+            </p>
+          </section>
+
+          <section>
             <h2 className="text-xl font-semibold text-foreground">What it focuses on</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
               Airport trips cover airport parking, leave-by timing, TSA/checklist details, rideshare,

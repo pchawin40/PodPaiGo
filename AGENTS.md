@@ -875,6 +875,30 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Do a quick visual pass on mobile nav + pricing + results footer in localhost, then use the README testing checklist before the first partner outreach email or demo.
 
+### 2026-06-09 23:10 PDT — About page name origin story added
+
+**Summary**
+- Added a short `Why PodPaiGo?` section to the About page explaining the Thai-English origin of the name from `ปลอดภัย Go`, meaning `go safely`.
+- Kept the tone personal but professional, and left the existing public-beta/data-transparency language intact.
+
+**Files changed**
+- `app/about/page.tsx`
+- `AGENTS.md`
+
+**Why**
+- The public About page needed a concise, partner-safe origin story that explains the name without sounding gimmicky and better reflects the product mission.
+
+**Tests run and result**
+- No dedicated test added; this was a copy-only About page change and the page did not already have targeted tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- The About page still uses static copy only; there is no shared About-specific content module yet.
+
+**Next recommended step**
+- Do a quick visual review of the About page in localhost to confirm the Thai text renders cleanly and the new section spacing feels balanced on mobile and desktop.
+
 ---
 
 # Final Response Requirement for Agents
