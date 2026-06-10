@@ -21,6 +21,7 @@ import TripAssistantChatThread, {
 } from './TripAssistantChat';
 import { resolveTripPlannerStatusLabel } from '../../lib/ai/tripPlanningAssistantLabel';
 import {
+  buildMultiIntentTurn,
   buildTripPlanningTurn,
   getNextMissingField,
   getTripPlanningPlaceholder,
@@ -30,6 +31,8 @@ import {
   type TripPlanningQuickReply,
   type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
+import { tripIntentToCard } from '../../lib/ai/tripIntents';
+import type { TripIntent } from '../../lib/ai/tripIntentTypes';
 import { getRecentOrigins } from '../../lib/trip/quickGo';
 import { useTripPlanningLocation } from './useTripPlanningLocation';
 
@@ -45,6 +48,9 @@ type ParseTripApiResponse = ParsedTripAssistantResult & {
   plan?: 'anonymous' | 'free' | 'plus' | 'pro' | 'admin';
   assistantLabel?: string;
   remainingToday?: number | null;
+  intents?: TripIntent[];
+  originalText?: string;
+  primaryIntentId?: string | null;
 };
 
 export default function PodPaiGoAssistant({
@@ -65,6 +71,8 @@ export default function PodPaiGoAssistant({
     originText: ParsedTripAssistantResult['originText'];
     originSource: ParsedTripAssistantResult['originSource'];
   } | null>(null);
+  const [extractedIntents, setExtractedIntents] = useState<TripIntent[]>([]);
+  const [suggestedOrigin, setSuggestedOrigin] = useState<string | null>(null);
   const locationContext = useTripPlanningLocation();
   const [messages, setMessages] = useState<TripAssistantChatMessage[]>([
     createTripChatMessage(
@@ -94,8 +102,9 @@ export default function PodPaiGoAssistant({
     return buildTripPlanningTurn(rawParsed, locationContext, {
       originInputMode,
       originInputReason,
+      suggestedOrigin,
     });
-  }, [rawParsed, locationContext, originInputMode, originInputReason]);
+  }, [rawParsed, locationContext, originInputMode, originInputReason, suggestedOrigin]);
 
   const accessToken = session?.access_token ?? null;
   const signedIn = Boolean(user && accessToken);
@@ -260,6 +269,7 @@ export default function PodPaiGoAssistant({
     const turn = buildTripPlanningTurn(processed, locationContext, {
       originInputMode: nextOriginInputMode,
       originInputReason: nextOriginInputReason,
+      suggestedOrigin,
     });
 
     setRawParsed(processed);
@@ -286,12 +296,29 @@ export default function PodPaiGoAssistant({
     return processed;
   };
 
-  const applyParsedResponse = (data: ParsedTripAssistantResult, nextTurns: string[]) => {
-    const processed = reprocessParsedTrip(data);
+  const applyMultiIntentResponse = (intents: TripIntent[]) => {
+    setExtractedIntents(intents);
+    setRawParsed(null);
+    setParsed(null);
+    setAwaitingClarification(true);
+    setOriginInputMode(false);
+    setOriginInputReason('default');
+    setEditingField(null);
+    setShowRecentOriginPicker(false);
+
+    const turn = buildMultiIntentTurn(intents.map(tripIntentToCard));
+    lastPlanningTurnRef.current = turn;
+    lastParsedRef.current = null;
+    appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+  };
+
+  const startSingleIntent = (parsedResult: ParsedTripAssistantResult, nextTurns: string[]) => {
+    const processed = reprocessParsedTrip(parsedResult);
     const turn = buildTripPlanningTurn(processed, locationContext, { originInputMode: false });
 
     setRawParsed(processed);
     setParseTurns(nextTurns);
+    setSuggestedOrigin(processed.originText ?? null);
     setOriginInputMode(false);
     setOriginInputReason('default');
     setEditingField(null);
@@ -307,6 +334,25 @@ export default function PodPaiGoAssistant({
     setParsed(null);
     setAwaitingClarification(true);
     appendPlanningTurn(turn, processed, { force: true });
+  };
+
+  const applyParsedResponse = (data: ParseTripApiResponse, nextTurns: string[]) => {
+    if (data.intents && data.intents.length > 1) {
+      setParseTurns(nextTurns);
+      applyMultiIntentResponse(data.intents);
+      return;
+    }
+
+    setExtractedIntents([]);
+    startSingleIntent(data, nextTurns);
+  };
+
+  const handleSelectIntent = (intent: TripIntent) => {
+    appendMessage(createTripChatMessage('user', tripIntentToCard(intent).buttonLabel));
+    setExtractedIntents([]);
+    lastPlanningTurnRef.current = null;
+    lastParsedRef.current = null;
+    startSingleIntent(intent.parsed, parseTurns);
   };
 
   const runTripParse = async (nextTurns: string[]) => {
@@ -380,6 +426,13 @@ export default function PodPaiGoAssistant({
 
     if (reply.action === 'plan_trip') {
       handleConfirmTrip();
+      return;
+    }
+
+    if (reply.action === 'select_intent') {
+      const intent = extractedIntents.find((item) => item.id === reply.intentId);
+      if (!intent) return;
+      handleSelectIntent(intent);
       return;
     }
 

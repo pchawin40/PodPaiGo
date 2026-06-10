@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOutboundClick';
 import { beginAiParseRequest, resetAiParseBudgetForTests } from '../../../../lib/ai/tripParseBudget';
 import { parseTripText } from '../../../../lib/ai/parseTripText';
+import { extractTripIntents } from '../../../../lib/ai/tripIntents';
 import {
   clientRequestedLiveAi,
   getAiParseRemainingToday,
@@ -73,8 +74,21 @@ export async function POST(request: NextRequest) {
 
     const parsed = await parseTripText(userText, { userId, sessionId, plan });
 
+    // Layer multi-intent extraction on top of the single parse. For a one-trip
+    // message this just enriches the parse (event venue, lodging origin, driving
+    // preferences); for several trips it returns one intent per trip.
+    const extraction = extractTripIntents(userText, { basePrimaryParsed: parsed });
+    const primaryIntent =
+      extraction.intents.find((intent) => intent.id === extraction.primaryIntentId) ??
+      extraction.intents[0] ??
+      null;
+    const primaryParsed = primaryIntent?.parsed ?? parsed;
+
     return NextResponse.json({
-      ...parsed,
+      ...primaryParsed,
+      intents: extraction.intents,
+      originalText: extraction.originalText,
+      primaryIntentId: extraction.primaryIntentId,
       assistantDisabled: isAiAssistantDisabled(),
       configuredProvider: getAiAssistantProvider(),
       liveProviderActive: entitlements.providerUsed === 'openai',

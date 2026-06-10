@@ -26,7 +26,8 @@ export type TripPlanningQuickReplyAction =
   | 'await_origin_input'
   | 'reject_origin_confirmation'
   | 'choose_recent_origin'
-  | 'back_from_origin_input';
+  | 'back_from_origin_input'
+  | 'select_intent';
 
 export type TripPlanningQuickReply = {
   id: string;
@@ -34,6 +35,18 @@ export type TripPlanningQuickReply = {
   value: string;
   patch?: Partial<ParsedTripAssistantResult>;
   action?: TripPlanningQuickReplyAction;
+  /** For select_intent: which extracted intent this reply chooses. */
+  intentId?: string;
+};
+
+/** A trip card shown when several intents were detected in one message. */
+export type TripPlanningIntentCard = {
+  id: string;
+  title: string;
+  subtitle: string;
+  badges: string[];
+  /** Short label for the "Plan …" selection button. */
+  buttonLabel: string;
 };
 
 export type TripPlanningAssumption = {
@@ -58,6 +71,8 @@ export type TripPlanningTurn = {
   assumptions: TripPlanningAssumption[];
   summary: TripPlanningSummaryItem[];
   nextField: string | null;
+  /** Present when the turn is a multi-intent selection prompt. */
+  intents?: TripPlanningIntentCard[];
 };
 
 export type TripPlanningBuildOptions = {
@@ -65,6 +80,8 @@ export type TripPlanningBuildOptions = {
   originInputReason?: 'reject' | 'change' | 'default';
   reviewMode?: boolean;
   phase?: TripPlanningPhase;
+  /** A likely origin recovered from the original message, offered on reject. */
+  suggestedOrigin?: string | null;
 };
 
 export type TripPlanningEditingField = TripPlanningSummaryItem['field'];
@@ -86,6 +103,8 @@ const CLARIFICATION_PRIORITY = [
   'departureTime',
   'targetTime',
   'airportCode',
+  'eventTime',
+  'passengerCount',
   'parkingCheckInDate',
   'parkingCheckInTime',
   'parkingCheckOutDate',
@@ -453,8 +472,19 @@ export function deriveTripPlanningPhase(
   return 'parsed';
 }
 
+function shortPlaceLabel(value: string | null | undefined): string {
+  if (!value) return '';
+  return value.split(',')[0]?.trim() || value;
+}
+
 function buildAcknowledgment(parsed: ParsedTripAssistantResult): string {
   const destination = destinationLabel(parsed);
+
+  if (parsed.eventContext?.isEvent) {
+    const venue = parsed.eventContext.venueName || destination;
+    const fromPart = parsed.originText ? ` from ${shortPlaceLabel(parsed.originText)}` : '';
+    return `Got it — getting to ${venue} for the game${fromPart}. I'll prioritize event parking, transit, and rideshare over street parking.`;
+  }
 
   if (parsed.mode === 'airport_trip') {
     const airport = parsed.airportCode ? `${parsed.airportCode}` : 'the airport';
@@ -473,6 +503,21 @@ function buildAcknowledgment(parsed: ParsedTripAssistantResult): string {
 
 function buildAssumptions(parsed: ParsedTripAssistantResult): TripPlanningAssumption[] {
   const assumptions: TripPlanningAssumption[] = [];
+
+  if (parsed.eventContext?.isEvent) {
+    assumptions.push({ id: 'event-parking', label: 'Event parking priority' });
+  }
+
+  const prefs = parsed.drivingPreferences;
+  if (
+    prefs &&
+    (prefs.expressPassAvailable ||
+      prefs.tollLaneAllowed === true ||
+      prefs.hovLaneEligible !== 'no' ||
+      prefs.carpoolPossible)
+  ) {
+    assumptions.push({ id: 'driving-confirm', label: 'Confirm HOV/toll rules' });
+  }
 
   if (parsed.transportAvailability === 'all') {
     assumptions.push({
@@ -535,6 +580,18 @@ function buildOriginInputQuestion(
   const destination = destinationLabel(parsed);
   const quickReplies: TripPlanningQuickReply[] = [];
   const rejected = options.originInputReason === 'reject';
+  const suggestedOrigin = options.suggestedOrigin?.trim() || null;
+
+  // Correction recovery: if the original message named a likely origin (e.g. a
+  // lodging like "Bellagio"), offer it instead of a blank address box.
+  if (suggestedOrigin) {
+    quickReplies.push({
+      id: 'origin-suggested',
+      label: `Use ${shortPlaceLabel(suggestedOrigin)}`,
+      value: '',
+      patch: { originText: suggestedOrigin, originSource: 'manual' },
+    });
+  }
 
   if (context.geolocationAvailable && !context.geolocationDenied) {
     quickReplies.push({
@@ -559,12 +616,13 @@ function buildOriginInputQuestion(
     action: 'back_from_origin_input',
   });
 
-  return {
-    question: rejected
+  const question = suggestedOrigin
+    ? `Thanks — I won't use that. Should I start from ${shortPlaceLabel(suggestedOrigin)} instead, or pick another start?`
+    : rejected
       ? 'No problem — where should I start from?'
-      : `Enter your starting address for ${destination}.`,
-    quickReplies,
-  };
+      : `Enter your starting address for ${destination}.`;
+
+  return { question, quickReplies };
 }
 
 function buildOriginQuestion(
@@ -678,6 +736,72 @@ function buildQuestionForField(
           { id: 'airport-pae', label: 'PAE', value: 'PAE' },
         ],
       };
+    case 'eventTime': {
+      const eventBase = parsed.eventContext ?? {
+        isEvent: true,
+        eventLabel: null,
+        venueName: null,
+        eventTimeKnown: false,
+      };
+      const venue = parsed.eventContext?.venueName || destination;
+      const acknowledgePatch = {
+        eventContext: { ...eventBase, eventTimeAcknowledged: true },
+      };
+      return {
+        question: `Do you know the game time for ${venue}? I can plan around it, or arrive about 90 minutes early for the event.`,
+        quickReplies: [
+          {
+            id: 'event-90',
+            label: 'Arrive 90 min early',
+            value: 'Arrive about 90 minutes early',
+            patch: acknowledgePatch,
+          },
+          {
+            id: 'event-unknown',
+            label: "I don't know game time",
+            value: "I don't know the game time",
+            patch: acknowledgePatch,
+          },
+        ],
+      };
+    }
+    case 'passengerCount': {
+      const prefsBase = parsed.drivingPreferences ?? {
+        carpoolPossible: true,
+        numberOfPeople: null,
+        hovLaneEligible: 'unknown' as const,
+        expressPassAvailable: false,
+        tollLaneAllowed: null,
+        avoidTolls: false,
+        willingToPayTollForTime: null,
+      };
+      const withCount = (count: number) => ({
+        drivingPreferences: {
+          ...prefsBase,
+          numberOfPeople: count,
+          occupancyConfirmedUnknown: false,
+          hovLaneEligible: (count >= 2 ? 'yes' : 'no') as 'yes' | 'no',
+        },
+      });
+      return {
+        question:
+          'How many people will be in the car? HOV and toll-lane eligibility depend on it — and you should still confirm posted lane rules.',
+        quickReplies: [
+          { id: 'pax-1', label: 'Just me', value: 'Just me driving', patch: withCount(1) },
+          { id: 'pax-2', label: '2', value: '2 people', patch: withCount(2) },
+          { id: 'pax-3', label: '3', value: '3 people', patch: withCount(3) },
+          { id: 'pax-4', label: '4+', value: '4 or more people', patch: withCount(4) },
+          {
+            id: 'pax-unsure',
+            label: 'Not sure',
+            value: 'Not sure yet',
+            patch: {
+              drivingPreferences: { ...prefsBase, occupancyConfirmedUnknown: true },
+            },
+          },
+        ],
+      };
+    }
     case 'departureDate':
     case 'departureTime':
       return {
@@ -829,6 +953,14 @@ export function getTripPlanningPlaceholder(
     return 'When are you going?';
   }
 
+  if (input.nextField === 'eventTime') {
+    return 'Add the game time, or tap a quick reply…';
+  }
+
+  if (input.nextField === 'passengerCount') {
+    return 'How many people are riding? Tap a quick reply…';
+  }
+
   return 'Describe a trip or destination…';
 }
 
@@ -838,6 +970,35 @@ export function buildTripPlanningTurn(
   options: TripPlanningBuildOptions = {},
 ): TripPlanningTurn {
   return buildTurnFromProcessed(reprocessParsedTrip(parsed), context, options);
+}
+
+/**
+ * Build a multi-intent selection turn. Shown when one message contains several
+ * distinct trips so the user can pick which to plan first while the others stay
+ * available.
+ */
+export function buildMultiIntentTurn(
+  cards: TripPlanningIntentCard[],
+): TripPlanningTurn {
+  const count = cards.length;
+  return {
+    status: 'needs_clarification',
+    phase: 'parsed',
+    headline: `I found ${count} trips`,
+    acknowledgment: `I found ${count} trips in your message. Pick one to plan first — I'll keep the others ready.`,
+    question: 'Which trip should I plan first?',
+    quickReplies: cards.map((card) => ({
+      id: `select-${card.id}`,
+      label: card.buttonLabel,
+      value: '',
+      action: 'select_intent',
+      intentId: card.id,
+    })),
+    assumptions: [],
+    summary: [],
+    nextField: 'selectIntent',
+    intents: cards,
+  };
 }
 
 export function buildSingleClarificationQuestion(

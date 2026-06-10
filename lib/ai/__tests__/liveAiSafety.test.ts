@@ -151,13 +151,15 @@ describe('parseTripText safety guards', () => {
   });
 });
 
-describe('pricing page placeholder', () => {
-  test('renders free and future pro sections', () => {
+describe('pricing page beta copy', () => {
+  test('renders free beta and planned-later sections with no active billing', () => {
     const pagePath = path.join(__dirname, '../../../app/pricing/page.tsx');
     const source = fs.readFileSync(pagePath, 'utf8');
 
+    // Beta is free now, with a clearly separate "planned later" paid section and
+    // no subscriptions/billing active yet (page rewritten away from Stripe copy).
     expect(source).toContain('Free');
-    expect(source).toContain('Future Pro');
-    expect(source).toContain('Stripe subscriptions are not enabled yet');
+    expect(source).toContain('Planned later');
+    expect(source).toContain('no subscriptions active');
   });
 });

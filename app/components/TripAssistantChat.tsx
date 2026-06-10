@@ -425,6 +425,40 @@ function EditableSummaryRows({
   );
 }
 
+function IntentCards({
+  intents,
+}: {
+  intents: NonNullable<TripPlanningTurn['intents']>;
+}) {
+  if (intents.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-2">
+      {intents.map((card) => (
+        <div
+          key={card.id}
+          className="rounded-xl border border-border/70 bg-card/80 px-3 py-2 dark:border-slate-700/70 dark:bg-slate-900/50"
+        >
+          <div className="text-sm font-semibold text-foreground">{card.title}</div>
+          <div className="text-[11px] text-muted-foreground">{card.subtitle}</div>
+          {card.badges.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {card.badges.map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-full border border-border/80 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuickReplyChips({
   replies,
   onQuickReply,
@@ -529,6 +563,9 @@ export default function TripAssistantChatThread({
                       </div>
                     ))}
                   </div>
+                ) : null}
+                {message.turn.intents && message.turn.intents.length > 0 ? (
+                  <IntentCards intents={message.turn.intents} />
                 ) : null}
                 {message.turn.question ? <p className="mt-1">{message.turn.question}</p> : null}
                 <AssumptionChips assumptions={message.turn.assumptions} />

@@ -899,6 +899,99 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Do a quick visual review of the About page in localhost to confirm the Thai text renders cleanly and the new section spacing feels balanced on mobile and desktop.
 
+### 2026-06-10 — Ask PodPaiGo multi-intent, event venue, lodging origin, and driving preferences
+
+**Summary**
+- Reworked Ask PodPaiGo / AI Trip Planner from a single-trip parser into a multi-intent trip assistant. A free-text message is now segmented into one or more structured `TripIntent`s; each wraps the existing `ParsedTripAssistantResult` so it still flows through the existing conversation, review, and search-params machinery.
+- Travel-context awareness: "staying at the Bellagio … in vegas" now sets the trip origin to the lodging (`Bellagio Hotel & Casino, Las Vegas`, origin source manual) instead of defaulting to home/current location, so the assistant no longer asks "starting near Monroe?" for a Vegas trip.
+- Event/stadium inference: team + city resolves a concrete venue (e.g. Seahawks @ Las Vegas / "raiders stadium" → Allegiant Stadium), sets `destinationKind: 'event'`, attaches `eventContext`, asks for the game time as a soft slot (satisfiable by a cautious "arrive ~90 min early" default — never invents a real game time), and routes search params as an event venue (no destination/customer parking; street/meter only as trailing fallback in compare modes).
+- Carpool/HOV/Express Pass/toll-lane preferences are extracted into structured `drivingPreferences`. HOV eligibility is never asserted as fact: `hovLaneEligible` is only `yes` when a 2+ occupancy is stated, otherwise `unknown`, and copy/assumptions tell the user to confirm posted lane rules. When carpool/HOV/Express Pass intent is present without an occupancy, the assistant asks "How many people will be in the car?" as the next best detail (soft `passengerCount` slot). Preferences map onto the existing additive drive-route URL params (`avoidTolls`, `hasTollPass`, `hovEligible`, `vehicleOccupancy`, `showExpressLaneNotes`) without touching scoring/ranking.
+- Multi-intent UX: when several trips are detected, the assistant shows trip cards + "Plan …" buttons ("Plan SEA trip", "Plan <city> stadium trip"), keeps the others available, and does not merge them. Correction recovery: the reject/"No" origin flow now offers the origin recovered from the original message ("Use Bellagio …") instead of a blank address box.
+- Existing single-trip airport, event, and normal point-A-to-B flows are unchanged; the multi-intent layer is additive and enrichment runs on top of either the mock or OpenAI parse.
+
+**Files changed**
+- New: `lib/ai/tripIntentTypes.ts`, `lib/ai/tripIntents.ts`, `lib/ai/eventVenueInference.ts`, `lib/ai/drivingPreferences.ts`, `lib/ai/lodgingContext.ts`.
+- New tests: `lib/ai/__tests__/tripIntents.test.ts`, `lib/ai/__tests__/eventVenueInference.test.ts`, `lib/ai/__tests__/drivingPreferences.test.ts`, `lib/ai/__tests__/multiIntentConversation.test.ts`.
+- Modified: `lib/ai/tripParseTypes.ts` (DrivingPreferences/EventContext types + optional `tripCity`/`drivingPreferences`/`eventContext` fields), `lib/ai/tripPlanningConversation.ts` (event-aware acknowledgment/game-time question, `passengerCount` question, `eventTime`/`passengerCount` priority slots, `buildMultiIntentTurn`, `select_intent` action, `TripPlanningIntentCard`, suggested-origin recovery), `lib/ai/normalizeParsedTrip.ts` (soft event/passenger slots + new-field passthrough), `lib/ai/parsedTripToSearchParams.ts` (event params + additive drive-route params), `lib/ai/openaiTripParser.ts` (prompt hints only, no schema change), `app/api/ai/parse-trip/route.ts` (returns `intents`/`originalText`/`primaryIntentId`), `app/components/TripAssistantChat.tsx` (intent cards), `app/components/PodPaiGoAssistant.tsx` and `app/components/TripAssistantPanel.tsx` (extracted-intents state, multi-intent turn, select handling, suggested origin).
+
+**Why**
+- Ask PodPaiGo previously collapsed multi-need messages into one route, defaulted Vegas-lodging trips to the home origin (Monroe), did not infer stadium venues, and had no structured carpool/HOV/toll handling. Goal: an all-in-one trip decision assistant that splits intents, respects travel context, treats events under event-parking rules, and is honest about HOV/toll eligibility.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/ai/__tests__/tripIntents.test.ts lib/ai/__tests__/eventVenueInference.test.ts lib/ai/__tests__/drivingPreferences.test.ts lib/ai/__tests__/multiIntentConversation.test.ts --runInBand` → 39 passed (scenarios A–H).
+- `npx jest --runTestsByPath app/components/__tests__/PodPaiGoAssistant.test.tsx app/components/__tests__/TripAssistantConfirm.test.tsx lib/ai/__tests__/tripPlanningConversation.test.ts --runInBand` → 50 passed.
+- Regression sweep `npx jest lib/ai lib/trip/__tests__/quickGo lib/trip/__tests__/searchParams app/components/__tests__/PodPaiGoAssistant app/components/__tests__/TripAssistantConfirm` → 250 passed, 1 failed. The single failure is the pre-existing `lib/ai/__tests__/liveAiSafety.test.ts` `/pricing` copy assertion ("Future Pro" / "Stripe subscriptions are not enabled yet"); it fails with these changes stashed too (the pricing page copy was rewritten in an earlier commit) and is unrelated to this work.
+- `npm run build` → compiled successfully. `git diff --check` → clean. `npx tsc --noEmit` → no type errors in touched source files (only pre-existing test-file type errors elsewhere).
+
+**Known remaining issues**
+- The pre-existing `liveAiSafety.test.ts` pricing-copy assertions are stale and should be updated to match the rewritten `/pricing` page (separate from this change).
+- Event game time is a cautious soft slot; if the user does not provide a real time, routing uses a placeholder departure time with event buffers/warnings rather than a real schedule (we intentionally do not fetch or invent game times).
+- The team/venue knowledge base in `eventVenueInference.ts` is a curated list (Seahawks, Raiders, Mariners, Kraken, Bears, Giants, Rams/Chargers, 49ers, Cowboys, Broncos, Cardinals, plus venue-name detection); unknown teams fall back to keeping the user's destination text while still treating the trip as event-sensitive.
+- Multi-segment messages re-parse extra segments with the deterministic mock parser (free, no provider call); only the single-segment case reuses a configured live (OpenAI) parse.
+
+**Next recommended step**
+- Visually verify in localhost with a signed-in account: (1) the Vegas event example shows Bellagio → Allegiant Stadium and asks game time (not Monroe); (2) the multi-intent SeaTac + Vegas example shows two trip cards with distinct Plan buttons; (3) the carpool/Express Pass SeaTac example asks passenger count and shows the "Confirm HOV/toll rules" caveat; then confirm an event trip's results page applies event-parking rules and a carpool trip carries the drive-route params.
+
+### 2026-06-10 — Fixed stale pricing-copy test after beta pricing rewrite
+
+**Summary**
+- Updated the stale `pricing page` assertion in `lib/ai/__tests__/liveAiSafety.test.ts` that still expected the pre-rewrite wording (`Future Pro`, `Stripe subscriptions are not enabled yet`).
+- The `/pricing` page was earlier rewritten to be beta-friendly (free during beta, a separate "Planned later" paid section, no active billing) and no longer contains the old Stripe/Future Pro strings.
+- The test now asserts on stable strings that literally appear in the rewritten `app/pricing/page.tsx` source and capture the same intent: `Free`, `Planned later`, and `no subscriptions active`. Renamed the test to "renders free beta and planned-later sections with no active billing".
+- No product code changed — the page already communicates the free + planned-later + no-active-billing message; this was purely a stale-test fix.
+
+**Files changed**
+- `lib/ai/__tests__/liveAiSafety.test.ts`
+
+**Why**
+- The pricing page rewrite left this assertion checking removed copy, so the suite reported a false failure unrelated to any product regression.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/ai/__tests__/liveAiSafety.test.ts --runInBand` → 7 passed.
+- `npm run build` → compiled successfully.
+- `git diff --check` → clean.
+
+**Known remaining issues**
+- None for this change. The pricing page copy lives in `app/pricing/page.tsx` plus `lib/marketing/publicCopy.ts`; the test only reads the page source, so it intentionally asserts on literal in-page strings rather than the imported marketing constants.
+
+**Next recommended step**
+- If the pricing page copy is reworded again, update these literal assertions (or move pricing-copy verification to a rendered-component test) so they stay in sync.
+
+### 2026-06-10 09:54 PDT — Parking map modal mobile fallback and loader hardening
+
+**Summary**
+- Hardened the parking map modal against missing/invalid `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, Google Maps script load failures, and Google auth/referrer failures.
+- The modal now waits for a visible paint frame before initializing, resizes/recenters after mount, and uses a stable mobile map height.
+- Added a friendly fallback state: `Map could not load. Open in Google Maps instead.` with a primary Google Maps link plus per-lot open links using destination/lot coordinates or address.
+- Added production-safe, once-per-reason diagnostics without logging API keys or script URLs.
+- Documented the Vercel public browser key name, Maps JavaScript API requirement, and required production/localhost HTTP referrers in `.env.example`.
+- Did not change recommendation scoring/ranking or mix airport, city, and event parking logic.
+
+**Files changed**
+- `app/results/ParkingLotsMap.tsx`
+- `lib/googleMapsLoader.ts`
+- `app/results/__tests__/ParkingLotsMap.test.tsx`
+- `lib/__tests__/googleMapsLoader.test.ts`
+- `.env.example`
+- `AGENTS.md`
+
+**Why**
+- Production mobile could show the Google Maps "Oops! Something went wrong" auth/referrer overlay inside the parking map modal, leaving users with no useful map action.
+- The UI needed to fail gracefully when the public browser key, Maps JavaScript API, or allowed referrer configuration is missing or wrong.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ParkingLotsMap.test.tsx lib/__tests__/googleMapsLoader.test.ts --runInBand` passed, 8 tests.
+- `npm test -- --runTestsByPath app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx lib/parking/__tests__/pointAbRanking.test.ts lib/providers/parking/providers/googlePlaces/__tests__/destinationSearch.test.ts lib/__tests__/providersParkingAirport.test.ts --runInBand` passed, 92 tests. Jest still printed the existing open-handle warning after this provider-heavy set.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Production still needs `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` configured in Vercel with Maps JavaScript API enabled and HTTP referrers including `https://podpaigo.com/*` and `https://www.podpaigo.com/*`; otherwise the fallback will show by design.
+- No live mobile browser verification against `podpaigo.com` was run in this local environment.
+
+**Next recommended step**
+- Set/verify the Vercel public browser key and referrer restrictions, redeploy, then open a production results page on a phone and confirm the parking map renders; temporarily break the key/referrer in preview to confirm the fallback CTA appears.
+
 ---
 
 # Final Response Requirement for Agents

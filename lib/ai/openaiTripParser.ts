@@ -140,6 +140,8 @@ function buildSystemPrompt(now = new Date()): string {
     'Use mode airport_trip for flights, airport pickup/dropoff, and airport travel timing.',
     'For general trips, map transportAvailability to car, rideshare, transit, or all. Map Uber/Lyft/taxi/no parking to rideshare and parkingPreference none.',
     'For parking durations, convert hours to minutes. For "park for 8 hours", return parkingDurationMinutes 480.',
+    'Treat stadiums, arenas, ballparks, and sports/concert events as event trips: set destinationKind to stadium or event, not airport.',
+    'When the user says they are staying at a hotel/lodging in a city, that lodging is the origin for that local trip — do not default to home or current location.',
     'If a field is not stated, use null rather than guessing except obvious airport codes and obvious category/kind.',
   ].join('\n');
 }
