@@ -1,10 +1,31 @@
 const MAX_STRING_LENGTH = 200;
+export const MAX_ANALYTICS_PROPERTIES_JSON_LENGTH = 6000;
 
 const ALLOWED_PROPERTY_KEYS = new Set([
+  'eventName',
+  'timestamp',
+  'sessionId',
+  'anonymousId',
   'airportCode',
+  'resultType',
   'destinationCategory',
   'provider',
   'lotId',
+  'lotName',
+  'parkingLotId',
+  'parkingLotName',
+  'rank',
+  'index',
+  'priceTotal',
+  'priceLabel',
+  'driveToLotMinutes',
+  'walkMinutes',
+  'sourcePage',
+  'requestSource',
+  'cacheStatus',
+  'cacheKey',
+  'windowMs',
+  'retryAfterSeconds',
   'mode',
   'sort',
   'preference',
@@ -16,6 +37,12 @@ const ALLOWED_PROPERTY_KEYS = new Set([
   'surface',
   'ctaType',
   'reportType',
+  'message',
+  'pageUrl',
+  'pagePath',
+  'userAgent',
+  'resultId',
+  'resultName',
   'accessType',
   'originSource',
   'destinationSource',
@@ -44,6 +71,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function estimateJsonLength(value: unknown): number {
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return MAX_ANALYTICS_PROPERTIES_JSON_LENGTH + 1;
+  }
+}
+
+export function stripAnalyticsUrlQueryAndHash(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  try {
+    const url = new URL(trimmed);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    const [withoutHash] = trimmed.split('#');
+    return (withoutHash || '').split('?')[0] || '';
+  }
+}
+
 function sanitizeValue(key: string, value: unknown, originTextAllowed: boolean): unknown {
   if (value === null || value === undefined) return value;
 
@@ -54,6 +102,9 @@ function sanitizeValue(key: string, value: unknown, originTextAllowed: boolean):
     if (TOKEN_VALUE_PATTERN.test(value)) return undefined;
     if ((key === 'originText' || key === 'destinationText') && !originTextAllowed) {
       return '[redacted]';
+    }
+    if (key === 'pageUrl' || key === 'pagePath') {
+      return truncateString(stripAnalyticsUrlQueryAndHash(value));
     }
     return truncateString(value);
   }
@@ -81,6 +132,7 @@ export function sanitizeAnalyticsProperties(
   forceOriginTextSafe = false,
 ): Record<string, unknown> {
   if (!input || !isPlainObject(input)) return {};
+  if (estimateJsonLength(input) > MAX_ANALYTICS_PROPERTIES_JSON_LENGTH) return {};
 
   const originTextAllowed = forceOriginTextSafe || input.originTextSafe === true;
   const sanitized: Record<string, unknown> = {};

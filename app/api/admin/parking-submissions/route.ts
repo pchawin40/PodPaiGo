@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdminEmail } from '@/lib/admin/adminAuth';
-import { createSupabaseAuthClient } from '@/lib/monetization/recordOutboundClick';
+import { requireAdmin } from '@/lib/auth/admin';
 import {
   isUserParkingStatus,
   type UserParkingStatus,
@@ -14,25 +13,6 @@ export const runtime = 'nodejs';
 
 function jsonError(status: number, error: string, message: string) {
   return NextResponse.json({ error, message }, { status });
-}
-
-async function requireAdmin(request: NextRequest): Promise<
-  | { ok: true; userId: string | null }
-  | { ok: false; response: NextResponse }
-> {
-  const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || null;
-  const authClient = createSupabaseAuthClient(accessToken);
-
-  if (!authClient || !accessToken) {
-    return { ok: false, response: jsonError(403, 'admin_required', 'Admin access required.') };
-  }
-
-  const { data } = await authClient.auth.getUser();
-  if (!isAdminEmail(data.user?.email)) {
-    return { ok: false, response: jsonError(403, 'admin_required', 'Admin access required.') };
-  }
-
-  return { ok: true, userId: data.user?.id ?? null };
 }
 
 export async function GET(request: NextRequest) {

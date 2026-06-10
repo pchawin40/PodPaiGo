@@ -63,10 +63,12 @@ import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
 import { useAuth } from '../components/AuthProvider';
+import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import OptionComparisonCard from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
+import BetaFeedbackButton from './BetaFeedbackButton';
 import DriveRouteOptionsSection from './DriveRouteOptionsSection';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
@@ -225,6 +227,7 @@ import {
 import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 import { trackEvent } from '../../lib/analytics/trackEvent';
+import { getOrCreateSessionId } from '../../lib/analytics/analyticsIds';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import { PricingLinksSection, type ProviderLinkItem } from './ProviderPricingCards';
 import { resolveWeatherDestinationLabel } from '../../lib/weather/destinationLabel';
@@ -369,11 +372,13 @@ function isJiffyParkingLot(option: Pick<ParkingOption, 'name'>): boolean {
 function ParkingRouteDebugPanel({
   option,
   googleMapsUrl,
+  showInternalDebug,
 }: {
   option: ParkingOption;
   googleMapsUrl?: string | null;
+  showInternalDebug: boolean;
 }) {
-  if (!isPodPaiGoDebugUIEnabled() || !isJiffyParkingLot(option)) {
+  if (!showInternalDebug || !isJiffyParkingLot(option)) {
     return null;
   }
 
@@ -2051,6 +2056,7 @@ function OptionCard({
   alignedLeaveByTime = null,
   alignedLeaveByReason = null,
   parkingPeerOptions = [],
+  showInternalDebug = false,
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -2068,8 +2074,10 @@ function OptionCard({
   alignedLeaveByTime?: string | null;
   alignedLeaveByReason?: string | null;
   parkingPeerOptions?: ParkingOption[];
+  showInternalDebug?: boolean;
 }) {
   const [bookingHelperOpen, setBookingHelperOpen] = useState(false);
+  const detailsExpandedTrackedRef = useRef(false);
   const opt =
     item.type === 'parking'
       ? (withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption)
@@ -2195,6 +2203,23 @@ function OptionCard({
     item.type === 'parking' && normalizedParkingOption
       ? resolveParkingPriceTrust(normalizedParkingOption, tripData)
       : null;
+  const parkingActionOption =
+    item.type === 'parking'
+      ? ((displayParkingOption || normalizedParkingOption || opt) as ParkingOption)
+      : null;
+  const parkingActionDriveMinutes = parkingActionOption
+    ? resolveParkingDriveOrRouteTimeForDisplay(
+        parkingActionOption,
+        buildParkingDriveContextFromOption(parkingActionOption),
+      ).minutes
+    : null;
+  const parkingActionWalkMinutes =
+    parkingBreakdown?.parts.find((part) => /walk/i.test(part.label))?.minutes ?? null;
+  const parkingActionPriceTotal =
+    parkingActionOption
+      ? getParkingTotalPrice(parkingActionOption, tripData) ??
+        (typeof parkingActionOption.price === 'number' ? parkingActionOption.price : null)
+      : null;
   const activeParkingRate =
     item.type === 'parking'
       ? ((displayParkingOption || opt) as ParkingOption).activeRate
@@ -2282,7 +2307,7 @@ function OptionCard({
 
   return (
     <>
-    {item.type === 'parking' ? (
+    {showInternalDebug && item.type === 'parking' ? (
       <ParkingRenderedReviewDebug
         component="ResultsContent OptionCard"
         option={displayParkingOption}
@@ -2536,6 +2561,7 @@ function OptionCard({
             <ParkingRouteDebugPanel
               option={displayParkingOption}
               googleMapsUrl={parkingLotRouteLink}
+              showInternalDebug={showInternalDebug}
             />
           )}
 
@@ -2709,6 +2735,14 @@ function OptionCard({
               }
               airportCode={airportCode}
               parkingLotId={opt.id || null}
+              parkingLotName={String(opt.name || '') || null}
+              resultType={item.type}
+              tripType={tripData?.type ?? null}
+              rank={rank}
+              priceTotal={parkingActionPriceTotal}
+              priceLabel={parkingPrice?.primary ?? visiblePrice.primary ?? null}
+              driveToLotMinutes={parkingActionDriveMinutes}
+              walkMinutes={parkingActionWalkMinutes}
               tripId={tripId || null}
               accessToken={accessToken}
               onReserve={() => setBookingHelperOpen(true)}
@@ -2782,7 +2816,35 @@ function OptionCard({
       </div>
 
       {!compact && (
-        <details className="mt-4">
+        <details
+          className="mt-4"
+          onToggle={(event) => {
+            if (
+              detailsExpandedTrackedRef.current ||
+              !(event.currentTarget as HTMLDetailsElement).open ||
+              item.type !== 'parking'
+            ) {
+              return;
+            }
+            detailsExpandedTrackedRef.current = true;
+            trackEvent('parking_details_expanded', {
+              accessToken,
+              eventProperties: {
+                airportCode: airportCode || undefined,
+                tripType: tripData?.type ?? undefined,
+                resultType: item.type,
+                provider:
+                  (displayParkingOption || normalizedParkingOption)?.bookingProvider ||
+                  (displayParkingOption || normalizedParkingOption)?.sourceName ||
+                  undefined,
+                lotId: (displayParkingOption || normalizedParkingOption)?.id || undefined,
+                lotName: (displayParkingOption || normalizedParkingOption)?.name || undefined,
+                rank,
+                sourcePage: 'results',
+              },
+            });
+          }}
+        >
           <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">Details & evidence</summary>
           <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200">
             {item.type === 'parking' && parkingProviderUrl ? (
@@ -4930,7 +4992,9 @@ function computeSmartPickParkingBundles(input: {
 export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
   const { session } = useAuth();
+  const { isAdmin } = useAdminStatus();
   const accessToken = session?.access_token ?? null;
+  const showInternalDebug = isAdmin || isPodPaiGoDebugUIEnabled();
   const routeSearchParams = useSearchParams();
   const routeSearchParamsString = routeSearchParams.toString();
   const searchParams = useMemo(
@@ -5510,7 +5574,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         airportCode: tripData?.airportCode || searchParams.get('airportCode') || undefined,
       },
     });
-  }, [accessToken, selectedParkingId, searchParams, tripData?.airportCode]);
+    trackEvent('parking_result_viewed', {
+      accessToken,
+      eventProperties: {
+        lotId: selectedParkingId,
+        airportCode: tripData?.airportCode || searchParams.get('airportCode') || undefined,
+        tripType: tripData?.type ?? searchParams.get('type') ?? undefined,
+        resultType: 'parking',
+        sourcePage: 'results',
+      },
+    });
+  }, [accessToken, selectedParkingId, searchParams, tripData?.airportCode, tripData?.type]);
 
   useEffect(() => {
     // Sync URL param with current sort state
@@ -5737,6 +5811,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       }
 
       logRecommendationsFetch('start', requestKey);
+      trackEvent('recommendation_search_started', {
+        accessToken,
+        eventProperties: {
+          airportCode: data.airportCode || undefined,
+          tripType: data.type,
+          resultType: 'recommendation_results',
+          sourcePage: 'results',
+        },
+      });
       const routeRequestId = ++routeRequestSeq.current;
       quickGoRouteRequestIdRef.current = routeRequestId;
       if (quickGoRequest) {
@@ -5752,6 +5835,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(typeof window !== 'undefined'
+            ? { 'X-PodPaiGo-Session-Id': getOrCreateSessionId() }
+            : {}),
         },
         body: JSON.stringify(data),
         signal: controller.signal,
@@ -5760,9 +5846,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           const text = await response.text();
 
           if (!response.ok) {
-            throw new Error(
+            const fetchError = new Error(
               `Recommendations failed ${response.status}: ${text || 'No response body'}`
             );
+            (fetchError as Error & { status?: number }).status = response.status;
+            throw fetchError;
           }
 
           if (!text) {
@@ -5897,6 +5985,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             rideshare: recWithPreservedParking.rideshare?.length ?? 0,
             transit: recWithPreservedParking.transit?.length ?? 0,
           });
+          trackEvent('recommendation_search_completed', {
+            accessToken,
+            eventProperties: {
+              airportCode: data.airportCode || undefined,
+              tripType: data.type,
+              resultType: 'recommendation_results',
+              sourcePage: 'results',
+            },
+          });
         })
         .catch((error) => {
           const current = recommendationsRequestRef.current;
@@ -5919,6 +6016,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           logRecommendationsFetch('fail', requestKey, {
             message: error instanceof Error ? error.message : String(error),
           });
+          if ((error as Error & { status?: number })?.status === 429) {
+            trackEvent('rate_limit_hit', {
+              accessToken,
+              eventProperties: {
+                airportCode: data.airportCode || undefined,
+                tripType: data.type,
+                resultType: 'recommendation_results',
+                sourcePage: 'results',
+              },
+            });
+          }
           console.error('Error fetching recommendations:', error);
           setFetchError(
             error instanceof Error
@@ -7240,12 +7348,35 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     const airportCode = getTripAirportCode(tripData);
     const cached = googleEnrichedParking[parking.id];
 
+    trackEvent('google_reviews_opened', {
+      accessToken,
+      eventProperties: {
+        airportCode: airportCode || undefined,
+        tripType: tripData?.type ?? undefined,
+        provider: parking.bookingProvider || parking.sourceName || undefined,
+        lotId: parking.id || parking.providerLotId || undefined,
+        lotName: parking.name || undefined,
+        sourcePage: 'results',
+      },
+    });
+
     if (cached?.googleReviews?.length) {
       setReviewsParking(cached);
       return;
     }
 
     setReviewsParking(cached || parking);
+  }
+
+  function handleNewTripClick() {
+    trackEvent('new_trip_clicked', {
+      accessToken,
+      eventProperties: {
+        airportCode: getTripAirportCode(tripData) || undefined,
+        tripType: tripData?.type ?? undefined,
+        sourcePage: 'results',
+      },
+    });
   }
 
   return (
@@ -7553,38 +7684,40 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     intent={intent}
                     tripData={tripData}
                   />
-                  <details className="group rounded-2xl border border-border bg-muted/40">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
-                      Route lookahead
-                      <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
-                        ▾
-                      </span>
-                    </summary>
-                    <div className="border-t border-border px-3 py-3">
-                      <RouteLookaheadPanel
-                        origin={tripData.origin}
-                        destination={
-                          currentAirport.routingAddress ||
-                          currentAirport.destinationName ||
-                          currentAirport.label
-                        }
-                        destinationLatLng={currentAirport.geoLocation}
-                        airportCode={currentAirportCode}
-                        departureDate={
-                          tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                            ? tripData.departureDate
-                            : null
-                        }
-                        departureTime={
-                          tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                            ? tripData.departureTime
-                            : null
-                        }
-                        airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                        disabled={airportRouteUnavailable || !tripData.origin?.trim()}
-                      />
-                    </div>
-                  </details>
+                  {showInternalDebug ? (
+                    <details className="group rounded-2xl border border-border bg-muted/40">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
+                        Route lookahead
+                        <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
+                          ▾
+                        </span>
+                      </summary>
+                      <div className="border-t border-border px-3 py-3">
+                        <RouteLookaheadPanel
+                          origin={tripData.origin}
+                          destination={
+                            currentAirport.routingAddress ||
+                            currentAirport.destinationName ||
+                            currentAirport.label
+                          }
+                          destinationLatLng={currentAirport.geoLocation}
+                          airportCode={currentAirportCode}
+                          departureDate={
+                            tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                              ? tripData.departureDate
+                              : null
+                          }
+                          departureTime={
+                            tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                              ? tripData.departureTime
+                              : null
+                          }
+                          airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                          disabled={airportRouteUnavailable || !tripData.origin?.trim()}
+                        />
+                      </div>
+                    </details>
+                  ) : null}
                 </>
               )}
               {(recommendation.weatherImpact || recommendation.weatherContext || seasonalClimateGuidance) && (
@@ -7684,6 +7817,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 {tripData ? (
                   <SaveAccountTripButton tripData={tripData} intent={intent} />
                 ) : null}
+                <BetaFeedbackButton
+                  tripData={tripData}
+                  parking={selectedParkingTimingOption || visibleSmartPickOption}
+                  accessToken={accessToken}
+                />
                 <button
                   type="button"
                   onClick={() => {
@@ -7708,6 +7846,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </button>
                 <Link
                   href="/trip"
+                  onClick={handleNewTripClick}
                   className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   New trip
@@ -8799,7 +8938,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           />
         ) : null}
 
-        {isPodPaiGoDebugUIEnabled() &&
+        {showInternalDebug &&
         getTripAirportCode(tripData) === 'SEA' &&
         !recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
@@ -8812,7 +8951,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </div>
         ) : null}
 
-        {isPodPaiGoDebugUIEnabled() && isCityTrip && cityTripPointAbRanking ? (
+        {showInternalDebug && isCityTrip && cityTripPointAbRanking ? (
           <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
             <summary className="cursor-pointer font-semibold">Point A-B canonical flow</summary>
             <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-50">
@@ -8836,7 +8975,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </details>
         ) : null}
 
-        {isPodPaiGoDebugUIEnabled() && isCityTrip && recommendation.optionScoreBreakdowns?.length ? (
+        {showInternalDebug && isCityTrip && recommendation.optionScoreBreakdowns?.length ? (
           <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
             <summary className="cursor-pointer font-semibold">Point A-B score breakdown</summary>
             <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-50">
@@ -8970,17 +9109,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
                 <>
-                  <ParkingResultDiagnostics options={enrichedParkingDisplayOptions} />
-                  <ParkingPhotoReviewListTrace
-                    stage="final_parking_option_array"
-                    options={enrichedParkingDisplayOptions}
-                    stageNote="ResultsContent final parking option array before Smart Pick"
-                  />
-                  <ParkingPhotoReviewHandoffTrace
-                    stage="parking_smart_pick_handoff"
-                    option={googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption}
-                    stageNote="ResultsContent final selected parking object passed into ParkingSmartPick"
-                  />
+                  {showInternalDebug ? (
+                    <>
+                      <ParkingResultDiagnostics options={enrichedParkingDisplayOptions} />
+                      <ParkingPhotoReviewListTrace
+                        stage="final_parking_option_array"
+                        options={enrichedParkingDisplayOptions}
+                        stageNote="ResultsContent final parking option array before Smart Pick"
+                      />
+                      <ParkingPhotoReviewHandoffTrace
+                        stage="parking_smart_pick_handoff"
+                        option={googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption}
+                        stageNote="ResultsContent final selected parking object passed into ParkingSmartPick"
+                      />
+                    </>
+                  ) : null}
                   <ParkingSmartPick
                     options={enrichedParkingDisplayOptions}
                     tripData={tripData}
@@ -8997,6 +9140,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     weatherContext={recommendation?.weatherContext}
                     onShowReviews={handleShowReviews}
                     googleEnrichedParking={googleEnrichedParking}
+                    showInternalDebug={showInternalDebug}
                   />
                 </>
               )}
@@ -9266,6 +9410,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                 <Link
                   href="/trip"
+                  onClick={handleNewTripClick}
                   className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
                 >
                   Start new trip
@@ -9357,6 +9502,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           parkingPeerOptions={displayedParking.map(
                             (entry) => entry.option as ParkingOption,
                           )}
+                          showInternalDebug={showInternalDebug}
                         />
                       );
                       })}
@@ -9415,6 +9561,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         googleEnrichedParking={googleEnrichedParking}
                         accessToken={accessToken}
                         tripId={searchParams.get('tripId')}
+                        showInternalDebug={showInternalDebug}
                       />
                     ))}
                   </div>
@@ -9535,6 +9682,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     mergeGooglePlaceResultIntoParking(reviewsParking, parking);
                   }
                 }}
+                onGoogleMapsReviewsClick={(parking) => {
+                  trackEvent('google_maps_reviews_clicked', {
+                    accessToken,
+                    eventProperties: {
+                      airportCode: getTripAirportCode(tripData) || undefined,
+                      tripType: tripData?.type ?? undefined,
+                      provider: parking.bookingProvider || parking.sourceName || undefined,
+                      lotId: parking.id || parking.providerLotId || undefined,
+                      lotName: parking.name || undefined,
+                      sourcePage: 'results',
+                    },
+                  });
+                }}
               />
             ) : null}
           </div>
@@ -9598,6 +9758,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         <div className="mt-10 flex justify-center">
           <Link
             href="/trip"
+            onClick={handleNewTripClick}
             className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
           >
             Plan another trip

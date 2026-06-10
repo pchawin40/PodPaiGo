@@ -5,6 +5,8 @@ describe('/api/admin/parking-submissions', () => {
     jest.resetModules();
     jest.restoreAllMocks();
     process.env.ADMIN_EMAILS = 'admin@example.com';
+    delete process.env.ALLOW_LOCAL_ADMIN;
+    delete process.env.NEXT_PUBLIC_ENABLE_ADMIN_DEBUG;
   });
 
   test('admin can list and verify or reject submissions', async () => {
@@ -121,5 +123,19 @@ describe('/api/admin/parking-submissions', () => {
     );
 
     expect(response.status).toBe(403);
+  });
+
+  test('signed-out user cannot list submissions', async () => {
+    jest.doMock('@/lib/monetization/recordOutboundClick', () => ({
+      createSupabaseAuthClient: jest.fn(() => null),
+    }));
+
+    const { GET } = await import('../route');
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/admin/parking-submissions'),
+    );
+
+    expect(response.status).toBe(401);
   });
 });

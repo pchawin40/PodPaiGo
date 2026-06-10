@@ -123,7 +123,7 @@ describe('admin verification path is service-role only', () => {
   );
 
   test('admin status update is gated by ADMIN_EMAILS', () => {
-    expect(adminRoute).toContain('isAdminEmail');
+    expect(adminRoute).toContain('requireAdmin');
     expect(adminRoute).toContain('updateUserParkingSubmissionStatus');
   });
 

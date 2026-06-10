@@ -112,12 +112,14 @@ export default function ParkingReviewsModal({
     onClose,
     airportCode,
     onResolvedParking,
+    onGoogleMapsReviewsClick,
 }: {
     parking: ParkingOption | null;
     open: boolean;
     onClose: () => void;
     airportCode?: string | null;
     onResolvedParking?: (parking: ParkingOption) => void;
+    onGoogleMapsReviewsClick?: (parking: ParkingOption) => void;
 }) {
     const [sort, setSort] = useState<SortMode>("most_relevant");
     const parkingKey = parkingReviewKey(parking, airportCode);
@@ -453,6 +455,7 @@ export default function ParkingReviewsModal({
                             ) ?? "#"}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={() => onGoogleMapsReviewsClick?.(resolvedParking)}
                             className="inline-flex text-xs font-semibold text-zinc-800 underline decoration-zinc-400 underline-offset-2"
                         >
                             View all reviews on Google Maps

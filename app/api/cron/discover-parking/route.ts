@@ -4,7 +4,16 @@ export const runtime = 'nodejs';
 
 const AIRPORTS_TO_REFRESH = ['SEA', 'PAE', 'GEG', 'BLI', 'PSC'];
 
-export async function GET() {
+export async function GET(req: Request) {
+  const authHeader = req.headers.get('authorization');
+
+  if (
+    process.env.CRON_SECRET &&
+    authHeader !== `Bearer ${process.env.CRON_SECRET}`
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.BASE_URL;
 
   if (!baseUrl) {
@@ -19,7 +28,12 @@ export async function GET() {
   for (const airportCode of AIRPORTS_TO_REFRESH) {
     const res = await fetch(`${baseUrl}/api/parking/discover`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.CRON_SECRET
+          ? { Authorization: `Bearer ${process.env.CRON_SECRET}` }
+          : {}),
+      },
       body: JSON.stringify({
         airportCode,
         radiusMeters: 20000,

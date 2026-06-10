@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from './AuthProvider';
+import { useAdminStatus } from './useAdminStatus';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './UserMenu';
 import PrimaryButton from './ui/PrimaryButton';
@@ -140,8 +141,8 @@ export default function SiteHeader({
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, session, loading, configured } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { user, loading, configured } = useAuth();
+  const { isAdmin, loading: adminStatusLoading } = useAdminStatus();
 
   const closeMobileMenu = () => setMobileOpen(false);
 
@@ -149,32 +150,7 @@ export default function SiteHeader({
     if (href === '/') return pathname === '/';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
-  const showAdmin = configured && !loading && Boolean(session?.access_token) && isAdmin;
-
-  useEffect(() => {
-    if (!configured || loading || !session?.access_token) {
-      return;
-    }
-
-    let cancelled = false;
-
-    fetch('/api/admin/status', {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [configured, loading, session?.access_token]);
+  const showAdmin = !loading && !adminStatusLoading && isAdmin;
 
   return (
     <header className="sticky top-0 z-50 border-b border-border glass-panel rounded-none shadow-[0_8px_30px_rgba(14,116,144,0.08)]">

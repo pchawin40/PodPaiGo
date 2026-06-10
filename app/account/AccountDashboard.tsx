@@ -6,6 +6,7 @@ import SiteHeader from '../components/SiteHeader';
 import TravelPreferencesPanel from '../components/TravelPreferencesPanel';
 import UserAvatar from '../components/UserAvatar';
 import { useAuth } from '../components/AuthProvider';
+import { useAdminStatus } from '../components/useAdminStatus';
 import type { SavedTripRecord } from '../../lib/auth/types';
 import { deleteSavedTrip, listSavedTrips } from '../../lib/auth/savedTrips';
 import { getUserDisplayName } from '../../lib/auth/userProfile';
@@ -64,6 +65,7 @@ function AccountSection({
 
 export default function AccountDashboard() {
   const { user, session, loading, configured, signOut } = useAuth();
+  const { isAdmin } = useAdminStatus();
   const [savedTrips, setSavedTrips] = useState<SavedTripRecord[]>([]);
   const [tripsLoading, setTripsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,34 +75,6 @@ export default function AccountDashboard() {
   const [travelPreferences, setTravelPreferences] = useState<TripTravelPreferences>(() =>
     readTravelPreferences(),
   );
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    if (!configured || loading || !session?.access_token) {
-      setIsAdmin(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    fetch('/api/admin/status', {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [configured, loading, session?.access_token]);
-
   useEffect(() => {
     trackEvent('account_viewed');
   }, []);

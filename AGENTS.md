@@ -400,6 +400,129 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Visually verify review modal rows in dark and light contexts on mobile and desktop.
 
+### 2026-06-09 19:08 PDT — Admin-only gates for internal features
+
+**Summary**
+- Added a shared admin guard backed by `ADMIN_EMAILS` and reused it across admin/internal APIs.
+- Protected `/api/admin/*`, parking diagnostics, and parking inventory/discovery maintenance endpoints server-side.
+- Added an admin route boundary for `/admin/*` pages and replaced browser-side `ADMIN_EMAILS` checks with a server-verified admin status hook.
+- Hid internal route/provider/debug panels and temporary review/photo debug traces from normal beta users.
+- Hardened debug UI flags so public production builds do not trust client-side debug/admin flags.
+
+**Files changed**
+- `lib/auth/admin.ts`
+- `lib/admin/adminAuth.ts`
+- `app/components/useAdminStatus.ts`
+- `app/admin/AdminRouteBoundary.tsx`
+- `app/admin/layout.tsx`
+- `app/admin/analytics/page.tsx`
+- `app/admin/parking-diagnostics/page.tsx`
+- `app/admin/parking-submissions/AdminParkingSubmissionsClient.tsx`
+- `app/api/admin/status/route.ts`
+- `app/api/admin/analytics/route.ts`
+- `app/api/admin/parking-submissions/route.ts`
+- `app/api/admin/refresh-apr/route.ts`
+- `app/api/parking/diagnostics/route.ts`
+- `app/api/parking/discover/route.ts`
+- `app/api/parking/inventory/route.ts`
+- `app/api/cron/discover-parking/route.ts`
+- `app/components/SiteHeader.tsx`
+- `app/account/AccountDashboard.tsx`
+- `app/results/ResultsContent.tsx`
+- `app/results/ParkingSmartPick.tsx`
+- `lib/utils/debug.ts`
+- Related tests under `app/api/admin`, `app/components`, `app/results`, `lib/admin`, `lib/utils`, and `__tests__`.
+
+**Why**
+- Normal beta users should not see admin dashboards, diagnostics, provider refresh tools, raw analytics, route/provider debug UI, admin nav links, or admin API data.
+- Admin access needed a single server-side source of truth using signed-in user email allowlisted by `ADMIN_EMAILS`.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/admin/__tests__/adminAuth.test.ts lib/utils/__tests__/debug.test.ts app/api/admin/status/__tests__/route.test.ts app/api/admin/parking-submissions/__tests__/route.test.ts app/api/admin/refresh-apr/__tests__/route.test.ts app/components/__tests__/SiteHeader.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx __tests__/userParkingSpacesSecurity.test.ts --runInBand` passed, 54 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Admin status is checked by multiple client components, so admin pages may make duplicate `/api/admin/status` requests.
+- `CRON_SECRET` should be set for scheduled parking discovery refreshes; otherwise the guarded discovery endpoint will reject unauthenticated calls outside local debug mode.
+
+**Next recommended step**
+- Verify in Vercel with a non-admin beta account and an allowlisted admin account that admin nav, `/admin/*`, `/api/admin/*`, parking diagnostics, and debug panels are hidden or accessible as expected.
+
+### 2026-06-09 19:29 PDT — Beta analytics, feedback, reserve tracking, and recommendation guardrails
+
+**Summary**
+- Added lightweight beta analytics events for recommendation search lifecycle, parking result views, parking details expansion, reserve/route/walk clicks, Google review opens, Google Maps review clicks, new trip clicks, feedback, cache hits/misses, and rate-limit hits.
+- Made reserve/outbound parking tracking use `sendBeacon` with fetch fallback and sanitized outbound metadata.
+- Added a `Send feedback` modal on results pages plus `/api/feedback` storage and an admin-protected `/api/admin/feedback` inbox endpoint.
+- Added in-memory rate limiting and short TTL response caching for `/api/recommendations`, keyed by session/IP and hashed request body only.
+
+**Files changed**
+- `app/results/ResultsContent.tsx`
+- `app/results/ParkingProviderActions.tsx`
+- `app/results/ParkingReviewsModal.tsx`
+- `app/results/BetaFeedbackButton.tsx`
+- `app/api/recommendations/route.ts`
+- `app/api/feedback/route.ts`
+- `app/api/admin/feedback/route.ts`
+- `app/api/monetization/outbound-click/route.ts`
+- `lib/apiUsage/recommendationsGuard.ts`
+- `lib/analytics/analyticsTypes.ts`
+- `lib/analytics/sanitizeAnalytics.ts`
+- `lib/analytics/validateAnalyticsEvent.ts`
+- `lib/analytics/trackEvent.ts`
+- `lib/analytics/serverTrackEvent.ts`
+- `lib/feedback/betaFeedback.ts`
+- `lib/monetization/trackOutboundClick.ts`
+- Tests under `__tests__`, `app/api/recommendations/__tests__`, `app/results/__tests__`, and `lib/analytics/__tests__`.
+
+**Why**
+- GitHub issue #5 needs beta-safe analytics, booking click tracking, user feedback capture, and cost guardrails before wider beta usage.
+- Analytics metadata must avoid full home addresses, raw origins, raw provider payloads, and non-admin exposure of internal data.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath __tests__/analyticsEventRoute.test.ts lib/analytics/__tests__/sanitizeAnalytics.test.ts app/results/__tests__/ParkingProviderActions.test.tsx app/results/__tests__/BetaFeedbackButton.test.tsx __tests__/feedbackRoute.test.ts app/api/recommendations/__tests__/route.test.ts app/results/__tests__/ParkingReviewsModal.test.tsx --runInBand` passed, 25 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- `/api/recommendations` cache and rate limits are in-memory per server process, so they are beta guardrails rather than distributed enforcement.
+- Feedback is stored in `analytics_events`; a dedicated feedback table can be added later if moderation/workflow needs grow.
+- No scoring, ranking, parking provider fetching, Stripe, or paywall logic was changed.
+
+**Next recommended step**
+- Configure `RECOMMENDATIONS_RATE_LIMIT_WINDOW_MS`, `RECOMMENDATIONS_RATE_LIMIT_MAX`, and `RECOMMENDATIONS_CACHE_TTL_SECONDS` for Vercel beta, then verify analytics and feedback rows in Supabase with a non-admin beta account.
+
+### 2026-06-09 20:24 PDT — Feedback admin email notifications
+
+**Summary**
+- Added server-side Resend email notifications for valid `/api/feedback` submissions.
+- Notifications are sent to `ADMIN_EMAILS` after validation and feedback storage handling.
+- Missing `RESEND_API_KEY`, missing `FEEDBACK_FROM_EMAIL`, missing admin recipients, or Resend failures do not fail feedback submission.
+- Email content includes issue type, message, optional submitted email, sanitized page URL, result/trip type, provider/lot, timestamp, and user agent.
+
+**Files changed**
+- `.env.example`
+- `app/api/feedback/route.ts`
+- `lib/feedback/feedbackEmail.ts`
+- `__tests__/feedbackRoute.test.ts`
+- `lib/feedback/__tests__/feedbackEmail.test.ts`
+- `AGENTS.md`
+
+**Why**
+- Admins need immediate beta feedback notifications without exposing `ADMIN_EMAILS` to the client and without making feedback submission dependent on email provider availability.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath __tests__/feedbackRoute.test.ts lib/feedback/__tests__/feedbackEmail.test.ts --runInBand` passed, 9 tests.
+- `npm run build` passed.
+
+**Known remaining issues**
+- Email notification delivery uses Resend REST directly and is best-effort; delivery failures are logged server-side only.
+- Feedback remains stored in `analytics_events`; a dedicated feedback workflow/table can be added later if needed.
+
+**Next recommended step**
+- Set `RESEND_API_KEY`, `FEEDBACK_FROM_EMAIL`, and `ADMIN_EMAILS` in Vercel, then submit a beta feedback item and confirm the admin email arrives.
+
 ---
 
 # Final Response Requirement for Agents

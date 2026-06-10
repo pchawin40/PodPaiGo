@@ -3,7 +3,10 @@ import {
   createSupabaseAnalyticsClient,
   insertAnalyticsEvent,
 } from '../../../../lib/analytics/insertAnalyticsEvent';
-import { sanitizeAnalyticsProperties } from '../../../../lib/analytics/sanitizeAnalytics';
+import {
+  sanitizeAnalyticsProperties,
+  stripAnalyticsUrlQueryAndHash,
+} from '../../../../lib/analytics/sanitizeAnalytics';
 import { validateAnalyticsTrackPayload } from '../../../../lib/analytics/validateAnalyticsEvent';
 
 export const runtime = 'nodejs';
@@ -44,8 +47,8 @@ export async function POST(request: NextRequest) {
       session_id: payload.sessionId?.trim() || null,
       event_name: payload.eventName,
       event_properties: sanitizedProperties,
-      page_path: payload.pagePath?.trim() || null,
-      referrer: payload.referrer?.trim() || null,
+      page_path: payload.pagePath ? stripAnalyticsUrlQueryAndHash(payload.pagePath) || null : null,
+      referrer: payload.referrer ? stripAnalyticsUrlQueryAndHash(payload.referrer) || null : null,
       user_agent: userAgent,
     });
 

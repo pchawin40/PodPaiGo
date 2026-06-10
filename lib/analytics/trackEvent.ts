@@ -1,6 +1,7 @@
 'use client';
 
 import { getOrCreateAnonymousId, getOrCreateSessionId } from './analyticsIds';
+import { stripAnalyticsUrlQueryAndHash } from './sanitizeAnalytics';
 import type { AnalyticsEventName, AnalyticsEventProperties } from './analyticsTypes';
 
 export type TrackEventOptions = {
@@ -14,6 +15,31 @@ export function trackEvent(eventName: AnalyticsEventName, options: TrackEventOpt
   const fetchFn = typeof globalThis !== 'undefined' ? globalThis.fetch : undefined;
   if (typeof window === 'undefined' || typeof fetchFn !== 'function') return;
 
+  const body = JSON.stringify({
+    eventName,
+    eventProperties: {
+      ...(options.eventProperties ?? {}),
+      timestamp: new Date().toISOString(),
+    },
+    anonymousId: getOrCreateAnonymousId(),
+    sessionId: getOrCreateSessionId(),
+    pagePath: stripAnalyticsUrlQueryAndHash(options.pagePath ?? window.location.pathname),
+    referrer: options.referrer
+      ? stripAnalyticsUrlQueryAndHash(options.referrer)
+      : document.referrer
+        ? stripAnalyticsUrlQueryAndHash(document.referrer)
+        : null,
+  });
+
+  if (!options.accessToken && typeof navigator.sendBeacon === 'function') {
+    try {
+      const blob = new Blob([body], { type: 'application/json' });
+      if (navigator.sendBeacon('/api/analytics/event', blob)) return;
+    } catch {
+      // Fall back to fetch below.
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -25,14 +51,7 @@ export function trackEvent(eventName: AnalyticsEventName, options: TrackEventOpt
   void fetchFn('/api/analytics/event', {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      eventName,
-      eventProperties: options.eventProperties ?? {},
-      anonymousId: getOrCreateAnonymousId(),
-      sessionId: getOrCreateSessionId(),
-      pagePath: options.pagePath ?? window.location.pathname,
-      referrer: options.referrer ?? (document.referrer || null),
-    }),
+    body,
     keepalive: true,
   }).catch(() => {
     // Analytics must never block navigation or UI.

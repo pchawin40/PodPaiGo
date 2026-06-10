@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import TravelCard from '../../components/ui/TravelCard';
-import { useAuth } from '../../components/AuthProvider';
+import { useAdminStatus } from '../../components/useAdminStatus';
 import {
   USER_PARKING_STATUS_LABELS,
   type UserParkingSpaceRecord,
@@ -20,54 +20,27 @@ const FILTERS: Array<UserParkingStatus | 'all'> = [
 ];
 
 export default function AdminParkingSubmissionsClient() {
-  const { user, session, loading, configured } = useAuth();
+  const {
+    accessToken,
+    configured,
+    isAdmin,
+    loading,
+    signedIn,
+  } = useAdminStatus();
   const [status, setStatus] = useState<UserParkingStatus | 'all'>('pending');
   const [parking, setParking] = useState<UserParkingSpaceRecord[]>([]);
   const [reason, setReason] = useState('');
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminStatusLoading, setAdminStatusLoading] = useState(false);
-
-  const accessToken = session?.access_token ?? null;
-
-  useEffect(() => {
-    if (!configured || loading || !accessToken) {
-      setIsAdmin(false);
-      setAdminStatusLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setAdminStatusLoading(true);
-
-    fetch('/api/admin/status', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      })
-      .finally(() => {
-        if (!cancelled) setAdminStatusLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, configured, loading]);
 
   const load = useCallback(async () => {
-    if (!accessToken || !isAdmin) return;
+    if (!isAdmin) return;
 
     setFetching(true);
     setError(null);
     try {
       const response = await fetch(`/api/admin/parking-submissions?status=${status}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
       const data = (await response.json().catch(() => ({}))) as {
         parking?: UserParkingSpaceRecord[];
@@ -83,19 +56,19 @@ export default function AdminParkingSubmissionsClient() {
   }, [accessToken, isAdmin, status]);
 
   useEffect(() => {
-    if (!loading && configured && isAdmin && accessToken) {
+    if (!loading && isAdmin) {
       void load();
     }
-  }, [accessToken, configured, isAdmin, load, loading]);
+  }, [isAdmin, load, loading]);
 
   async function moderate(item: UserParkingSpaceRecord, nextStatus: UserParkingStatus) {
-    if (!accessToken) return;
+    if (!isAdmin) return;
 
     const response = await fetch('/api/admin/parking-submissions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify({
         id: item.id,
@@ -146,15 +119,15 @@ export default function AdminParkingSubmissionsClient() {
           </button>
         </div>
 
-        {!configured ? (
+        {!configured && !isAdmin ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Supabase auth is not configured.</p>
           </TravelCard>
-        ) : loading || adminStatusLoading ? (
+        ) : loading ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Loading session...</p>
           </TravelCard>
-        ) : !user ? (
+        ) : !signedIn && !isAdmin ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Sign in with an admin account.</p>
             <Link

@@ -47,6 +47,59 @@ describe('/api/analytics/event route', () => {
     expect(json).toMatchObject({ ok: true, stored: true });
   });
 
+  it('accepts beta recommendation analytics metadata', async () => {
+    insertMock.mockResolvedValue({ error: null });
+
+    const { POST } = await import('../app/api/analytics/event/route');
+    const { NextRequest } = await import('next/server');
+
+    const request = new NextRequest('http://localhost/api/analytics/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        eventName: 'reserve_parking_clicked',
+        eventProperties: {
+          airportCode: 'SEA',
+          tripType: 'general-trip',
+          resultType: 'parking',
+          provider: 'ParkWhiz',
+          lotId: 'lot-1',
+          lotName: 'Public Garage',
+          priceTotal: 18,
+          priceLabel: '$18 total',
+          driveToLotMinutes: 12,
+          walkMinutes: 4,
+        },
+        anonymousId: 'anon-test',
+        sessionId: 'sess-test',
+      }),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json).toMatchObject({ ok: true, stored: true });
+  });
+
+  it('rejects oversized analytics payloads', async () => {
+    const { POST } = await import('../app/api/analytics/event/route');
+    const { NextRequest } = await import('next/server');
+
+    const request = new NextRequest('http://localhost/api/analytics/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        eventName: 'feedback_submitted',
+        eventProperties: {
+          message: 'x'.repeat(7000),
+        },
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(400);
+  });
+
   it('fails safely when DB insert fails', async () => {
     insertMock.mockResolvedValue({ error: { message: 'insert failed' } });
 

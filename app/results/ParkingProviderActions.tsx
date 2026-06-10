@@ -22,6 +22,14 @@ type ParkingProviderActionsProps = {
   provider?: string | null;
   airportCode?: string | null;
   parkingLotId?: string | null;
+  parkingLotName?: string | null;
+  resultType?: string | null;
+  tripType?: string | null;
+  rank?: number | null;
+  priceTotal?: number | null;
+  priceLabel?: string | null;
+  driveToLotMinutes?: number | null;
+  walkMinutes?: number | null;
   tripId?: string | null;
   accessToken?: string | null;
   compact?: boolean;
@@ -44,7 +52,34 @@ function buildTracking(
     tripId: props.tripId,
     metadata: {
       surface: props.compact ? 'option-card-compact' : 'option-card',
+      sourcePage: 'results',
+      resultType: props.resultType ?? undefined,
+      tripType: props.tripType ?? undefined,
+      lotName: props.parkingLotName ?? undefined,
+      rank: props.rank ?? undefined,
+      priceTotal: props.priceTotal ?? undefined,
+      priceLabel: props.priceLabel ?? undefined,
+      driveToLotMinutes: props.driveToLotMinutes ?? undefined,
+      walkMinutes: props.walkMinutes ?? undefined,
     },
+  };
+}
+
+function buildAnalyticsMetadata(props: ParkingProviderActionsProps, ctaType: string) {
+  return {
+    provider: props.provider ?? undefined,
+    airportCode: props.airportCode ?? undefined,
+    lotId: props.parkingLotId ?? undefined,
+    lotName: props.parkingLotName ?? undefined,
+    resultType: props.resultType ?? undefined,
+    tripType: props.tripType ?? undefined,
+    rank: props.rank ?? undefined,
+    priceTotal: props.priceTotal ?? undefined,
+    priceLabel: props.priceLabel ?? undefined,
+    driveToLotMinutes: props.driveToLotMinutes ?? undefined,
+    walkMinutes: props.walkMinutes ?? undefined,
+    sourcePage: 'results',
+    ctaType,
   };
 }
 
@@ -76,14 +111,13 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         <button
           type="button"
           onClick={() => {
+            trackEvent('reserve_parking_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: buildAnalyticsMetadata(props, 'reserve_parking'),
+            });
             trackEvent('parking_cta_clicked', {
               accessToken: props.accessToken,
-              eventProperties: {
-                provider: props.provider ?? undefined,
-                airportCode: props.airportCode ?? undefined,
-                lotId: props.parkingLotId ?? undefined,
-                ctaType: 'reserve_parking',
-              },
+              eventProperties: buildAnalyticsMetadata(props, 'reserve_parking'),
             });
             if (props.onReserve) {
               props.onReserve();
@@ -103,13 +137,17 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
       ) : ctas.viewProviderEnabled ? (
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            trackEvent('parking_cta_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: buildAnalyticsMetadata(props, 'view_provider'),
+            });
             openTrackedUrl(
               ctas.viewProviderUrl!,
               buildTracking('view_provider', ctas.viewProviderUrl, props),
               props.accessToken,
-            )
-          }
+            );
+          }}
           className={secondaryButtonClass}
         >
           {ctas.viewProviderLabel}
@@ -131,14 +169,13 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         <button
           type="button"
           onClick={() => {
+            trackEvent('route_to_parking_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: buildAnalyticsMetadata(props, 'route_to_parking'),
+            });
             trackEvent('directions_clicked', {
               accessToken: props.accessToken,
-              eventProperties: {
-                provider: props.provider ?? undefined,
-                airportCode: props.airportCode ?? undefined,
-                lotId: props.parkingLotId ?? undefined,
-                ctaType: 'route_to_parking',
-              },
+              eventProperties: buildAnalyticsMetadata(props, 'route_to_parking'),
             });
             openTrackedUrl(
               ctas.directionsUrl!,
@@ -156,14 +193,13 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         <button
           type="button"
           onClick={() => {
+            trackEvent('walk_to_destination_clicked', {
+              accessToken: props.accessToken,
+              eventProperties: buildAnalyticsMetadata(props, 'parking_transfer'),
+            });
             trackEvent('directions_clicked', {
               accessToken: props.accessToken,
-              eventProperties: {
-                provider: props.provider ?? undefined,
-                airportCode: props.airportCode ?? undefined,
-                lotId: props.parkingLotId ?? undefined,
-                ctaType: 'parking_to_terminal',
-              },
+              eventProperties: buildAnalyticsMetadata(props, 'parking_to_terminal'),
             });
             openTrackedUrl(
               transferUrl,

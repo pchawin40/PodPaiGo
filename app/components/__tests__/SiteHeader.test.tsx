@@ -85,8 +85,9 @@ describe('SiteHeader', () => {
       signOut: jest.fn(),
     });
     (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ signedIn: true, isAdmin: false, email: 'traveler@example.com' }),
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'admin_required' }),
     });
 
     renderHeader();

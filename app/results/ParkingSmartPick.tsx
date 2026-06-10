@@ -516,6 +516,7 @@ export default function ParkingSmartPick({
   weatherContext,
   onShowReviews,
   googleEnrichedParking = {},
+  showInternalDebug = isPodPaiGoDebugUIEnabled(),
 }: {
   options: ParkingOption[];
   tripData: TripData | null;
@@ -532,6 +533,7 @@ export default function ParkingSmartPick({
   weatherContext?: WeatherContext;
   onShowReviews?: (parking: ParkingOption) => void;
   googleEnrichedParking?: Record<string, Partial<ParkingOption>>;
+  showInternalDebug?: boolean;
 }) {
   const [openDetail, setOpenDetail] = useState<'reviews' | 'availability' | null>(null);
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -867,27 +869,33 @@ export default function ParkingSmartPick({
 
   return (
     <section className="travel-card overflow-hidden rounded-3xl p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
-      <ParkingPhotoReviewTrace
-        stage="after_smart_pick_selection"
-        option={best}
-        stageNote="ParkingSmartPick selected final best parking option"
-      />
-      <ParkingRenderedReviewDebug
-        component="ParkingSmartPick"
-        option={best}
-        badges={modeBadges}
-        canShowReviewAction={canShowReviewAction}
-      />
+      {showInternalDebug ? (
+        <>
+          <ParkingPhotoReviewTrace
+            stage="after_smart_pick_selection"
+            option={best}
+            stageNote="ParkingSmartPick selected final best parking option"
+          />
+          <ParkingRenderedReviewDebug
+            component="ParkingSmartPick"
+            option={best}
+            badges={modeBadges}
+            canShowReviewAction={canShowReviewAction}
+          />
+        </>
+      ) : null}
       <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
         {smartPickBadgeLabel}
       </div>
 
       <div className="mt-4">
-        <ParkingPhotoReviewTrace
-          stage="parking_smart_pick_visual_handoff"
-          option={best}
-          stageNote="ParkingSmartPick props passed into ParkingLotVisual"
-        />
+        {showInternalDebug ? (
+          <ParkingPhotoReviewTrace
+            stage="parking_smart_pick_visual_handoff"
+            option={best}
+            stageNote="ParkingSmartPick props passed into ParkingLotVisual"
+          />
+        ) : null}
         <ParkingLotVisual
           option={best}
           tripContext={parkingTripContext}
@@ -1307,7 +1315,7 @@ export default function ParkingSmartPick({
                   </div>
                 )}
 
-                {isPodPaiGoDebugUIEnabled() ? (
+                {showInternalDebug ? (
                   <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
                     <div className="font-semibold text-slate-950">Sort lenses</div>
                     <div className="mt-2 space-y-1">

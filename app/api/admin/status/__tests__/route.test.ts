@@ -5,9 +5,11 @@ describe('/api/admin/status', () => {
     jest.resetModules();
     jest.restoreAllMocks();
     process.env.ADMIN_EMAILS = 'admin@example.com';
+    delete process.env.ALLOW_LOCAL_ADMIN;
+    delete process.env.NEXT_PUBLIC_ENABLE_ADMIN_DEBUG;
   });
 
-  test('signed-out request returns non-admin status', async () => {
+  test('signed-out request is rejected', async () => {
     jest.doMock('@/lib/monetization/recordOutboundClick', () => ({
       createSupabaseAuthClient: jest.fn(() => null),
     }));
@@ -15,10 +17,9 @@ describe('/api/admin/status', () => {
     const { GET } = await import('../route');
     const response = await GET(new NextRequest('http://localhost/api/admin/status'));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      signedIn: false,
-      isAdmin: false,
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'authentication_required',
     });
   });
 
@@ -50,7 +51,7 @@ describe('/api/admin/status', () => {
     expect(JSON.stringify(json)).not.toContain('ADMIN_EMAILS');
   });
 
-  test('non-admin signed-in user returns non-admin status', async () => {
+  test('non-admin signed-in user is rejected', async () => {
     const authClient = {
       auth: {
         getUser: jest.fn(async () => ({
@@ -69,10 +70,9 @@ describe('/api/admin/status', () => {
       }),
     );
 
+    expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      signedIn: true,
-      isAdmin: false,
-      email: 'user@example.com',
+      error: 'admin_required',
     });
   });
 });

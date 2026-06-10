@@ -75,6 +75,26 @@ describe('ParkingSmartPick fallback', () => {
     expect(screen.queryByText('Sort lenses')).not.toBeInTheDocument();
   });
 
+  test('shows Sort lenses only when internal debug is enabled', () => {
+    const routeAvailableParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="best"
+        showInternalDebug
+      />,
+    );
+
+    expect(screen.getByText('Sort lenses')).toBeInTheDocument();
+  });
+
   test('shows a recommended parking card even when route timing is unavailable', () => {
     render(
       <ParkingSmartPick

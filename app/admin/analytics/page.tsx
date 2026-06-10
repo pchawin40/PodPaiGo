@@ -4,13 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import AnalyticsDashboard from '../../components/admin/AnalyticsDashboard';
-import { useAuth } from '../../components/AuthProvider';
-import { isAdminEmail } from '../../../lib/admin/adminAuth';
+import { useAdminStatus } from '../../components/useAdminStatus';
 import type {
   AnalyticsDashboardData,
   AnalyticsDateRange,
 } from '../../../lib/admin/analyticsDashboardTypes';
-import { getSupabaseClient } from '../../../lib/supabase/client';
 
 const EMPTY_DASHBOARD: AnalyticsDashboardData = {
   range: '7d',
@@ -59,17 +57,21 @@ const EMPTY_DASHBOARD: AnalyticsDashboardData = {
 };
 
 export default function AdminAnalyticsPage() {
-  const { user, loading, configured, session } = useAuth();
+  const {
+    accessToken,
+    configured,
+    isAdmin,
+    loading: adminLoading,
+    signedIn,
+  } = useAdminStatus();
   const [range, setRange] = useState<AnalyticsDateRange>('7d');
   const [airport, setAirport] = useState('');
   const [data, setData] = useState<AnalyticsDashboardData>(EMPTY_DASHBOARD);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isAdmin = isAdminEmail(user?.email);
-
   const loadDashboard = useCallback(async () => {
-    if (!session?.access_token || !isAdmin) return;
+    if (!isAdmin) return;
 
     setFetching(true);
     setError(null);
@@ -79,9 +81,7 @@ export default function AdminAnalyticsPage() {
       if (airport.trim()) params.set('airport', airport.trim().toUpperCase());
 
       const response = await fetch(`/api/admin/analytics?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
 
       if (!response.ok) {
@@ -95,13 +95,13 @@ export default function AdminAnalyticsPage() {
     } finally {
       setFetching(false);
     }
-  }, [airport, isAdmin, range, session?.access_token]);
+  }, [accessToken, airport, isAdmin, range]);
 
   useEffect(() => {
-    if (!loading && isAdmin && session?.access_token) {
+    if (!adminLoading && isAdmin) {
       void loadDashboard();
     }
-  }, [isAdmin, loadDashboard, loading, session?.access_token]);
+  }, [adminLoading, isAdmin, loadDashboard]);
 
   return (
     <main className="travel-page-bg min-h-screen text-foreground">
@@ -112,13 +112,13 @@ export default function AdminAnalyticsPage() {
           ← Account
         </Link>
 
-        {loading ? (
+        {adminLoading ? (
           <p className="mt-8 text-sm text-muted-foreground">Loading session…</p>
-        ) : !configured ? (
+        ) : !configured && !isAdmin ? (
           <p className="mt-8 text-sm text-muted-foreground">
             Supabase auth is not configured. Add env vars to use the admin analytics dashboard.
           </p>
-        ) : !user ? (
+        ) : !signedIn && !isAdmin ? (
           <div className="mt-8 rounded-2xl border border-border bg-card p-6">
             <p className="text-sm text-muted-foreground">Sign in with an admin account to continue.</p>
             <Link

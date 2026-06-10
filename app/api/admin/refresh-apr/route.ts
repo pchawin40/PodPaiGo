@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/auth/admin';
 import { crawlAirportParkingReservationsSea } from '@/lib/providers/airportParkingReservationsCrawler';
 import { saveAprPrices } from '@/lib/db/parkingCache';
 
 export async function GET(request: Request) {
+    const admin = await requireAdmin(request);
+    if (!admin.ok) return admin.response;
+
     const url = new URL(request.url);
 
     const checkInDate = url.searchParams.get('checkInDate') || '2026-04-28';
