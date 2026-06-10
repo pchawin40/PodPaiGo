@@ -388,6 +388,10 @@ type ParkingOptionsRequestContext = {
   destinationCoordinates?: RouteLatLng | null;
   destinationLat?: number;
   destinationLng?: number;
+  checkInDate?: string;
+  checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
   routeDepartureTime?: string;
   targetTerminalArrivalTime?: string;
 };
@@ -2063,10 +2067,10 @@ export class MockProvider implements DataProvider {
             parkingDurationMinutes,
             destinationLat: destinationCoords?.lat ?? context?.destinationLat,
             destinationLng: destinationCoords?.lng ?? context?.destinationLng,
-            checkInDate: parkingDates.checkInDate,
-            checkOutDate: parkingDates.checkOutDate,
-            checkInAt: parkingDates.checkInAt,
-            checkOutAt: parkingDates.checkOutAt,
+            checkInDate: context?.checkInDate ?? parkingDates.checkInDate,
+            checkOutDate: context?.checkOutDate ?? parkingDates.checkOutDate,
+            checkInAt: context?.checkInAt ?? parkingDates.checkInAt,
+            checkOutAt: context?.checkOutAt ?? parkingDates.checkOutAt,
           }).then((result) => {
             parkingDiscoveryMetadata = result.metadata;
             return result.options;
@@ -2080,10 +2084,10 @@ export class MockProvider implements DataProvider {
             parkingDurationMinutes,
             destinationLat: destinationCoords?.lat ?? context?.destinationLat,
             destinationLng: destinationCoords?.lng ?? context?.destinationLng,
-            checkInDate: parkingDates.checkInDate,
-            checkOutDate: parkingDates.checkOutDate,
-            checkInAt: parkingDates.checkInAt,
-            checkOutAt: parkingDates.checkOutAt,
+            checkInDate: context?.checkInDate ?? parkingDates.checkInDate,
+            checkOutDate: context?.checkOutDate ?? parkingDates.checkOutDate,
+            checkInAt: context?.checkInAt ?? parkingDates.checkInAt,
+            checkOutAt: context?.checkOutAt ?? parkingDates.checkOutAt,
           });
 
     if (liveParkingOptions.length === 0) {
@@ -2295,15 +2299,100 @@ export class MockProvider implements DataProvider {
       return promise;
     };
 
-    const routeEnrichmentFallback = withDeferredParkingDetails(
-      parkingSource,
-      'parking_route_enrichment_timeout',
+    const buildParkingRouteFallbackOption = (
+      entry: typeof parkingRouteEntries[number],
+      reason: string,
+    ): ParkingOption => {
+      const { option, routeDestination: entryRouteDestination, lotDestination } = entry;
+      const meta = resolveParkingTransferMeta(option, context);
+      const parkingBufferMinutes =
+        option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
+      const transferToTerminalMinutes =
+        option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
+      const transferType = option.transferType ?? meta.transferType;
+      const sourceLink =
+        option.sourceLink && option.sourceLink.includes('example.com')
+          ? undefined
+          : option.sourceLink;
+      const mapLink =
+        origin && entryRouteDestination
+          ? googleMapsDirectionsLink(origin, entryRouteDestination, 'driving', {
+              destinationPlaceId: lotDestination.googlePlaceId,
+            })
+          : this.buildGoogleDirectionsLink(origin, entryRouteDestination);
+      const routeTargetCoords = entry.destinationLatLng;
+      const canonicalRouteCoords = getParkingRouteCoordinates(option);
+      const usedCanonicalCoords = Boolean(
+        option.coordinateSource === 'google_place' &&
+          routeTargetCoords &&
+          typeof canonicalRouteCoords.lat === 'number' &&
+          typeof canonicalRouteCoords.lng === 'number' &&
+          Math.abs(routeTargetCoords.lat - canonicalRouteCoords.lat) <= 0.001 &&
+          Math.abs(routeTargetCoords.lng - canonicalRouteCoords.lng) <= 0.001,
+      );
+      const routeTarget = routeTargetCoords
+        ? {
+            lat: routeTargetCoords.lat,
+            lng: routeTargetCoords.lng,
+            usedCanonicalCoords,
+          }
+        : undefined;
+      const parkingRouteDebug = {
+        routesApiDestination: routeTargetCoords
+          ? `${routeTargetCoords.lat},${routeTargetCoords.lng}`
+          : entryRouteDestination,
+        googleMapsUrlDestination: lotDestination.destination || entryRouteDestination,
+        deferredReason: reason,
+      };
+      const fallbackDriveMinutes = estimateParkingDriveMinutesFallback({
+        originLat: originCoords?.lat,
+        originLng: originCoords?.lng,
+        option,
+      });
+      const hasFallbackDrive = fallbackDriveMinutes > 0;
+
+      return applyParkingOriginDriveMinutes(
+        {
+          ...option,
+          parkingBufferMinutes,
+          transferToTerminalMinutes,
+          transferType,
+          routeOrigin: routeOrigins,
+          routeDestination: entryRouteDestination,
+          sourceLink,
+          mapLink,
+          lastUpdated: new Date().toISOString(),
+          parkingRouteDebug,
+          routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
+          routeUnavailable: false,
+          routeUnavailableReason: option.routeUnavailableReason,
+          ...(originCoords
+            ? { originLat: originCoords.lat, originLng: originCoords.lng }
+            : {}),
+          assumptions: [
+            ...(option.assumptions || []),
+            hasFallbackDrive
+              ? `Estimated ${fallbackDriveMinutes} min drive from origin based on straight-line distance while live route details refresh.`
+              : 'Origin-to-lot route calculation is still refreshing. Open directions to confirm drive time.',
+          ],
+        },
+        fallbackDriveMinutes,
+        hasFallbackDrive ? 'haversine-estimated' : 'google-routes',
+        routeTarget,
+        { source: hasFallbackDrive ? 'fallback' : 'google-routes' },
+      );
+    };
+
+    const routeEnrichmentTimeoutMs = readPositiveTimeoutMs(
+      'PARKING_ROUTE_ENRICH_TIMEOUT_MS',
+      isAirportDestination ? 1600 : 4500,
     );
-    const { value: enriched } = await withParkingStepFallback(
-      'parking_route_enrichment',
-      parkingOptionsStartedAt,
-      () => Promise.all(
-        parkingRouteEntries.map(async (entry) => {
+    const enriched = await Promise.all(
+      parkingRouteEntries.map(async (entry) => {
+        const { value } = await withParkingStepFallback(
+          `parking_route_enrichment:${entry.option.id || entry.option.name || 'unknown'}`,
+          parkingOptionsStartedAt,
+          async () => {
         const { option, routeDestination, lotDestination } = entry;
         const shouldUseLiveRoute = liveRouteKeys.has(entry.routeCacheKey);
 
@@ -2464,6 +2553,7 @@ export class MockProvider implements DataProvider {
             fallbackDriveMinutes,
             'haversine-estimated',
             routeTarget,
+            { source: 'fallback' },
           );
 
           return deferredOption;
@@ -2495,6 +2585,9 @@ export class MockProvider implements DataProvider {
             fallbackDriveMinutes,
             fallbackDriveMinutes > 0 ? 'haversine-estimated' : 'google-routes',
             routeTarget,
+            {
+              source: fallbackDriveMinutes > 0 ? 'fallback' : 'google-routes',
+            },
           );
 
           if (fallbackDriveMinutes <= 0) {
@@ -2575,6 +2668,18 @@ export class MockProvider implements DataProvider {
               ? 'google-routes'
               : 'haversine-estimated',
           routeTarget,
+          {
+            distanceMeters: routeEstimate.distanceMeters,
+            source: routeFailed
+              ? fallbackDriveMinutes > 0
+                ? 'fallback'
+                : 'google-routes'
+              : routeEstimate.sourceName === 'Mapbox Directions'
+                ? 'mapbox'
+                : routeWasCached
+                  ? 'cache'
+                  : 'google-routes',
+          },
         );
 
         if (driveMinutes <= 0) {
@@ -2601,10 +2706,17 @@ export class MockProvider implements DataProvider {
         }
 
         return enrichedOption;
-        }),
-      ),
-      routeEnrichmentFallback,
-      readPositiveTimeoutMs('PARKING_ROUTE_ENRICH_TIMEOUT_MS', 1600),
+          },
+          buildParkingRouteFallbackOption(
+            entry,
+            liveRouteKeys.has(entry.routeCacheKey)
+              ? 'parking_route_enrichment_timeout'
+              : 'parking_route_deferred',
+          ),
+          routeEnrichmentTimeoutMs,
+        );
+        return value;
+      }),
     );
 
     return { options: enriched, metadata: parkingDiscoveryMetadata };

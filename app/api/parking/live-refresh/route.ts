@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getAirportById } from '@/lib/airports/catalog';
-import {
-  getDestinationParkingOptions,
-  getLiveParkingOptions,
-} from '@/lib/providers/parkingAggregator';
-import { LiveTrafficProvider } from '@/lib/providers';
+import { getLiveParkingOptions } from '@/lib/providers/parkingAggregator';
+import { MockProvider } from '@/lib/providers';
 import { runWithPlacesRequestBudget } from '@/lib/apiUsage/placesRequestBudget';
-import type { ParkingOption } from '@/lib/types';
+import type { DestinationKind, ParkingOption } from '@/lib/types';
 import { debugLog } from '@/lib/utils/debug';
 
 export const dynamic = 'force-dynamic';
@@ -34,13 +31,37 @@ function stringFromBody(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+const destinationKinds = new Set<DestinationKind>([
+  'airport',
+  'office',
+  'downtown',
+  'stadium',
+  'event',
+  'hospital',
+  'restaurant',
+  'cafe',
+  'bar',
+  'hotel',
+  'grocery',
+  'store',
+  'mall',
+  'park',
+  'trailhead',
+  'neighborhood',
+  'general',
+]);
+
+function destinationKindFromBody(value: unknown): DestinationKind {
+  return typeof value === 'string' && destinationKinds.has(value as DestinationKind)
+    ? (value as DestinationKind)
+    : 'airport';
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const destinationKind = typeof body.destinationKind === 'string'
-      ? body.destinationKind
-      : 'airport';
+    const destinationKind = destinationKindFromBody(body.destinationKind);
     const isAirportTrip = destinationKind === 'airport';
 
     const destination = stringFromBody(body.destination);
@@ -139,29 +160,35 @@ export async function POST(req: Request) {
             };
           }
 
+          const parkingProvider = new MockProvider();
+
           if (
             (typeof destinationLat !== 'number' || typeof destinationLng !== 'number') &&
             destination
           ) {
-            const geocoded = await new LiveTrafficProvider().geocodeAddress(destination);
+            const geocoded = await parkingProvider.geocodeAddress(destination);
             destinationLat = geocoded?.lat;
             destinationLng = geocoded?.lng;
           }
 
-          const parking = await getDestinationParkingOptions({
+          const parkingResult = await parkingProvider.getParkingOptionsWithMetadata(
             origin,
-            destination: destination!,
-            destinationName,
-            destinationKind,
+            destination!,
             dateTime,
             parkingDurationMinutes,
-            destinationLat,
-            destinationLng,
-            checkInDate,
-            checkOutDate,
-            checkInAt,
-            checkOutAt,
-          });
+            {
+              destinationKind,
+              destinationName,
+              destinationLat,
+              destinationLng,
+              routeDepartureTime: dateTime,
+              checkInDate,
+              checkOutDate,
+              checkInAt,
+              checkOutAt,
+            },
+          );
+          const parking = parkingResult.options;
 
           return {
             fetchedAt: new Date().toISOString(),

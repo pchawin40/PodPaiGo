@@ -1090,7 +1090,12 @@ async function fetchGooglePlaceDetails(
   if (!normalizedPlaceId) return null;
 
   const cachedByPlaceId = await getCachedRecordByPlaceId(normalizedPlaceId);
-  if (cachedByPlaceId && hasUsablePlaceCoords(cachedByPlaceId)) {
+  const purpose = context?.purpose ?? 'coordinates';
+  if (
+    cachedByPlaceId &&
+    hasUsablePlaceCoords(cachedByPlaceId) &&
+    purpose !== 'reviews'
+  ) {
     logPlaceMetadataCache('google_getplace_skipped_cache_hit', {
       placeId: normalizedPlaceId,
       reason: 'supabase_place_id_cache',

@@ -352,6 +352,100 @@ describe('/api/parking-reviews route', () => {
     jest.restoreAllMocks();
   });
 
+  test('review lookup does not stop at coordinate-only place-id cache records', async () => {
+    process.env.DISABLE_GOOGLE_PLACE_REVIEWS = 'false';
+    process.env.DISABLE_GOOGLE_PLACES = 'false';
+    process.env.MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACE_REVIEWS_PER_REQUEST = '1';
+    process.env.MAX_GOOGLE_PLACES_CALLS_PER_REQUEST = '2';
+    process.env.GOOGLE_MAPS_SERVER_API_KEY = 'test-key';
+
+    const { db } = await import('../lib/db/client');
+    const queryMock = db.query as jest.Mock;
+    queryMock.mockImplementation(async (sql: unknown, params?: unknown[]) => {
+      if (
+        String(sql).includes('where google_place_id = $1') &&
+        params?.[0] === 'place-cached'
+      ) {
+        return {
+          rows: [
+            {
+              cache_key: 'SEA|1935-2nd-ave-lot',
+              airport_code: 'SEA',
+              lot_name: '1935 2nd Ave. Lot',
+              normalized_lot_name: '1935 2nd Ave Lot',
+              lot_address: '161 Virginia St., Seattle, WA 98101',
+              google_place_id: 'place-cached',
+              google_place_name: '1935 2nd Ave. Lot',
+              google_formatted_address: '161 Virginia St., Seattle, WA 98101',
+              google_maps_uri: 'https://maps.example/place-cached',
+              rating: 3.6,
+              review_count: 32,
+              reviews_json: [],
+              lat: 47.611,
+              lng: -122.342,
+              last_fetched_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              expires_at: new Date(Date.now() + 86400000).toISOString(),
+            },
+          ],
+        };
+      }
+
+      return { rows: [] };
+    });
+
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('places.googleapis.com/v1/places/place-cached')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'place-cached',
+            displayName: { text: '1935 2nd Ave. Lot' },
+            formattedAddress: '161 Virginia St., Seattle, WA 98101',
+            location: { latitude: 47.611, longitude: -122.342 },
+            rating: 3.6,
+            userRatingCount: 32,
+            googleMapsUri: 'https://maps.example/place-cached',
+            reviews: [
+              {
+                name: 'places/place-cached/reviews/1',
+                authorAttribution: { displayName: 'Dana' },
+                rating: 4,
+                relativePublishTimeDescription: '3 weeks ago',
+                text: { text: 'Simple lot near Pike Place.' },
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      return { ok: false, json: async () => ({}) } as Response;
+    });
+
+    const cacheModule = await import('../lib/parking/googlePlacesCache');
+    const result = await runWithPlacesRequestBudget('parking-reviews:coord-cache', async () =>
+      cacheModule.resolveParkingGoogleReviews({
+        googlePlaceId: 'place-cached',
+        lotName: '1935 2nd Ave. Lot',
+        lotAddress: '161 Virginia St., Seattle, WA 98101',
+        airportCode: 'SEA',
+      }),
+    );
+
+    expect(result?.reviews).toHaveLength(1);
+    expect(result?.reviews[0]?.text).toBe('Simple lot near Pike Place.');
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('places.googleapis.com/v1/places/place-cached'),
+      ),
+    ).toHaveLength(1);
+
+    fetchMock.mockRestore();
+    queryMock.mockImplementation(async () => ({ rows: [] }));
+  });
+
   test('cap exceeded returns demo limit message', async () => {
     process.env.DISABLE_GOOGLE_PLACE_REVIEWS = 'false';
     process.env.DISABLE_GOOGLE_PLACES = 'false';

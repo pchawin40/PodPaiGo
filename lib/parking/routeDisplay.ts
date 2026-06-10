@@ -48,6 +48,8 @@ import {
   resolveParkingDriveMinutesDetailed,
   buildParkingDriveContextFromOption,
   formatDriveToLotMinutes,
+  formatRouteDisplayMinutes,
+  resolveParkingDriveOrRouteTimeForDisplay,
   resolveWalkToDestinationMinutes,
   type ParkingDriveContext,
 } from './routeMinutes';
@@ -62,6 +64,8 @@ export function parkingTimeBreakdown(
   label: string;
   totalMinutes: number;
   parts: Array<{ label: string; minutes: number; display?: string }>;
+  isPartial?: boolean;
+  totalLabel?: string;
 } {
   const explicitTotal =
     typeof option.duration === 'number' && option.duration > 0 ? option.duration : null;
@@ -84,24 +88,43 @@ export function parkingTimeBreakdown(
 
   const resolvedContext = context ?? buildParkingDriveContextFromOption(option);
   const driveResolution = resolveParkingDriveMinutesDetailed(option, resolvedContext);
+  const routeDisplayResolution = resolveParkingDriveOrRouteTimeForDisplay(option, resolvedContext);
+  const routeDisplayIsFallback =
+    routeDisplayResolution.source === 'fallback-route-time' ||
+    routeDisplayResolution.source === 'fallback-total-time';
   const drive = driveResolution.minutes;
-  const driveDisplay = formatDriveToLotMinutes(drive, driveResolution.source);
+  const driveDisplay = routeDisplayIsFallback
+    ? formatRouteDisplayMinutes(routeDisplayResolution.minutes, routeDisplayResolution.source)
+    : formatDriveToLotMinutes(drive, driveResolution.source);
   const park = typeof option.parkingBufferMinutes === 'number' ? option.parkingBufferMinutes : 0;
 
   if (tripContext === 'city_destination_trip') {
     const walkToDestination = resolveWalkToDestinationMinutes(option);
+    const hasConfirmedDrive =
+      driveResolution.source === 'same-place' ||
+      (driveResolution.source != null && drive > 0);
+    const isPartial = !routeDisplayIsFallback && !hasConfirmedDrive;
 
-    const parts = [
-      {
-        label: 'Drive to lot',
-        minutes: drive,
-        display: driveDisplay,
-      },
-      ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
-      walkToDestination != null
-        ? { label: 'Walk to destination', minutes: walkToDestination }
-        : { label: 'Walk to destination', minutes: 8, display: 'Walk time not confirmed' },
-    ];
+    const parts =
+      routeDisplayIsFallback && routeDisplayResolution.minutes != null
+        ? [
+            {
+              label: routeDisplayResolution.label,
+              minutes: routeDisplayResolution.minutes,
+              display: driveDisplay,
+            },
+          ]
+        : [
+            {
+              label: 'Drive to lot',
+              minutes: drive,
+              display: isPartial ? 'Check route' : driveDisplay,
+            },
+            ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
+            walkToDestination != null
+              ? { label: 'Walk to destination', minutes: walkToDestination }
+              : { label: 'Walk to destination', minutes: 8, display: 'Walk time not confirmed' },
+          ];
 
     const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
 
@@ -111,6 +134,8 @@ export function parkingTimeBreakdown(
         .join(' + '),
       totalMinutes,
       parts,
+      isPartial,
+      totalLabel: isPartial ? `${formatMinutes(totalMinutes)} partial` : `${formatMinutes(totalMinutes)} total`,
     };
   }
 
@@ -137,32 +162,41 @@ export function parkingTimeBreakdown(
         ? 5
         : 0;
 
-  const parts = [
-    {
-      label: 'Drive to lot',
-      minutes: drive,
-      display: driveDisplay,
-    },
-    ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
-    ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
-    ...(transfer > 0
+  const parts =
+    routeDisplayIsFallback && routeDisplayResolution.minutes != null
       ? [
-        {
-          label:
-            option.transferType === 'shuttle'
-              ? 'Shuttle'
-              : option.transferType === 'transit'
-                ? 'Transit to terminal'
-              : option.transferType === 'airport-garage'
-                ? 'Garage to terminal'
-                : 'Walk to terminal',
-          minutes: transfer,
-        },
-      ]
-      : []),
-    ...(walk > 0 ? [{ label: 'Walk inside airport', minutes: walk }] : []),
-    ...(risk > 0 ? [{ label: 'Buffer/risk', minutes: risk }] : []),
-  ];
+          {
+            label: routeDisplayResolution.label,
+            minutes: routeDisplayResolution.minutes,
+            display: driveDisplay,
+          },
+        ]
+      : [
+          {
+            label: 'Drive to lot',
+            minutes: drive,
+            display: driveDisplay,
+          },
+          ...(park > 0 ? [{ label: 'Park/check-in', minutes: park }] : []),
+          ...(shuttleWait > 0 ? [{ label: 'Shuttle wait', minutes: shuttleWait }] : []),
+          ...(transfer > 0
+            ? [
+                {
+                  label:
+                    option.transferType === 'shuttle'
+                      ? 'Shuttle'
+                      : option.transferType === 'transit'
+                        ? 'Transit to terminal'
+                        : option.transferType === 'airport-garage'
+                          ? 'Garage to terminal'
+                          : 'Walk to terminal',
+                  minutes: transfer,
+                },
+              ]
+            : []),
+          ...(walk > 0 ? [{ label: 'Walk inside airport', minutes: walk }] : []),
+          ...(risk > 0 ? [{ label: 'Buffer/risk', minutes: risk }] : []),
+        ];
 
   const totalMinutes = parts.reduce((sum, p) => sum + p.minutes, 0);
 
@@ -172,6 +206,7 @@ export function parkingTimeBreakdown(
       .join(' + '),
     totalMinutes,
     parts,
+    totalLabel: `${formatMinutes(totalMinutes)} total`,
   };
 }
 

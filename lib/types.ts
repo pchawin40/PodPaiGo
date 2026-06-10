@@ -398,7 +398,41 @@ export type ParkingOption = {
   originToParkingMinutes?: number;
   /** Same as originToParkingMinutes; used by route enrichment. */
   routeToParkingMinutes?: number;
+  /** Same origin→lot drive duration exposed for city/general-trip UI consumers. */
+  driveToLotMinutes?: number;
+  routeLegs?: {
+    originToLot?: {
+      durationMinutes?: number;
+      distanceMiles?: number;
+      source?: string;
+    };
+    driveToLot?: {
+      durationMinutes?: number;
+      distanceMiles?: number;
+      source?: string;
+    };
+  };
+  routeTime?: {
+    durationMinutes?: number | string;
+    driveMinutes?: number | string;
+    driveToLotMinutes?: number | string;
+  };
+  parkingRoute?: {
+    durationMinutes?: number | string;
+    driveToLotMinutes?: number | string;
+  };
+  trafficEstimate?: {
+    duration?: number | string;
+  };
   driveMinutes?: number;
+  driveTimeMinutes?: number | string;
+  durationMinutes?: number | string;
+  totalMinutes?: number | string;
+  totalTripMinutes?: number | string;
+  routeDurationMinutes?: number | string;
+  routeMinutes?: number | string;
+  routeToLotMinutes?: number | string;
+  drivingMinutes?: number | string;
   /** Live or estimated origin→lot drive duration in minutes. */
   duration?: number;
   walkToDestinationMinutes?: number;
@@ -428,6 +462,17 @@ export type ParkingOption = {
   featureConfidence?: Partial<Record<ParkingFeatureKey, ParkingFeatureConfidence>>;
   reviewScore?: number; // e.g. from Google reviews, 0-5
   reviewCount?: number; // number of reviews, for context with reviewScore
+  googleRating?: number;
+  googleReviewCount?: number;
+  rating?: number;
+  placeRating?: number;
+  userRatingsTotal?: number;
+  reviewsSummary?: {
+    rating?: number;
+    reviewScore?: number;
+    reviewCount?: number;
+    userRatingsTotal?: number;
+  };
   googleReviews?: ParkingGoogleReview[];
   googleReviewsFetchedAt?: string;
   googleReviewsExpiresAt?: string;

@@ -36,21 +36,53 @@ function buildReviewResponse(
   place: Awaited<ReturnType<typeof getCachedParkingGoogleReviews>>,
   source: string,
   message?: string,
+  request?: Pick<ReviewLookupArgs, 'placeId' | 'name'>,
 ) {
   const config = getEffectiveGooglePlacesConfig();
+  const reviews = place?.reviews ?? [];
+  const placeId = place?.googlePlaceId;
+  const googleMapsUri = place?.googleMapsUri;
+  const liveFetchEnabled = config.liveReviewsEnabled && !isGooglePlaceReviewsLiveBlocked();
+
+  if (process.env.NODE_ENV !== 'test') {
+    console.log('[parking-reviews debug]', {
+      placeId: request?.placeId ?? placeId ?? null,
+      name: request?.name ?? place?.googlePlaceName ?? place?.lotName ?? null,
+      resolvedPlaceId: placeId ?? null,
+      resolvedName: place?.googlePlaceName || place?.lotName || null,
+      rating: place?.rating ?? null,
+      reviewCount: place?.reviewCount ?? null,
+      reviewsLength: reviews.length,
+      firstReview: reviews[0] ?? null,
+      source,
+      safeMode: !liveFetchEnabled,
+      liveFetchEnabled,
+    });
+  }
 
   return NextResponse.json({
-    reviews: place?.reviews ?? [],
+    reviews,
     source,
     message,
     liveReviewsEnabled: config.liveReviewsEnabled,
+    placeId,
+    googlePlaceId: placeId,
+    rating: place?.rating,
+    reviewCount: place?.reviewCount,
+    googleMapsUri,
+    googleMapsUrl: googleMapsUri,
+    attribution: 'Google Maps',
     place: place
       ? {
-          googlePlaceId: place.googlePlaceId,
+          googlePlaceId: placeId,
+          placeId,
           name: place.googlePlaceName || place.lotName,
           rating: place.rating,
           reviewCount: place.reviewCount,
           address: place.googleFormattedAddress || place.lotAddress,
+          googleMapsUri,
+          googleMapsUrl: googleMapsUri,
+          attribution: 'Google Maps',
         }
       : null,
   });
@@ -92,10 +124,11 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
             cached,
             'supabase-cache',
             SHOWING_CACHED_PROVIDER_DATA_MESSAGE,
+            args,
           );
         }
 
-        return buildReviewResponse(cached, 'disabled', GOOGLE_REVIEWS_SAFE_MODE_MESSAGE);
+        return buildReviewResponse(cached, 'disabled', GOOGLE_REVIEWS_SAFE_MODE_MESSAGE, args);
       }
 
       const place = await resolveParkingGoogleReviews(lookupArgs);
@@ -117,6 +150,7 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
           place.source === 'supabase-cache' || place.source === 'stale-fallback'
             ? SHOWING_CACHED_PROVIDER_DATA_MESSAGE
             : undefined,
+          args,
         );
       }
 
@@ -126,7 +160,7 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
           lotName: args.name,
           reason: 'no_listing_matched',
         });
-        return buildReviewResponse(place, 'no-listing', GOOGLE_LISTING_NOT_FOUND_MESSAGE);
+        return buildReviewResponse(place, 'no-listing', GOOGLE_LISTING_NOT_FOUND_MESSAGE, args);
       }
 
       if (budget && budget.blocked > 0) {
@@ -136,7 +170,7 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
           googlePlaceId: place.googlePlaceId,
           reason: 'cap_exceeded',
         });
-        return buildReviewResponse(place, 'cap-exceeded', GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE);
+        return buildReviewResponse(place, 'cap-exceeded', GOOGLE_REVIEWS_CAP_EXCEEDED_MESSAGE, args);
       }
 
       debugLog('review_match_failed', {
@@ -145,7 +179,7 @@ async function handleReviewLookup(args: ReviewLookupArgs) {
         googlePlaceId: place.googlePlaceId,
         reason: 'no_reviews_available',
       });
-      return buildReviewResponse(place, 'no-reviews', GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE);
+      return buildReviewResponse(place, 'no-reviews', GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE, args);
     },
     { route: '/api/parking-reviews' },
   );

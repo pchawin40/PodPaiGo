@@ -19,24 +19,70 @@ type ReviewsApiResponse = {
     source?: string;
     message?: string;
     liveReviewsEnabled?: boolean;
+    placeId?: string;
+    googlePlaceId?: string;
+    rating?: number;
+    reviewCount?: number;
+    googleMapsUri?: string;
+    googleMapsUrl?: string;
     place?: {
+        placeId?: string;
         googlePlaceId?: string;
         name?: string;
         rating?: number;
         reviewCount?: number;
         address?: string;
+        googleMapsUri?: string;
+        googleMapsUrl?: string;
     } | null;
 };
+
+const GOOGLE_REVIEW_SUMMARY_ONLY_MESSAGE =
+    "Google rating summary is available, but individual review text was not returned for this listing.";
 
 function stars(rating?: number) {
     const value = Math.round(rating ?? 0);
     return "★★★★★".slice(0, value) + "☆☆☆☆☆".slice(0, 5 - value);
 }
 
-function googleReviewsUrl(placeId?: string) {
+function googleReviewsUrl(placeId?: string, googleMapsUri?: string) {
+    if (googleMapsUri) return googleMapsUri;
     if (!placeId) return null;
 
     return `https://www.google.com/maps/search/?api=1&query=Google%20reviews&query_place_id=${encodeURIComponent(placeId)}`;
+}
+
+function reviewerInitials(review: ParkingGoogleReview): string {
+    const name = review.displayName || review.authorName || "Google reviewer";
+    const parts = name
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+    if (parts.length >= 2) {
+        return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+
+    return (parts[0]?.[0] || "G").toUpperCase();
+}
+
+const REVIEWER_AVATAR_STYLES = [
+    "border-slate-700/60 bg-gradient-to-br from-slate-900 to-blue-700 text-slate-50",
+    "border-indigo-700/60 bg-gradient-to-br from-indigo-950 to-cyan-700 text-indigo-50",
+    "border-blue-700/60 bg-gradient-to-br from-blue-950 to-teal-700 text-blue-50",
+    "border-violet-700/60 bg-gradient-to-br from-violet-950 to-slate-700 text-violet-50",
+    "border-emerald-700/60 bg-gradient-to-br from-slate-900 to-emerald-700 text-emerald-50",
+];
+
+function reviewerAvatarStyle(review: ParkingGoogleReview): string {
+    const name = review.displayName || review.authorName || review.id || "Google reviewer";
+    let hash = 0;
+
+    for (let index = 0; index < name.length; index += 1) {
+        hash = (hash * 31 + name.charCodeAt(index)) >>> 0;
+    }
+
+    return REVIEWER_AVATAR_STYLES[hash % REVIEWER_AVATAR_STYLES.length];
 }
 
 function parkingReviewKey(parking: ParkingOption | null, airportCode?: string | null): string {
@@ -157,16 +203,46 @@ export default function ParkingReviewsModal({
 
                 if (cancelled) return;
 
+                if (process.env.NODE_ENV !== "test") {
+                    console.log("[ParkingReviewsModal data]", {
+                        placeId:
+                            data?.placeId ||
+                            data?.googlePlaceId ||
+                            data?.place?.placeId ||
+                            data?.place?.googlePlaceId ||
+                            parking.googlePlaceId ||
+                            null,
+                        rating: data?.rating ?? data?.place?.rating ?? null,
+                        reviewCount: data?.reviewCount ?? data?.place?.reviewCount ?? null,
+                        reviewsLength: data?.reviews?.length ?? 0,
+                        data,
+                    });
+                }
+
                 const enriched: ParkingOption = {
                     ...parking,
-                    googlePlaceId: data.place?.googlePlaceId || parking.googlePlaceId,
+                    googlePlaceId:
+                        data.place?.googlePlaceId ||
+                        data.googlePlaceId ||
+                        data.placeId ||
+                        parking.googlePlaceId,
+                    googleMapsUri:
+                        data.place?.googleMapsUri ||
+                        data.place?.googleMapsUrl ||
+                        data.googleMapsUri ||
+                        data.googleMapsUrl ||
+                        parking.googleMapsUri,
                     reviewScore:
-                        typeof data.place?.rating === "number"
-                            ? data.place.rating
+                        typeof data.rating === "number"
+                            ? data.rating
+                            : typeof data.place?.rating === "number"
+                              ? data.place.rating
                             : parking.reviewScore,
                     reviewCount:
-                        typeof data.place?.reviewCount === "number"
-                            ? data.place.reviewCount
+                        typeof data.reviewCount === "number"
+                            ? data.reviewCount
+                            : typeof data.place?.reviewCount === "number"
+                              ? data.place.reviewCount
                             : parking.reviewCount,
                     googleReviews: data.reviews?.length ? data.reviews : parking.googleReviews,
                 };
@@ -200,6 +276,9 @@ export default function ParkingReviewsModal({
         reviewSource === "supabase-cache" || reviewSource === "stale-fallback"
             ? SHOWING_CACHED_PROVIDER_DATA_MESSAGE
             : null;
+    const hasRatingSummary =
+        typeof resolvedParking.reviewScore === "number" ||
+        (typeof resolvedParking.reviewCount === "number" && resolvedParking.reviewCount > 0);
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 px-4">
@@ -306,7 +385,20 @@ export default function ParkingReviewsModal({
                         sortedReviews.length === 0 &&
                         reviewSource !== "disabled" &&
                         reviewSource !== "cap-exceeded" &&
-                        reviewSource !== "no-listing" && (
+                        reviewSource !== "no-listing" &&
+                        hasRatingSummary && (
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                            {GOOGLE_REVIEW_SUMMARY_ONLY_MESSAGE}
+                        </div>
+                    )}
+
+                    {!loadingGoogleData &&
+                        resolvedParking.googlePlaceId &&
+                        sortedReviews.length === 0 &&
+                        reviewSource !== "disabled" &&
+                        reviewSource !== "cap-exceeded" &&
+                        reviewSource !== "no-listing" &&
+                        !hasRatingSummary && (
                         <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
                             {reviewMessage || GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE}
                         </div>
@@ -317,17 +409,12 @@ export default function ParkingReviewsModal({
                             {sortedReviews.map((review) => (
                                 <article key={review.id} className="border-b border-zinc-200 pb-6">
                                     <div className="flex items-start gap-3">
-                                        {review.profilePhotoUrl ? (
-                                            <img
-                                                src={review.profilePhotoUrl}
-                                                alt=""
-                                                className="h-10 w-10 rounded-full object-cover"
-                                            />
-                                        ) : (
-                                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200 text-sm font-bold text-zinc-700">
-                                                {(review.displayName || review.authorName || "G").slice(0, 1)}
-                                            </div>
-                                        )}
+                                        <div
+                                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-sm font-bold shadow-sm ring-1 ring-black/5 ${reviewerAvatarStyle(review)}`}
+                                            aria-hidden="true"
+                                        >
+                                            {reviewerInitials(review)}
+                                        </div>
 
                                         <div className="min-w-0 flex-1">
                                             <div className="font-semibold text-zinc-900">
@@ -360,7 +447,10 @@ export default function ParkingReviewsModal({
                     <GoogleMapsAttribution className="text-xs text-zinc-600" />
                     {resolvedParking.googlePlaceId ? (
                         <a
-                            href={googleReviewsUrl(resolvedParking.googlePlaceId) ?? "#"}
+                            href={googleReviewsUrl(
+                                resolvedParking.googlePlaceId,
+                                resolvedParking.googleMapsUri,
+                            ) ?? "#"}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex text-xs font-semibold text-zinc-800 underline decoration-zinc-400 underline-offset-2"

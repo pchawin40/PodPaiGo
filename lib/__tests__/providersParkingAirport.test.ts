@@ -1,4 +1,8 @@
-import { LiveTrafficProvider, MockProvider } from '../providers';
+import {
+  LiveTrafficProvider,
+  MockProvider,
+  PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE,
+} from '../providers';
 import { mockParkingOptions } from '../../data/mockData';
 import { ParkingOption, TrafficEstimate } from '../types';
 import { aggregateAirportParkingOptions } from '../providers/parking/aggregator';
@@ -186,6 +190,166 @@ describe('MockProvider airport parking pipeline', () => {
     expect(near?.transferToTerminalMinutes).toBe(3);
     expect(far?.walkingMinutes).toBe(17);
     expect(far?.transferToTerminalMinutes).toBe(17);
+  });
+
+  it('general-trip enrichment attaches origin-to-lot drive fields for city parking', async () => {
+    const originalLimit = process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT;
+    process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT = '5';
+    (getDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
+      destinationLot({
+        id: 'securities-building-garage',
+        name: 'Securities Building Garage (Lot #1) - Weekday Evening Rates',
+        address: '1922 3rd Ave., Seattle, WA 98101',
+        normalizedAddress: '1922 3rd Ave., Seattle, WA 98101',
+        routeDestination: '1922 3rd Ave., Seattle, WA 98101',
+        lat: 47.6115,
+        lng: -122.3406,
+        walkingMinutes: 3,
+        transferToTerminalMinutes: 3,
+      }),
+    ]);
+
+    try {
+      const liveTraffic = new LiveTrafficProvider();
+      jest.spyOn(liveTraffic, 'geocodeAddress').mockImplementation(async (address) => {
+        if (address === 'Monroe, WA') return { lat: 47.8554, lng: -121.9709 };
+        return null;
+      });
+      const routeSpy = jest
+        .spyOn(liveTraffic, 'getTrafficEstimate')
+        .mockImplementation(async (_origin, _destination, _dateTime, destinationLatLng, routeContext) => {
+          if (routeContext?.routePurpose === PARKING_ORIGIN_TO_LOT_ROUTE_PURPOSE) {
+            expect(destinationLatLng).toEqual({ lat: 47.6115, lng: -122.3406 });
+            return {
+              route: 'origin-to-lot',
+              duration: 14,
+              distanceMeters: 3219,
+              congestion: 'medium',
+              trustStatus: 'live',
+              sourceName: 'Google Routes API',
+              lastUpdated: '2026-06-01T18:00:00.000Z',
+              assumptions: [],
+            } satisfies TrafficEstimate;
+          }
+
+          return {
+            route: 'origin-to-destination',
+            duration: 20,
+            congestion: 'medium',
+            trustStatus: 'live',
+            sourceName: 'Google Routes API',
+            lastUpdated: '2026-06-01T18:00:00.000Z',
+            assumptions: [],
+          } satisfies TrafficEstimate;
+        });
+
+      const provider = new MockProvider();
+      (provider as unknown as { trafficProvider: LiveTrafficProvider }).trafficProvider = liveTraffic;
+
+      const parking = await provider.getParkingOptions(
+        'Monroe, WA',
+        'Downtown Seattle',
+        '2026-06-01T18:00:00.000Z',
+        180,
+        {
+          destinationKind: 'downtown',
+          destinationLat: 47.6097,
+          destinationLng: -122.3425,
+        },
+      );
+
+      const lot = parking[0];
+      expect(routeSpy).toHaveBeenCalled();
+      expect(lot?.originToParkingMinutes).toBe(14);
+      expect(lot?.routeToParkingMinutes).toBe(14);
+      expect(lot?.driveToLotMinutes).toBe(14);
+      expect(lot?.routeLegs?.originToLot?.durationMinutes).toBe(14);
+      expect(lot?.routeLegs?.originToLot?.source).toBe('google-routes');
+      expect(lot?.routeLegs?.originToLot?.distanceMiles).toBeCloseTo(2, 1);
+    } finally {
+      if (originalLimit == null) {
+        delete process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT;
+      } else {
+        process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT = originalLimit;
+      }
+    }
+  });
+
+  it('general-trip route enrichment timeout still attaches fallback drive-to-lot fields', async () => {
+    const originalLimit = process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT;
+    const originalRouteTimeout = process.env.PARKING_ROUTE_ENRICH_TIMEOUT_MS;
+    process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT = '5';
+    process.env.PARKING_ROUTE_ENRICH_TIMEOUT_MS = '1';
+    (getDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
+      destinationLot({
+        id: 'securities-building-garage',
+        name: 'Securities Building Garage (Lot #1) - Weekday Evening Rates',
+        address: '1922 3rd Ave., Seattle, WA 98101',
+        normalizedAddress: '1922 3rd Ave., Seattle, WA 98101',
+        routeDestination: '1922 3rd Ave., Seattle, WA 98101',
+        lat: 47.6115,
+        lng: -122.3406,
+        walkingMinutes: 3,
+        transferToTerminalMinutes: 3,
+      }),
+    ]);
+
+    try {
+      const liveTraffic = new LiveTrafficProvider();
+      jest.spyOn(liveTraffic, 'geocodeAddress').mockImplementation(async (address) => {
+        if (address === 'Monroe, WA') return { lat: 47.8554, lng: -121.9709 };
+        return null;
+      });
+      jest
+        .spyOn(liveTraffic, 'getTrafficEstimate')
+        .mockImplementation(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return {
+            route: 'late-origin-to-lot',
+            duration: 14,
+            distanceMeters: 3219,
+            congestion: 'medium',
+            trustStatus: 'live',
+            sourceName: 'Google Routes API',
+            lastUpdated: '2026-06-01T18:00:00.000Z',
+            assumptions: [],
+          } satisfies TrafficEstimate;
+        });
+
+      const provider = new MockProvider();
+      (provider as unknown as { trafficProvider: LiveTrafficProvider }).trafficProvider = liveTraffic;
+
+      const parking = await provider.getParkingOptions(
+        'Monroe, WA',
+        'Downtown Seattle',
+        '2026-06-01T18:00:00.000Z',
+        180,
+        {
+          destinationKind: 'downtown',
+          destinationLat: 47.6097,
+          destinationLng: -122.3425,
+        },
+      );
+
+      const lot = parking[0];
+      expect(lot?.driveToLotMinutes).toBeGreaterThan(0);
+      expect(lot?.routeLegs?.originToLot?.durationMinutes).toBe(lot?.driveToLotMinutes);
+      expect(lot?.routeLegs?.originToLot?.source).toBe('fallback');
+      expect(lot?.originDriveSource).toBe('haversine-estimated');
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    } finally {
+      if (originalLimit == null) {
+        delete process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT;
+      } else {
+        process.env.PARKING_INITIAL_LIVE_ROUTE_LIMIT = originalLimit;
+      }
+      if (originalRouteTimeout == null) {
+        delete process.env.PARKING_ROUTE_ENRICH_TIMEOUT_MS;
+      } else {
+        process.env.PARKING_ROUTE_ENRICH_TIMEOUT_MS = originalRouteTimeout;
+      }
+    }
   });
 
   it('general-trip enrichment does not add airport transfer defaults when destination walk is unknown', async () => {

@@ -161,6 +161,220 @@ describe('ParkingSmartPick fallback', () => {
     );
   });
 
+  test('normalizes Google rating aliases and does not duplicate the review chip', () => {
+    const routeAvailableParking = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      googlePlaceId: 'places/jiffy',
+      googleRating: 4.7,
+      googleReviewCount: 981,
+    } as ParkingOption & {
+      googleRating: number;
+      googleReviewCount: number;
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="best"
+        onShowReviews={jest.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('★ 4.7 · 981 reviews')).toHaveLength(1);
+  });
+
+  test('renders one Google rating chip for general-trip parking when rating data exists', () => {
+    const cityTripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Downtown Seattle',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '18:00',
+    };
+    const cityParking = {
+      ...routeUnavailableParking,
+      id: 'securities-building-garage',
+      name: 'Securities Building Garage (Lot #1) - Weekday Evening Rates',
+      serviceAirportCode: undefined,
+      type: 'off-airport',
+      sourceName: 'ParkWhiz',
+      bookingProvider: 'ParkWhiz',
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      googlePlaceId: 'places/securities-building-garage',
+      googleRating: 4.4,
+      googleReviewCount: 312,
+      parkingBufferMinutes: 8,
+      walkingMinutes: 3,
+      transferToTerminalMinutes: 3,
+      driveToLotMinutes: 14,
+    } as ParkingOption & {
+      googleRating: number;
+      googleReviewCount: number;
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[cityParking]}
+        selectedOption={cityParking}
+        tripData={cityTripData}
+        sortMode="best"
+        onShowReviews={jest.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('★ 4.4 · 312 reviews')).toHaveLength(1);
+  });
+
+  test('details show fallback route time instead of blank drive-to-lot timing', () => {
+    const cityTripData: TripData = {
+      type: 'general-trip',
+      origin: 'Seattle, WA',
+      destination: 'Downtown Seattle',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '18:00',
+    };
+    const cityParking: ParkingOption = {
+      ...routeUnavailableParking,
+      id: 'skyway-luggage-lot',
+      name: 'Skyway Luggage Employee Lot (Lot #84) - Weekday Evening Rates',
+      serviceAirportCode: undefined,
+      type: 'off-airport',
+      sourceName: 'Test city parking',
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      routeDestination: 'Seattle, WA',
+      transferType: 'walk',
+      transferToTerminalMinutes: undefined,
+      walkingMinutes: undefined,
+      shuttleMinutes: undefined,
+      parkingBufferMinutes: undefined,
+      originToParkingMinutes: undefined,
+      routeToParkingMinutes: undefined,
+      driveMinutes: undefined,
+      duration: undefined,
+      routeTime: { durationMinutes: '15' },
+    } as ParkingOption & { routeTime: { durationMinutes: string } };
+
+    render(
+      <ParkingSmartPick
+        options={[cityParking]}
+        selectedOption={cityParking}
+        tripData={cityTripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.getAllByText('15m total').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Fallback route time').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('15m route').length).toBeGreaterThan(0);
+    expect(screen.queryByText('—')).not.toBeInTheDocument();
+  });
+
+  test('general-trip details show Drive to lot when driveToLotMinutes is attached', () => {
+    const cityTripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Downtown Seattle',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '18:00',
+    };
+    const cityParking: ParkingOption = {
+      ...routeUnavailableParking,
+      id: 'securities-building-garage',
+      name: 'Securities Building Garage (Lot #1) - Weekday Evening Rates',
+      serviceAirportCode: undefined,
+      type: 'off-airport',
+      sourceName: 'ParkWhiz',
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      routeDestination: '1922 3rd Ave., Seattle, WA 98101',
+      address: '1922 3rd Ave., Seattle, WA 98101',
+      transferType: 'walk',
+      parkingBufferMinutes: 8,
+      transferToTerminalMinutes: 3,
+      walkingMinutes: 3,
+      originToParkingMinutes: undefined,
+      routeToParkingMinutes: undefined,
+      driveToLotMinutes: 14,
+      routeLegs: {
+        originToLot: {
+          durationMinutes: 14,
+          distanceMiles: 2,
+          source: 'google-routes',
+        },
+      },
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[cityParking]}
+        selectedOption={cityParking}
+        tripData={cityTripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.getAllByText('14m').length).toBeGreaterThan(0);
+    expect(screen.getByText('Total to destination')).toBeInTheDocument();
+    expect(screen.getAllByText('25m').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Partial to destination')).not.toBeInTheDocument();
+  });
+
+  test('general-trip details label park and walk total as partial when drive is missing', () => {
+    const cityTripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Downtown Seattle',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '18:00',
+    };
+    const cityParking: ParkingOption = {
+      ...routeUnavailableParking,
+      id: 'securities-building-garage',
+      name: 'Securities Building Garage (Lot #1) - Weekday Evening Rates',
+      serviceAirportCode: undefined,
+      type: 'off-airport',
+      sourceName: 'ParkWhiz',
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      routeDestination: '1922 3rd Ave., Seattle, WA 98101',
+      address: '1922 3rd Ave., Seattle, WA 98101',
+      transferType: 'walk',
+      parkingBufferMinutes: 8,
+      transferToTerminalMinutes: 3,
+      walkingMinutes: 3,
+      originToParkingMinutes: undefined,
+      routeToParkingMinutes: undefined,
+      driveToLotMinutes: undefined,
+      driveMinutes: undefined,
+      duration: undefined,
+      lat: undefined,
+      lng: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[cityParking]}
+        selectedOption={cityParking}
+        tripData={cityTripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.getByText('Partial to destination')).toBeInTheDocument();
+    expect(screen.getAllByText('11m partial').length).toBeGreaterThan(0);
+    expect(screen.queryByText('11m total')).not.toBeInTheDocument();
+  });
+
   test('does not show a fake exact walk time for city parking with unknown walk distance', () => {
     const cityTripData: TripData = {
       type: 'general-trip',

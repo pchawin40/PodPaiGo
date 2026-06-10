@@ -12,6 +12,9 @@ import {
   GOOGLE_REVIEWS_SAFE_MODE_MESSAGE,
 } from '@/lib/parking/googlePlacesSafeMode';
 
+const GOOGLE_REVIEW_SUMMARY_ONLY_MESSAGE =
+  'Google rating summary is available, but individual review text was not returned for this listing.';
+
 const baseParking: ParkingOption = {
   id: 'lot-1',
   name: 'Jiffy Airport Parking',
@@ -183,7 +186,51 @@ describe('ParkingReviewsModal status messages', () => {
     });
   });
 
-  test('shows no reviews message when listing exists but reviews are empty', async () => {
+  test('renders review rows when API returns reviews', async () => {
+    mockReviewsFetch({
+      reviews: [
+        {
+          id: 'api-review-1',
+          authorName: 'Priya',
+          displayName: 'Priya S.',
+          rating: 4,
+          relativeTimeDescription: 'a month ago',
+          text: 'Easy entrance and clear signage.',
+          profilePhotoUrl: 'https://example.invalid/broken-google-profile.jpg',
+          source: 'google-places',
+        },
+      ],
+      source: 'google-places',
+      liveReviewsEnabled: true,
+      place: {
+        googlePlaceId: 'place-abc',
+        rating: 4.2,
+        reviewCount: 18,
+      },
+    });
+
+    const { container } = render(
+      <ParkingReviewsModal
+        parking={{
+          ...parkingWithoutPlace,
+          googlePlaceId: 'place-abc',
+        }}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Priya S.')).toBeInTheDocument();
+      expect(screen.getByText('PS')).toBeInTheDocument();
+      expect(screen.getByText('a month ago')).toBeInTheDocument();
+      expect(screen.getByText('Easy entrance and clear signage.')).toBeInTheDocument();
+      expect(container.querySelector('img')).toBeNull();
+    });
+  });
+
+  test('shows summary-only message when listing has rating summary but reviews are empty', async () => {
     mockReviewsFetch({
       reviews: [],
       source: 'no-reviews',
@@ -206,7 +253,36 @@ describe('ParkingReviewsModal status messages', () => {
     );
 
     await waitFor(() => {
+      expect(screen.getByText(GOOGLE_REVIEW_SUMMARY_ONLY_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE)).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'View all reviews on Google Maps' })).toBeInTheDocument();
+    });
+  });
+
+  test('shows no reviews message only when review count and rows are missing or zero', async () => {
+    mockReviewsFetch({
+      reviews: [],
+      source: 'no-reviews',
+      message: GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE,
+      liveReviewsEnabled: true,
+      place: {
+        googlePlaceId: 'place-abc',
+        reviewCount: 0,
+      },
+    });
+
+    render(
+      <ParkingReviewsModal
+        parking={parkingWithoutPlace}
+        open
+        onClose={() => undefined}
+        airportCode="SEA"
+      />,
+    );
+
+    await waitFor(() => {
       expect(screen.getByText(GOOGLE_REVIEWS_NOT_AVAILABLE_MESSAGE)).toBeInTheDocument();
+      expect(screen.queryByText(GOOGLE_REVIEW_SUMMARY_ONLY_MESSAGE)).not.toBeInTheDocument();
     });
   });
 });

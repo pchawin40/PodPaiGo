@@ -9,6 +9,7 @@ import {
   getParkingPriceTier,
   qualifiesForCheapestBadge,
 } from './priceReliability';
+import { getParkingReviewSummary } from './reviewSummary';
 
 export type ParkingPriorityBadge = {
   key: string;
@@ -41,15 +42,16 @@ function ratingReviewSource(option: ParkingOption): 'google' | 'provider' {
 export function getParkingRatingReviewBadgeSemanticKey(
   option: ParkingOption,
 ): string | null {
-  const hasRating = typeof option.reviewScore === 'number';
-  const hasReviewCount = typeof option.reviewCount === 'number';
+  const summary = getParkingReviewSummary(option);
+  const hasRating = typeof summary.reviewScore === 'number';
+  const hasReviewCount = typeof summary.reviewCount === 'number';
   if (!hasRating && !hasReviewCount) return null;
 
   return [
     ratingReviewSource(option),
     'rating-review',
-    hasRating ? option.reviewScore!.toFixed(1) : 'no-rating',
-    hasReviewCount ? String(option.reviewCount) : 'no-count',
+    hasRating ? summary.reviewScore!.toFixed(1) : 'no-rating',
+    hasReviewCount ? String(summary.reviewCount) : 'no-count',
   ].join(':');
 }
 
@@ -92,12 +94,13 @@ function modeHeadlineBadge(
 }
 
 function parkingReviewBadge(option: ParkingOption): ParkingPriorityBadge | null {
-  if (typeof option.reviewScore !== 'number') return null;
+  const summary = getParkingReviewSummary(option);
+  if (typeof summary.reviewScore !== 'number') return null;
   const semanticKey = getParkingRatingReviewBadgeSemanticKey(option);
-  const rating = option.reviewScore.toFixed(1);
+  const rating = summary.reviewScore.toFixed(1);
   const count =
-    typeof option.reviewCount === 'number'
-      ? ` · ${option.reviewCount.toLocaleString()} reviews`
+    typeof summary.reviewCount === 'number'
+      ? ` · ${summary.reviewCount.toLocaleString()} reviews`
       : '';
   return {
     key: 'reviews',

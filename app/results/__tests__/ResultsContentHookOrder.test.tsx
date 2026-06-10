@@ -1929,5 +1929,9 @@ describe('ResultsContent hook order', () => {
         fetchMock.mock.calls.some(([input]) => String(input) === '/api/google-place-match'),
       ).toBe(true);
     });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('★ 4.6 · 128 reviews').length).toBeGreaterThan(0);
+    });
   });
 });

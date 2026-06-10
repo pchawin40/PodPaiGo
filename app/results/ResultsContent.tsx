@@ -36,6 +36,7 @@ import {
 import {
   buildParkingPriorityBadges,
   getParkingRatingReviewBadgeSemanticKey,
+  type ParkingPriorityBadge,
 } from '../../lib/parking/priorityBadges';
 import {
   getSeasonalClimateGuidance,
@@ -68,6 +69,7 @@ import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import DriveRouteOptionsSection from './DriveRouteOptionsSection';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
+import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
 import { buildPointAbModeActions } from './DestinationModeActions';
 import { rankPointAbModes } from '../../lib/parking/pointAbRanking';
 import {
@@ -95,7 +97,14 @@ import AirportSearchPicker from '../components/AirportSearchPicker';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
-import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
+import {
+  buildParkingDriveContextFromOption,
+  formatRouteDisplayMinutes,
+  firstFiniteNumber,
+  resolveParkingDriveMinutesDetailed,
+  resolveParkingDriveOrRouteTimeForDisplay,
+  resolveParkingRouteTimeFallbackForDisplay,
+} from '../../lib/parking/routeMinutes';
 import { getParkingRouteCoordinates } from '../../lib/parking/parkingCoordinates';
 import { getParkingTimeSummaryTitle, getParkingTransferLinkLabel } from '../../lib/parking/parkingLabels';
 import { isCityDestinationTrip, resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
@@ -219,6 +228,10 @@ import { trackEvent } from '../../lib/analytics/trackEvent';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import { PricingLinksSection, type ProviderLinkItem } from './ProviderPricingCards';
 import { resolveWeatherDestinationLabel } from '../../lib/weather/destinationLabel';
+import {
+  getParkingReviewSummary,
+  normalizeParkingReviewSummary,
+} from '../../lib/parking/reviewSummary';
 
 type PriceableOption = {
   id?: string;
@@ -345,6 +358,7 @@ function parkingTimeParts(option: ParkingOption, tripContext = resolveTripParkin
   return {
     total: breakdown.totalMinutes,
     parts: breakdown.parts,
+    isPartial: breakdown.isPartial === true,
   };
 }
 
@@ -467,6 +481,145 @@ function ParkingPhotoReviewListTrace({
   return null;
 }
 
+function ParkingResultDiagnostics({
+  options,
+}: {
+  options: ParkingOption[];
+}) {
+  const loggedKeysRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    options.forEach((option) => {
+      const keyBase = String(option.id || option.name || 'unknown');
+      const summary = getParkingReviewSummary(option);
+
+      if (
+        option.googlePlaceId &&
+        typeof summary.reviewScore !== 'number' &&
+        typeof summary.reviewCount !== 'number'
+      ) {
+        const key = `missing-review:${keyBase}:${option.googlePlaceId}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] missing Google review summary', {
+            id: option.id,
+            name: option.name,
+            googlePlaceId: option.googlePlaceId,
+          });
+        }
+      }
+
+      const driveResolution = resolveParkingDriveMinutesDetailed(
+        option,
+        buildParkingDriveContextFromOption(option),
+      );
+      const fallbackRoute = resolveParkingRouteTimeFallbackForDisplay(option);
+      const aggregateTotal = firstFiniteNumber(
+        option.totalMinutes,
+        option.totalTripMinutes,
+        option.totalOptionMinutes,
+        option.timingBreakdown?.totalOptionMinutes,
+        option.routeTime?.durationMinutes,
+        option.parkingRoute?.durationMinutes,
+        option.duration,
+      );
+
+      if (
+        driveResolution.minutes <= 0 &&
+        driveResolution.source !== 'same-place' &&
+        (fallbackRoute || aggregateTotal != null)
+      ) {
+        const key = `missing-drive:${keyBase}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] missing drive-to-lot while route total exists', {
+            id: option.id,
+            name: option.name,
+            fallbackRouteMinutes: fallbackRoute?.minutes ?? null,
+            totalMinutes: aggregateTotal,
+          });
+        }
+      }
+
+      if (option.routeUnavailableReason) {
+        const key = `route-unavailable:${keyBase}:${option.routeUnavailableReason}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] parking route unavailable', {
+            id: option.id,
+            name: option.name,
+            reason: option.routeUnavailableReason,
+          });
+        }
+      }
+    });
+  }, [options]);
+
+  return null;
+}
+
+function shouldLogRenderedParkingReviewDebug(option: ParkingOption): boolean {
+  return /securities building garage/i.test(option.name || '');
+}
+
+function ParkingRenderedReviewDebug({
+  component,
+  option,
+  badges,
+  canShowReviewAction,
+}: {
+  component: string;
+  option: ParkingOption | null;
+  badges: ParkingPriorityBadge[];
+  canShowReviewAction: boolean;
+}) {
+  const loggedKeysRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') return;
+    if (!option || !shouldLogRenderedParkingReviewDebug(option)) return;
+
+    const key = JSON.stringify({
+      component,
+      id: option.id || option.name,
+      googlePlaceId: option.googlePlaceId ?? null,
+      reviewScore: option.reviewScore ?? null,
+      reviewCount: option.reviewCount ?? null,
+      badges: badges.map((badge) => badge.label),
+    });
+    if (loggedKeysRef.current.has(key)) return;
+    loggedKeysRef.current.add(key);
+
+    const raw = option as ParkingOption & Record<string, unknown>;
+    console.warn('[parking-results] rendered parking option review debug', {
+      component,
+      id: option.id,
+      name: option.name,
+      provider: option.bookingProvider || option.providerSource || option.sourceName,
+      address: option.address || option.normalizedAddress || option.canonicalAddress,
+      googlePlaceId: option.googlePlaceId,
+      googleRating: raw.googleRating,
+      googleReviewCount: raw.googleReviewCount,
+      reviewScore: option.reviewScore,
+      reviewCount: option.reviewCount,
+      placeRating: raw.placeRating,
+      userRatingsTotal: raw.userRatingsTotal,
+      reviewsSummary: raw.reviewsSummary,
+      normalizedReviewSummary: getParkingReviewSummary(option),
+      canShowReviewAction,
+      reviewActionLabel: canShowReviewAction ? parkingReviewLabel(option) : null,
+      badgesGenerated: badges.map((badge) => ({
+        key: badge.key,
+        semanticKey: badge.semanticKey ?? null,
+        label: badge.label,
+      })),
+      availabilityBadge: getParkingAvailabilityDisplay(option).label,
+    });
+  }, [badges, canShowReviewAction, component, option]);
+
+  return null;
+}
+
 function needsParkingGooglePhotoReviewMetadata(option: ParkingOption | null | undefined): boolean {
   if (!option) return true;
   const hasGooglePhoto = Boolean(option.googlePhotoName || option.googlePhotoNames?.length);
@@ -517,12 +670,15 @@ function ParkingTimeSummary({
   }
 
   const breakdown = parkingTimeParts(option, tripContext);
+  const totalDisplay = breakdown.isPartial
+    ? `${formatMiniMinutes(breakdown.total)} partial`
+    : formatMiniMinutes(breakdown.total);
 
   if (compact) {
     return (
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="font-semibold text-zinc-900">
-          Total time {formatMiniMinutes(breakdown.total)}
+          {breakdown.isPartial ? 'Partial time' : 'Total time'} {totalDisplay}
         </span>
 
         {breakdown.parts.slice(0, 3).map((part) => (
@@ -541,10 +697,10 @@ function ParkingTimeSummary({
     <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-xs font-medium text-zinc-500">
-          {getParkingTimeSummaryTitle(tripContext)}
+          {breakdown.isPartial ? 'Partial time breakdown' : getParkingTimeSummaryTitle(tripContext)}
         </span>
         <span className="text-base font-bold text-zinc-900">
-          {formatMiniMinutes(breakdown.total)}
+          {totalDisplay}
         </span>
       </div>
 
@@ -1836,9 +1992,10 @@ function formatTag(tag: string): string {
 }
 
 function hasParkingReviewSource(option: ParkingOption): boolean {
+  const summary = getParkingReviewSummary(option);
   return Boolean(
-    typeof option.reviewScore === 'number' ||
-      typeof option.reviewCount === 'number' ||
+    typeof summary.reviewScore === 'number' ||
+      typeof summary.reviewCount === 'number' ||
       (option.googleReviews || []).some((review) => Boolean(review.text?.trim())) ||
       option.googlePlaceId ||
       option.googleMapsUri,
@@ -1846,16 +2003,18 @@ function hasParkingReviewSource(option: ParkingOption): boolean {
 }
 
 function parkingReviewLabel(option: ParkingOption): string {
-  if (typeof option.reviewScore === 'number') {
-    const rating = option.reviewScore.toFixed(1);
-    if (typeof option.reviewCount === 'number') {
-      return `★ ${rating} · ${option.reviewCount.toLocaleString()} reviews`;
+  const summary = getParkingReviewSummary(option);
+
+  if (typeof summary.reviewScore === 'number') {
+    const rating = summary.reviewScore.toFixed(1);
+    if (typeof summary.reviewCount === 'number') {
+      return `★ ${rating} · ${summary.reviewCount.toLocaleString()} reviews`;
     }
     return `★ ${rating}`;
   }
 
-  if (typeof option.reviewCount === 'number') {
-    return `${option.reviewCount.toLocaleString()} reviews`;
+  if (typeof summary.reviewCount === 'number') {
+    return `${summary.reviewCount.toLocaleString()} reviews`;
   }
 
   return 'Check reviews';
@@ -1950,7 +2109,7 @@ function OptionCard({
 
   const displayParkingOption =
     item.type === 'parking'
-      ? (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption
+      ? normalizeParkingReviewSummary((googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption)
       : null;
 
   const parkingTripContext = tripData ? resolveTripParkingContext(tripData) : 'airport_trip';
@@ -2091,7 +2250,7 @@ function OptionCard({
     : null;
   const parkingReviewActionOption =
     item.type === 'parking'
-      ? ((googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption)
+      ? normalizeParkingReviewSummary((googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption)
       : null;
   const parkingReviewActionSemanticKey =
     parkingReviewActionOption &&
@@ -2099,6 +2258,20 @@ function OptionCard({
     onShowReviews
       ? getParkingRatingReviewBadgeSemanticKey(parkingReviewActionOption)
       : null;
+  const parkingPriorityBadges =
+    item.type === 'parking' && normalizedParkingOption
+      ? buildParkingPriorityBadges({
+          option: (displayParkingOption || normalizedParkingOption) as ParkingOption,
+          mode: sort,
+          tripData,
+          peers: parkingPeerOptions.length > 0
+            ? parkingPeerOptions
+            : [(displayParkingOption || normalizedParkingOption) as ParkingOption],
+          excludeSemanticKeys: [parkingReviewActionSemanticKey],
+        })
+      : [];
+  const canShowParkingReviewAction =
+    Boolean(parkingReviewActionOption && hasParkingReviewSource(parkingReviewActionOption));
 
   const nonParkingPrice =
     item.type === 'rideshare'
@@ -2109,6 +2282,14 @@ function OptionCard({
 
   return (
     <>
+    {item.type === 'parking' ? (
+      <ParkingRenderedReviewDebug
+        component="ResultsContent OptionCard"
+        option={displayParkingOption}
+        badges={parkingPriorityBadges}
+        canShowReviewAction={canShowParkingReviewAction}
+      />
+    ) : null}
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
@@ -2244,15 +2425,7 @@ function OptionCard({
               )}
 
               {item.type === 'parking' && normalizedParkingOption
-                ? buildParkingPriorityBadges({
-                    option: (displayParkingOption || normalizedParkingOption) as ParkingOption,
-                    mode: sort,
-                    tripData,
-                    peers: parkingPeerOptions.length > 0
-                      ? parkingPeerOptions
-                      : [(displayParkingOption || normalizedParkingOption) as ParkingOption],
-                    excludeSemanticKeys: [parkingReviewActionSemanticKey],
-                  }).map((badge) => (
+                ? parkingPriorityBadges.map((badge) => (
                     <div
                       key={badge.key}
                       className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
@@ -2731,7 +2904,7 @@ function OptionCard({
                   </div>
 
                   <div className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                    {formatMinutes(parkingBreakdown.totalMinutes)}
+                    {parkingBreakdown.totalLabel ?? formatMinutes(parkingBreakdown.totalMinutes)}
                   </div>
                 </div>
 
@@ -2743,7 +2916,7 @@ function OptionCard({
                     >
                       <div className="text-zinc-700">{part.label}</div>
                       <div className="font-medium text-zinc-900">
-                        {formatMinutes(part.minutes)}
+                        {part.display ?? formatMinutes(part.minutes)}
                       </div>
                     </div>
                   ))}
@@ -2752,10 +2925,16 @@ function OptionCard({
                 <div className="mt-3 border-t border-zinc-100 pt-3">
                   <div className="flex items-center justify-between text-sm">
                     <div className="font-semibold text-zinc-900">
-                      {parkingTripContext === 'city_destination_trip' ? 'Total to destination' : 'Total to terminal'}
+                      {parkingBreakdown.isPartial
+                        ? parkingTripContext === 'city_destination_trip'
+                          ? 'Partial to destination'
+                          : 'Partial to terminal'
+                        : parkingTripContext === 'city_destination_trip'
+                          ? 'Total to destination'
+                          : 'Total to terminal'}
                     </div>
                     <div className="font-semibold text-zinc-900">
-                      {formatMinutes(parkingBreakdown.totalMinutes)}
+                      {parkingBreakdown.totalLabel ?? formatMinutes(parkingBreakdown.totalMinutes)}
                     </div>
                   </div>
 
@@ -3192,6 +3371,7 @@ function ProviderDropdownSection({
 
 type PointAbDetailTimingLabels = {
   drive?: string;
+  fallbackRoute?: string;
   parkingBuffer?: string;
   walk?: string;
   pickupWait?: string;
@@ -3301,12 +3481,20 @@ function hasParkingPlanTiming(row: PointAbModePresentation | null | undefined): 
   const timing = row?.timing;
   if (!timing) return false;
 
-  return [
+  const hasDetailTiming = [
     timing.driveMinutes,
     timing.parkingBufferMinutes,
     timing.walkToDestinationMinutes,
     timing.pickupWaitMinutes,
   ].some((value) => typeof value === 'number' && Number.isFinite(value));
+
+  if (hasDetailTiming) return true;
+
+  return (
+    typeof timing.totalOptionMinutes === 'number' &&
+    Number.isFinite(timing.totalOptionMinutes) &&
+    timing.totalOptionMinutes > 0
+  );
 }
 
 function ParkingPlanSection({
@@ -3354,13 +3542,40 @@ function ParkingPlanList({ items }: { items: string[] }) {
 function ParkingPlanTiming({
   row,
   timingLabels,
+  parkingOption,
 }: {
   row: PointAbModePresentation | null | undefined;
   timingLabels: PointAbDetailTimingLabels;
+  parkingOption?: ParkingOption | null;
 }) {
   if (!hasParkingPlanTiming(row)) return null;
 
-  const timingRows = pointAbDetailTimingRows(row, timingLabels);
+  let timingRows = pointAbDetailTimingRows(row, timingLabels);
+  const hasDriveRow = timingRows.some(
+    (item) => item.label === (timingLabels.drive || 'Drive route'),
+  );
+
+  if (!hasDriveRow && parkingOption) {
+    const displayTime = resolveParkingDriveOrRouteTimeForDisplay(
+      parkingOption,
+      buildParkingDriveContextFromOption(parkingOption),
+    );
+
+    if (
+      displayTime.minutes != null &&
+      (displayTime.source === 'fallback-route-time' ||
+        displayTime.source === 'fallback-total-time')
+    ) {
+      timingRows = [
+        {
+          label: timingLabels.fallbackRoute || displayTime.label,
+          value: formatRouteDisplayMinutes(displayTime.minutes, displayTime.source),
+        },
+        ...timingRows,
+      ];
+    }
+  }
+
   if (timingRows.length === 0) return null;
 
   return (
@@ -3627,8 +3842,10 @@ function PaidParkingPlanCard({
 
           <ParkingPlanTiming
             row={row}
+            parkingOption={parkingOption}
             timingLabels={{
               drive: 'Drive to lot',
+              fallbackRoute: 'Fallback route time',
               parkingBuffer: 'Park/check-in buffer',
               walk: 'Walk to destination',
               total: 'Total to destination',
@@ -4790,6 +5007,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const priceMatchKeyRef = useRef('');
   const googlePlaceAttemptedKeysRef = useRef(new Set<string>());
   const googlePhotoReviewRetryKeysRef = useRef(new Set<string>());
+  const googleReviewSummaryAttemptedKeysRef = useRef(new Set<string>());
   const googlePlaceInFlightKeysRef = useRef(new Map<string, Promise<ParkingOption>>());
   const recommendationsRequestRef = useRef<RecommendationRequestRef | null>(null);
   const recommendationsLoadedKeyRef = useRef('');
@@ -4836,25 +5054,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     const routeTargetLat = base.routeTargetLat ?? merged.routeTargetLat;
     const routeTargetLng = base.routeTargetLng ?? merged.routeTargetLng;
+    const hasRouteTarget =
+      typeof routeTargetLat === 'number' && typeof routeTargetLng === 'number';
+    const routeTargetMatchesCanonical =
+      hasRouteTarget &&
+      typeof canonicalLat === 'number' &&
+      typeof canonicalLng === 'number' &&
+      Math.abs(canonicalLat - routeTargetLat) <= 0.001 &&
+      Math.abs(canonicalLng - routeTargetLng) <= 0.001;
     const canonicalCoordsChanged =
       coordinateSource === 'google_place' &&
       typeof canonicalLat === 'number' &&
       typeof canonicalLng === 'number' &&
-      typeof routeTargetLat === 'number' &&
-      typeof routeTargetLng === 'number' &&
+      hasRouteTarget &&
       (Math.abs(canonicalLat - routeTargetLat) > 0.01 ||
         Math.abs(canonicalLng - routeTargetLng) > 0.01);
 
-    const gainedGooglePlaceCoords =
-      coordinateSource === 'google_place' &&
-      base.coordinateSource !== 'google_place' &&
-      typeof canonicalLat === 'number' &&
-      typeof canonicalLng === 'number';
-
     const staleDriveMinutes =
       canonicalCoordsChanged ||
-      gainedGooglePlaceCoords ||
-      (coordinateSource === 'google_place' && base.routesUsedCanonicalCoords !== true);
+      (coordinateSource === 'google_place' &&
+        hasRouteTarget &&
+        base.routesUsedCanonicalCoords !== true &&
+        !routeTargetMatchesCanonical);
 
     const driveContext = staleDriveMinutes
       ? {}
@@ -4863,11 +5084,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             merged.originToParkingMinutes ?? base.originToParkingMinutes,
           routeToParkingMinutes:
             merged.routeToParkingMinutes ?? base.routeToParkingMinutes,
+          driveToLotMinutes:
+            merged.driveToLotMinutes ?? base.driveToLotMinutes,
           driveMinutes: merged.driveMinutes ?? base.driveMinutes,
           duration: merged.duration ?? base.duration,
+          routeLegs: merged.routeLegs ?? base.routeLegs,
+          originDriveSource: merged.originDriveSource ?? base.originDriveSource,
         };
 
-    return {
+    return normalizeParkingReviewSummary({
       ...merged,
       ...driveContext,
       providerLat: base.providerLat ?? merged.providerLat ?? enriched.providerLat,
@@ -4898,11 +5123,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       sourceLink: base.sourceLink ?? merged.sourceLink ?? enriched.sourceLink,
       routesUsedCanonicalCoords: staleDriveMinutes
         ? undefined
-        : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
+        : routeTargetMatchesCanonical
+          ? true
+          : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
       routeTargetLat: staleDriveMinutes ? undefined : routeTargetLat,
       routeTargetLng: staleDriveMinutes ? undefined : routeTargetLng,
       ...photoFields,
-    };
+    } as ParkingOption);
   }
 
   function mergeGooglePlaceResultIntoParking(
@@ -5070,6 +5297,90 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       cancelled = true;
     };
   }, [rankedOptions, tripData, googleEnrichedParking, visibleParkingCount]);
+
+  useEffect(() => {
+    if (!rankedOptions.length || !tripData) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
+    if (!shouldDiscoverParkingForTrip(tripData)) return;
+
+    const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
+    const parkingOptions = rankedOptions
+      .filter((item) => item.type === 'parking')
+      .map((item) => item.option as ParkingOption)
+      .map((parking) => googleEnrichedParking[parking.id] || parking)
+      .filter((parking) => {
+        if (!parking.id || !parking.googlePlaceId) return false;
+        const summary = getParkingReviewSummary(parking);
+        if (typeof summary.reviewScore === 'number' || typeof summary.reviewCount === 'number') {
+          return false;
+        }
+
+        const key = `${parking.id}:${parking.googlePlaceId}`;
+        if (googleReviewSummaryAttemptedKeysRef.current.has(key)) return false;
+
+        return true;
+      })
+      .slice(0, Math.min(visibleParkingCount, MAX_GOOGLE_PLACE_MATCH_LIMIT));
+
+    if (parkingOptions.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchReviewSummaries = async () => {
+      await Promise.all(
+        parkingOptions.map(async (parking) => {
+          const key = `${parking.id}:${parking.googlePlaceId}`;
+          googleReviewSummaryAttemptedKeysRef.current.add(key);
+
+          const params = new URLSearchParams();
+          params.set('placeId', parking.googlePlaceId as string);
+          params.set('name', parking.name);
+          if (airportCode) params.set('airport', airportCode);
+          const address = parking.address || parking.normalizedAddress || parking.routeDestination;
+          if (address) params.set('address', address);
+
+          try {
+            const response = await fetch(`/api/parking-reviews?${params.toString()}`);
+            if (!response.ok || cancelled) return;
+
+            const data = await response.json();
+            const place = data?.place || {};
+            const enriched = normalizeParkingReviewSummary({
+              ...parking,
+              googlePlaceId: place.googlePlaceId || parking.googlePlaceId,
+              googlePlaceName: place.name || parking.googlePlaceName,
+              googlePlaceAddress: place.address || parking.googlePlaceAddress,
+              reviewScore:
+                typeof place.rating === 'number' ? place.rating : parking.reviewScore,
+              reviewCount:
+                typeof place.reviewCount === 'number'
+                  ? place.reviewCount
+                  : parking.reviewCount,
+              googleReviews: Array.isArray(data?.reviews)
+                ? data.reviews
+                : parking.googleReviews,
+            } as ParkingOption);
+            const summary = getParkingReviewSummary(enriched);
+
+            if (
+              typeof summary.reviewScore === 'number' ||
+              typeof summary.reviewCount === 'number'
+            ) {
+              mergeGooglePlaceResultIntoParking(parking, enriched);
+            }
+          } catch {
+            // Best-effort card summary. The modal still handles full review lookup.
+          }
+        }),
+      );
+    };
+
+    void fetchReviewSummaries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rankedOptions, tripData, googleEnrichedParking, visibleParkingCount, searchParams]);
 
   useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
@@ -5300,6 +5611,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
         googlePlaceAttemptedKeysRef.current.clear();
         googlePhotoReviewRetryKeysRef.current.clear();
+        googleReviewSummaryAttemptedKeysRef.current.clear();
         googlePlaceInFlightKeysRef.current.clear();
 
         priceMatchKeyRef.current = '';
@@ -6687,7 +6999,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return [...available, ...unavailable];
   })();
   const enrichedParkingDisplayOptions = parkingDisplayOptions.map(
-    (option) => googleEnrichedParking[option.id] || option,
+    (option) => normalizeParkingReviewSummary(googleEnrichedParking[option.id] || option),
   );
   const visibleSmartPickOption =
     enrichedParkingDisplayOptions[0] ||
@@ -8658,6 +8970,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
                 <>
+                  <ParkingResultDiagnostics options={enrichedParkingDisplayOptions} />
                   <ParkingPhotoReviewListTrace
                     stage="final_parking_option_array"
                     options={enrichedParkingDisplayOptions}

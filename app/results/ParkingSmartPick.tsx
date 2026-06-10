@@ -16,6 +16,8 @@ import {
 } from '../../lib/parking/routeDisplay';
 import {
   buildParkingDriveContextFromOption,
+  formatRouteDisplayMinutes,
+  resolveParkingDriveOrRouteTimeForDisplay,
   resolveWalkToDestinationMinutes,
 } from '../../lib/parking/routeMinutes';
 import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
@@ -31,6 +33,7 @@ import {
 import {
   buildParkingPriorityBadges,
   getParkingRatingReviewBadgeSemanticKey,
+  type ParkingPriorityBadge,
 } from '../../lib/parking/priorityBadges';
 import { resolveParkingPriceTrust } from '../../lib/parking/priceTrust';
 import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
@@ -46,11 +49,16 @@ import {
 import ParkingAvailabilityBadge from './ParkingAvailabilityBadge';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { WeatherContext, WeatherImpact } from '@/lib/weather/types';
+import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
 // import ParkingBookingSources from './ParkingBookSources';
 import ParkingLotVisual from './ParkingLotVisual';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
 import { selectBestParkingPhotoFields } from '../../lib/parking/parkingLotPhotoShared';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
+import {
+  getParkingReviewSummary,
+  normalizeParkingReviewSummary,
+} from '../../lib/parking/reviewSummary';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -76,6 +84,12 @@ function formatCompactMinutes(minutes: number): string {
   if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
   if (hours > 0) return `${hours}h`;
   return `${mins}m`;
+}
+
+function formatCompactRouteMinutes(minutes: number | null): string {
+  if (minutes === 0) return '0m';
+  if (minutes == null) return 'Check route';
+  return formatCompactMinutes(minutes);
 }
 
 function formatPriceSource(option: ParkingOption): string {
@@ -222,11 +236,11 @@ function mergeGoogleEnrichedParking(
     googleEnrichedParking[String(option.id || '')] ||
     googleEnrichedParking[String(option.name || '')];
 
-  if (!enriched) return option;
+  if (!enriched) return normalizeParkingReviewSummary(option);
 
   const photoFields = selectBestParkingPhotoFields(enriched, option);
 
-  return {
+  return normalizeParkingReviewSummary({
     ...option,
     ...enriched,
     bookingProvider: option.bookingProvider ?? enriched.bookingProvider,
@@ -236,7 +250,7 @@ function mergeGoogleEnrichedParking(
         : enriched.sourceName ?? option.sourceName,
     sourceLink: option.sourceLink ?? enriched.sourceLink,
     ...photoFields,
-  };
+  } as ParkingOption);
 }
 
 function isAirportTrip(tripData: TripData | null): boolean {
@@ -273,9 +287,10 @@ function parkingReviewSnippets(option: ParkingOption): ParkingGoogleReview[] {
 }
 
 function hasParkingReviewSource(option: ParkingOption): boolean {
+  const summary = getParkingReviewSummary(option);
   return Boolean(
-    typeof option.reviewScore === 'number' ||
-      typeof option.reviewCount === 'number' ||
+    typeof summary.reviewScore === 'number' ||
+      typeof summary.reviewCount === 'number' ||
       parkingReviewSnippets(option).length > 0 ||
       option.googlePlaceId ||
       option.googleMapsUri,
@@ -283,16 +298,18 @@ function hasParkingReviewSource(option: ParkingOption): boolean {
 }
 
 function parkingReviewLabel(option: ParkingOption): string {
-  if (typeof option.reviewScore === 'number') {
-    const rating = option.reviewScore.toFixed(1);
-    if (typeof option.reviewCount === 'number') {
-      return `★ ${rating} · ${option.reviewCount.toLocaleString()} reviews`;
+  const summary = getParkingReviewSummary(option);
+
+  if (typeof summary.reviewScore === 'number') {
+    const rating = summary.reviewScore.toFixed(1);
+    if (typeof summary.reviewCount === 'number') {
+      return `★ ${rating} · ${summary.reviewCount.toLocaleString()} reviews`;
     }
     return `★ ${rating}`;
   }
 
-  if (typeof option.reviewCount === 'number') {
-    return `${option.reviewCount.toLocaleString()} reviews`;
+  if (typeof summary.reviewCount === 'number') {
+    return `${summary.reviewCount.toLocaleString()} reviews`;
   }
 
   return 'Check reviews';
@@ -349,6 +366,68 @@ function ParkingPhotoReviewTrace({
     visualSource.illustrationReason,
     visualSource.selectedVisualSource,
   ]);
+
+  return null;
+}
+
+function shouldLogRenderedReviewDebug(option: ParkingOption): boolean {
+  return /securities building garage/i.test(option.name || '');
+}
+
+function ParkingRenderedReviewDebug({
+  component,
+  option,
+  badges,
+  canShowReviewAction,
+}: {
+  component: string;
+  option: ParkingOption;
+  badges: ParkingPriorityBadge[];
+  canShowReviewAction: boolean;
+}) {
+  const loggedRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') return;
+    if (!shouldLogRenderedReviewDebug(option)) return;
+
+    const key = JSON.stringify({
+      component,
+      id: option.id || option.name,
+      googlePlaceId: option.googlePlaceId ?? null,
+      reviewScore: option.reviewScore ?? null,
+      reviewCount: option.reviewCount ?? null,
+      badges: badges.map((badge) => badge.label),
+    });
+    if (loggedRef.current.has(key)) return;
+    loggedRef.current.add(key);
+
+    const raw = option as ParkingOption & Record<string, unknown>;
+    console.warn('[parking-results] rendered parking option review debug', {
+      component,
+      id: option.id,
+      name: option.name,
+      provider: option.bookingProvider || option.providerSource || option.sourceName,
+      address: option.address || option.normalizedAddress || option.canonicalAddress,
+      googlePlaceId: option.googlePlaceId,
+      googleRating: raw.googleRating,
+      googleReviewCount: raw.googleReviewCount,
+      reviewScore: option.reviewScore,
+      reviewCount: option.reviewCount,
+      placeRating: raw.placeRating,
+      userRatingsTotal: raw.userRatingsTotal,
+      reviewsSummary: raw.reviewsSummary,
+      normalizedReviewSummary: getParkingReviewSummary(option),
+      canShowReviewAction,
+      reviewActionLabel: canShowReviewAction ? parkingReviewLabel(option) : null,
+      badgesGenerated: badges.map((badge) => ({
+        key: badge.key,
+        semanticKey: badge.semanticKey ?? null,
+        label: badge.label,
+      })),
+      availabilityBadge: getParkingAvailabilityDisplay(option).label,
+    });
+  }, [badges, canShowReviewAction, component, option]);
 
   return null;
 }
@@ -704,15 +783,22 @@ export default function ParkingSmartPick({
     : 'airport_trip';
 
   const bestTime = routeTimingUnavailable
-    ? { totalMinutes: 0, parts: [] as Array<{ label: string; minutes: number; display?: string }> }
+    ? {
+        totalMinutes: 0,
+        parts: [] as Array<{ label: string; minutes: number; display?: string }>,
+        isPartial: false,
+      }
     : parkingTimeBreakdown(
         best,
         buildParkingDriveContextFromOption(best),
         parkingTripContext,
       );
+  const bestTimeIsPartial = !routeTimingUnavailable && bestTime.isPartial === true;
   const bestTimeLabel = routeTimingUnavailable
     ? 'Route timing unavailable'
-    : `${formatCompactMinutes(bestTime.totalMinutes)} total`;
+    : bestTimeIsPartial
+      ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
+      : `${formatCompactMinutes(bestTime.totalMinutes)} total`;
 
   const weatherBadge = weatherParkingBadge(best, weatherImpact, weatherContext);
   const parkingReviewActionSemanticKey =
@@ -747,6 +833,10 @@ export default function ParkingSmartPick({
   const canShowReviewAction = hasParkingReviewSource(best);
 
   const bestRouteLinks = parkingRouteLinks(best, tripData);
+  const bestOriginRouteTime = resolveParkingDriveOrRouteTimeForDisplay(
+    best,
+    buildParkingDriveContextFromOption(best),
+  );
   const officialCtas = resolveOfficialSeaGarageCtas(best);
   const handoff = buildParkingProviderHandoff(
     best,
@@ -781,6 +871,12 @@ export default function ParkingSmartPick({
         stage="after_smart_pick_selection"
         option={best}
         stageNote="ParkingSmartPick selected final best parking option"
+      />
+      <ParkingRenderedReviewDebug
+        component="ParkingSmartPick"
+        option={best}
+        badges={modeBadges}
+        canShowReviewAction={canShowReviewAction}
       />
       <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
         {smartPickBadgeLabel}
@@ -1015,7 +1111,11 @@ export default function ParkingSmartPick({
                 </p>
               </div>
               <div className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
-                {routeTimingUnavailable ? 'Route timing unavailable' : `${formatCompactMinutes(bestTime.totalMinutes)} total trip`}
+                {routeTimingUnavailable
+                  ? 'Route timing unavailable'
+                  : bestTimeIsPartial
+                    ? `${formatCompactMinutes(bestTime.totalMinutes)} partial trip`
+                    : `${formatCompactMinutes(bestTime.totalMinutes)} total trip`}
               </div>
             </div>
 
@@ -1027,14 +1127,13 @@ export default function ParkingSmartPick({
                 <div className="mt-2 font-semibold text-foreground">
                   {routeTimingUnavailable
                     ? 'Check route'
-                    : formatCompactMinutes(
-                        best.originToParkingMinutes ??
-                          best.routeToParkingMinutes ??
-                          best.driveMinutes ??
-                          best.duration ??
-                          bestTime.parts[0]?.minutes ??
-                          0,
-                      )}
+                    : bestOriginRouteTime.source === 'fallback-route-time' ||
+                        bestOriginRouteTime.source === 'fallback-total-time'
+                      ? formatRouteDisplayMinutes(
+                          bestOriginRouteTime.minutes,
+                          bestOriginRouteTime.source,
+                        )
+                      : formatCompactRouteMinutes(bestOriginRouteTime.minutes)}
                 </div>
                 <div className="mt-2 text-muted-foreground">
                   {best.address || best.canonicalAddress || best.routeDestination || best.name}
@@ -1151,7 +1250,11 @@ export default function ParkingSmartPick({
                   </div>
 
                   <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-900">
-                    {routeTimingUnavailable ? 'Check route' : formatCompactMinutes(bestTime.totalMinutes)}
+                    {routeTimingUnavailable
+                      ? 'Check route'
+                      : bestTimeIsPartial
+                        ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
+                        : formatCompactMinutes(bestTime.totalMinutes)}
                   </div>
                 </div>
 
@@ -1177,8 +1280,22 @@ export default function ParkingSmartPick({
 
                 <div className="mt-3 border-t border-zinc-200 pt-3">
                   <div className="flex items-center justify-between gap-3 font-semibold text-zinc-900">
-                    <span>{airportTrip ? 'Total to terminal' : 'Total to destination'}</span>
-                    <span>{routeTimingUnavailable ? 'Check route' : formatCompactMinutes(bestTime.totalMinutes)}</span>
+                    <span>
+                      {bestTimeIsPartial
+                        ? airportTrip
+                          ? 'Partial to terminal'
+                          : 'Partial to destination'
+                        : airportTrip
+                          ? 'Total to terminal'
+                          : 'Total to destination'}
+                    </span>
+                    <span>
+                      {routeTimingUnavailable
+                        ? 'Check route'
+                        : bestTimeIsPartial
+                          ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
+                          : formatCompactMinutes(bestTime.totalMinutes)}
+                    </span>
                   </div>
                 </div>
               </div>
