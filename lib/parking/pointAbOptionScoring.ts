@@ -297,35 +297,56 @@ export function selectCanonicalFastest(input: {
   });
 }
 
-export function resolvePaidParkingDriveToLotMinutes(parking: ParkingOption | null): number | null {
-  if (!parking || isParkingRouteUnavailable(parking)) return null;
+export function resolvePaidParkingDriveToLotMinutesDetailed(parking: ParkingOption | null): {
+  minutes: number | null;
+  routeConfirmed: boolean;
+} {
+  if (!parking || isParkingRouteUnavailable(parking)) {
+    return { minutes: null, routeConfirmed: false };
+  }
 
   const resolved = resolveParkingDriveMinutesDetailed(
     parking,
     buildParkingDriveContextFromOption(parking),
   );
-  if (resolved.source) return resolved.minutes;
-
-  if (parking.coordinateSource === 'google_place' && parking.routesUsedCanonicalCoords !== true) {
-    return null;
+  if (resolved.source) {
+    return {
+      minutes: resolved.minutes,
+      routeConfirmed: resolved.source === 'google-routes' || resolved.source === 'same-place',
+    };
   }
 
-  return (
-    finiteMinutes(parking.timingBreakdown?.driveMinutes) ??
-    finiteMinutes(parking.originToParkingMinutes) ??
-    finiteMinutes(parking.routeToParkingMinutes) ??
-    finiteMinutes(parking.driveMinutes) ??
-    finiteMinutes(parking.duration) ??
-    null
-  );
+  if (parking.coordinateSource === 'google_place' && parking.routesUsedCanonicalCoords !== true) {
+    return { minutes: null, routeConfirmed: false };
+  }
+
+  return {
+    minutes:
+      finiteMinutes(parking.timingBreakdown?.driveMinutes) ??
+      finiteMinutes(parking.originToParkingMinutes) ??
+      finiteMinutes(parking.routeToParkingMinutes) ??
+      finiteMinutes(parking.driveMinutes) ??
+      finiteMinutes(parking.duration) ??
+      null,
+    routeConfirmed: false,
+  };
 }
 
-function parkingTimingForScore(parking: ParkingOption): PointToPointTiming | null {
-  const driveToLotMinutes = resolvePaidParkingDriveToLotMinutes(parking);
+export function resolvePaidParkingDriveToLotMinutes(parking: ParkingOption | null): number | null {
+  return resolvePaidParkingDriveToLotMinutesDetailed(parking).minutes;
+}
+
+function parkingTimingForScore(
+  parking: ParkingOption,
+  mainDriveMinutes: number | null,
+): PointToPointTiming | null {
+  const driveToLot = resolvePaidParkingDriveToLotMinutesDetailed(parking);
   return resolvePaidGarageTiming({
-    driveMinutes: driveToLotMinutes,
+    driveMinutes: driveToLot.minutes,
     parkingMinutes: finiteMinutes(parking.timingBreakdown?.totalOptionMinutes ?? parking.totalOptionMinutes),
     parking,
+    mainDriveMinutes,
+    driveRouteConfirmed: driveToLot.routeConfirmed,
   });
 }
 
@@ -409,7 +430,7 @@ export function buildPointAbOptionScoreBreakdowns(
   }
 
   if (bestParking) {
-    const timing = parkingTimingForScore(bestParking);
+    const timing = parkingTimingForScore(bestParking, driveMinutes);
     const paid = isPaidParkingOption(bestParking);
     const routeUnavailable = isParkingRouteUnavailable(bestParking);
     const cost = getParkingTotalPrice(bestParking, input.tripData) ?? bestParking.price ?? null;
@@ -418,6 +439,9 @@ export function buildPointAbOptionScoreBreakdowns(
       routeUnavailable ? 'Origin-to-lot route timing is unavailable.' : '',
       paid ? 'Paid parking requires booking, payment, or garage entry.' : '',
       timing?.driveMinutes == null ? 'Drive-to-lot timing is not confirmed.' : '',
+      timing?.driveSource === 'main-drive-estimate'
+        ? 'Drive-to-lot time is estimated from the main drive route.'
+        : '',
     ].filter(Boolean);
 
     scores.push(

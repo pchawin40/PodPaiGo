@@ -586,6 +586,64 @@ describe('pointAbRanking', () => {
     expect(ranked.fastestMode).toMatchObject({ key: 'rideshare', minutes: 38 });
   });
 
+  test('long-distance rideshare with a distance-band fallback uses the main drive route timing', () => {
+    const longDistanceTrip = {
+      type: 'general-trip' as const,
+      origin: 'Monroe, WA',
+      destination: 'Bend, OR',
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 48 * 60,
+      transportAvailability: 'all' as const,
+    };
+
+    // Rideshare estimate that fell back to an airport distance band: ~72 min
+    // drive even though the real origin→destination drive is 6h+.
+    const fallbackBandRide = {
+      id: 'uber-x',
+      name: 'UberX',
+      price: 120,
+      duration: 77,
+      driveMinutes: 72,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 77,
+      routeConfirmed: false,
+      availability: 80,
+      trustStatus: 'estimated' as const,
+      sourceName: 'Uber estimate model',
+      lastUpdated: '2026-06-01T00:00:00Z',
+      assumptions: [],
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: longDistanceTrip,
+      sort: 'fastest',
+      destinationLabel: longDistanceTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: fallbackBandRide,
+      ridePrice: 120,
+      rideDuration: 77,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 374,
+    });
+
+    const rideshare = ranked.modes.find((mode) => mode.key === 'rideshare');
+    expect(rideshare?.timing?.driveMinutes).toBe(374);
+    expect(rideshare?.timing?.totalOptionMinutes).toBe(379);
+    // Must not show the fake ~1h 17m fallback time for a 6h+ trip.
+    expect(rideshare?.time).toBe('6h 19m');
+  });
+
   test('Point A→B customer parking actions omit verify-signs button styling', () => {
     const actions = buildPointAbModeActions({
       mode: 'destination-customer',
@@ -625,7 +683,7 @@ describe('pointAbRanking', () => {
     });
   });
 
-  test('route-degraded city garage stays visible but does not rank as fastest without fallback', () => {
+  test('route-degraded city garage shows an honest main-drive estimate and does not rank as fastest', () => {
     const routeDegradedGarage = {
       ...parkingOption,
       name: 'Pike Place Market Parking Garage',
@@ -660,10 +718,13 @@ describe('pointAbRanking', () => {
 
     expect(ranked.recommendationMode).not.toBe('parking');
     expect(ranked.fastestMode?.key).not.toBe('parking');
-    expect(parkingMode?.time).toBe('Check route');
+    // Drive 31 + park buffer 8 + walk 5, labeled as an estimate.
+    expect(parkingMode?.time).toBe('44 min est.');
+    expect(parkingMode?.timing?.driveMinutes).toBe(31);
+    expect(parkingMode?.timing?.driveSource).toBe('main-drive-estimate');
     expect(parkingMode?.unavailable).toBe(false);
     expect(parkingMode?.status).toBe('route_needed');
-    expect(parkingMode?.cons).toContain('Route timing unavailable');
+    expect(parkingMode?.cons).toContain('Backup route estimate; open directions to confirm');
   });
 
   test('street meter rules do not suppress destination garage mode', () => {
@@ -998,8 +1059,12 @@ describe('pointAbRanking', () => {
 
     expect(ranked.fastestMode?.key).toBe('destination-customer');
     expect(ranked.recommendationMode).toBe('destination-customer');
-    expect(paidMode?.status).toBe('route_needed');
-    expect(paidMode?.timing?.driveMinutes).toBeNull();
+    // The 13-min aggregate leg is never presented as the trip total; the
+    // chain is re-based on the main drive and labeled as an estimate.
+    expect(paidMode?.time).not.toBe('13 min');
+    expect(paidMode?.time).toBe('25 min est.');
+    expect(paidMode?.timing?.driveMinutes).toBe(12);
+    expect(paidMode?.timing?.driveSource).toBe('main-drive-estimate');
   });
 
   test('Monroe 4-hour street parking rule penalizes longer stays', () => {
@@ -1855,6 +1920,11 @@ describe('pointAbRanking', () => {
     expect(pointAbParkRide?.durationMinutes).toBeNull();
     expect(parkRideMode?.name).toMatch(/not confirmed for this destination/i);
     expect(parkRideMode?.time).toBe('Not estimated');
+    // An unconfirmed/invalid Park & Ride path reads as Unavailable, not
+    // "Not recommended".
+    expect(parkRideMode?.status).toBe('unavailable');
+    expect(parkRideMode?.unavailable).toBe(true);
+    expect(recommendationStatusLabel('unavailable')).toBe('Unavailable');
     expect(parkRideMode?.status).not.toBe('best_pick');
     expect(ranked.recommendationMode).not.toBe('park-ride');
     expect(ranked.displayRecommendationMode).not.toBe('park-ride');
@@ -1865,6 +1935,132 @@ describe('pointAbRanking', () => {
     expect(transitMode?.time).toBe('Check route');
     expect(transitMode?.status).toBe('not_recommended');
     expect(ranked.recommendationMode).toBe('drive');
+  });
+
+  test('Bend-style long-distance paid garage/lot uses the full trip chain, never a 12-min local leg', () => {
+    const bendTrip = {
+      type: 'general-trip' as const,
+      origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+      destination: 'Bend, Oregon',
+      destinationKind: 'general' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+      originLat: 47.847,
+      originLng: -121.978,
+      destinationLat: 44.0582,
+      destinationLng: -121.3153,
+    };
+
+    const {
+      originToParkingMinutes: _originToParkingMinutes,
+      routeToParkingMinutes: _routeToParkingMinutes,
+      ...lotWithoutRouteTiming
+    } = parkingOption;
+    const centennialGarage = {
+      ...lotWithoutRouteTiming,
+      id: 'centennial-garage',
+      name: 'Centennial Garage',
+      price: 12,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData: bendTrip,
+      sort: 'easiest',
+      destinationLabel: bendTrip.destination,
+      noParkingPreferred: false,
+      bestParking: centennialGarage,
+      parkingOptions: [centennialGarage],
+      parkingTotal: 12,
+      parkingMinutes: 12,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 377,
+    });
+
+    const parkingMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    // 12-min local parking leg must never be shown as the trip total.
+    expect(parkingMode?.time).not.toBe('12 min');
+    expect(parkingMode?.time).toMatch(/est\.$/);
+    expect(parkingMode?.timing?.driveMinutes).toBe(377);
+    expect(parkingMode?.timing?.driveSource).toBe('main-drive-estimate');
+    expect(parkingMode?.timing?.totalOptionMinutes ?? 0).toBeGreaterThanOrEqual(377);
+    expect(parkingMode?.cons).toContain(
+      'Drive-to-lot time estimated from your main drive route',
+    );
+
+    // Hero and Compare options read the same corrected timing object.
+    const fastestMinutes = ranked.fastestMode?.minutes ?? null;
+    if (ranked.fastestMode?.key === 'parking' && fastestMinutes != null) {
+      expect(fastestMinutes).toBeGreaterThanOrEqual(377);
+    }
+  });
+
+  test('paid garage with only a local leg and no main drive shows partial timing and cannot win', () => {
+    const {
+      originToParkingMinutes: _originToParkingMinutes,
+      routeToParkingMinutes: _routeToParkingMinutes,
+      ...lotWithoutRouteTiming
+    } = parkingOption;
+    const localLegOnlyLot = {
+      ...lotWithoutRouteTiming,
+      id: 'local-leg-only-lot',
+      name: 'Local Leg Only Lot',
+      price: 12,
+      parkingCategory: 'garage_paid' as const,
+      googleParkingOptions: { paidGarageParking: true },
+    } satisfies ParkingOption;
+
+    const ranked = rankPointAbModes({
+      tripData,
+      sort: 'fastest',
+      destinationLabel: tripData.destination,
+      noParkingPreferred: false,
+      bestParking: localLegOnlyLot,
+      parkingOptions: [localLegOnlyLot],
+      parkingTotal: 12,
+      parkingMinutes: 12,
+      bestRideOption: expensiveRide,
+      ridePrice: 112,
+      rideDuration: 38,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: null,
+    });
+
+    const parkingMode = ranked.modes.find((mode) => mode.key === 'parking');
+
+    expect(parkingMode?.time).toBe('Drive time needed');
+    expect(parkingMode?.status).toBe('route_needed');
+    expect(parkingMode?.timing?.partial).toBe(true);
+    expect(parkingMode?.timing?.totalOptionMinutes ?? null).toBeNull();
+    expect(parkingMode?.cons).toContain(
+      'Partial timing only — origin-to-lot drive time is missing',
+    );
+    expect(ranked.fastestMode?.key).not.toBe('parking');
+    expect(ranked.recommendationMode).not.toBe('parking');
+    expect(ranked.canonicalWinners.fastestWinner?.key).not.toBe('parking');
   });
 
   test('valid local Park & Ride remains eligible and usable', () => {

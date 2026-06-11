@@ -609,6 +609,10 @@ export function buildRideshareEstimateOptions(
       availability: profile.availability,
       trustStatus: 'estimated',
       routeTrustStatus: resolvedRoute.trustStatus,
+      // False when timing came from the distance-band fallback rather than a
+      // real origin→destination route. Downstream timing reconciliation uses
+      // this to avoid trusting a fallback drive leg over the main drive route.
+      routeConfirmed: !effective.usedFallback,
       routeOrigin: args.origin,
       routeDestination: args.destination,
       sourceName: isTaxi ? 'Estimated taxi fare model' : `${providerName} estimate model`,
@@ -634,4 +638,58 @@ export function buildRideshareEstimateOptions(
       ],
     } satisfies RideshareOption;
   });
+}
+
+function finitePositive(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * A rideshare ride is a car drive, so it cannot reach the destination faster
+ * than the main origin→destination drive route. When a rideshare option's
+ * timing came from a distance-band fallback (for example an airport band applied
+ * to a long intercity trip), its drive leg can be far too short. Re-base the
+ * drive leg on the known main drive route so rideshare uses the same drive
+ * duration source as driving, plus the existing pickup/wait buffer.
+ *
+ * Only timing fields are adjusted; pricing fields are never changed. Returns the
+ * option unchanged when there is nothing to correct.
+ */
+export function reconcileRideshareDriveTiming<T extends RideshareOption>(
+  option: T,
+  mainDriveMinutes: number | null | undefined,
+): T {
+  const mainDrive = finitePositive(mainDriveMinutes);
+  if (mainDrive == null) {
+    return option;
+  }
+
+  const optionDrive = finitePositive(option.driveMinutes);
+  // Already consistent or legitimately slower than the main drive route.
+  if (optionDrive != null && optionDrive >= mainDrive) {
+    return option;
+  }
+
+  const pickupWaitMinutes = finitePositive(option.pickupWaitMinutes) ?? 5;
+  const scope = option.rideshareTripScope === 'round-trip' ? 2 : 1;
+  const totalOptionMinutes = (mainDrive + pickupWaitMinutes) * scope;
+
+  return {
+    ...option,
+    driveMinutes: mainDrive,
+    totalOptionMinutes,
+    duration: totalOptionMinutes,
+    timingDerivedFromDrive: true,
+    timingBreakdown: {
+      driveMinutes: mainDrive,
+      parkingBufferMinutes: null,
+      walkToDestinationMinutes: null,
+      pickupWaitMinutes,
+      totalOptionMinutes,
+    },
+    assumptions: [
+      ...option.assumptions,
+      'Rideshare drive time uses the main origin-to-destination drive route plus pickup wait.',
+    ],
+  };
 }

@@ -1866,7 +1866,7 @@ describe('ResultsContent hook order', () => {
     expect(within(planCard).queryByText('Street parking note')).not.toBeInTheDocument();
   });
 
-  test('parking plan omits timing section when route timing is missing', async () => {
+  test('parking plan shows estimated drive-to-lot timing from the main route when lot route timing is missing', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
     recommendation.parking = [
@@ -1894,10 +1894,15 @@ describe('ResultsContent hook order', () => {
     const planCard = getParkingPlanCard();
 
     expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
-    expect(within(planCard).queryByText('Timing')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Drive to lot')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Park/check-in buffer')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+    // The main origin→destination drive exists, so the missing origin→lot leg
+    // falls back to an honest estimate labeled est. instead of disappearing.
+    expect(within(planCard).getByText('Timing')).toBeInTheDocument();
+    expect(within(planCard).getByText('Drive to lot')).toBeInTheDocument();
+    const driveToLotValue = within(planCard)
+      .getByText('Drive to lot')
+      .closest('div')
+      ?.querySelector('dd')?.textContent;
+    expect(driveToLotValue).toMatch(/est\./);
   });
 
   test('route time card shows unavailable timing without directions link or debug warning copy', async () => {

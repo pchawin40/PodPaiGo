@@ -3,9 +3,10 @@ import {
   buildRideshareEstimateOptions,
   estimateFareRange,
   formatRidesharePriceDisplay,
+  reconcileRideshareDriveTiming,
   timeOfDayMultiplier,
 } from '../estimate';
-import type { TrafficEstimate } from '../../types';
+import type { RideshareOption, TrafficEstimate } from '../../types';
 
 const baseRoute: TrafficEstimate = {
   route: 'Capitol Hill -> SEA',
@@ -116,6 +117,75 @@ describe('rideshare estimate v1', () => {
     expect(options[0].priceMin).toBeGreaterThan(0);
     expect(options[0].priceMax).toBeGreaterThan(options[0].priceMin!);
     expect(options[0].rideshareEstimateConfidence).toBe('baseline-estimate');
+    // Distance-band fallback is not a confirmed origin→destination route.
+    expect(options[0].routeConfirmed).toBe(false);
+  });
+
+  test('marks options from a real route as route-confirmed', () => {
+    const options = buildRideshareEstimateOptions(baseArgs);
+    expect(options.every((option) => option.routeConfirmed === true)).toBe(true);
+  });
+
+  describe('reconcileRideshareDriveTiming', () => {
+    const fallbackBandRide: RideshareOption = {
+      id: 'uber',
+      name: 'UberX',
+      price: 90,
+      duration: 77,
+      driveMinutes: 72,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 77,
+      routeConfirmed: false,
+      availability: 85,
+      trustStatus: 'estimated',
+      sourceName: 'Uber estimate model',
+      lastUpdated: '2026-06-01T00:00:00Z',
+      assumptions: ['Route data was unavailable; estimate uses a typical airport distance band.'],
+    };
+
+    test('re-bases a too-short fallback drive leg on the main drive route', () => {
+      const reconciled = reconcileRideshareDriveTiming(fallbackBandRide, 374);
+
+      expect(reconciled.driveMinutes).toBe(374);
+      expect(reconciled.totalOptionMinutes).toBe(379);
+      expect(reconciled.duration).toBe(379);
+      expect(reconciled.timingDerivedFromDrive).toBe(true);
+      expect(reconciled.timingBreakdown).toMatchObject({
+        driveMinutes: 374,
+        pickupWaitMinutes: 5,
+        totalOptionMinutes: 379,
+      });
+    });
+
+    test('never lowers the price during timing reconciliation', () => {
+      const reconciled = reconcileRideshareDriveTiming(fallbackBandRide, 374);
+      expect(reconciled.price).toBe(fallbackBandRide.price);
+    });
+
+    test('leaves an option that already drives at least as long as the main route', () => {
+      const realRoute: RideshareOption = {
+        ...fallbackBandRide,
+        driveMinutes: 30,
+        totalOptionMinutes: 35,
+        duration: 35,
+        routeConfirmed: true,
+      };
+      expect(reconcileRideshareDriveTiming(realRoute, 28)).toBe(realRoute);
+    });
+
+    test('returns the option unchanged when no main drive route is known', () => {
+      expect(reconcileRideshareDriveTiming(fallbackBandRide, null)).toBe(fallbackBandRide);
+      expect(reconcileRideshareDriveTiming(fallbackBandRide, 0)).toBe(fallbackBandRide);
+    });
+
+    test('doubles the re-based total for round-trip rideshare scope', () => {
+      const roundTrip: RideshareOption = {
+        ...fallbackBandRide,
+        rideshareTripScope: 'round-trip',
+      };
+      const reconciled = reconcileRideshareDriveTiming(roundTrip, 374);
+      expect(reconciled.totalOptionMinutes).toBe((374 + 5) * 2);
+    });
   });
 
   test('does not advertise live Uber/Lyft pricing in generated copy', () => {

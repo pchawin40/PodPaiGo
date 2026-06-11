@@ -29,6 +29,7 @@ After updating:
 - Beta trip-planning results experience for airport, point A→B/city, and Quick Go trips, prioritizing fast scanning: one concise recommended answer, honest price/time caveats, and compact Compare options rows where full details are needed.
 
 **Active priorities**
+- Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route. A distance-band fallback (e.g. an airport band applied to a long intercity trip) is re-based on the known main drive time plus pickup wait, and shows "Open app for live estimate" / no concrete duration when no reliable drive route exists. Rideshare timing reconciliation happens once at the engine level so Compare options, Quick Go Best Way, option scoring, and Full Trip Details tell the same timing story. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
 - Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
 - Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders.
@@ -41,12 +42,16 @@ After updating:
 - Public/non-admin surfaces must stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
 
 **Current known issues**
+- Rideshare long-distance timing fix (re-base on main drive route; never faster than driving; suppress fake duration for unconfirmed distance-band fallbacks) is covered by rideshare estimate, mode-timing, and point A→B ranking unit tests plus the production build; no live Bend route/browser validation was run.
 - Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
 - Quick Go Bend/intercity transit suppression is covered by resolver, Quick Go view, Park & Ride, and point A→B ranking tests; no live Bend route/browser validation was run for the latest resolver guard.
 - Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
+- Pre-existing unit failures unrelated to timing remain in OptionComparisonCard layout (parkAndRidePointAb), TripRecalculatingLoader reduced-motion, inventory provider airport scoping, and parking route live-limit suites; they fail identically on a clean tree.
 
 **Beta validation checklist**
-- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, and Bend-style estimated intercity transit does not appear as a 1h Best Way.
+- Long-distance point A→B (e.g. Monroe/Seattle-area → Bend, OR): rideshare time equals the main drive route plus pickup wait (not a ~1h 17m distance-band estimate), drive / drive+park stay the timed routes, transit stays "Check route", paid garage/lot reads as the full trip chain with an `est.` label (never a 12-min local leg), and Park & Ride shows an "Unavailable" badge with "Not estimated" time when not confirmed; the same timing appears in the Recommended hero, Compare options, and Full Trip Details.
+- Local point A→B: rideshare may legitimately read slightly slower than the raw drive (drive route + pickup), can still win on convenience, and verified faster transit/rideshare is preserved.
+- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, Bend-style estimated intercity transit does not appear as a 1h Best Way, and a distance-band rideshare estimate does not win Best Way as faster than driving.
 - General/city Park & Ride: local corridor estimates remain usable for valid metro trips, but intercity destinations outside the corridor show Park & Ride not confirmed / no transit to destination and cannot win Best Way.
 - Non-admin SEA airport results: no env/config diagnostic text; options render normally.
 - /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
@@ -352,3 +357,91 @@ After updating:
 
 **Known remaining issues**
 - No live browser route validation was run for the Bend example.
+
+### 2026-06-10 21:45 PDT — Rideshare route-mode timing correctness audit and fix
+
+**Summary**
+- Fixed long-distance rideshare timing: a point A→B / general trip like Monroe/Seattle-area → Bend, OR no longer shows a ~1h 17m rideshare time against a 6h+ drive. The 1h 17m came from the airport distance-band fallback (`distant` band = 72 min + 5 min pickup) being applied when the rideshare route call was unavailable.
+- Added `routeConfirmed` (real route vs distance-band fallback) and `timingDerivedFromDrive` to `RideshareOption`; `buildRideshareEstimateOptions` now sets `routeConfirmed: !usedFallback`.
+- Added `reconcileRideshareDriveTiming(option, mainDriveMinutes)` in `lib/rideshare/estimate.ts`: a rideshare ride is a car drive, so when the option's drive leg is shorter than the known main origin→destination drive route, the drive leg is re-based on the main drive time plus the existing pickup wait (round-trip scope preserved). Only timing fields change; pricing is untouched. An assumption line documents the re-based source.
+- Applied the reconciliation once in `recommendationEngine` where rideshare options are enriched, using `effectiveTrafficEstimate` (skipped when the main route is unavailable). This single correction propagates to Compare options, Quick Go Best Way (`option.duration`), point A→B option scoring, `knownDriveMinutesForTransit`, and Full Trip Details so they all tell the same timing story.
+- Hardened `resolveRideshareTiming` (point A→B): the rideshare drive leg is `max(main drive, option drive)`; a confirmed option route is trusted when no main drive is known; an unconfirmed distance-band fallback with no main drive returns no timing so the UI shows "Open app for live estimate" instead of a fake precise duration. The total is always recomputed as `drive + pickup` (×scope) for internal consistency.
+- Dropped the stale `?? input.rideDuration` fallback in `pointAbRanking` so a suppressed rideshare duration cannot be resurrected from the raw option value.
+- Audited the other modes: drive / drive+park (origin→lot drive + park buffer + walk), transit (`Check route` / suppressed duration for impractical intercity), and Park & Ride (`Not estimated` / `not confirmed` on invalid legs) were already honest via existing guards and were left unchanged. Pricing logic, parking provider fetches, and airport/city/event separation were not changed.
+- Refreshed the AGENTS.md current-state summary (active priorities, known issues, beta validation checklist) for the timing audit; no changelog history was deleted.
+
+**Files changed**
+- `lib/types.ts`
+- `lib/rideshare/estimate.ts`
+- `lib/recommendationEngine.ts`
+- `lib/parking/pointAbModeTiming.ts`
+- `lib/parking/pointAbRanking.ts`
+- `lib/rideshare/__tests__/estimate.test.ts`
+- `lib/parking/__tests__/pointAbModeTiming.test.ts`
+- `lib/parking/__tests__/pointAbRanking.test.ts`
+- `AGENTS.md`
+
+**Why**
+- A rideshare can never reach a destination faster than driving there, but a distance-band fallback made rideshare look 5× faster than the real drive on long intercity trips, so it could read as the fastest/best option on fake timing. Reconciling at the engine gives every surface a single, source-aware timing truth.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/rideshare/__tests__/estimate.test.ts lib/parking/__tests__/pointAbModeTiming.test.ts lib/parking/__tests__/pointAbRanking.test.ts --runInBand` passed, 67 tests (new reconcile, routeConfirmed, resolveRideshareTiming, and long-distance ranking cases).
+- Broad sweep `--runTestsByPath` over quickGo, domain, decisionScoring, transitPracticality, pointAbOptionScoring, parkRideResolver, parkAndRideAccess, RecommendationStatus, recommendationEngineTrafficDestination, routeTimingIntegration, QuickGoResultsView, OptionComparisonCard, ResultsContentHookOrder, ProviderPricingCards passed, 194 tests.
+- Full suite: 1323 passed, 5 skipped; 5 pre-existing failures in 4 suites (OptionComparisonCard layout in parkAndRidePointAb, TripRecalculatingLoader reduced-motion, inventory provider airport scoping, parking route live-limit) fail identically on a clean tree and are unrelated to timing.
+- `npm run build` passed (TypeScript type check included).
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser/mobile validation of the Bend rideshare timing; coverage is unit tests plus production build.
+- Rideshare price for a re-based long-distance trip remains the distance-band fare estimate (pricing logic intentionally untouched); only the displayed time is corrected.
+
+**Next recommended step**
+- Open a Monroe/Seattle-area → Bend, OR general result and confirm rideshare reads ~6h (drive route + pickup) in the Recommended hero, Compare options, and Full Trip Details, while transit stays "Check route" and Park & Ride stays "not confirmed".
+
+### 2026-06-10 21:45 PDT — AGENTS.md current-state summary refreshed
+
+**Summary**
+- Updated the Current PodPaiGo State section inside the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` markers: added route-mode timing honesty to active priorities, recorded the rideshare long-distance timing fix and the pre-existing unrelated unit failures in known issues, and added long-distance/local rideshare timing checks to the beta validation checklist. No changelog history was deleted.
+
+### 2026-06-10 22:30 PDT — Paid garage/lot full-trip timing honesty and Park & Ride "Unavailable" wording
+
+**Summary**
+- Fixed point A→B / general-trip paid garage/lot timing so a Bend-style 6h+ trip can never show a 12-min "total" (e.g. Centennial Garage). The 12 min came from `resolvePaidGarageTiming` returning the local parking/walk leg (`parkingMinutes`) as `totalOptionMinutes` when the origin→lot drive leg was missing.
+- `resolvePaidGarageTiming` now takes `mainDriveMinutes` (known main origin→destination drive) and `driveRouteConfirmed` and applies three honesty rules: (1) origin→lot leg present → full chain `drive + park buffer + walk` as before; (2) origin→lot leg missing but main drive known → the main drive is used as an honest estimated stand-in (`driveSource: 'main-drive-estimate'`, displayed with an `est.` suffix); (3) only the local leg known and no main drive → `partial: true` timing with `totalOptionMinutes: null` (never a fake total). An unconfirmed origin→lot leg whose full chain is still shorter than the main drive is re-based on the main drive; route-confirmed (google-routes/same-place) faster legs are kept.
+- `PointToPointTiming` gained optional `partial` and `driveSource` fields. `resolvePaidParkingDriveToLotMinutesDetailed` (new) reports whether the drive-to-lot leg is route-confirmed; the old minutes-only helper delegates to it.
+- `rankPointAbModes` passes `effectiveDriveMinutes` + route confirmation into the paid-garage timing, so the Recommended plan hero, Compare options row, and Full Trip Details all read the same corrected timing object. Compare-row time shows `Xh Ym est.` for the main-drive fallback and `Drive time needed` for partial timing (status stays `route_needed`, candidate minutes become unusable, so partial timing cannot win fastest/best/cheapest). New cons explain partial/estimated timing.
+- Canonical option scoring (`buildPointAbOptionScoreBreakdowns`) uses the same guarded timing with the trip's main drive minutes, so Quick Go/canonical fastest winners cannot be won by a fake/partial paid-garage total; an estimated drive leg adds a penalty line.
+- Full Trip Details / parking-plan timing rows (`pointAbDetailTimingRows`) label the drive and total rows with `est.` when the drive leg is a main-drive estimate, instead of hiding the timing section.
+- Park & Ride wording: a `not_recommended` tier with no usable duration (invalid/missing route legs, destination not confirmed) now renders status `unavailable` ("Unavailable" badge) with `unavailable: true` instead of "Not recommended"; time stays `Not estimated` and the note stays "Park & Ride not confirmed for this destination." Genuinely timed-but-discouraged Park & Ride keeps "Not recommended". Airport overnight Park & Ride logic untouched.
+- Provider pricing, rideshare pricing/timing, airport parking timing, and event/stadium logic were not changed.
+
+**Files changed**
+- `lib/types.ts` (PointToPointTiming `partial`/`driveSource`)
+- `lib/parking/pointAbModeTiming.ts` (resolvePaidGarageTiming honesty guards)
+- `lib/parking/pointAbOptionScoring.ts` (detailed drive-to-lot resolver, main-drive-aware score timing, estimate penalty)
+- `lib/parking/pointAbRanking.ts` (corrected timing plumbed to display, est./partial copy, Park & Ride unavailable wording)
+- `app/results/ResultsContent.tsx` (detail timing rows show est. labels for main-drive-estimate legs)
+- `lib/parking/__tests__/pointAbModeTiming.test.ts` (partial, fallback, re-base, confirmed-leg, local-chain cases)
+- `lib/parking/__tests__/pointAbRanking.test.ts` (Bend paid-garage full-chain test, partial-timing exclusion test, P&R Unavailable assertions, updated route-degraded and aggregate-only expectations to the new honest est. behavior)
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx` (parking plan now shows estimated drive-to-lot timing instead of omitting the section)
+- `AGENTS.md`
+
+**Why**
+- A paid garage/lot near the destination cannot be reached faster than driving there; presenting the 12-min local parking/walk leg as the trip total for a 6h+ Bend trip was dishonest and could distort fastest/easiest comparisons. "Not recommended" also misdescribed Park & Ride paths that are actually unavailable/not confirmed.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/parking/__tests__/pointAbModeTiming.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/pointAbOptionScoring.test.ts lib/parking/__tests__/pointAbCanonicalFlow.test.ts --runInBand` passed, 65 tests.
+- `npx jest --runTestsByPath lib/parking/__tests__/parkRideResolver.test.ts lib/parking/__tests__/transitPracticality.test.ts __tests__/parkAndRideAccess.test.ts lib/rideshare/__tests__/estimate.test.ts lib/trip/__tests__/quickGo.test.ts __tests__/domain.test.ts lib/__tests__/RecommendationStatus.test.ts lib/parking/__tests__/streetMeterSmartCard.test.ts --runInBand` passed, 104 tests.
+- `npx jest --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx --runInBand` passed (34 + UI suites).
+- `npx jest --runTestsByPath lib/__tests__/providersParkingAirport.test.ts lib/__tests__/RecommendationStatus.test.ts __tests__/parkingPriceDisplay.test.ts lib/parking/__tests__/pointAbQuickRead.test.ts lib/parking/__tests__/pointAbLocalTripCleanup.test.ts lib/parking/__tests__/streetMeterParking.test.ts lib/__tests__/recommendationEngineTrafficDestination.test.ts --runInBand` passed, 64 tests (airport/event/engine regression).
+- `lib/parking/__tests__/parkAndRidePointAb.test.tsx` still fails 2 OptionComparisonCard layout tests; verified via `git stash` that these fail identically on a clean tree (pre-existing, documented in known issues).
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser validation of the Bend Centennial Garage result; coverage is unit/DOM tests plus production build.
+- The main-drive-estimate fallback uses the trip's effective drive minutes (which can itself be a haversine estimate when no routed drive exists); it is always labeled `est.` and cannot understate the main drive.
+- Pre-existing unrelated failures remain in OptionComparisonCard layout (parkAndRidePointAb), TripRecalculatingLoader reduced-motion, inventory provider airport scoping, and parking route live-limit suites.
+
+**Next recommended step**
+- Re-run the Monroe/Seattle-area → Bend, OR general trip in localhost/Vercel and confirm Paid garage/lot reads ~6h 30m est. (not 12 min) in the Recommended hero, Compare options, and Full Trip Details, and that Park & Ride shows an "Unavailable" badge with "Not estimated" time.

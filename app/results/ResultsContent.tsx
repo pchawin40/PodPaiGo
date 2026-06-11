@@ -3443,18 +3443,26 @@ function pointAbDetailTimingRows(
   const timing = row?.timing;
   if (!timing) return [];
 
+  // Drive leg estimated from the main origin→destination route (no confirmed
+  // origin→lot route); keep the estimate label visible in detail rows.
+  const driveEstimated = timing.driveSource === 'main-drive-estimate';
+
   const detailRows = [
-    { label: labels.drive || 'Drive route', minutes: timing.driveMinutes },
+    {
+      label: labels.drive || 'Drive route',
+      minutes: timing.driveMinutes,
+      estimated: driveEstimated,
+    },
     { label: labels.parkingBuffer || 'Access/verify buffer', minutes: timing.parkingBufferMinutes },
     { label: labels.walk || 'Walk to destination', minutes: timing.walkToDestinationMinutes },
     { label: labels.pickupWait || 'Pickup wait', minutes: timing.pickupWaitMinutes },
   ]
-    .filter((entry): entry is { label: string; minutes: number } =>
+    .filter((entry): entry is { label: string; minutes: number; estimated?: boolean } =>
       typeof entry.minutes === 'number' && Number.isFinite(entry.minutes),
     )
     .map((entry) => ({
       label: entry.label,
-      value: formatMiniMinutes(entry.minutes),
+      value: `${formatMiniMinutes(entry.minutes)}${entry.estimated ? ' est.' : ''}`,
     }));
 
   const totalMinutes = timing.totalOptionMinutes;
@@ -3464,7 +3472,7 @@ function pointAbDetailTimingRows(
 
   const totalRow = {
     label: labels.total || 'Total to destination',
-    value: formatMiniMinutes(totalMinutes),
+    value: `${formatMiniMinutes(totalMinutes)}${driveEstimated ? ' est.' : ''}`,
   };
 
   return labels.totalFirst ? [totalRow, ...detailRows] : [...detailRows, totalRow];

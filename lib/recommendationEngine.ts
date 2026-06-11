@@ -13,6 +13,7 @@ import {
   LocationInfo,
 } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { reconcileRideshareDriveTiming } from './rideshare/estimate';
 import { shouldComputeDriveRouteOptions } from './routes/driveRouteProfiles';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
@@ -1442,7 +1443,17 @@ export class RecommendationEngine {
       };
     });
 
-    const enrichedRideshare = sortedRideshare.map((option) => {
+    // Rideshare is a car ride: re-base its drive leg on the main drive route so
+    // a distance-band fallback can never make rideshare look faster than driving
+    // (e.g. a long intercity trip showing a 1h ride against a 6h drive). Only
+    // timing fields change; pricing is untouched. This corrects the option data
+    // once so every consumer (point A→B ranking, Quick Go, scoring, details)
+    // tells the same timing story.
+    const mainDriveMinutesForRideshare = effectiveTrafficEstimate.routeUnavailable
+      ? null
+      : effectiveTrafficEstimate.duration;
+    const enrichedRideshare = sortedRideshare.map((rawOption) => {
+      const option = reconcileRideshareDriveTiming(rawOption, mainDriveMinutesForRideshare);
       const intelligence = buildOptionIntelligence('rideshare', option, tripData, weatherImpact);
 
       return {
