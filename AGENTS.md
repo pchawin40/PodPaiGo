@@ -38,6 +38,7 @@ After updating:
 - Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route; paid garage/lot timing must be full-trip timing or clearly estimated/partial, never a local-only leg presented as total. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
 - Quick Go Best Way must use practical total origin-to-destination timing: estimated/fallback intercity transit and local Park & Ride corridor estimates must not win over known drive/rideshare unless the user explicitly selected transit-only.
 - Quick Go best-way picks should still honor materially faster verified local transit/rideshare, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" for free/customer-parking or impractical-transit trips.
+- Quick Go summary should show honest parking price in Best way to go when available (`$18`, `~$18 est.`, `$36–$84 est.`, or `Check live price`) and a provider CTA beside Open directions when a real source/booking link exists (Reserve parking / Check provider / Compare parking); no fake booking buttons.
 - Public filter UI should stay visible, user-facing, and compact with Excel-style feature counts on filter chips (e.g. `Covered (2)`); keep technical filter/evidence language out of the main results page.
 - Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows and parking cards should not read as report cards.
 - Preserve pricing honesty everywhere: live / estimated / official rate range / check provider / open app / check route must remain explicit.
@@ -58,7 +59,7 @@ After updating:
 - Airport results: parking cards, provider cards, map, recommended plan hero, compare options, official-rate copy, and airport/event separation remain unchanged.
 - Long-distance point A→B (e.g. Monroe/Seattle-area → Bend, OR): rideshare time equals the main drive route plus pickup wait (not a ~1h 17m distance-band estimate), drive / drive+park stay the timed routes, transit stays "Check route", paid garage/lot reads as the full trip chain with an `est.` label when a main-drive fallback is used (never a 12-min local leg), and Park & Ride shows an "Unavailable" badge with "Not estimated" time when not confirmed.
 - Local point A→B: rideshare may legitimately read slightly slower than the raw drive (drive route + pickup), can still win on convenience, and verified faster transit/rideshare is preserved.
-- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, Bend-style estimated intercity transit does not appear as a 1h Best Way, and a distance-band rideshare estimate does not win Best Way as faster than driving.
+- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]` with honest price suffix when known, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, Bend-style estimated intercity transit does not appear as a 1h Best Way, and a distance-band rideshare estimate does not win Best Way as faster than driving; parking winners with provider/source links show Reserve parking / Check provider / Compare parking beside Open directions with outbound tracking and no origin address in analytics URLs.
 - General/city Park & Ride: local corridor estimates remain usable for valid metro trips, but intercity destinations outside the corridor show Park & Ride not confirmed / no transit to destination and cannot win Best Way.
 - Non-admin SEA airport results: no env/config diagnostic text; options render normally.
 - /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
@@ -614,3 +615,34 @@ After updating:
 
 **Summary**
 - Updated Current PodPaiGo State active priorities and beta checklist for md breakpoint mobile/desktop Compare options split; no changelog history was deleted.
+
+### 2026-06-11 — Quick Go provider CTA and Best way price summary
+
+**Summary**
+- Added `lib/trip/quickGoSummary.ts` helpers to append honest parking price copy to Quick Go Best way to go (`$18`, `~$18 est.`, `$36–$84 est.`, `Check live price`) and resolve provider CTAs (Reserve parking / Check provider / Compare parking) from the selected parking winner.
+- Quick Go results card now shows provider CTA beside Open directions (desktop side-by-side, mobile stacked) using centralized outbound URL building, click correlation, and outbound analytics without origin address in tracking payloads.
+- Provider CTA only renders when a real source/booking link exists; ranking/pricing/provider fetch logic unchanged.
+- Refreshed AGENTS.md current-state summary.
+
+**Files changed**
+- `lib/trip/quickGoSummary.ts`
+- `lib/trip/__tests__/quickGoSummary.test.ts`
+- `app/components/QuickGoResultsCard.tsx`
+- `app/components/__tests__/QuickGoResultsView.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/trip/__tests__/quickGoSummary.test.ts app/components/__tests__/QuickGoResultsView.test.tsx lib/trip/__tests__/quickGo.test.ts --runInBand` passed, 71 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser verification of Quick Go provider CTA click-through on phone/desktop.
+
+**Next recommended step**
+- Open a Quick Go parking winner (e.g. Brighton Jones / 2120 5th Ave. Lot) and confirm Best way to go shows price plus Reserve/Check provider/Compare parking beside Open directions.
+
+### 2026-06-11 — AGENTS.md current-state summary refreshed (Quick Go provider CTA)
+
+**Summary**
+- Updated Current PodPaiGo State active priorities and beta checklist for Quick Go Best way price suffix and provider CTA beside Open directions; no changelog history was deleted.
