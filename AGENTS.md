@@ -1,12 +1,5 @@
 Read AGENTS.md first and follow it exactly.
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
-=======
-=======
->>>>>>> main
 Task:
 Refresh only the generated/current-state portion of AGENTS.md.
 
@@ -88,36 +81,3 @@ After updating:
 
 **Next recommended step**
 - Open `/admin/outreach` on desktop and mobile widths and confirm a long partner template preview wraps inside the preview card with internal vertical scrolling only.
-<<<<<<< HEAD
-
-### 2026-06-10 19:29 PDT — Results recalculating loader polished
-
-**Summary**
-- Replaced the plain results-page recalculating/loading text panel with a reusable `TripRecalculatingLoader` component.
-- The loader shows a small animated car moving along a dotted route, a pulsing destination pin, friendly copy (`Finding the best way to go…`), and short rotating status lines.
-- City parking initial loading keeps its existing user-facing copy (`Finding nearby parking…` / `Checking garages, lots, and street rules.`) inside the same branded loader.
-- Animation is CSS-only, lightweight, responsive, light/dark-mode friendly, and includes `prefers-reduced-motion: reduce` handling.
-- No recommendation logic, routing, provider fetching, scoring, pricing, airport/city/event behavior, or API calls changed.
-
-**Files changed**
-- `app/components/TripRecalculatingLoader.tsx`
-- `app/components/__tests__/TripRecalculatingLoader.test.tsx`
-- `app/results/ResultsContent.tsx`
-- `AGENTS.md`
-
-**Why**
-- The old `Recalculating…` screen looked empty and could feel stuck during refreshes; the results page now has a friendlier on-brand loading state that communicates progress without adding runtime dependencies.
-
-**Tests run and result**
-- `npm test -- --runTestsByPath app/components/__tests__/TripRecalculatingLoader.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 36 tests.
-- `npm run build` passed.
-- `git diff --check` passed.
-
-**Known remaining issues**
-- No live browser/mobile visual verification was run; animation coverage is DOM/copy/reduced-motion markup plus production build.
-
-**Next recommended step**
-- Open a results page, trigger Recalculate on desktop and mobile, and confirm the car/route animation feels smooth in light and dark mode and the reduced-motion setting shows a static, readable state.
->>>>>>> Stashed changes
-=======
->>>>>>> main
