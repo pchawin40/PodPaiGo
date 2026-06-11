@@ -32,7 +32,7 @@ After updating:
 **Active priorities**
 - Public results flow should stay lean: Recommended plan, Compare options, compact parking filters, parking/provider cards, details/evidence, map/actions. Do not reintroduce the giant public `Parking plan` block with Nearby parking options / Why this option / Before you park / Timing / Backup options / Street parking note sections.
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
-- Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
+- Compare options should scan like a compact table/scoreboard on desktop with fixed columns: Option, Status, Cost, Time, Note, Action; on mobile use stacked compact cards (no horizontal table overflow).
 - Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders. Parking rows should keep a useful anchor even when the old plan card is hidden.
 - Keep essential parking actions available outside the hidden plan: Route to parking in parking cards, View parking details via hero/Compare anchors, Map, reserve/provider CTAs, and details/evidence where already useful. Do not show `Search nearby parking` in normal results when parking options/cards already exist; true empty/unavailable fallbacks may use `Open Google Maps parking search`.
 - Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route; paid garage/lot timing must be full-trip timing or clearly estimated/partial, never a local-only leg presented as total. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
@@ -47,7 +47,7 @@ After updating:
 **Current known issues**
 - Public Parking plan removal is covered by ResultsContent DOM tests, parking card/provider/Compare/ranking regression tests, and production build; no live browser/mobile screenshot pass yet.
 - Rideshare long-distance timing, paid garage/lot full-trip timing, Quick Go Bend/intercity transit suppression, and Park & Ride unavailable wording are covered by targeted unit/DOM tests plus production build; no live Bend route/browser validation was run.
-- Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters, compact parking anchors/status notices) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
+- Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, desktop fixed-column Compare options scoreboard rows, mobile stacked compare cards, simplified parking filters, compact parking anchors/status notices) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
 - Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
 - Pre-existing unit failures unrelated to timing remain in OptionComparisonCard layout (parkAndRidePointAb), TripRecalculatingLoader reduced-motion, inventory provider airport scoping, and parking route live-limit suites; they fail identically on a clean tree.
 
@@ -64,7 +64,8 @@ After updating:
 - /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
 - Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
 - Airport + city results: Recommended hero shows title, inline cost/time/confidence metrics, why line, primary CTA, and Compare options scroll.
-- Compare options: airport and city rows align to the same fixed desktop columns as the header, desktop cells are vertically centered, selected option is highlighted without becoming huge, each row has only one quiet action (View or Why?), row hover/pointer affordance is present, no compact-row Details/pro-con mini box appears, and long notes/cost notes clamp without overflow.
+- Compare options desktop: airport and city rows align to the same fixed columns as the header, desktop cells are vertically centered, selected option is highlighted without becoming huge, each row has only one quiet action (View or Why?), row hover/pointer affordance is present, no compact-row Details/pro-con mini box appears, and long notes/cost notes clamp without overflow.
+- Compare options mobile: stacked compact cards per option (icon, label, status badge, name, cost · time, note, one action); no desktop table headers or horizontal overflow; actions stay clear of the Ask PodPaiGo floating button.
 - Parking filters: public results show a visible compact "Filter parking" section with Excel-style feature counts on chips (e.g. `Covered (2)`), zero-count chips muted, user-facing helper copy, and no developer terms like inferred claims / provider-claimed / strict filters.
 - Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; official airport price ranges read as estimates with daily-rate basis and confirm-with-airport caveat.
 <!-- AGENT_STATE_END -->
@@ -544,3 +545,37 @@ After updating:
 **Tests run and result**
 - `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ProviderPricingCards.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx app/components/__tests__/DestinationParkingSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/parkingFilters.test.ts lib/__tests__/RecommendationStatus.test.ts lib/__tests__/providersParkingAirport.test.ts --runInBand` passed, 147 tests. Jest printed its existing open-handle warning after completion.
 - `npm run build` passed.
+
+### 2026-06-11 — Mobile Compare options stacked card layout
+
+**Summary**
+- Split `OptionComparisonCard` into responsive layouts: desktop keeps the compact fixed-column scoreboard row (`hidden sm:grid`); mobile renders stacked compact cards (`sm:hidden`) with icon, label, status badge, name, cost · time, note, and one action.
+- Extracted shared `OptionComparisonAction` helper so View/Why? behavior stays consistent across breakpoints without nested invalid buttons.
+- Mobile cards use `min-w-0`, `break-words`, and `line-clamp-2` to prevent horizontal page overflow and keep actions clear of the Ask PodPaiGo floating button.
+- Preserved selected/winning highlight, unavailable dimming, single-action row behavior, and all scoring/pricing/routing logic.
+- Added focused mobile/desktop layout tests; refreshed AGENTS.md current-state summary.
+
+**Files changed**
+- `app/components/OptionComparisonCard.tsx`
+- `app/components/__tests__/OptionComparisonCard.test.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `AGENTS.md`
+
+**Why**
+- The desktop column grid was still active on phone widths, pushing the Action column off-screen and making Compare options feel broken.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/components/__tests__/OptionComparisonCard.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/__tests__/RecommendationStatus.test.ts --runInBand` passed, 110 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser/mobile screenshot verification was run; coverage is DOM/class-based plus production build.
+
+**Next recommended step**
+- Open airport and city results on a phone-width viewport and confirm Compare options cards fit without horizontal scroll and actions are not covered by Ask PodPaiGo.
+
+### 2026-06-11 — AGENTS.md current-state summary refreshed
+
+**Summary**
+- Updated the Current PodPaiGo State section inside the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` markers for mobile stacked Compare options cards and desktop table retention; no changelog history was deleted.

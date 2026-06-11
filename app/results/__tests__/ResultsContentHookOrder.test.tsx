@@ -1748,9 +1748,9 @@ describe('ResultsContent hook order', () => {
     expect(customerDetailsLink).toBeDefined();
 
     const customerCard = screen.getByRole('group', { name: 'Customer parking recommendation' });
-    expect(within(customerCard).getByText('Customer parking')).toBeInTheDocument();
+    expect(within(customerCard).getAllByText('Customer parking').length).toBeGreaterThan(0);
     expect(within(customerCard).getAllByText('Free? Verify').length).toBeGreaterThan(0);
-    expect(within(customerCard).getByText('Verify signs before parking.')).toBeInTheDocument();
+    expect(within(customerCard).getAllByText('Verify signs before parking.').length).toBeGreaterThan(0);
     expect(
       within(customerCard).queryByText('Check signs, validation, time limits, and towing rules'),
     ).not.toBeInTheDocument();
