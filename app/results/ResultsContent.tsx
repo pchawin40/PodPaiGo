@@ -62,6 +62,7 @@ import {
 import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
+import TripRecalculatingLoader from '../components/TripRecalculatingLoader';
 import { useAuth } from '../components/AuthProvider';
 import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
@@ -6837,21 +6838,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     const loadingCityParking = Boolean(
       quickGoTripDataFromParams && isCityDestinationTrip(quickGoTripDataFromParams),
     );
+    const loaderTitle = loadingCityParking
+      ? 'Finding nearby parking…'
+      : isRecalculating
+        ? 'Finding the best way to go…'
+        : 'Loading options…';
+    const loaderStatusMessages = loadingCityParking
+      ? ['Checking garages, lots, and street rules.']
+      : undefined;
 
     return (
-      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
-        <div className="text-lg text-zinc-700">
-          {loadingCityParking
-            ? 'Finding nearby parking…'
-            : isRecalculating
-              ? 'Recalculating…'
-              : 'Loading options…'}
-        </div>
-        {loadingCityParking ? (
-          <div className="mt-2 text-sm text-zinc-600">
-            Checking garages, lots, and street rules.
-          </div>
-        ) : null}
+      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center px-4 py-10">
+        <TripRecalculatingLoader
+          title={loaderTitle}
+          statusMessages={loaderStatusMessages}
+        />
       </div>
     );
   }
