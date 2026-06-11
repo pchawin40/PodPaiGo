@@ -3,6 +3,23 @@
 import type { OutboundClickPayload } from './outboundClickTypes';
 
 export function trackOutboundClick(payload: OutboundClickPayload, accessToken?: string | null): void {
+  const body = JSON.stringify({
+    ...payload,
+    metadata: {
+      ...(payload.metadata ?? {}),
+      timestamp: new Date().toISOString(),
+    },
+  });
+
+  if (!accessToken && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    try {
+      const blob = new Blob([body], { type: 'application/json' });
+      if (navigator.sendBeacon('/api/monetization/outbound-click', blob)) return;
+    } catch {
+      // Fall back to fetch below.
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -14,7 +31,7 @@ export function trackOutboundClick(payload: OutboundClickPayload, accessToken?: 
   void fetch('/api/monetization/outbound-click', {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload),
+    body,
     keepalive: true,
   }).catch(() => {
     // Navigation must never depend on telemetry.

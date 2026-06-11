@@ -29,6 +29,7 @@ export type ParkingSortContext = {
 };
 
 const BIG = 1_000_000;
+const CHEAPEST_CLOSE_PRICE_DOLLARS = 2;
 
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -215,6 +216,91 @@ function cheapestKey(option: ParkingOption, tripData?: TripData | null): number 
   );
 }
 
+function hasUsableComparableCost(cost: number): boolean {
+  return Number.isFinite(cost) && cost >= 0 && cost < BIG;
+}
+
+function cheapestPriceReliabilityClass(
+  option: ParkingOption,
+  tripData?: TripData | null,
+): number {
+  switch (getParkingPriceTier(option, tripData ?? null)) {
+    case 'live_exact':
+    case 'official':
+    case 'provider_estimate':
+      return 0;
+    case 'estimated_range':
+      return 1;
+    case 'check_provider':
+    case 'unknown':
+    default:
+      return 2;
+  }
+}
+
+function pricesAreCloseForCheapest(aCost: number, bCost: number): boolean {
+  if (!hasUsableComparableCost(aCost) || !hasUsableComparableCost(bCost)) {
+    return false;
+  }
+
+  return (
+    Math.round(aCost) === Math.round(bCost) ||
+    Math.abs(aCost - bCost) <= CHEAPEST_CLOSE_PRICE_DOLLARS
+  );
+}
+
+function parkingWalkProximityTieBreaker(option: ParkingOption): number {
+  return (
+    num(option.walkToDestinationMinutes) ??
+    num(option.walkingMinutes) ??
+    num(option.transferToTerminalMinutes) ??
+    BIG
+  );
+}
+
+function parkingDistanceProximityTieBreaker(option: ParkingOption): number {
+  return (
+    num(option.distanceToAirport) ??
+    num(option.distance) ??
+    BIG
+  );
+}
+
+function compareParkingProximityTieBreakers(a: ParkingOption, b: ParkingOption): number {
+  return (
+    parkingWalkProximityTieBreaker(a) - parkingWalkProximityTieBreaker(b) ||
+    parkingDistanceProximityTieBreaker(a) - parkingDistanceProximityTieBreaker(b)
+  );
+}
+
+function reviewScoreTieBreaker(option: ParkingOption): number {
+  const score = num(option.reviewScore);
+  return score == null ? 6 : 5 - score;
+}
+
+function reviewCountTieBreaker(option: ParkingOption): number {
+  const count = num(option.reviewCount);
+  return count == null ? BIG : -count;
+}
+
+function compareCheapestNonPriceTieBreakers(
+  a: ParkingOption,
+  b: ParkingOption,
+  tripData?: TripData | null,
+): number {
+  return (
+    getParkingTotalTimeMinutes(a, tripData) - getParkingTotalTimeMinutes(b, tripData) ||
+    compareParkingProximityTieBreakers(a, b) ||
+    trustPenalty(a.trustStatus) - trustPenalty(b.trustStatus) ||
+    trustPenalty(a.routeTrustStatus ?? a.trustStatus) -
+      trustPenalty(b.routeTrustStatus ?? b.trustStatus) ||
+    availabilityPenalty(a) - availabilityPenalty(b) ||
+    priceConfidencePenalty(a) - priceConfidencePenalty(b) ||
+    reviewScoreTieBreaker(a) - reviewScoreTieBreaker(b) ||
+    reviewCountTieBreaker(a) - reviewCountTieBreaker(b)
+  );
+}
+
 function frictionPenalty(option: ParkingOption): number {
   let penalty = transferPenalty(option);
   if (option.transferType === 'shuttle') {
@@ -274,21 +360,43 @@ export function compareParkingByCheapest(
   b: ParkingOption,
   tripData?: TripData | null,
 ): number {
-  const costDiff = cheapestKey(a, tripData) - cheapestKey(b, tripData);
-  if (costDiff !== 0) {
-    if (Math.abs(costDiff) <= 3) {
-      const livePreference =
-        bookabilityBonus(a) - bookabilityBonus(b) ||
-        priceConfidencePenalty(a) - priceConfidencePenalty(b);
-      if (livePreference !== 0) return livePreference;
+  const aClass = cheapestPriceReliabilityClass(a, tripData);
+  const bClass = cheapestPriceReliabilityClass(b, tripData);
+  if (aClass !== bClass) {
+    return aClass - bClass;
+  }
+
+  const aCost = getParkingComparableCost(a, tripData);
+  const bCost = getParkingComparableCost(b, tripData);
+  const aHasCost = hasUsableComparableCost(aCost);
+  const bHasCost = hasUsableComparableCost(bCost);
+
+  if (aHasCost !== bHasCost) {
+    return aHasCost ? -1 : 1;
+  }
+
+  if (aHasCost && bHasCost) {
+    const closePrice = pricesAreCloseForCheapest(aCost, bCost);
+    if ((aCost === 0 || bCost === 0) && aCost !== bCost) {
+      return aCost - bCost;
     }
-    return costDiff;
+
+    if (!closePrice && aCost !== bCost) {
+      return aCost - bCost;
+    }
+
+    const nonPriceTieBreak = compareCheapestNonPriceTieBreakers(a, b, tripData);
+    if (nonPriceTieBreak !== 0) return nonPriceTieBreak;
+
+    if (aCost !== bCost) return aCost - bCost;
   }
 
   return (
     unknownPricePenalty(a, tripData) - unknownPricePenalty(b, tripData) ||
+    bookabilityBonus(a) - bookabilityBonus(b) ||
     priceConfidencePenalty(a) - priceConfidencePenalty(b) ||
-    getParkingTotalTimeMinutes(a, tripData) - getParkingTotalTimeMinutes(b, tripData)
+    compareCheapestNonPriceTieBreakers(a, b, tripData) ||
+    cheapestKey(a, tripData) - cheapestKey(b, tripData)
   );
 }
 
@@ -371,7 +479,7 @@ export function logParkingSortScores(
  * - Route-unavailable options always sink to the bottom in every mode.
  * - "fastest" ranks by total door-to-destination time, but a missing/<=0 drive time
  *   is NOT treated as fast (it is pushed to the bottom) so a 0-minute fallback never wins.
- * - "cheapest" ranks by total cost (free first), then total time.
+ * - "cheapest" ranks by reliable total cost (free first), then total time/proximity for close prices.
  * - "easiest" ranks by trust/availability, then total time, then walk/transfer.
  */
 export function sortParkingOptionsForMode(

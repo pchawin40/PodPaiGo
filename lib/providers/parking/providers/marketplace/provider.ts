@@ -16,6 +16,7 @@ export class MarketplaceParkingProvider implements ParkingProvider {
   }
 
   async search(context: ParkingSearchContext): Promise<ParkingOption[]> {
+    if (!context.airportCode) return [];
     const airportCode = context.airportCode.toUpperCase();
     const airport = getAirportById(airportCode);
     const airportSearchName = airport

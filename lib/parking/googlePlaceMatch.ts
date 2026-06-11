@@ -49,6 +49,7 @@ function buildRequestBody(
     name: parking.name,
     address: parking.address || parking.normalizedAddress || parking.routeDestination || null,
     airport: airportCode,
+    airportContext: tripData?.destination || null,
     destinationKind: tripData?.destinationKind ?? 'airport',
     parkingLotId: parking.providerLotId || parking.id || null,
     provider: parking.bookingProvider || null,
@@ -81,11 +82,7 @@ export async function attachGooglePlaceToParking(
     return withStableParkingRouteStatus(parking);
   }
 
-  if (
-    isGooglePlacesLiveBlocked() &&
-    typeof parking.lat === 'number' &&
-    typeof parking.lng === 'number'
-  ) {
+  if (isGooglePlacesLiveBlocked()) {
     return withStableParkingRouteStatus(parking);
   }
 

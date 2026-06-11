@@ -9,6 +9,7 @@ import { resolveParkingPricing } from '../../../../pricingResolver';
 import { resetPlacesRequestBudgetForTests, runWithPlacesRequestBudget } from '../../../../../apiUsage/placesRequestBudget';
 
 const SEA_AIRPORT_LABEL = getAirportById('SEA')!.label;
+const PAE_AIRPORT_LABEL = getAirportById('PAE')!.label;
 
 jest.mock('../../../../../env/googleMapsServerKey', () => ({
   getGoogleMapsServerApiKey: jest.fn(() => 'test-key'),
@@ -24,6 +25,23 @@ function mockParkingPlace(id: string, name: string) {
     displayName: { text: name },
     formattedAddress: '17801 International Blvd, SeaTac, WA',
     location: { latitude: 47.44, longitude: -122.29 },
+    rating: 4.5,
+    userRatingCount: 120,
+  };
+}
+
+function mockParkingPlaceAt(
+  id: string,
+  name: string,
+  latitude: number,
+  longitude: number,
+  formattedAddress = '3308 100th St SW, Everett, WA',
+) {
+  return {
+    id,
+    displayName: { text: name },
+    formattedAddress,
+    location: { latitude, longitude },
     rating: 4.5,
     userRatingCount: 120,
   };
@@ -303,6 +321,63 @@ describe('Google airport parking discovery helpers', () => {
     });
 
     expect(searchTextCalls).toBe(1);
+
+    fetchMock.mockRestore();
+  });
+
+  test('PAE Google airport parking excludes Tacoma-area lots and uses tight radius', async () => {
+    applyLiveGoogleParkingEnv();
+
+    const requestedRadii: number[] = [];
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (!url.includes('places:searchText')) {
+        return { ok: false, json: async () => ({}) } as Response;
+      }
+
+      const body = JSON.parse(String(init?.body));
+      requestedRadii.push(body.locationBias.circle.radius);
+
+      return {
+        ok: true,
+        json: async () => ({
+          places: [
+            mockParkingPlaceAt(
+              'pae-near',
+              'Paine Field Economy Parking',
+              47.907,
+              -122.28,
+            ),
+            mockParkingPlaceAt(
+              'tacoma-far',
+              'Tacoma Airport Parking',
+              47.2529,
+              -122.4443,
+              'Tacoma, WA',
+            ),
+          ],
+        }),
+      } as Response;
+    });
+
+    await runWithPlacesRequestBudget('airport-search:pae-radius', async () => {
+      const options = await getGoogleParkingPlaces({
+        airportCode: 'PAE',
+        destination: 'Paine Field Everett Airport',
+      });
+
+      expect(options.map((option) => option.id)).toEqual(['pae-google-pae-near']);
+      expect(options.some((option) => /tacoma/i.test(option.name))).toBe(false);
+      expect(requestedRadii.length).toBeGreaterThan(0);
+      expect(Math.max(...requestedRadii)).toBeLessThanOrEqual(Math.round(8 * 1609.34));
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://places.googleapis.com/v1/places:searchText',
+      expect.objectContaining({
+        body: expect.stringContaining(`airport parking near ${PAE_AIRPORT_LABEL}`),
+      }),
+    );
 
     fetchMock.mockRestore();
   });

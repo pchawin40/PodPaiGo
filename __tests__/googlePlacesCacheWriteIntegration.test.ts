@@ -6,6 +6,7 @@ jest.mock('../lib/db/client', () => ({
     connect: jest.fn(),
     query: jest.fn(),
   },
+  parkingDbCacheDisabledByConfig: jest.fn(() => false),
 }));
 
 jest.mock('../lib/env/googleMapsServerKey', () => ({
@@ -129,5 +130,95 @@ describe('resolveParkingGooglePlace cache write failures', () => {
 
     expect(detailsCalls.length).toBeLessThanOrEqual(2);
     expect(searchCalls).toHaveLength(0);
+  });
+
+  test('concurrent resolves for the same lot share one lookup and a single coalesced write', async () => {
+    const { db } = jest.requireMock('../lib/db/client') as {
+      db: { connect: jest.Mock; query: jest.Mock };
+    };
+
+    let freshReadCount = 0;
+    let insertCount = 0;
+
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('expires_at > now()')) {
+        freshReadCount += 1;
+        return { rows: [] };
+      }
+      if (sql.includes('where cache_key = $1')) {
+        return { rows: [] };
+      }
+      if (sql.includes('where google_place_id = $1')) {
+        return { rows: [] };
+      }
+      throw new Error('Unexpected query');
+    });
+
+    db.connect.mockImplementation(async () => ({
+      query: jest.fn(async (sql: string) => {
+        if (sql === 'begin' || sql === 'commit' || sql === 'rollback') {
+          return { rows: [] };
+        }
+        if (sql.includes('insert into parking_lot_google_place_snapshots')) {
+          insertCount += 1;
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }),
+      release: jest.fn(),
+    }));
+
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('places.googleapis.com/v1/places/place-live')) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'place-live',
+            displayName: { text: 'Jiffy Airport Parking' },
+            formattedAddress: '18836 International Blvd',
+            location: { latitude: 47.439, longitude: -122.294 },
+            photos: [{ name: 'photos/live/1' }],
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404, clone: async () => ({ text: async () => '' }) } as Response;
+    });
+
+    const { resolveParkingGooglePlace } = await import('../lib/parking/googlePlacesCache');
+    const { flushGooglePlacesCacheWriteQueueForTests } = await import(
+      '../lib/parking/googlePlacesCacheWrite'
+    );
+
+    const args = {
+      airportCode: 'SEA' as const,
+      lotName: 'Jiffy Airport Parking',
+      lotAddress: '18836 International Blvd',
+      googlePlaceId: 'place-live',
+      provider: 'ParkWhiz',
+      source: 'ParkWhiz',
+    };
+
+    const [a, b, c] = await Promise.all([
+      resolveParkingGooglePlace(args),
+      resolveParkingGooglePlace(args),
+      resolveParkingGooglePlace(args),
+    ]);
+
+    await flushGooglePlacesCacheWriteQueueForTests();
+
+    expect(a?.googlePlaceId).toBe('place-live');
+    expect(b?.googlePlaceId).toBe('place-live');
+    expect(c?.googlePlaceId).toBe('place-live');
+
+    // In-flight resolve dedup: concurrent identical lookups share one DB read pass.
+    expect(freshReadCount).toBe(1);
+    // Write coalescing: duplicate cache writes collapse into a single DB insert.
+    expect(insertCount).toBe(1);
+
+    const detailsCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('places.googleapis.com/v1/places/place-live'),
+    );
+    expect(detailsCalls.length).toBe(1);
   });
 });

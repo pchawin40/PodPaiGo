@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { requireAdmin } from '@/lib/auth/admin';
 import { buildParkingDiagnostics } from '@/lib/providers/parking/coverage/diagnostics';
 import {
   buildAirportCoverageDashboard,
@@ -31,6 +32,9 @@ function readDashboard(path: string): AirportCoverageDashboard | null {
 }
 
 export async function GET(request: NextRequest) {
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
+
   const airportCode = request.nextUrl.searchParams.get('airportCode') || 'SEA';
   const checkInDate = request.nextUrl.searchParams.get('checkInDate') || undefined;
   const checkOutDate = request.nextUrl.searchParams.get('checkOutDate') || undefined;
@@ -55,6 +59,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
+
   try {
     const body = await request.json().catch(() => ({}));
     const airportCodes = Array.isArray(body.airportCodes)

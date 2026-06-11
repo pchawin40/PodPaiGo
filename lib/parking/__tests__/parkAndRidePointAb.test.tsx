@@ -6,12 +6,13 @@ import OptionComparisonCard from '../../../app/components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../../../app/components/ParkAndRideDetailsPanel';
 import { PARK_AND_RIDE_UI_COPY } from '../../access/parkAndRideAccess';
 import { buildParkAndRideDetailsPanel } from '../parkAndRideDetails';
-import { getSeattleRegionParkAndRideLots } from '../parkAndRideProvider';
+import { getAustinCapMetroParkAndRideLots, getSeattleRegionParkAndRideLots } from '../parkAndRideProvider';
 import {
   selectBestParkAndRideForPointAb,
   toPointAbParkRidePresentation,
 } from '../parkAndRideSelection';
 import { buildPointAbModeActions } from '../pointAbModeActions';
+import { POINT_AB_DETAILS_SECTION_IDS } from '../pointAbDetailsScroll';
 import { rankPointAbModes } from '../pointAbRanking';
 import {
   SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
@@ -58,6 +59,15 @@ describe('Point A→B Park & Ride provider', () => {
       ),
     ).toBe(false);
   });
+
+  test('seeds Austin CapMetro curated lots with free parking', () => {
+    const lots = getAustinCapMetroParkAndRideLots();
+
+    expect(lots.length).toBeGreaterThan(0);
+    expect(lots.every((lot) => lot.parkingCostMin === 0 && lot.parkingCostMax === 0)).toBe(true);
+    expect(lots.some((lot) => lot.lotName.includes('Plaza Saltillo'))).toBe(true);
+    expect(lots.some((lot) => lot.transitFareMin === 3.5)).toBe(true);
+  });
 });
 
 describe('Point A→B Park & Ride selection', () => {
@@ -78,7 +88,7 @@ describe('Point A→B Park & Ride selection', () => {
     expect(result.best).not.toBeNull();
     expect(result.best?.isRecommended).toBe(true);
     expect(result.best?.totalTimeMinutes).toBeGreaterThan(0);
-    expect(result.best?.costEstimate?.display).toMatch(/Estimated \$/);
+    expect(result.best?.costEstimate?.display).toMatch(/\$[\d.]+ one-way adult est\./);
     expect(
       result.best?.lotName.includes('Lynnwood') ||
         result.best?.lotName.includes('Northgate') ||
@@ -99,7 +109,8 @@ describe('Point A→B Park & Ride selection', () => {
     });
 
     expect(result.best).toBeNull();
-    expect(result.notUsefulReason).toMatch(/Not useful|no Park & Ride/i);
+    expect(result.metroStatus).toBe('data_not_available');
+    expect(result.notUsefulReason).toMatch(/data not available yet for this metro/i);
   });
 
   test('does not recommend overnight airport Park & Ride', () => {
@@ -136,7 +147,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
     expect(result.best!.rulesUrl).not.toMatch(/how-to-ride\/park-and-ride/);
   });
 
-  test('viable Park & Ride actions use route, transit, and rules buttons', () => {
+  test('viable Park & Ride actions keep route primary and send details lower on page', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideDirectionsUrl: 'https://maps.example/drive',
@@ -144,6 +155,7 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       parkRideRulesUrl: SOUND_TRANSIT_PARKING_URL,
       parkRideViable: true,
       onDetails: () => undefined,
+      detailsSectionId: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
     });
 
     expect(actions[0]).toEqual({ label: 'Route to lot', href: 'https://maps.example/drive' });
@@ -151,27 +163,26 @@ describe('Point A→B Park & Ride URLs and actions', () => {
       label: 'Transit to destination',
       href: 'https://maps.example/transit',
     });
-    expect(actions[2]).toEqual({
-      label: 'Rules',
-      href: SOUND_TRANSIT_PARKING_URL,
-    });
+    expect(actions[2].label).toBe('Details');
+    expect(actions[2].ariaControls).toBe('park-ride-details');
   });
 
-  test('unavailable Park & Ride actions open rules and why-unavailable details', () => {
+  test('unavailable Park & Ride actions keep rules primary and send details lower on page', () => {
     const actions = buildPointAbModeActions({
       mode: 'park-ride',
       parkRideRulesUrl: 'https://soundtransit.org/rules',
       parkRideTransitPlannerUrl: SOUND_TRANSIT_TRIP_PLANNER_URL,
       parkRideViable: false,
       onDetails: () => undefined,
+      detailsSectionId: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
     });
 
     expect(actions[0]).toEqual({
       label: 'Check lot rules',
       href: 'https://soundtransit.org/rules',
     });
-    expect(actions[1].label).toBe('Why unavailable');
-    expect(actions[1].ariaControls).toBeUndefined();
+    expect(actions[1].label).toBe('Details');
+    expect(actions[1].ariaControls).toBe('park-ride-details');
     expect(actions[2]).toEqual({
       label: 'Open transit planner',
       href: SOUND_TRANSIT_TRIP_PLANNER_URL,
@@ -192,8 +203,7 @@ describe('Point A→B Park & Ride details and ranking', () => {
       isAirportTrip: false,
     });
     const presentation = toPointAbParkRidePresentation(selection);
-    const seed = getSeattleRegionParkAndRideLots().find((lot) => lot.id === selection.best?.id);
-    const details = buildParkAndRideDetailsPanel(selection.best!, seed);
+    const details = buildParkAndRideDetailsPanel(selection.best!);
 
     expect(presentation?.details.lotName).toBeTruthy();
     expect(details.routesServed.length).toBeGreaterThan(0);
@@ -241,7 +251,7 @@ describe('Point A→B Park & Ride details and ranking', () => {
     const parkRideRow = ranking.modes.find((mode) => mode.key === 'park-ride');
     expect(parkRideRow?.name).toMatch(/Lynnwood|Northgate|Mountlake/);
     expect(parkRideRow?.time).not.toBe('Depends');
-    expect(parkRideRow?.cost).toMatch(/Estimated \$/);
+    expect(parkRideRow?.cost).toMatch(/one-way adult est|Transit fare est/);
   });
 });
 
@@ -263,7 +273,7 @@ describe('OptionComparisonCard layout', () => {
           {
             label: 'Details',
             onClick: () => undefined,
-            ariaControls: 'details-park-ride',
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
             ariaExpanded: false,
           },
         ]}
@@ -272,18 +282,18 @@ describe('OptionComparisonCard layout', () => {
 
     expect(screen.getByText('Park & Ride')).toBeInTheDocument();
     expect(screen.getByText('Verify')).toBeInTheDocument();
-    expect(screen.getByText('Lower parking cost')).toBeInTheDocument();
-    expect(screen.queryByText('Extra pro hidden')).not.toBeInTheDocument();
-    expect(screen.queryByText('Extra con hidden')).not.toBeInTheDocument();
+    // Primary action and Details toggle always visible
     expect(screen.getByRole('link', { name: 'Route to lot' })).toHaveAttribute(
       'href',
       'https://maps.example/drive',
     );
-    expect(screen.getByRole('link', { name: 'Transit to destination' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute(
-      'aria-controls',
-      'details-park-ride',
+    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute(
+      'href',
+      '#park-ride-details',
     );
+    // Pros, cons, and secondary action belong in the lower details section.
+    expect(screen.queryByText('Lower parking cost')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Transit to destination' })).not.toBeInTheDocument();
   });
 
   test('desktop cards share equal-height flex layout', () => {
@@ -341,5 +351,97 @@ describe('OptionComparisonCard layout', () => {
 
     const mercer = result.candidates.find((lot) => lot.id === 'mercer-island-park-and-ride');
     expect(mercer?.rulesUrl).toBe(SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL);
+  });
+});
+
+describe('Austin CapMetro Park & Ride QA scenario', () => {
+  const austinTripInput = {
+    origin: 'La Quinta Inn & Suites by Wyndham Austin Airport',
+    originLat: 30.1944,
+    originLng: -97.6699,
+    destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+    destinationLat: 30.2702,
+    destinationLng: -97.7314,
+    parkingDurationMinutes: 120,
+    isAirportTrip: false,
+    sort: 'easiest' as const,
+    parkingTotal: 15,
+  };
+
+  test('airport to Franklin surfaces CapMetro candidates with separate parking and fare', () => {
+    const result = selectBestParkAndRideForPointAb(austinTripInput);
+
+    expect(result.metroId).toBe('austin');
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(result.best).not.toBeNull();
+    expect(result.availabilityTier).toMatch(/recommended|backup_available/);
+    expect(result.best?.costEstimate?.parkingDisplay).toBe('Usually free; verify lot signs.');
+    expect(result.best?.costEstimate?.transitFareDisplay).toBe('$3.50 one-way adult est.');
+    expect(result.best?.costEstimate?.display).not.toMatch(/total/i);
+  });
+
+  test('presentation does not say unavailable when candidates exist', () => {
+    const result = selectBestParkAndRideForPointAb(austinTripInput);
+    const presentation = toPointAbParkRidePresentation(result);
+
+    expect(presentation).not.toBeNull();
+    expect(presentation?.hasCandidates).toBe(true);
+    expect(presentation?.displayName).not.toMatch(/unavailable/i);
+    expect(presentation?.cardHeadline).not.toMatch(/unavailable/i);
+    expect(presentation?.costNote).toBe('Usually free; verify lot signs.');
+    expect(presentation?.costDisplay).toBe('$3.50 one-way adult est.');
+  });
+
+  test('lot cards use descriptive labels instead of Not useful', () => {
+    const result = selectBestParkAndRideForPointAb(austinTripInput);
+    const presentation = toPointAbParkRidePresentation(result);
+    const labels = presentation?.details.lots.map((lot) => lot.statusLabel) ?? [];
+
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).not.toContain('Not useful');
+    expect(labels.some((label) =>
+      ['Best pick', 'Useful backup', 'Long detour', 'Slow transit connection'].includes(label),
+    )).toBe(true);
+  });
+
+  test('ranking keeps Park & Ride visible as backup or recommended', () => {
+    const selection = selectBestParkAndRideForPointAb(austinTripInput);
+    const pointAbParkRide = toPointAbParkRidePresentation(selection);
+    const ranking = rankPointAbModes({
+      tripData: {
+        type: 'general-trip',
+        origin: austinTripInput.origin,
+        destination: austinTripInput.destination,
+        originLat: austinTripInput.originLat,
+        originLng: austinTripInput.originLng,
+        destinationLat: austinTripInput.destinationLat,
+        destinationLng: austinTripInput.destinationLng,
+        parkingDuration: austinTripInput.parkingDurationMinutes,
+      } as TripData,
+      sort: 'easiest',
+      destinationLabel: austinTripInput.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingTotal: 15,
+      parkingMinutes: 20,
+      bestRideOption: null,
+      ridePrice: 25,
+      rideDuration: 18,
+      bestTransitOption: null,
+      transitCost: 1.25,
+      transitDuration: 45,
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      pointAbParkRide,
+      parkRideCost: pointAbParkRide?.cost ?? null,
+      parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
+      parkRideReliable: Boolean(pointAbParkRide?.reliable),
+    });
+
+    const parkRideRow = ranking.modes.find((mode) => mode.key === 'park-ride');
+    expect(parkRideRow?.unavailable).toBe(false);
+    expect(parkRideRow?.name).not.toMatch(/unavailable/i);
+    expect(parkRideRow?.cost).toMatch(/one-way adult est|Transit fare est/);
+    expect(parkRideRow?.costNote).toBe('Usually free; verify lot signs.');
   });
 });

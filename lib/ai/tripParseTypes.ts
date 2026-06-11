@@ -17,6 +17,44 @@ export type ParsedTripOriginSource =
   | 'saved'
   | 'unknown';
 
+/**
+ * Structured driving preferences extracted from free text. These are user
+ * inputs only — they never assert that a lane is legal for the user. HOV/toll
+ * eligibility must always be confirmed against posted rules before it is
+ * presented as fact, so copy that surfaces these stays cautious.
+ */
+export type DrivingPreferences = {
+  carpoolPossible: boolean;
+  numberOfPeople: number | null;
+  /** True once the user explicitly said they don't know the passenger count. */
+  occupancyConfirmedUnknown?: boolean;
+  hovLaneEligible: 'yes' | 'no' | 'unknown';
+  expressPassAvailable: boolean;
+  tollLaneAllowed: boolean | null;
+  avoidTolls: boolean;
+  willingToPayTollForTime: boolean | null;
+};
+
+/**
+ * Event/stadium context for a trip. When isEvent is true the destination should
+ * be treated under PodPaiGo event-parking rules (no street/meter hero, prefer
+ * official/prepaid parking, transit, rideshare).
+ */
+export type EventContext = {
+  isEvent: boolean;
+  /** Human label such as "Seahawks/Raiders game". */
+  eventLabel: string | null;
+  /** Inferred venue name such as "Allegiant Stadium". */
+  venueName: string | null;
+  /** Whether a concrete game/event time is known. */
+  eventTimeKnown: boolean;
+  /**
+   * True once the user acknowledged they don't know the game time and accepted
+   * a cautious "arrive early" default. We never invent a real game time.
+   */
+  eventTimeAcknowledged?: boolean;
+};
+
 export type ParsedTripAssistantResult = {
   mode: TripParseMode;
   status?: TripParseStatus;
@@ -40,6 +78,12 @@ export type ParsedTripAssistantResult = {
   parkingDurationMinutes?: number | null;
   transportAvailability?: TransportAvailability | null;
   parkingPreference?: ParkingPreference | null;
+  /** City the trip takes place in, e.g. "Las Vegas" for a lodging-based trip. */
+  tripCity?: string | null;
+  /** Structured carpool/HOV/Express Pass/toll preferences when present. */
+  drivingPreferences?: DrivingPreferences | null;
+  /** Event/stadium context when the destination is an event venue. */
+  eventContext?: EventContext | null;
   tripType: string | null;
   needsParking: boolean;
   needsLeaveTime: boolean;

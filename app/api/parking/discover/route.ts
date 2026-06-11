@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/auth/admin';
 import { getGoogleMapsServerApiKey } from '@/lib/env/googleMapsServerKey';
 import { getAirportById } from '../../../../lib/airports/catalog';
 import { saveParkingLots, ParkingLotInventoryInput } from '../../../../lib/parking/inventory';
@@ -41,7 +42,17 @@ function confidenceForPlace(place: GooglePlace): number {
     return Math.min(score, 1);
 }
 
+function hasCronAccess(req: NextRequest): boolean {
+    const secret = process.env.CRON_SECRET;
+    return Boolean(secret && req.headers.get('authorization') === `Bearer ${secret}`);
+}
+
 export async function POST(req: NextRequest) {
+    if (!hasCronAccess(req)) {
+        const admin = await requireAdmin(req);
+        if (!admin.ok) return admin.response;
+    }
+
     try {
         const body = await req.json();
 

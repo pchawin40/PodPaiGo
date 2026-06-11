@@ -131,6 +131,45 @@ describe('quickGo', () => {
     expect(readQuickGoOriginFromSearchParams(params)).toEqual(geolocationOrigin);
   });
 
+  test('selected Quick Go origin and destination coordinates persist through params and parsing', () => {
+    const params = buildQuickGoSearchParams({
+      destination: {
+        destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+        destinationLabel: 'Franklin Barbecue',
+        destinationAddress: '900 E 11th St, Austin, TX 78702',
+        destinationSource: 'google',
+        destinationLat: 30.2701,
+        destinationLng: -97.7313,
+        destinationConfidence: 'high',
+      },
+      origin: {
+        origin:
+          'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+        originLabel: 'La Quinta Inn & Suites by Wyndham Austin Airport',
+        originSource: 'google',
+        originLat: 30.2146,
+        originLng: -97.6896,
+        originPlaceId: 'la-quinta-austin-airport',
+        originConfidence: 'high',
+      },
+      now: new Date('2026-06-01T10:00:00'),
+    });
+
+    expect(params.get('originLat')).toBe('30.2146');
+    expect(params.get('originLng')).toBe('-97.6896');
+    expect(params.get('originPlaceId')).toBe('la-quinta-austin-airport');
+    expect(params.get('destinationLat')).toBe('30.2701');
+    expect(params.get('destinationLng')).toBe('-97.7313');
+
+    const tripData = parseTripDataFromSearchParams(params);
+    expect(tripData?.originLat).toBe(30.2146);
+    expect(tripData?.originLng).toBe(-97.6896);
+    expect(tripData?.originPlaceId).toBe('la-quinta-austin-airport');
+    expect(tripData?.destinationLat).toBe(30.2701);
+    expect(tripData?.destinationLng).toBe(-97.7313);
+    expect(tripData?.tripMode).toBe('quick-go');
+  });
+
   test('general trip parking window uses arrival plus selected duration', () => {
     const params = new URLSearchParams({
       type: 'general-trip',

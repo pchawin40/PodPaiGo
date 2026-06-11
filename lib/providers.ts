@@ -1,5 +1,6 @@
 import {
   DestinationKind,
+  ParkingDiscoveryMetadata,
   ParkingOption,
   RideshareOption,
   TransitJourney,
@@ -9,7 +10,12 @@ import {
   TsaEstimate,
   SecurityOption,
   TripData,
+  DriveRoutePreferences,
 } from './types';
+import {
+  computeDriveRouteOptions,
+} from './routes/computeDriveRouteOptions';
+import type { DriveRouteRanking } from './routes/driveRouteProfiles';
 import { mockTrafficEstimates, mockFlightInfo, mockLocationInfo } from '../data/mockData';
 import { AIRPORTS_CATALOG, getAirportById } from './airports/catalog';
 import { RoutesApiElement, RoutesApiResponse } from '../lib/parking/provider';
@@ -21,6 +27,7 @@ import {
 } from './trip/quickGo';
 import { debugLog } from './utils/debug';
 import { buildRideshareEstimateOptions } from './rideshare/estimate';
+import { resolveTransitFare } from './transit/transitFareResolver';
 import {
   applyParkingOriginDriveMinutes,
   estimateDriveMinutesFromStraightLineMiles,
@@ -41,6 +48,7 @@ import {
   applyCanonicalCoordinatesToOption,
   resolveCanonicalParkingCoordinates,
 } from './parking/resolveCanonicalCoordinates';
+import { enrichParkingOptionsOutboundUrls } from './monetization/providerUrls';
 import {
   buildRouteEstimateCacheKey,
   shortRequestKey,
@@ -327,11 +335,22 @@ function coordinateFallbackTrafficEstimate(
   };
 }
 
-function resolveParkingTransferMeta(option: ParkingOption): {
+function resolveParkingTransferMeta(
+  option: ParkingOption,
+  context?: ParkingOptionsRequestContext,
+): {
   parkingBufferMinutes: number;
-  transferToTerminalMinutes: number;
-  transferType: 'walk' | 'shuttle' | 'airport-garage';
+  transferToTerminalMinutes?: number;
+  transferType?: ParkingOption['transferType'];
 } {
+  const isCityDestination = context?.destinationKind != null && context.destinationKind !== 'airport';
+  if (isCityDestination) {
+    return {
+      parkingBufferMinutes: option.type === 'park-and-ride' ? 10 : 8,
+      transferType: option.type === 'park-and-ride' ? 'transit' : option.transferType ?? 'walk',
+    };
+  }
+
   const id = (option.id || '').toLowerCase();
   const name = (option.name || '').toLowerCase();
 
@@ -365,11 +384,22 @@ function resolveParkingTransferMeta(option: ParkingOption): {
 
 type ParkingOptionsRequestContext = {
   destinationKind?: DestinationKind;
+  destinationName?: string;
   airportCode?: string;
+  destinationCoordinates?: RouteLatLng | null;
   destinationLat?: number;
   destinationLng?: number;
+  checkInDate?: string;
+  checkOutDate?: string;
+  checkInAt?: string;
+  checkOutAt?: string;
   routeDepartureTime?: string;
   targetTerminalArrivalTime?: string;
+};
+
+type ParkingOptionsResult = {
+  options: ParkingOption[];
+  metadata?: ParkingDiscoveryMetadata;
 };
 
 type RouteLatLng = { lat: number; lng: number };
@@ -384,6 +414,13 @@ type RouteRequestContext = {
   targetTerminalArrivalTime?: string;
 };
 
+type DriveRouteOptionsContext = {
+  originLatLng?: RouteLatLng | null;
+  destinationLatLng?: RouteLatLng | null;
+  /** Feature flag override; when omitted falls back to the env flag. */
+  featureEnabled?: boolean;
+};
+
 export interface TrafficProvider {
   getTrafficEstimate(
     origin: string,
@@ -392,6 +429,18 @@ export interface TrafficProvider {
     destinationLatLng?: RouteLatLng | null,
     routeContext?: RouteRequestContext,
   ): Promise<TrafficEstimate>;
+  /**
+   * Optional toll/HOV/express drive route comparison (Phase 1). Returns null
+   * when not enabled/chosen so no extra route calls are made. Optional so
+   * lightweight mock providers need not implement it.
+   */
+  getDriveRouteOptions?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    prefs: DriveRoutePreferences | null | undefined,
+    context?: DriveRouteOptionsContext,
+  ): Promise<DriveRouteRanking | null>;
 }
 
 export interface ParkingProvider {
@@ -402,6 +451,13 @@ export interface ParkingProvider {
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]>;
+  getParkingOptionsWithMetadata?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult>;
 }
 
 export interface FlightProvider {
@@ -435,6 +491,13 @@ export interface DataProvider extends TrafficProvider, ParkingProvider, FlightPr
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]>;
+  getParkingOptionsWithMetadata?(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult>;
   /**
    * Optional address → coordinates resolver (budget-guarded + cached). Used to
    * resolve trip origin/destination coordinates before route timing so live and
@@ -496,7 +559,7 @@ function readPositiveTimeoutMs(name: string, fallback: number): number {
 }
 
 function getParkingOptionsReturnBudgetMs(): number {
-  const overall = readPositiveTimeoutMs('PARKING_FETCH_TIMEOUT_MS', 5000);
+  const overall = readPositiveTimeoutMs('PARKING_FETCH_TIMEOUT_MS', 15000);
   const reserve = readPositiveTimeoutMs('PARKING_FETCH_RETURN_RESERVE_MS', 700);
 
   return Math.max(1000, overall - reserve);
@@ -747,6 +810,53 @@ export class LiveTrafficProvider implements TrafficProvider {
       } catch {
         return null;
       }
+    });
+  }
+
+  /**
+   * Toll/HOV/express drive route comparison (Phase 1). Returns null without any
+   * network call when the feature is disabled and the user did not choose a
+   * toll/HOV option. Never makes the toll route Best Overall when the user
+   * chose avoidTolls; never guarantees HOV/express eligibility.
+   */
+  async getDriveRouteOptions(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    prefs: DriveRoutePreferences | null | undefined,
+    context?: DriveRouteOptionsContext,
+  ): Promise<DriveRouteRanking | null> {
+    // Cheap gate first: avoid geocoding / network when not enabled or chosen.
+    const { shouldComputeDriveRouteOptions } = await import(
+      './routes/driveRouteProfiles'
+    );
+    if (
+      !shouldComputeDriveRouteOptions({
+        prefs,
+        featureEnabled: context?.featureEnabled,
+      })
+    ) {
+      return null;
+    }
+
+    if (!this.serverKey) return null;
+
+    const [originLatLng, destinationLatLng] = await Promise.all([
+      context?.originLatLng
+        ? Promise.resolve(context.originLatLng)
+        : this.geocodeAddress(origin),
+      context?.destinationLatLng
+        ? Promise.resolve(context.destinationLatLng)
+        : this.geocodeAddress(destination),
+    ]);
+
+    return computeDriveRouteOptions({
+      origin: originLatLng ?? origin,
+      destination: destinationLatLng ?? destination,
+      departureTime: dateTime,
+      prefs,
+      apiKey: this.serverKey,
+      featureEnabled: context?.featureEnabled,
     });
   }
 
@@ -1881,6 +1991,23 @@ export class MockProvider implements DataProvider {
     parkingDurationMinutes?: number,
     context?: ParkingOptionsRequestContext
   ): Promise<ParkingOption[]> {
+    const result = await this.getParkingOptionsWithMetadata(
+      origin,
+      destination,
+      dateTime,
+      parkingDurationMinutes,
+      context,
+    );
+    return result.options;
+  }
+
+  async getParkingOptionsWithMetadata(
+    origin: string,
+    destination: string,
+    dateTime: string,
+    parkingDurationMinutes?: number,
+    context?: ParkingOptionsRequestContext
+  ): Promise<ParkingOptionsResult> {
     const parkingOptionsStartedAt = Date.now();
     const routeOrigins = origin;
 
@@ -1905,15 +2032,22 @@ export class MockProvider implements DataProvider {
 
     const parkingDates = buildParkingDateRange(dateTime, parkingDurationMinutes);
 
-    const destinationCoords =
+    const contextDestinationCoords =
       typeof context?.destinationLat === 'number' &&
       typeof context?.destinationLng === 'number'
         ? { lat: context.destinationLat, lng: context.destinationLng }
-        : !isAirportDestination
-          ? await this.geocodeLatLng(destination)
-          : undefined;
+        : null;
+    const destinationCoords =
+      resolveRouteLatLng(context?.destinationCoordinates) ??
+      contextDestinationCoords ??
+      (!isAirportDestination ? await this.geocodeLatLng(destination) : undefined);
 
-    const { getLiveParkingOptions, getDestinationParkingOptions } = await import('./providers/parkingAggregator');
+    const {
+      getLiveParkingOptions,
+      getDestinationParkingOptions,
+      getDestinationParkingOptionsWithMetadata,
+    } = await import('./providers/parkingAggregator');
+    let parkingDiscoveryMetadata: ParkingDiscoveryMetadata | undefined;
     const liveParkingOptions = isAirportDestination
       ? await getLiveParkingOptions({
         airportCode: airportCode!,
@@ -1924,22 +2058,54 @@ export class MockProvider implements DataProvider {
         checkInAt: parkingDates.checkInAt,
         checkOutAt: parkingDates.checkOutAt,
       })
-      : await getDestinationParkingOptions({
-        origin,
-        destination,
-        dateTime,
-        parkingDurationMinutes,
-        destinationLat: destinationCoords?.lat ?? context?.destinationLat,
-        destinationLng: destinationCoords?.lng ?? context?.destinationLng,
-        checkInDate: parkingDates.checkInDate,
-        checkOutDate: parkingDates.checkOutDate,
-        checkInAt: parkingDates.checkInAt,
-        checkOutAt: parkingDates.checkOutAt,
-      });
+      : getDestinationParkingOptionsWithMetadata
+        ? await getDestinationParkingOptionsWithMetadata({
+            origin,
+            destination,
+            destinationName: context?.destinationName,
+            destinationKind,
+            dateTime,
+            parkingDurationMinutes,
+            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+            checkInDate: context?.checkInDate ?? parkingDates.checkInDate,
+            checkOutDate: context?.checkOutDate ?? parkingDates.checkOutDate,
+            checkInAt: context?.checkInAt ?? parkingDates.checkInAt,
+            checkOutAt: context?.checkOutAt ?? parkingDates.checkOutAt,
+          }).then((result) => {
+            parkingDiscoveryMetadata = result.metadata;
+            return result.options;
+          })
+        : await getDestinationParkingOptions({
+            origin,
+            destination,
+            destinationName: context?.destinationName,
+            destinationKind,
+            dateTime,
+            parkingDurationMinutes,
+            destinationLat: destinationCoords?.lat ?? context?.destinationLat,
+            destinationLng: destinationCoords?.lng ?? context?.destinationLng,
+            checkInDate: context?.checkInDate ?? parkingDates.checkInDate,
+            checkOutDate: context?.checkOutDate ?? parkingDates.checkOutDate,
+            checkInAt: context?.checkInAt ?? parkingDates.checkInAt,
+            checkOutAt: context?.checkOutAt ?? parkingDates.checkOutAt,
+          });
 
-    if (liveParkingOptions.length === 0) return [];
+    if (liveParkingOptions.length === 0) {
+      return { options: [], metadata: parkingDiscoveryMetadata };
+    }
     if (remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
-      return withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout');
+      return {
+        options: enrichParkingOptionsOutboundUrls(
+          withDeferredParkingDetails(liveParkingOptions, 'base_provider_results_near_timeout'),
+          {
+            airportCode,
+            tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+            searchQuery: context?.destinationName || destination,
+          },
+        ),
+        metadata: parkingDiscoveryMetadata,
+      };
     }
 
     const { value: parkingSource, timedOut: canonicalTimedOut } = await withParkingStepFallback(
@@ -1962,7 +2128,17 @@ export class MockProvider implements DataProvider {
     );
 
     if (canonicalTimedOut && remainingParkingOptionsBudgetMs(parkingOptionsStartedAt) <= 0) {
-      return withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout');
+      return {
+        options: enrichParkingOptionsOutboundUrls(
+          withDeferredParkingDetails(parkingSource, 'canonical_coordinates_timeout'),
+          {
+            airportCode,
+            tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+            searchQuery: context?.destinationName || destination,
+          },
+        ),
+        metadata: parkingDiscoveryMetadata,
+      };
     }
 
     const routeDestination = isAirportDestination
@@ -2138,15 +2314,100 @@ export class MockProvider implements DataProvider {
       return promise;
     };
 
-    const routeEnrichmentFallback = withDeferredParkingDetails(
-      parkingSource,
-      'parking_route_enrichment_timeout',
+    const buildParkingRouteFallbackOption = (
+      entry: typeof parkingRouteEntries[number],
+      reason: string,
+    ): ParkingOption => {
+      const { option, routeDestination: entryRouteDestination, lotDestination } = entry;
+      const meta = resolveParkingTransferMeta(option, context);
+      const parkingBufferMinutes =
+        option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
+      const transferToTerminalMinutes =
+        option.transferToTerminalMinutes ?? meta.transferToTerminalMinutes;
+      const transferType = option.transferType ?? meta.transferType;
+      const sourceLink =
+        option.sourceLink && option.sourceLink.includes('example.com')
+          ? undefined
+          : option.sourceLink;
+      const mapLink =
+        origin && entryRouteDestination
+          ? googleMapsDirectionsLink(origin, entryRouteDestination, 'driving', {
+              destinationPlaceId: lotDestination.googlePlaceId,
+            })
+          : this.buildGoogleDirectionsLink(origin, entryRouteDestination);
+      const routeTargetCoords = entry.destinationLatLng;
+      const canonicalRouteCoords = getParkingRouteCoordinates(option);
+      const usedCanonicalCoords = Boolean(
+        option.coordinateSource === 'google_place' &&
+          routeTargetCoords &&
+          typeof canonicalRouteCoords.lat === 'number' &&
+          typeof canonicalRouteCoords.lng === 'number' &&
+          Math.abs(routeTargetCoords.lat - canonicalRouteCoords.lat) <= 0.001 &&
+          Math.abs(routeTargetCoords.lng - canonicalRouteCoords.lng) <= 0.001,
+      );
+      const routeTarget = routeTargetCoords
+        ? {
+            lat: routeTargetCoords.lat,
+            lng: routeTargetCoords.lng,
+            usedCanonicalCoords,
+          }
+        : undefined;
+      const parkingRouteDebug = {
+        routesApiDestination: routeTargetCoords
+          ? `${routeTargetCoords.lat},${routeTargetCoords.lng}`
+          : entryRouteDestination,
+        googleMapsUrlDestination: lotDestination.destination || entryRouteDestination,
+        deferredReason: reason,
+      };
+      const fallbackDriveMinutes = estimateParkingDriveMinutesFallback({
+        originLat: originCoords?.lat,
+        originLng: originCoords?.lng,
+        option,
+      });
+      const hasFallbackDrive = fallbackDriveMinutes > 0;
+
+      return applyParkingOriginDriveMinutes(
+        {
+          ...option,
+          parkingBufferMinutes,
+          transferToTerminalMinutes,
+          transferType,
+          routeOrigin: routeOrigins,
+          routeDestination: entryRouteDestination,
+          sourceLink,
+          mapLink,
+          lastUpdated: new Date().toISOString(),
+          parkingRouteDebug,
+          routeTrustStatus: option.routeTrustStatus ?? option.trustStatus,
+          routeUnavailable: false,
+          routeUnavailableReason: option.routeUnavailableReason,
+          ...(originCoords
+            ? { originLat: originCoords.lat, originLng: originCoords.lng }
+            : {}),
+          assumptions: [
+            ...(option.assumptions || []),
+            hasFallbackDrive
+              ? `Estimated ${fallbackDriveMinutes} min drive from origin based on straight-line distance while live route details refresh.`
+              : 'Origin-to-lot route calculation is still refreshing. Open directions to confirm drive time.',
+          ],
+        },
+        fallbackDriveMinutes,
+        hasFallbackDrive ? 'haversine-estimated' : 'google-routes',
+        routeTarget,
+        { source: hasFallbackDrive ? 'fallback' : 'google-routes' },
+      );
+    };
+
+    const routeEnrichmentTimeoutMs = readPositiveTimeoutMs(
+      'PARKING_ROUTE_ENRICH_TIMEOUT_MS',
+      isAirportDestination ? 1600 : 4500,
     );
-    const { value: enriched } = await withParkingStepFallback(
-      'parking_route_enrichment',
-      parkingOptionsStartedAt,
-      () => Promise.all(
-        parkingRouteEntries.map(async (entry) => {
+    const enriched = await Promise.all(
+      parkingRouteEntries.map(async (entry) => {
+        const { value } = await withParkingStepFallback(
+          `parking_route_enrichment:${entry.option.id || entry.option.name || 'unknown'}`,
+          parkingOptionsStartedAt,
+          async () => {
         const { option, routeDestination, lotDestination } = entry;
         const shouldUseLiveRoute = liveRouteKeys.has(entry.routeCacheKey);
 
@@ -2159,7 +2420,7 @@ export class MockProvider implements DataProvider {
           ),
         );
 
-        const meta = resolveParkingTransferMeta(option);
+        const meta = resolveParkingTransferMeta(option, context);
         const parkingBufferMinutes =
           option.parkingBufferMinutes ?? meta.parkingBufferMinutes;
         const transferToTerminalMinutes =
@@ -2307,6 +2568,7 @@ export class MockProvider implements DataProvider {
             fallbackDriveMinutes,
             'haversine-estimated',
             routeTarget,
+            { source: 'fallback' },
           );
 
           return deferredOption;
@@ -2338,6 +2600,9 @@ export class MockProvider implements DataProvider {
             fallbackDriveMinutes,
             fallbackDriveMinutes > 0 ? 'haversine-estimated' : 'google-routes',
             routeTarget,
+            {
+              source: fallbackDriveMinutes > 0 ? 'fallback' : 'google-routes',
+            },
           );
 
           if (fallbackDriveMinutes <= 0) {
@@ -2418,6 +2683,18 @@ export class MockProvider implements DataProvider {
               ? 'google-routes'
               : 'haversine-estimated',
           routeTarget,
+          {
+            distanceMeters: routeEstimate.distanceMeters,
+            source: routeFailed
+              ? fallbackDriveMinutes > 0
+                ? 'fallback'
+                : 'google-routes'
+              : routeEstimate.sourceName === 'Mapbox Directions'
+                ? 'mapbox'
+                : routeWasCached
+                  ? 'cache'
+                  : 'google-routes',
+          },
         );
 
         if (driveMinutes <= 0) {
@@ -2444,13 +2721,27 @@ export class MockProvider implements DataProvider {
         }
 
         return enrichedOption;
-        }),
-      ),
-      routeEnrichmentFallback,
-      readPositiveTimeoutMs('PARKING_ROUTE_ENRICH_TIMEOUT_MS', 1600),
+          },
+          buildParkingRouteFallbackOption(
+            entry,
+            liveRouteKeys.has(entry.routeCacheKey)
+              ? 'parking_route_enrichment_timeout'
+              : 'parking_route_deferred',
+          ),
+          routeEnrichmentTimeoutMs,
+        );
+        return value;
+      }),
     );
 
-    return enriched;
+    return {
+      options: enrichParkingOptionsOutboundUrls(enriched, {
+        airportCode,
+        tripType: isAirportDestination ? 'airport-trip' : 'general-trip',
+        searchQuery: context?.destinationName || destination,
+      }),
+      metadata: parkingDiscoveryMetadata,
+    };
   }
 
   async getRideshareOptions(
@@ -2497,41 +2788,61 @@ export class MockProvider implements DataProvider {
         routeEstimate.routeUnavailable || !Number.isFinite(routeEstimate.duration)
           ? 55
           : Math.max(20, Math.round(routeEstimate.duration * 1.45 + 12));
+      const longIntercityEstimate =
+        !routeEstimate.routeUnavailable &&
+        Number.isFinite(routeEstimate.duration) &&
+        routeEstimate.duration >= 120;
+
+      const fareResolution = resolveTransitFare({ destination, origin });
+      const oneWayFare = fareResolution.oneWayDollars ?? 0;
 
       return [
         {
           id: 'regional-transit-to-destination',
           name: 'Transit route to destination',
-          price: 3.25,
+          price: oneWayFare,
           duration: estimatedTransitMinutes,
           frequency: 15,
           totalDuration: estimatedTransitMinutes,
-          totalCost: 3.25,
+          totalCost: oneWayFare,
           segments: [
             {
               mode: 'bus',
               name: 'Open transit directions for exact route',
               duration: estimatedTransitMinutes,
-              cost: 3.25,
+              cost: oneWayFare,
               frequency: 15,
             },
           ],
           transfers: 1,
-          availability: routeEstimate.routeUnavailable ? 50 : 70,
+          availability: routeEstimate.routeUnavailable ? 50 : longIntercityEstimate ? 35 : 70,
           trustStatus: 'estimated',
           routeTrustStatus: routeEstimate.routeUnavailable ? 'fallback' : routeEstimate.trustStatus,
           routeOrigin: origin,
           routeDestination: destination,
           assumptions: [
-            'Regional transit fare estimate based on origin and destination.',
+            fareResolution.matchKind === 'unknown'
+              ? 'Open transit directions to confirm route and local fare.'
+              : `${fareResolution.fareLabel}. Open transit directions for exact route.`,
             routeEstimate.routeUnavailable
               ? 'Drive time unavailable; open transit directions to confirm route.'
               : 'Transit time estimated from entered origin and destination.',
-          ],
-          sourceName: 'Google Maps transit directions',
-          sourceLink: this.buildGoogleTransitDirectionsLink(origin, destination),
+            longIntercityEstimate
+              ? 'For long intercity trips, this is a planning link to verify, not a primary recommendation.'
+              : '',
+          ].filter(Boolean),
+          sourceName:
+            fareResolution.matchKind === 'unknown'
+              ? 'Google Maps transit directions'
+              : fareResolution.agencyName || fareResolution.sourceLabel,
+          sourceLink: fareResolution.sourceUrl || this.buildGoogleTransitDirectionsLink(origin, destination),
           mapLink: this.buildGoogleTransitDirectionsLink(origin, destination),
           lastUpdated: new Date().toISOString(),
+          transitFareResolution: fareResolution,
+          priceNote:
+            fareResolution.matchKind === 'unknown'
+              ? 'Fare varies by agency'
+              : fareResolution.fareLabel,
         },
       ];
     }

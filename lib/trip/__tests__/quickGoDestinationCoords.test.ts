@@ -23,6 +23,17 @@ const fredMeyerPlaceResult: DestinationSearchResult = {
   confidence: 'high',
 };
 
+// Mirrors a Google autocomplete prediction selection: place_id, no coordinates.
+const brightonJonesGeocoderResult: DestinationSearchResult = {
+  id: 'geocoder:ChIJBrightonJones',
+  label: 'Brighton Jones',
+  address: 'Brighton Jones, 2030 1st Ave, Seattle, WA 98121',
+  category: 'address',
+  source: 'geocoder',
+  placeId: 'ChIJBrightonJones',
+  confidence: 'medium',
+};
+
 describe('Quick Go destination coordinate preservation', () => {
   test('a selected Google Places destination preserves lat/lng through params and parsing', () => {
     const selection = destinationSearchResultToSelection(fredMeyerPlaceResult);
@@ -58,5 +69,27 @@ describe('Quick Go destination coordinate preservation', () => {
     expect(params.get('destinationLng')).toBeNull();
     // Destination text is still preserved so the server can geocode it for routing.
     expect(params.get('destination')).toContain('Fred Meyer');
+  });
+
+  test('an autocomplete destination with a place_id but no coordinates propagates the place_id', () => {
+    const selection = destinationSearchResultToSelection(brightonJonesGeocoderResult);
+    expect(selection.destinationLat).toBeUndefined();
+    expect(selection.destinationLng).toBeUndefined();
+    expect(selection.destinationPlaceId).toBe('ChIJBrightonJones');
+
+    const params = buildQuickGoSearchParams({
+      destination: selection,
+      origin: manualOrigin,
+    });
+
+    expect(params.get('destinationLat')).toBeNull();
+    expect(params.get('destinationLng')).toBeNull();
+    // place_id must survive so the engine/client can resolve confirmed coords.
+    expect(params.get('destinationPlaceId')).toBe('ChIJBrightonJones');
+
+    const tripData = parseTripDataFromSearchParams(params);
+    expect(tripData?.destinationLat).toBeUndefined();
+    expect(tripData?.destinationLng).toBeUndefined();
+    expect(tripData?.destinationPlaceId).toBe('ChIJBrightonJones');
   });
 });

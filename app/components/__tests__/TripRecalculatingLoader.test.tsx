@@ -17,18 +17,27 @@ describe('TripRecalculatingLoader', () => {
   });
 
   test('marks the animation as reduced-motion safe', () => {
+<<<<<<< HEAD
     const { container } = render(<TripRecalculatingLoader />);
     const panel = screen.getByText('Finding the best way to go…').closest('section');
 
     expect(panel).toHaveAttribute('aria-busy', 'true');
     expect(panel).toHaveAttribute('aria-live', 'polite');
+=======
+    render(<TripRecalculatingLoader />);
+
+>>>>>>> main
     expect(screen.getByTestId('podpaigo-route-loader')).toHaveAttribute(
       'data-reduced-motion-safe',
       'true',
     );
+<<<<<<< HEAD
     expect(container.querySelector('style')?.textContent).toContain(
       'prefers-reduced-motion: reduce',
     );
+=======
+    expect(screen.getByLabelText('Finding the best way to go…').closest('section')).toBeNull();
+>>>>>>> main
   });
 
   test('supports static custom loading copy for city parking searches', () => {

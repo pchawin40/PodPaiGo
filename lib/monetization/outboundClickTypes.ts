@@ -28,6 +28,7 @@ export function buildParkingMonetizationCtas(input: {
   providerUrl?: string | null;
   directionsUrl?: string | null;
   reserveLabel?: string;
+  viewProviderLabel?: string;
   /** Info-only official links open Port pages but should not say "Reserve parking". */
   infoOnlyBooking?: boolean;
 }): ParkingMonetizationCtas {
@@ -37,12 +38,15 @@ export function buildParkingMonetizationCtas(input: {
   const reserveLabel =
     input.reserveLabel ||
     (bookingUrl ? 'Reserve parking' : 'Booking unavailable');
+  const viewProviderLabel =
+    input.viewProviderLabel ||
+    (input.infoOnlyBooking ? 'Check official parking' : 'View provider');
 
   return {
     reserveLabel,
     reserveUrl: bookingUrl,
     reserveEnabled: Boolean(bookingUrl),
-    viewProviderLabel: input.infoOnlyBooking ? 'Check official parking' : 'View provider',
+    viewProviderLabel,
     viewProviderUrl: providerUrl,
     viewProviderEnabled: Boolean(providerUrl && !bookingUrl),
     directionsLabel: 'Route to parking',

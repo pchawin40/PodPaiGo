@@ -123,8 +123,9 @@ describe('admin verification path is service-role only', () => {
   );
 
   test('admin status update is gated by ADMIN_EMAILS', () => {
-    expect(adminRoute).toContain('isAdminEmail');
-    expect(adminRoute).toContain('updateUserParkingSubmissionStatus');
+    expect(adminRoute).toContain('requireAdmin');
+    expect(adminRoute).toContain('createSupabaseServiceClient');
+    expect(adminRoute).toContain('updateUserParkingSpaceStatus');
   });
 
   test('admin verify sets verified status server-side', () => {

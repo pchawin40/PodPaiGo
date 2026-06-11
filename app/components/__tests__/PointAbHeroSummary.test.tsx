@@ -9,6 +9,19 @@ import type { PointAbRankingResult } from '@/lib/parking/pointAbRanking';
 const ranking = {
   modes: [
     {
+      key: 'destination-customer',
+      label: 'Customer parking',
+      name: 'Customer parking at destination',
+      cost: 'Free? Verify',
+      time: '23 min',
+      confidence: 'Medium',
+      pros: [],
+      cons: [],
+      status: 'verify_rules',
+      unavailable: false,
+      hiddenByPreference: false,
+    },
+    {
       key: 'parking',
       label: 'Destination parking',
       name: 'Garage A',
@@ -22,13 +35,23 @@ const ranking = {
       hiddenByPreference: false,
     },
   ],
-  recommendationMode: 'parking',
-  recommendedTitle: 'Park at Garage A',
+  recommendationMode: 'destination-customer',
+  displayRecommendationMode: 'destination-customer',
+  recommendedTitle: 'Check customer parking first',
   recommendedReason: 'Best fit if you want to drive.',
   cheapestMode: { key: 'transit', label: 'Transit', cost: 3.25 },
   fastestMode: { key: 'rideshare', label: 'Rideshare', minutes: 28 },
   objectiveBestMode: 'parking',
   cheapestVsBestNote: null,
+  canonicalWinners: {
+    easiestWinner: 'destination-customer',
+    cheapestWinner: null,
+    fastestWinner: null,
+    bestOverallWinner: 'destination-customer',
+    heroWinner: 'destination-customer',
+    visibleOptionKeys: ['destination-customer', 'parking'],
+    hiddenOptionKeys: [],
+  },
 } satisfies PointAbRankingResult;
 
 describe('PointAbHeroSummary', () => {
@@ -62,7 +85,39 @@ describe('PointAbHeroSummary', () => {
     expect(screen.getByText('Cheapest')).toBeInTheDocument();
     expect(screen.getByText('Fastest')).toBeInTheDocument();
     expect(screen.getByText('Parking outlook')).toBeInTheDocument();
-    expect(screen.getByText('Drive + park')).toBeInTheDocument();
+    expect(screen.getByText('Customer parking')).toBeInTheDocument();
     expect(screen.getByText('Parking not confirmed yet')).toBeInTheDocument();
+  });
+
+  test('leads with a plain-language "Our pick" line naming the best option', () => {
+    render(
+      <PointAbHeroSummary
+        ranking={ranking}
+        parkingOutlook={{
+          headline: 'Parking not confirmed yet',
+          title: 'Parking not confirmed yet',
+          body: 'Compare options.',
+          reason: 'Compare options.',
+          status: 'parking_not_confirmed',
+          source: 'unknown',
+          confidence: 'low',
+          caveat: 'Verify posted signs and lot rules.',
+          hints: [],
+          verifyNotice: 'Verify posted signs and lot rules.',
+          showSearchNearbyParking: true,
+          diagnostics: {
+            accessType: 'Public',
+            confidence: 'Not confirmed yet',
+            reason: 'Test reason',
+            recommendedAction: 'Check signs',
+          },
+        }}
+      />,
+    );
+
+    // Plain-language summary at the top names the winning option.
+    expect(screen.getByText(/Our pick: Customer parking\./)).toBeInTheDocument();
+    // The Best overall card is tagged as the recommended pick.
+    expect(screen.getByText('Our pick')).toBeInTheDocument();
   });
 });

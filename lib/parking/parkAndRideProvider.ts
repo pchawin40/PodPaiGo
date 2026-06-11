@@ -1,9 +1,14 @@
 import type { ParkAndRideRuleConfidence } from '../types';
 import type { ParkAndRideLotConfidence, ParkAndRideOperator } from './parkAndRideTypes';
 import {
-  SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
-  SOUND_TRANSIT_PARKING_URL,
-} from './parkAndRideLinks';
+  getParkRideFacilitiesForMetro,
+  type ParkRideFacility,
+} from './parkRideFacilities';
+import { resolveTransitFare } from '../transit/transitFareResolver';
+import { VERIFY_SIGNS_WARNING } from './parkRideResolver';
+import { SOUND_TRANSIT_PARKING_URL } from './parkAndRideLinks';
+
+export { VERIFY_SIGNS_WARNING };
 
 export type CuratedParkAndRideLotSeed = {
   id: string;
@@ -33,248 +38,88 @@ export type CuratedParkAndRideLotSeed = {
   servesDestinations: RegExp[];
 };
 
-export const VERIFY_SIGNS_WARNING =
-  'Verify posted signs and lot rules before leaving your car.';
+function mapAgencyToOperator(agencyName: string): ParkAndRideOperator {
+  if (/sound transit/i.test(agencyName)) return 'Sound Transit';
+  if (/king county metro/i.test(agencyName)) return 'King County Metro';
+  if (/wsdot/i.test(agencyName)) return 'WSDOT';
+  if (/capmetro/i.test(agencyName)) return 'CapMetro';
+  return 'Other';
+}
 
-export const SEATTLE_REGION_PARK_AND_RIDE_LOTS: CuratedParkAndRideLotSeed[] = [
-  {
-    id: 'northgate-station-garage',
-    lotName: 'Northgate Station Garage / Park-and-Ride A',
-    address: '10300 1st Ave NE, Seattle, WA 98125',
-    lat: 47.7025,
-    lng: -122.3274,
-    operator: 'Sound Transit',
-    capacity: 1450,
-    routesServed: ['Link 1 Line', 'Routes 40, 41, 45, 75, 155, 301, 303, 345, 346, 347, 348, 373, 556, 810, 821, 860'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    permitInfo: 'Permit program varies; check Sound Transit guidance.',
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'high',
-    baseTransitMinutes: 22,
+function facilityTransitServiceModes(facility: ParkRideFacility): string[] {
+  return facility.modes.filter((mode) =>
+    ['light_rail', 'commuter_rail', 'rail', 'brt'].includes(mode),
+  );
+}
+
+function parkingCostRange(expectation: ParkRideFacility['parkingCostExpectation']): {
+  min: number;
+  max: number;
+} {
+  switch (expectation) {
+    case 'free':
+      return { min: 0, max: 0 };
+    case 'permit':
+      return { min: 0, max: 3 };
+    case 'paid':
+      return { min: 0, max: 5 };
+    default:
+      return { min: 0, max: 8 };
+  }
+}
+
+function facilityToLegacySeed(facility: ParkRideFacility): CuratedParkAndRideLotSeed {
+  const parkingRange = parkingCostRange(facility.parkingCostExpectation);
+  const operator = mapAgencyToOperator(facility.agencyName);
+  const serviceModes = facilityTransitServiceModes(facility);
+  const fare = resolveTransitFare({
+    destination: `${facility.city}, ${facility.state}`,
+    agencyName: facility.agencyName,
+    serviceModes: serviceModes.length > 0 ? serviceModes : ['bus'],
+  });
+  const transitOneWay = fare.oneWayDollars ?? 3;
+
+  return {
+    id: facility.id,
+    lotName: facility.name,
+    address: facility.address || `${facility.name}, ${facility.city}, ${facility.state}`,
+    lat: facility.lat,
+    lng: facility.lng,
+    operator,
+    routesServed: facility.servedRoutes ?? [],
+    maxParkingDuration: facility.timeLimit,
+    maxParkingHours: facility.overnightAllowed === false ? 12 : 24,
+    permitInfo:
+      facility.parkingCostExpectation === 'permit' ? 'Permit or validation may apply.' : undefined,
+    rulesUrl: facility.sourceUrl || SOUND_TRANSIT_PARKING_URL,
+    sourceUrl: facility.sourceUrl || SOUND_TRANSIT_PARKING_URL,
+    ruleConfidence: facility.parkingCostExpectation === 'unknown' ? 'unknown' : 'estimated',
+    overnightAllowed: facility.overnightAllowed === true,
+    confidence: facility.confidence,
+    baseTransitMinutes:
+      facility.modes.includes('light_rail') || facility.modes.includes('commuter_rail') ? 24 : 20,
     baseWalkMinutes: 5,
-    baseWaitMinutes: 6,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Sound Transit overnight rules vary by lot. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|pike place|pioneer square|capitol hill|university district|udistrict|uw|seattle center|space needle)\b/i],
-  },
-  {
-    id: 'mountlake-terrace-station',
-    lotName: 'Mountlake Terrace Station',
-    address: '24000 56th Ave W, Mountlake Terrace, WA 98043',
-    lat: 47.7883,
-    lng: -122.3117,
-    operator: 'Sound Transit',
-    capacity: 600,
-    routesServed: ['Link 1 Line', 'Routes 112, 115, 116, 118, 120, 130, 345, 346, 347, 348, 510, 511, 512, 522, 550, 554, 556'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'high',
-    baseTransitMinutes: 28,
-    baseWalkMinutes: 5,
-    baseWaitMinutes: 6,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Sound Transit overnight rules vary by lot. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|pike place|pioneer square|capitol hill|university district|udistrict|uw|seattle center)\b/i],
-  },
-  {
-    id: 'lynnwood-city-center',
-    lotName: 'Lynnwood City Center Station',
-    address: '19700 48th Ave W, Lynnwood, WA 98036',
-    lat: 47.8209,
-    lng: -122.2931,
-    operator: 'Sound Transit',
-    capacity: 1450,
-    routesServed: ['Link 1 Line', 'Routes 115, 116, 120, 130, 345, 346, 347, 348, 510, 511, 512, 522, 550, 554, 556'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'medium',
-    baseTransitMinutes: 34,
-    baseWalkMinutes: 5,
-    baseWaitMinutes: 8,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Longer Link ride from north end. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|pike place|pioneer square|capitol hill|university district|udistrict|uw|seattle center)\b/i],
-  },
-  {
-    id: 'mercer-island-park-and-ride',
-    lotName: 'Mercer Island Park-and-Ride',
-    address: '7600 SE 32nd St, Mercer Island, WA 98040',
-    lat: 47.5837,
-    lng: -122.2322,
-    operator: 'Sound Transit',
-    capacity: 400,
-    routesServed: ['Routes 204, 208, 212, 214, 216, 217, 218, 219, 221, 226, 227, 240, 245, 248, 250, 255, 271, 272, 301, 303, 550, 554, 556'],
-    maxParkingDuration: 'Same-day commuter use typical',
-    maxParkingHours: 12,
-    rulesUrl: SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
-    sourceUrl: SOUND_TRANSIT_MERCER_ISLAND_PARK_RIDE_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'medium',
-    baseTransitMinutes: 24,
-    baseWalkMinutes: 4,
-    baseWaitMinutes: 8,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Verify posted signs for time limits.'],
-    servesDestinations: [/\b(downtown|bellevue|seattle|capitol hill|pioneer square)\b/i],
-  },
-  {
-    id: 'redmond-technology-station',
-    lotName: 'Redmond Technology Station',
-    address: '16160 NE 83rd St, Redmond, WA 98052',
-    lat: 47.6762,
-    lng: -122.1238,
-    operator: 'Sound Transit',
-    capacity: 690,
-    routesServed: ['Link 2 Line', 'Routes 221, 245, 248, 250, 255, 271, 272, 301, 303, 342, 545, 550, 554, 556'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'high',
-    baseTransitMinutes: 30,
-    baseWalkMinutes: 5,
-    baseWaitMinutes: 6,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Verify posted signs for time limits.'],
-    servesDestinations: [/\b(downtown|bellevue|seattle|capitol hill|pioneer square|south lake union|slu)\b/i],
-  },
-  {
-    id: 'redmond-transit-center',
-    lotName: 'Redmond Transit Center',
-    address: '156th Ave NE & NE 40th St, Redmond, WA 98052',
-    lat: 47.6456,
-    lng: -122.1304,
-    operator: 'King County Metro',
-    capacity: 350,
-    routesServed: ['Routes 221, 245, 248, 250, 255, 271, 272, 301, 303, 342, 545, 550, 554, 556'],
-    maxParkingDuration: 'Same-day commuter use typical',
-    maxParkingHours: 12,
-    permitInfo: 'Metro permit program suspended; FCFS parking. Verify posted signs.',
-    rulesUrl: 'https://kingcounty.gov/en/dept/metro/travel-options/bus/park-and-ride',
-    sourceUrl: 'https://kingcounty.gov/en/dept/metro/travel-options/bus/park-and-ride',
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'medium',
-    baseTransitMinutes: 38,
-    baseWalkMinutes: 4,
-    baseWaitMinutes: 10,
-    parkingCostMin: 0,
-    parkingCostMax: 0,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Metro permit suspended; FCFS parking. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|bellevue|seattle|capitol hill|pioneer square)\b/i],
-  },
-  {
-    id: 'tukwila-international-blvd',
-    lotName: 'Tukwila International Blvd Station',
-    address: '15425 52nd Ave S, Tukwila, WA 98188',
-    lat: 47.4642,
-    lng: -122.2881,
-    operator: 'Sound Transit',
-    capacity: 600,
-    routesServed: ['Link 1 Line', 'Routes 124, 128, 131, 132, 140, 150, 152, 156, 158, 159, 164, 168, 174, 180, 181, 193, 194, 199, 200'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'medium',
-    baseTransitMinutes: 26,
-    baseWalkMinutes: 5,
-    baseWaitMinutes: 6,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['Useful for south-end origins heading north. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|pike place|pioneer square|capitol hill|university district|udistrict|uw|seattle center|airport|sea-tac|seatac)\b/i],
-  },
-  {
-    id: 'angle-lake-station',
-    lotName: 'Angle Lake Station',
-    address: '20055 24th Ave S, SeaTac, WA 98198',
-    lat: 47.4422,
-    lng: -122.2931,
-    operator: 'Sound Transit',
-    capacity: 1150,
-    routesServed: ['Link 1 Line', 'Routes 124, 128, 131, 132, 140, 150, 152, 156, 158, 159, 164, 168, 174, 180, 181, 193, 194, 199, 200'],
-    maxParkingDuration: 'Overnight rules vary by lot',
-    maxParkingHours: 24,
-    rulesUrl: SOUND_TRANSIT_PARKING_URL,
-    sourceUrl: SOUND_TRANSIT_PARKING_URL,
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'medium',
-    baseTransitMinutes: 32,
-    baseWalkMinutes: 5,
-    baseWaitMinutes: 6,
-    parkingCostMin: 0,
-    parkingCostMax: 5,
-    transitFareMin: 3,
-    transitFareMax: 3,
-    warnings: ['South-end Link access. Verify posted signs.'],
-    servesDestinations: [/\b(downtown|pike place|pioneer square|capitol hill|university district|udistrict|uw|seattle center)\b/i],
-  },
-  {
-    id: 'wsdot-narrows-park-ride',
-    lotName: 'Narrows Park & Ride',
-    address: 'Hwy 16 & Jackson Ave, Tacoma, WA 98466',
-    lat: 47.2522,
-    lng: -122.5361,
-    operator: 'WSDOT',
-    capacity: 200,
-    routesServed: ['Routes 102, 117, 216, 586'],
-    maxParkingDuration: 'Often 48 hours max; verify signs',
-    maxParkingHours: 48,
-    rulesUrl: 'https://wsdot.wa.gov/travel/roads-bridges/toll-roads/parking',
-    sourceUrl: 'https://wsdot.wa.gov/travel/roads-bridges/toll-roads/parking',
-    ruleConfidence: 'estimated',
-    overnightAllowed: false,
-    confidence: 'low',
-    baseTransitMinutes: 55,
-    baseWalkMinutes: 3,
-    baseWaitMinutes: 12,
-    parkingCostMin: 0,
-    parkingCostMax: 0,
-    transitFareMin: 3,
-    transitFareMax: 6,
-    warnings: ['WSDOT lots often have 48-hour max. Verify posted signs.'],
-    servesDestinations: [/\b(tacoma|downtown tacoma|federal way|seatac|airport)\b/i],
-  },
-];
+    baseWaitMinutes: facility.modes.includes('light_rail') ? 6 : 8,
+    parkingCostMin: parkingRange.min,
+    parkingCostMax: parkingRange.max,
+    transitFareMin: transitOneWay,
+    transitFareMax: transitOneWay,
+    warnings: [facility.timeLimit, VERIFY_SIGNS_WARNING].filter(Boolean) as string[],
+    servesDestinations: [/\b(downtown|seattle|bellevue|capitol hill|pike place|airport|seatac|austin|franklin|east 11th)\b/i],
+  };
+}
+
+/** @deprecated Prefer parkRideFacilities + parkRideResolver. Kept for legacy tests/adapters. */
+export const SEATTLE_REGION_PARK_AND_RIDE_LOTS: CuratedParkAndRideLotSeed[] =
+  getParkRideFacilitiesForMetro('seattle').map(facilityToLegacySeed);
+
+export const AUSTIN_CAPMETRO_PARK_AND_RIDE_LOTS: CuratedParkAndRideLotSeed[] =
+  getParkRideFacilitiesForMetro('austin').map(facilityToLegacySeed);
 
 export function getSeattleRegionParkAndRideLots(): CuratedParkAndRideLotSeed[] {
   return SEATTLE_REGION_PARK_AND_RIDE_LOTS;
+}
+
+export function getAustinCapMetroParkAndRideLots(): CuratedParkAndRideLotSeed[] {
+  return AUSTIN_CAPMETRO_PARK_AND_RIDE_LOTS;
 }

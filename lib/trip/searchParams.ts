@@ -8,6 +8,8 @@ import type {
   TransportAvailability,
   TransitPaymentOption,
   ParkingPreference,
+  DriveRoutePreferences,
+  VehicleOccupancy,
   TripData,
   TripType,
 } from '../types';
@@ -49,6 +51,42 @@ function addMinutesToLocalDateTime(
   return {
     date: `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`,
     time: `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
+  };
+}
+
+function parseBoolParam(value: string | null): boolean {
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+/**
+ * Parse optional drive route intelligence preferences. Returns undefined when
+ * none are present so existing trips/URLs keep their standard-only behavior.
+ */
+export function parseDriveRoutePreferencesFromSearchParams(
+  searchParams: URLSearchParams,
+): DriveRoutePreferences | undefined {
+  const keys = [
+    'avoidTolls',
+    'hasTollPass',
+    'hovEligible',
+    'vehicleOccupancy',
+    'showExpressLaneNotes',
+  ];
+  const anyPresent = keys.some((key) => searchParams.get(key) !== null);
+  if (!anyPresent) return undefined;
+
+  const occupancyRaw = Number(searchParams.get('vehicleOccupancy') ?? '1');
+  const vehicleOccupancy: VehicleOccupancy =
+    occupancyRaw === 2 || occupancyRaw === 3 || occupancyRaw === 4
+      ? (occupancyRaw as VehicleOccupancy)
+      : 1;
+
+  return {
+    avoidTolls: parseBoolParam(searchParams.get('avoidTolls')),
+    hasTollPass: parseBoolParam(searchParams.get('hasTollPass')),
+    hovEligible: parseBoolParam(searchParams.get('hovEligible')),
+    vehicleOccupancy,
+    showExpressLaneNotes: parseBoolParam(searchParams.get('showExpressLaneNotes')),
   };
 }
 
@@ -111,10 +149,13 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   const originLngRaw = searchParams.get('originLng');
   const originLat = originLatRaw ? Number(originLatRaw) : undefined;
   const originLng = originLngRaw ? Number(originLngRaw) : undefined;
+  const originName = searchParams.get('originLabel')?.trim() || undefined;
+  const originPlaceId = searchParams.get('originPlaceId')?.trim() || undefined;
   const destinationLatRaw = searchParams.get('destinationLat');
   const destinationLngRaw = searchParams.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
   const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
+  const destinationPlaceId = searchParams.get('destinationPlaceId')?.trim() || undefined;
 
   const transportRaw = searchParams.get('transport') || 'all';
   const transportAvailability: TransportAvailability = isOneOf(
@@ -369,6 +410,8 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
         arrivalDate,
         arrivalTime,
         tripMode,
+        quickGoPurpose: searchParams.get('quickGoPurpose') || undefined,
+        intent: searchParams.get('intent') || undefined,
         parkingDuration: parkingWindow?.parkingDuration ?? resolvedParkingDuration,
         parkingCheckInDate: parkingWindow?.parkingCheckInDate || arrivalDate,
         parkingCheckInTime: parkingWindow?.parkingCheckInTime || arrivalTime,
@@ -386,6 +429,11 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
   if (data) {
     data = { ...data, transitPayment } as TripData;
 
+    const driveRoutePreferences = parseDriveRoutePreferencesFromSearchParams(searchParams);
+    if (driveRoutePreferences) {
+      data = { ...data, driveRoutePreferences };
+    }
+
     if (
       typeof originLat === 'number' &&
       Number.isFinite(originLat) &&
@@ -394,6 +442,10 @@ export function parseTripDataFromSearchParams(searchParams: URLSearchParams): Tr
     ) {
       data = { ...data, originLat, originLng };
     }
+
+    if (originName) data = { ...data, originName };
+    if (originPlaceId) data = { ...data, originPlaceId };
+    if (destinationPlaceId) data = { ...data, destinationPlaceId };
 
     const isAirportStyleTrip =
       data.destinationKind === 'airport' ||
@@ -473,6 +525,16 @@ export function tripDataToSearchParams(
 
   params.set('type', data.type);
   params.set('origin', data.origin);
+  if (data.originName) {
+    params.set('originLabel', data.originName);
+  } else {
+    params.delete('originLabel');
+  }
+  if (data.originPlaceId) {
+    params.set('originPlaceId', data.originPlaceId);
+  } else {
+    params.delete('originPlaceId');
+  }
   if (typeof data.originLat === 'number' && Number.isFinite(data.originLat)) {
     params.set('originLat', String(data.originLat));
   } else {
@@ -493,6 +555,18 @@ export function tripDataToSearchParams(
 
   if (data.destinationKind) {
     params.set('destinationKind', data.destinationKind);
+  }
+
+  const driveRoutePreferences = data.driveRoutePreferences;
+  if (driveRoutePreferences) {
+    params.set('avoidTolls', driveRoutePreferences.avoidTolls ? '1' : '0');
+    params.set('hasTollPass', driveRoutePreferences.hasTollPass ? '1' : '0');
+    params.set('hovEligible', driveRoutePreferences.hovEligible ? '1' : '0');
+    params.set('vehicleOccupancy', String(driveRoutePreferences.vehicleOccupancy));
+    params.set(
+      'showExpressLaneNotes',
+      driveRoutePreferences.showExpressLaneNotes ? '1' : '0',
+    );
   }
 
   if (options?.preserve?.get('tripMode')) {
@@ -518,6 +592,7 @@ export function tripDataToSearchParams(
     params.set('airportCheckinNote', selectedAirport.checkinNote || '');
     params.set('airportLat', String(selectedAirport.geoLocation.lat));
     params.set('airportLng', String(selectedAirport.geoLocation.lng));
+    params.delete('destinationPlaceId');
   } else {
     params.set('destination', data.destination);
     if (typeof data.destinationLat === 'number' && Number.isFinite(data.destinationLat)) {
@@ -529,6 +604,11 @@ export function tripDataToSearchParams(
       params.set('destinationLng', String(data.destinationLng));
     } else {
       params.delete('destinationLng');
+    }
+    if (data.destinationPlaceId) {
+      params.set('destinationPlaceId', data.destinationPlaceId);
+    } else {
+      params.delete('destinationPlaceId');
     }
   }
 

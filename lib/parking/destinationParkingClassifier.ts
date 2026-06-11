@@ -1,3 +1,9 @@
+import {
+  EVENT_PARKING_OUTLOOK_COPY,
+  isEventVenueDestination,
+  type EventVenueDetectionInput,
+} from './eventVenueDetection';
+
 export type DestinationParkingMode =
   | 'free_likely'
   | 'validated_possible'
@@ -28,11 +34,7 @@ export type DestinationParkingClassification = {
   shouldSearchPaidParking: boolean;
 };
 
-export type ClassifyDestinationParkingInput = {
-  destination?: string | null;
-  destinationKind?: string | null;
-  airportCode?: string | null;
-};
+export type ClassifyDestinationParkingInput = EventVenueDetectionInput;
 
 export const RETAIL_GROCERY_PATTERN =
   /\b(costco|safeway|walmart|target|fred meyer|qfc|whole foods|trader joe'?s?|walgreens|cvs|rite aid|pharmacy|grocer(?:y|ies)|supermarket)\b/i;
@@ -41,18 +43,19 @@ const RETAIL_PATTERN = RETAIL_GROCERY_PATTERN;
 const MALL_PATTERN =
   /\b(mall|shopping center|shopping centre|outlet mall|town center|town centre|collection|square)\b/i;
 const RESTAURANT_PATTERN =
-  /\b(restaurant|cafe|café|coffee shop|bar|grill|bistro|diner|eatery|pizzeria|brewpub)\b/i;
+  /\b(restaurant|cafe|café|coffee shop|bar|grill|bistro|diner|eatery|pizzeria|pizza|taco|bbq|barbecue|brewery|brewpub|pub|deli|bakery)\b/i;
+const HOTEL_PATTERN = /\b(hotel|motel|inn|lodge|resort|suites)\b/i;
 const MEDICAL_PATTERN =
   /\b(hospital|clinic|medical center|medical centre|health center|health centre|urgent care)\b/i;
 const TRAIL_PATTERN =
-  /\b(trail|trailhead|state park|national forest|national park|park entrance|lake|mountain|hiking|campground)\b/i;
+  /\b(trail|trailhead|state park|national forest|national park|park entrance|trail entrance|lake|mountain|hiking|campground|preserve|recreation area)\b/i;
 const PAID_VENUE_PATTERN =
-  /\b(downtown|stadium|arena|convention center|convention centre|event center|event centre|ballpark|coliseum|theatre|theater)\b/i;
+  /\b(downtown|stadium|arena|convention center|convention centre|event center|event centre|event venue|concert venue|ballpark|coliseum|fairgrounds|racetrack|speedway|theatre|theater)\b/i;
 const RESTRICTED_PATTERN =
-  /\b(office|corporate|headquarters|\bhq\b|campus|employee|tenant|private garage|badge|permit only|secured parking|pse\b|utility|power company)\b/i;
+  /\b(office|office building|corporate|headquarters|\bhq\b|campus|business park|employee|tenant|private garage|badge|permit only|secured parking|pse\b|utility|power company)\b/i;
 
 const DENSE_URBAN_PATTERN =
-  /\b(downtown|central business|cbd|urban core|pike place|belltown|south lake union|denny triangle|waterfront district|financial district|city center|city centre|shopping district)\b/i;
+  /\b(downtown|central business|cbd|urban core|pike place|belltown|south lake union|denny triangle|waterfront district|financial district|city center|city centre|shopping district|entertainment district|arts district|historic district|midtown|uptown)\b/i;
 
 const SEATTLE_DOWNTOWN_STREET_PATTERN =
   /\b(1st(?:\s|-)?(?:ave|avenue)|2nd(?:\s|-)?(?:ave|avenue)|3rd(?:\s|-)?(?:ave|avenue)|4th(?:\s|-)?(?:ave|avenue)|5th(?:\s|-)?(?:ave|avenue)|pike st|pine st|university st|seneca st|spring st|madison st|marion st|columbia st|yesler)\b/i;
@@ -76,7 +79,15 @@ export function qualifiesForSuburbanCustomerParkingInference(
   const lower = destination.toLowerCase();
   if (MALL_PATTERN.test(lower) && !DENSE_URBAN_PATTERN.test(lower)) return true;
 
-  if (RESTAURANT_PATTERN.test(lower) && !/\b(bar|brewpub|downtown)\b/i.test(lower)) {
+  if (RESTAURANT_PATTERN.test(lower)) {
+    return true;
+  }
+
+  if (
+    /\b(gym|fitness|crossfit|health club|yoga|church|chapel|mosque|temple|synagogue|school|preschool|daycare|dental|dentist|clinic|urgent care|chiropractor|optometrist|physical therapy|massage)\b/i.test(
+      lower,
+    )
+  ) {
     return true;
   }
 
@@ -87,6 +98,18 @@ function normalizeDestination(value: string | null | undefined): string {
   return String(value || '')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+function eventVenueClassification(): DestinationParkingClassification {
+  return {
+    mode: 'paid_likely',
+    accessType: 'event_only',
+    confidence: 'medium',
+    reason: EVENT_PARKING_OUTLOOK_COPY,
+    recommendedAction:
+      'Book official or prepaid event parking, use transit, or verified paid lots before relying on street parking.',
+    shouldSearchPaidParking: true,
+  };
 }
 
 function airportClassification(): DestinationParkingClassification {
@@ -119,6 +142,8 @@ export type DestinationCategory =
   | 'hiking_or_park'
   | 'restaurant'
   | 'hotel'
+  | 'stadium_event_venue'
+  | 'downtown_neighborhood'
   | 'general';
 
 export function isRetailOrGroceryDestination(destination: string): boolean {
@@ -134,15 +159,20 @@ export function inferDestinationCategory(
   const lower = destination.toLowerCase();
 
   if (classification.mode === 'airport') return 'airport';
+  if (isEventVenueDestination(input)) return 'stadium_event_venue';
   if (classification.mode === 'free_likely' && isRetailOrGroceryDestination(destination)) {
     return 'grocery_or_retail';
   }
   if (RESTAURANT_PATTERN.test(lower)) {
     return 'restaurant';
   }
+  if (PAID_VENUE_PATTERN.test(lower)) {
+    return 'stadium_event_venue';
+  }
   if (classification.mode === 'restricted_possible') return 'office_or_workplace';
   if (classification.mode === 'permit_possible') return 'hiking_or_park';
-  if (/\bhotel|motel|inn\b/i.test(lower)) return 'hotel';
+  if (HOTEL_PATTERN.test(lower)) return 'hotel';
+  if (isDenseUrbanDestination(destination)) return 'downtown_neighborhood';
   return 'general';
 }
 
@@ -156,7 +186,25 @@ export function classifyDestinationParking(
     return airportClassification();
   }
 
+  if (isEventVenueDestination(input)) {
+    return eventVenueClassification();
+  }
+
   const lower = destination.toLowerCase();
+
+  if (
+    isDenseUrbanDestination(destination) &&
+    !/\b(waterfront restaurant)\b/i.test(lower)
+  ) {
+    return {
+      mode: 'paid_likely',
+      accessType: 'public',
+      confidence: 'medium',
+      reason: 'Dense downtown/core destinations usually rely on paid garages, lots, or meters.',
+      recommendedAction: 'Plan for paid parking, transit, or rideshare unless a business confirms customer parking.',
+      shouldSearchPaidParking: true,
+    };
+  }
 
   if (isRetailOrGroceryDestination(destination)) {
     const match = lower.match(RETAIL_GROCERY_PATTERN)?.[0] || 'Retail';
@@ -180,8 +228,19 @@ export function classifyDestinationParking(
       mode: 'free_likely',
       accessType: 'customer_only',
       confidence: /\b(bar|brewpub)\b/i.test(lower) ? 'low' : 'medium',
-      reason: 'Parking likely free/on-site or nearby street parking.',
-      recommendedAction: 'Check restaurant lot signs first, then nearby street parking and posted limits.',
+      reason: 'Customer on-site or nearby street parking may exist outside dense downtown areas.',
+      recommendedAction: 'Check destination lot signs first, then nearby street parking and posted limits.',
+      shouldSearchPaidParking: false,
+    };
+  }
+
+  if (HOTEL_PATTERN.test(lower)) {
+    return {
+      mode: 'validated_possible',
+      accessType: 'validated_customer',
+      confidence: 'medium',
+      reason: 'Hotels often have guest, visitor, or validated parking, but rules and fees vary.',
+      recommendedAction: 'Ask the hotel or check arrival signs for guest parking fees, validation, and time limits.',
       shouldSearchPaidParking: false,
     };
   }
@@ -214,12 +273,17 @@ export function classifyDestinationParking(
   }
 
   if (PAID_VENUE_PATTERN.test(lower) || /\b(pike place|waterfront|market district)\b/i.test(lower)) {
+    const eventVenue = /\b(stadium|arena|event|concert|ballpark|coliseum|fairgrounds|racetrack|speedway|convention)\b/i.test(lower);
     return {
       mode: 'paid_likely',
-      accessType: 'public',
+      accessType: eventVenue ? 'event_only' : 'public',
       confidence: 'medium',
-      reason: 'Downtown venues and event districts often rely on paid garages or event parking.',
-      recommendedAction: 'Plan for paid parking or transit unless you already have a reserved spot.',
+      reason: eventVenue
+        ? 'Event venues and stadiums often use special paid parking zones, permits, or event-day rates.'
+        : 'Downtown venues and event districts often rely on paid garages or event parking.',
+      recommendedAction: eventVenue
+        ? 'Check venue-day parking rules, event rates, permits, and street restrictions before relying on free parking.'
+        : 'Plan for paid parking or transit unless you already have a reserved spot.',
       shouldSearchPaidParking: true,
     };
   }

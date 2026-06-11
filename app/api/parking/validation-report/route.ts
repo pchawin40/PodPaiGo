@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseServiceClient } from '@/lib/analytics/insertAnalyticsEvent';
+import {
+  checkPublicEndpointRateLimit,
+  publicRateLimitResponse,
+} from '@/lib/apiUsage/publicRateLimit';
 import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOutboundClick';
 
 export const runtime = 'nodejs';
@@ -33,6 +38,11 @@ type ValidationReportBody = {
 };
 
 export async function POST(request: NextRequest) {
+  const rateLimit = checkPublicEndpointRateLimit('/api/parking/validation-report', request);
+  if (rateLimit.limited) {
+    return publicRateLimitResponse(rateLimit);
+  }
+
   let body: ValidationReportBody;
 
   try {
@@ -74,8 +84,11 @@ export async function POST(request: NextRequest) {
     userId = data.user?.id ?? null;
   }
 
-  const client = authClient ?? createSupabaseAuthClient(null);
+  const client = createSupabaseServiceClient();
   if (!client) {
+    console.info('[parking-validation-report] service-role insert skipped', {
+      reason: 'supabase_service_role_not_configured',
+    });
     return NextResponse.json({
       ok: true,
       stored: false,

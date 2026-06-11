@@ -1,9 +1,39 @@
 import { getAirportById } from '../airports/catalog';
 import { normalizeAirlineTextForAssistant } from '../airlines/parseFlightInput';
-import type { ParsedTripAssistantResult } from './tripParseTypes';
+import type { DrivingPreferences, ParsedTripAssistantResult } from './tripParseTypes';
 import type { QuickGoOriginSelection } from '../trip/quickGo';
 import type { DestinationKind, ParkingPreference, TransportAvailability } from '../types';
 import { resolveParkingWindow } from '../trip/parkingWindow';
+
+/**
+ * Map extracted driving preferences onto the existing, additive drive-route URL
+ * params. This never asserts HOV/toll eligibility: hovEligible is only set when
+ * a 2+ occupancy was confirmed, and express-lane notes stay advisory.
+ */
+function applyDrivingPreferencesToParams(
+  params: URLSearchParams,
+  prefs: DrivingPreferences | null | undefined,
+): void {
+  if (!prefs) return;
+
+  const occupancy =
+    prefs.numberOfPeople && prefs.numberOfPeople >= 1
+      ? Math.min(4, Math.max(1, Math.round(prefs.numberOfPeople)))
+      : 1;
+  const hasTollPass = prefs.expressPassAvailable || prefs.tollLaneAllowed === true;
+  const showExpressLaneNotes =
+    !prefs.avoidTolls &&
+    (prefs.carpoolPossible ||
+      prefs.hovLaneEligible !== 'no' ||
+      prefs.expressPassAvailable ||
+      prefs.tollLaneAllowed === true);
+
+  params.set('avoidTolls', prefs.avoidTolls ? '1' : '0');
+  params.set('hasTollPass', hasTollPass ? '1' : '0');
+  params.set('hovEligible', prefs.hovLaneEligible === 'yes' ? '1' : '0');
+  params.set('vehicleOccupancy', String(occupancy));
+  params.set('showExpressLaneNotes', showExpressLaneNotes ? '1' : '0');
+}
 
 function calculateParkingDurationMinutes(args: {
   checkInDate: string;
@@ -114,6 +144,13 @@ function parsedQuickGoToSearchParams(
   if (parsed.destinationCategory) {
     params.set('assistantDestinationCategory', parsed.destinationCategory);
   }
+
+  if (parsed.eventContext?.isEvent) {
+    params.set('assistantEvent', '1');
+    if (parsed.tripCity) params.set('assistantTripCity', parsed.tripCity);
+  }
+
+  applyDrivingPreferencesToParams(params, parsed.drivingPreferences);
 
   return params;
 }
@@ -273,6 +310,8 @@ export function parsedTripToSearchParams(
   params.set('cabin', 'economy');
   params.set('assistantParsed', '1');
   params.set('recalc', String(Date.now()));
+
+  applyDrivingPreferencesToParams(params, parsed.drivingPreferences);
 
   return params;
 }

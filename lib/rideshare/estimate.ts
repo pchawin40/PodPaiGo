@@ -207,13 +207,6 @@ export function formatRidesharePriceDisplay(
     };
   }
 
-  if (typeof option.price === 'number' && option.price > 0) {
-    return {
-      primary: `Estimated $${option.price}`,
-      secondary: null,
-    };
-  }
-
   if (option.priceDisplay === 'check-live') {
     return {
       primary: 'Open app for live price',
@@ -225,6 +218,13 @@ export function formatRidesharePriceDisplay(
     return {
       primary: 'Fare estimate unavailable',
       secondary: 'Open the rideshare app for current pricing.',
+    };
+  }
+
+  if (typeof option.price === 'number' && option.price > 0) {
+    return {
+      primary: `Estimated $${option.price}`,
+      secondary: null,
     };
   }
 
@@ -590,9 +590,22 @@ export function buildRideshareEstimateOptions(
       distanceMiles: Math.round(distanceMiles * 10) / 10,
       routeDistanceMeters,
       pickupWaitMinutes: profile.pickupWaitMinutes,
+      driveMinutes: resolvedRoute.duration,
       duration:
         (resolvedRoute.duration + profile.pickupWaitMinutes) *
         (tripScope === 'round-trip' ? 2 : 1),
+      totalOptionMinutes:
+        (resolvedRoute.duration + profile.pickupWaitMinutes) *
+        (tripScope === 'round-trip' ? 2 : 1),
+      timingBreakdown: {
+        driveMinutes: resolvedRoute.duration,
+        parkingBufferMinutes: null,
+        walkToDestinationMinutes: null,
+        pickupWaitMinutes: profile.pickupWaitMinutes,
+        totalOptionMinutes:
+          (resolvedRoute.duration + profile.pickupWaitMinutes) *
+          (tripScope === 'round-trip' ? 2 : 1),
+      },
       availability: profile.availability,
       trustStatus: 'estimated',
       routeTrustStatus: resolvedRoute.trustStatus,

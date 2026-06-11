@@ -2,6 +2,7 @@ import {
   applyTripPlanningDefaults,
   buildSingleClarificationQuestion,
 } from './tripPlanningConversation';
+import { needsPassengerCount } from './drivingPreferences';
 import type {
   ParsedTripAssistantResult,
   ParsedTripTimeAnchor,
@@ -354,6 +355,15 @@ export function normalizeParsedTripAssistantResult(
     parkingDurationMinutes: normalizeMinutes(parsed.parkingDurationMinutes),
     transportAvailability,
     parkingPreference,
+    tripCity: normalizeNullableString(parsed.tripCity),
+    drivingPreferences:
+      parsed.drivingPreferences && typeof parsed.drivingPreferences === 'object'
+        ? parsed.drivingPreferences
+        : null,
+    eventContext:
+      parsed.eventContext && typeof parsed.eventContext === 'object'
+        ? parsed.eventContext
+        : null,
     tripType: normalizeNullableString(parsed.tripType),
     needsParking: parsed.needsParking === true,
     needsLeaveTime: parsed.needsLeaveTime !== false,
@@ -454,6 +464,28 @@ export function computeMissingParsedFields(
     else missingFields.delete('departureTime');
     missingFields.delete('transportAvailability');
     missingFields.delete('destinationText');
+  }
+
+  // Soft event game/start-time slot. Asked once, then satisfiable either by a
+  // real time (eventTimeKnown) or a cautious "arrive early" default
+  // (eventTimeAcknowledged). We never invent a real game time.
+  const eventContext = withDefaults.eventContext;
+  if (
+    eventContext?.isEvent &&
+    !eventContext.eventTimeKnown &&
+    !eventContext.eventTimeAcknowledged
+  ) {
+    missingFields.add('eventTime');
+  } else {
+    missingFields.delete('eventTime');
+  }
+
+  // Soft carpool passenger-count slot. Only appears when the user signalled
+  // carpool/HOV/Express Pass intent without stating how many people are riding.
+  if (needsPassengerCount(withDefaults.drivingPreferences)) {
+    missingFields.add('passengerCount');
+  } else {
+    missingFields.delete('passengerCount');
   }
 
   const next: ParsedTripAssistantResult = {

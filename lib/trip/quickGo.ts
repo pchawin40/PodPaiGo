@@ -23,7 +23,14 @@ export const QUICK_GO_EXAMPLE_DESTINATIONS = [
   'Trailhead parking lot',
 ] as const;
 
-export type QuickGoOriginSource = 'manual' | 'geolocation' | 'saved';
+export type QuickGoOriginSource =
+  | 'manual'
+  | 'geolocation'
+  | 'saved'
+  | 'recent'
+  | 'airport'
+  | 'geocoder'
+  | 'google';
 
 export type QuickGoPurpose =
   | 'flying-out'
@@ -48,6 +55,8 @@ export type QuickGoOriginSelection = {
   originSource: QuickGoOriginSource;
   originLat?: number;
   originLng?: number;
+  originPlaceId?: string;
+  originConfidence?: 'high' | 'medium' | 'low';
 };
 
 export type QuickGoDestinationSelection = {
@@ -57,6 +66,7 @@ export type QuickGoDestinationSelection = {
   destinationSource: QuickGoDestinationSource;
   destinationLat?: number;
   destinationLng?: number;
+  destinationPlaceId?: string;
   destinationConfidence?: 'high' | 'medium' | 'low';
   detectedAirportCode?: string;
 };
@@ -69,6 +79,8 @@ export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
   'originSource',
   'originLat',
   'originLng',
+  'originPlaceId',
+  'originConfidence',
   'destination',
   'destinationName',
   'destinationLabel',
@@ -76,6 +88,7 @@ export const QUICK_GO_TRIP_DEFINING_PARAM_KEYS = [
   'destinationSource',
   'destinationLat',
   'destinationLng',
+  'destinationPlaceId',
   'destinationConfidence',
   'destinationKind',
   'intent',
@@ -245,11 +258,21 @@ export function readQuickGoOriginFromSearchParams(
     origin,
     originLabel,
     originSource:
-      originSource === 'manual' || originSource === 'geolocation' || originSource === 'saved'
+      originSource === 'manual' ||
+      originSource === 'geolocation' ||
+      originSource === 'saved' ||
+      originSource === 'recent' ||
+      originSource === 'airport' ||
+      originSource === 'geocoder' ||
+      originSource === 'google'
         ? originSource
         : 'manual',
     originLat: Number.isFinite(originLat) ? originLat : undefined,
     originLng: Number.isFinite(originLng) ? originLng : undefined,
+    originPlaceId: params.get('originPlaceId')?.trim() || undefined,
+    originConfidence: ['high', 'medium', 'low'].includes(params.get('originConfidence') || '')
+      ? (params.get('originConfidence') as 'high' | 'medium' | 'low')
+      : undefined,
   };
 }
 
@@ -264,6 +287,12 @@ export function formatQuickGoOriginDisplayLabel(
       return 'From current location';
     case 'saved':
       return `From saved origin: ${selection.originLabel}`;
+    case 'recent':
+      return `From recent origin: ${selection.originLabel}`;
+    case 'airport':
+    case 'geocoder':
+    case 'google':
+      return `From selected origin: ${selection.originLabel}`;
     case 'manual':
     default:
       return `From typed origin: ${selection.originLabel}`;
@@ -288,6 +317,18 @@ export function applyQuickGoOriginToSearchParams(
     params.set('originLng', String(origin.originLng));
   } else {
     params.delete('originLng');
+  }
+
+  if (origin.originPlaceId) {
+    params.set('originPlaceId', origin.originPlaceId);
+  } else {
+    params.delete('originPlaceId');
+  }
+
+  if (origin.originConfidence) {
+    params.set('originConfidence', origin.originConfidence);
+  } else {
+    params.delete('originConfidence');
   }
 }
 
@@ -354,6 +395,7 @@ export function readQuickGoDestinationFromSearchParams(
   const destinationLngRaw = params.get('destinationLng');
   const destinationLat = destinationLatRaw ? Number(destinationLatRaw) : undefined;
   const destinationLng = destinationLngRaw ? Number(destinationLngRaw) : undefined;
+  const destinationPlaceId = params.get('destinationPlaceId')?.trim() || undefined;
   const destinationConfidenceRaw = params.get('destinationConfidence');
   const destinationConfidence =
     destinationConfidenceRaw === 'high' ||
@@ -377,6 +419,7 @@ export function readQuickGoDestinationFromSearchParams(
         : 'typed',
     destinationLat: Number.isFinite(destinationLat) ? destinationLat : undefined,
     destinationLng: Number.isFinite(destinationLng) ? destinationLng : undefined,
+    destinationPlaceId,
     destinationConfidence,
     detectedAirportCode: params.get('detectedAirportCode')?.trim() || undefined,
   };
@@ -402,6 +445,12 @@ export function applyQuickGoDestinationToSearchParams(
     params.set('destinationLng', String(destination.destinationLng));
   } else {
     params.delete('destinationLng');
+  }
+
+  if (destination.destinationPlaceId) {
+    params.set('destinationPlaceId', destination.destinationPlaceId);
+  } else {
+    params.delete('destinationPlaceId');
   }
 
   if (destination.destinationConfidence) {

@@ -4,6 +4,7 @@ import {
   insertOutboundClickEvent,
 } from '../../../../lib/monetization/recordOutboundClick';
 import { validateOutboundClickPayload } from '../../../../lib/monetization/validateOutboundClick';
+import { sanitizeAnalyticsProperties } from '../../../../lib/analytics/sanitizeAnalytics';
 
 export const runtime = 'nodejs';
 
@@ -34,7 +35,14 @@ export async function POST(request: NextRequest) {
       authenticatedUserId = data.user?.id ?? null;
     }
 
-    await insertOutboundClickEvent(client, payload, authenticatedUserId);
+    await insertOutboundClickEvent(
+      client,
+      {
+        ...payload,
+        metadata: sanitizeAnalyticsProperties(payload.metadata),
+      },
+      authenticatedUserId,
+    );
     return NextResponse.json({ ok: true, stored: true });
   } catch (error) {
     console.warn('[outbound-click] failed to store event', {

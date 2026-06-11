@@ -24,6 +24,7 @@ export type DestinationSearchResult = {
   source: DestinationSearchSource;
   lat?: number;
   lng?: number;
+  placeId?: string;
   confidence: 'high' | 'medium' | 'low';
   airportCode?: string;
 };
@@ -34,7 +35,7 @@ export type DestinationSearchOptions = {
   recentDestinations?: string[];
   originLat?: number;
   originLng?: number;
-  originSource?: 'geolocation' | 'manual' | 'saved';
+  originSource?: 'geolocation' | 'manual' | 'saved' | 'recent' | 'airport' | 'geocoder' | 'google';
   limit?: number;
   signal?: AbortSignal;
 };

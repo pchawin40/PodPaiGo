@@ -1,10 +1,12 @@
 import {
   getDestinationParkingOptions,
+  getDestinationParkingOptionsWithMetadata,
   resetDestinationParkingSearchCacheForTests,
 } from '../destinationSearch';
 import { resetPlacesRequestBudgetForTests } from '../../../../../apiUsage/placesRequestBudget';
 import { getGoogleMapsServerApiKey } from '../../../../../env/googleMapsServerKey';
 import { getParkWhizDestinationParkingOptions } from '../../../../parkWhiz';
+import { getParkingLotsNearPoint } from '../../../../../parking/inventory';
 
 jest.mock('../../../../../env/googleMapsServerKey', () => ({
   getGoogleMapsServerApiKey: jest.fn(() => 'test-key'),
@@ -12,6 +14,10 @@ jest.mock('../../../../../env/googleMapsServerKey', () => ({
 
 jest.mock('../../../../parkWhiz', () => ({
   getParkWhizDestinationParkingOptions: jest.fn(async () => []),
+}));
+
+jest.mock('../../../../../parking/inventory', () => ({
+  getParkingLotsNearPoint: jest.fn(async () => []),
 }));
 
 function mockDestinationPlace(id: string, name: string) {
@@ -39,6 +45,7 @@ describe('Google destination parking discovery', () => {
     resetDestinationParkingSearchCacheForTests();
     resetPlacesRequestBudgetForTests();
     jest.restoreAllMocks();
+    (getParkingLotsNearPoint as jest.Mock).mockResolvedValue([]);
   });
 
   test('uses destination coordinates for bias and caches/dedupes identical searches', async () => {
@@ -180,6 +187,115 @@ describe('Google destination parking discovery', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(getParkWhizDestinationParkingOptions).toHaveBeenCalledTimes(1);
     expect(options.map((option) => option.name)).toContain('ParkWhiz City Garage');
+
+    fetchMock.mockRestore();
+  });
+
+  test('returns cached destination lots when Google live discovery is budget limited', async () => {
+    applyLiveGoogleParkingEnv();
+    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+    (getParkingLotsNearPoint as jest.Mock).mockResolvedValueOnce([
+      {
+        id: 101,
+        airportCode: 'GENERAL',
+        name: 'Cached Pike Garage',
+        normalizedName: 'cached pike garage',
+        address: '100 Pike St, Seattle, WA',
+        latitude: 47.609,
+        longitude: -122.34,
+        source: 'Supabase cache',
+        sourceId: 'cached-pike-garage',
+        sourceUrl: 'https://example.com/parking',
+        isOfficial: false,
+        confidence: 0.8,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-05T12:00:00.000Z',
+        distanceMiles: 0.2,
+      },
+    ]);
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const result = await getDestinationParkingOptionsWithMetadata({
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      dateTime: '2026-06-07T10:00:00.000Z',
+      parkingDurationMinutes: 180,
+      destinationLat: 47.615,
+      destinationLng: -122.203,
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.metadata.status).toBe('cache_only_budget_limited');
+    expect(result.metadata.cachedCount).toBe(1);
+    expect(result.metadata.liveRefreshPaused).toBe(true);
+    expect(result.options).toHaveLength(1);
+    expect(result.options[0]).toMatchObject({
+      name: 'Cached Pike Garage',
+      providerSource: 'destination-cache',
+      parkingDiscoveryStatus: 'cache_only_budget_limited',
+      priceDisplay: 'check-live',
+    });
+    expect(result.options[0]?.assumptions).toEqual(
+      expect.arrayContaining([
+        'Cached parking option.',
+        'Live availability not confirmed.',
+        'Open directions/provider site to verify price and availability.',
+      ]),
+    );
+
+    fetchMock.mockRestore();
+  });
+
+  test('reports cache empty when Google live discovery is paused and Supabase has no lots', async () => {
+    applyLiveGoogleParkingEnv();
+    process.env.DISABLE_GOOGLE_PARKING_DISCOVERY = 'true';
+    (getParkingLotsNearPoint as jest.Mock).mockResolvedValueOnce([]);
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const result = await getDestinationParkingOptionsWithMetadata({
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      dateTime: '2026-06-07T10:00:00.000Z',
+      parkingDurationMinutes: 180,
+      destinationLat: 47.615,
+      destinationLng: -122.203,
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.options).toEqual([]);
+    expect(result.metadata.status).toBe('cache_empty');
+    expect(result.metadata.message).toMatch(/No saved parking options/);
+
+    fetchMock.mockRestore();
+  });
+
+  test('returns empty with cache_empty status when API key is missing and Supabase inventory is empty', async () => {
+    // Reproduces the Monroe→Dairy Queen production scenario: no GOOGLE_MAPS_SERVER_API_KEY
+    // on Vercel means Google Places text-search is skipped. If Supabase inventory also has
+    // no cached lots near the destination, the result is zero parking options.
+    applyLiveGoogleParkingEnv();
+    (getGoogleMapsServerApiKey as jest.Mock).mockReturnValue(null);
+    (getParkingLotsNearPoint as jest.Mock).mockResolvedValue([]);
+    const fetchMock = jest.spyOn(global, 'fetch');
+
+    const result = await getDestinationParkingOptionsWithMetadata({
+      origin: 'Monroe, WA',
+      destination: 'Dairy Queen Grill & Chill Monroe',
+      dateTime: '2026-06-07T14:00:00.000Z',
+      parkingDurationMinutes: 60,
+      // No destinationLat / destinationLng — as happens for text-input trips without saved coords
+    });
+
+    // Google Places API (places:searchText endpoint) must not be called without a key
+    const googlePlacesCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('places:searchText'),
+    );
+    expect(googlePlacesCalls).toHaveLength(0);
+    expect(result.options).toEqual([]);
+    // provider_error (not cache_empty) when the API key itself is absent —
+    // distinguishable from an empty inventory so the UI can show "unavailable"
+    // rather than "no parking found yet."
+    expect(result.metadata.status).toBe('provider_error');
 
     fetchMock.mockRestore();
   });

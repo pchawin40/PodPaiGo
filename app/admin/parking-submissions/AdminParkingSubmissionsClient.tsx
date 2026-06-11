@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import TravelCard from '../../components/ui/TravelCard';
-import { useAuth } from '../../components/AuthProvider';
+import { useAdminStatus } from '../../components/useAdminStatus';
+import AdminNav from '../AdminNav';
 import {
   USER_PARKING_STATUS_LABELS,
   type UserParkingSpaceRecord,
@@ -20,60 +21,39 @@ const FILTERS: Array<UserParkingStatus | 'all'> = [
 ];
 
 export default function AdminParkingSubmissionsClient() {
-  const { user, session, loading, configured } = useAuth();
+  const {
+    accessToken,
+    configured,
+    isAdmin,
+    loading,
+    signedIn,
+  } = useAdminStatus();
   const [status, setStatus] = useState<UserParkingStatus | 'all'>('pending');
   const [parking, setParking] = useState<UserParkingSpaceRecord[]>([]);
   const [reason, setReason] = useState('');
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminStatusLoading, setAdminStatusLoading] = useState(false);
-
-  const accessToken = session?.access_token ?? null;
-
-  useEffect(() => {
-    if (!configured || loading || !accessToken) {
-      setIsAdmin(false);
-      setAdminStatusLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setAdminStatusLoading(true);
-
-    fetch('/api/admin/status', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      })
-      .finally(() => {
-        if (!cancelled) setAdminStatusLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, configured, loading]);
+  const [adminHint, setAdminHint] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!accessToken || !isAdmin) return;
+    if (!isAdmin) return;
 
     setFetching(true);
     setError(null);
+    setAdminHint(null);
     try {
       const response = await fetch(`/api/admin/parking-submissions?status=${status}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
       const data = (await response.json().catch(() => ({}))) as {
         parking?: UserParkingSpaceRecord[];
         message?: string;
+        adminHint?: string;
       };
-      if (!response.ok) throw new Error(data.message || `Load failed (${response.status})`);
+      if (!response.ok) {
+        setAdminHint(typeof data.adminHint === 'string' ? data.adminHint : null);
+        throw new Error(data.message || `Load failed (${response.status})`);
+      }
       setParking(data.parking || []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load submissions.');
@@ -83,19 +63,19 @@ export default function AdminParkingSubmissionsClient() {
   }, [accessToken, isAdmin, status]);
 
   useEffect(() => {
-    if (!loading && configured && isAdmin && accessToken) {
+    if (!loading && isAdmin) {
       void load();
     }
-  }, [accessToken, configured, isAdmin, load, loading]);
+  }, [isAdmin, load, loading]);
 
   async function moderate(item: UserParkingSpaceRecord, nextStatus: UserParkingStatus) {
-    if (!accessToken) return;
+    if (!isAdmin) return;
 
     const response = await fetch('/api/admin/parking-submissions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify({
         id: item.id,
@@ -106,13 +86,17 @@ export default function AdminParkingSubmissionsClient() {
     const data = (await response.json().catch(() => ({}))) as {
       parking?: UserParkingSpaceRecord;
       message?: string;
+      adminHint?: string;
     };
 
     if (!response.ok || !data.parking) {
       setError(data.message || `Moderation failed (${response.status})`);
+      setAdminHint(typeof data.adminHint === 'string' ? data.adminHint : null);
       return;
     }
 
+    setError(null);
+    setAdminHint(null);
     setParking((current) =>
       current.map((row) => (row.id === item.id ? data.parking! : row)),
     );
@@ -126,6 +110,7 @@ export default function AdminParkingSubmissionsClient() {
         <Link href="/account" className="text-sm font-medium text-primary hover:underline">
           Back to account
         </Link>
+        <AdminNav className="mt-6" />
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
@@ -146,15 +131,15 @@ export default function AdminParkingSubmissionsClient() {
           </button>
         </div>
 
-        {!configured ? (
+        {!configured && !isAdmin ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Supabase auth is not configured.</p>
           </TravelCard>
-        ) : loading || adminStatusLoading ? (
+        ) : loading ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Loading session...</p>
           </TravelCard>
-        ) : !user ? (
+        ) : !signedIn && !isAdmin ? (
           <TravelCard className="mt-6">
             <p className="text-sm text-muted-foreground">Sign in with an admin account.</p>
             <Link
@@ -200,6 +185,11 @@ export default function AdminParkingSubmissionsClient() {
             {error ? (
               <div className="rounded-xl border border-destructive/25 bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
+                {adminHint ? (
+                  <p className="mt-2 text-xs text-destructive/85">
+                    Admin hint: {adminHint}
+                  </p>
+                ) : null}
               </div>
             ) : null}
 

@@ -486,7 +486,11 @@ function calculateTrueTotalCost(
         ? calculateOfficialParkingCost(option, parkingDuration)
         : calculateOffAirportParkingCost(option, parkingDuration);
 
-    const estimatedFuelCost = Math.max(4, Math.min(25, Math.round(option.distance * 0.35)));
+    const fuelDistanceMiles =
+      typeof option.distance === 'number' && Number.isFinite(option.distance)
+        ? option.distance
+        : 0;
+    const estimatedFuelCost = Math.max(4, Math.min(25, Math.round(fuelDistanceMiles * 0.35)));
 
     return Math.round((parkingCost + estimatedFuelCost) * 100) / 100;
   }

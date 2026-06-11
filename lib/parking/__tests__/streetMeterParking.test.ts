@@ -1,4 +1,5 @@
 import { buildStreetMeterParkingOption } from '../streetMeterParking';
+import { EVENT_STREET_METER_FALLBACK_CON } from '../eventVenueDetection';
 
 describe('buildStreetMeterParkingOption', () => {
   test('returns Seattle street meter option during paid hours', () => {
@@ -27,7 +28,7 @@ describe('buildStreetMeterParkingOption', () => {
     expect(option).toBeNull();
   });
 
-  test('Uptown event area still surfaces check_signs street option', () => {
+  test('event venue still surfaces street option as risky fallback', () => {
     const option = buildStreetMeterParkingOption({
       destination: 'Climate Pledge Arena, Seattle, WA',
       arrivalDate: '2026-06-02',
@@ -36,7 +37,9 @@ describe('buildStreetMeterParkingOption', () => {
     });
 
     expect(option?.applicable).toBe(true);
-    expect(option?.name).toMatch(/Check signs|special rules|On-street/i);
+    expect(option?.label).toBe('Fallback: street / meter');
+    expect(option?.confidence).toBe('Low');
+    expect(option?.cons).toContain(EVENT_STREET_METER_FALLBACK_CON);
   });
 
   test('Seattle Sunday street option explains why payment may be free', () => {

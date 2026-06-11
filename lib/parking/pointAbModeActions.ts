@@ -20,21 +20,8 @@ function detailsAction(
   };
 }
 
-function unavailableDetailsAction(
-  onDetails: () => void,
-  detailsSectionId?: string,
-  detailsExpanded?: boolean,
-): DestinationModeAction {
-  return {
-    label: 'Why unavailable',
-    onClick: onDetails,
-    ariaControls: detailsSectionId,
-    ariaExpanded: detailsExpanded ?? false,
-  };
-}
-
 export function buildPointAbModeActions(input: {
-  mode: 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
+  mode: 'drive' | 'destination-customer' | 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride';
   routeToParkingUrl?: string | null;
   parkingToDestinationUrl?: string | null;
   streetMeterDirectionsUrl?: string | null;
@@ -51,12 +38,25 @@ export function buildPointAbModeActions(input: {
   detailsExpanded?: boolean;
 }): DestinationModeAction[] {
   switch (input.mode) {
+    case 'drive':
+      return [
+        input.routeToParkingUrl
+          ? { label: 'Open directions', href: input.routeToParkingUrl }
+          : { label: 'Open directions', disabled: true },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+      ];
+    case 'destination-customer':
+      return [
+        input.routeToParkingUrl
+          ? { label: 'Open directions', href: input.routeToParkingUrl }
+          : { label: 'Open directions', disabled: true },
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+      ];
     case 'street-meter':
       return [
         input.streetMeterDirectionsUrl
           ? { label: 'Open directions', href: input.streetMeterDirectionsUrl }
           : { label: 'Open directions', disabled: true },
-        { label: 'Verify signs', onClick: input.onDetails },
         detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
       ];
     case 'parking':
@@ -98,9 +98,7 @@ export function buildPointAbModeActions(input: {
           input.parkRideTransitUrl
             ? { label: 'Transit to destination', href: input.parkRideTransitUrl }
             : { label: 'Transit to destination', disabled: true },
-          input.parkRideRulesUrl
-            ? { label: 'Rules', href: input.parkRideRulesUrl }
-            : detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
+          detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
         ];
       }
 
@@ -108,11 +106,7 @@ export function buildPointAbModeActions(input: {
         input.parkRideRulesUrl
           ? { label: 'Check lot rules', href: input.parkRideRulesUrl }
           : { label: 'Check lot rules', onClick: input.onDetails },
-        unavailableDetailsAction(
-          input.onDetails,
-          input.detailsSectionId,
-          input.detailsExpanded,
-        ),
+        detailsAction(input.onDetails, input.detailsSectionId, input.detailsExpanded),
         input.parkRideTransitPlannerUrl
           ? { label: 'Open transit planner', href: input.parkRideTransitPlannerUrl }
           : input.parkRideTransitUrl

@@ -76,6 +76,7 @@ describe('SiteHeader', () => {
   test('does not show admin nav for signed-out or non-admin users', async () => {
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
 
     useAuth.mockReturnValue({
       user: { id: 'user-1', email: 'traveler@example.com' },
@@ -85,8 +86,9 @@ describe('SiteHeader', () => {
       signOut: jest.fn(),
     });
     (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ signedIn: true, isAdmin: false, email: 'traveler@example.com' }),
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'admin_required' }),
     });
 
     renderHeader();
@@ -97,6 +99,21 @@ describe('SiteHeader', () => {
       });
     });
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
+  });
+
+  test('renders public nav links without admin for non-admin users', () => {
+    renderHeader();
+
+    expect(screen.getByRole('link', { name: 'Quick Go' })).toHaveAttribute('href', '/quick-go');
+    expect(screen.getByRole('link', { name: 'Airports' })).toHaveAttribute('href', '/airports');
+    expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute('href', '/how-it-works');
+    expect(screen.getByRole('link', { name: 'Pricing' })).toHaveAttribute('href', '/pricing');
+    expect(screen.getByRole('link', { name: 'Roadmap' })).toHaveAttribute('href', '/roadmap');
+    expect(screen.getByRole('link', { name: 'About' })).toHaveAttribute('href', '/about');
+    expect(screen.getByRole('link', { name: 'Plan trip' })).toHaveAttribute('href', '/trip');
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
   });
 
   test('shows admin nav for signed-in admin', async () => {

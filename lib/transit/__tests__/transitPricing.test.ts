@@ -167,8 +167,8 @@ describe('formatTransitCostDisplay', () => {
     const display = formatTransitCostDisplay(transit, roundTrip);
 
     expect(display.tripTotal).toBe(6);
-    expect(display.primary).toBe('$6 round-trip est.');
-    expect(display.secondary).toBe('$3 one-way × 2');
+    expect(display.primary).toBe('$6 round-trip adult est.');
+    expect(display.secondary).toBe('$3 one-way adult × 2');
   });
 
   test('shows one-way labels when return leg is not included', () => {
@@ -186,7 +186,7 @@ describe('formatTransitCostDisplay', () => {
     const display = formatTransitCostDisplay(transit, oneWay);
 
     expect(display.tripTotal).toBe(3);
-    expect(display.primary).toBe('$3 one-way est.');
+    expect(display.primary).toBe('$3 one-way adult est.');
     expect(display.secondary).toBeNull();
   });
 
@@ -224,8 +224,8 @@ describe('formatTransitCostDisplay', () => {
       ? `${quickReadPrimary} (${display.secondary})`
       : quickReadPrimary;
 
-    expect(quickReadPrimary).toBe('at $6 round-trip est.');
-    expect(quickReadWithSecondary).toBe('at $6 round-trip est. ($3 one-way × 2)');
+    expect(quickReadPrimary).toBe('at $6 round-trip adult est.');
+    expect(quickReadWithSecondary).toBe('at $6 round-trip adult est. ($3 one-way adult × 2)');
     expect(display.tripTotal).toBe(6);
   });
 });

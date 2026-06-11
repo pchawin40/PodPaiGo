@@ -1,4 +1,4 @@
-import { sanitizeAnalyticsProperties } from '../sanitizeAnalytics';
+import { sanitizeAnalyticsProperties, stripAnalyticsUrlQueryAndHash } from '../sanitizeAnalytics';
 
 describe('sanitizeAnalytics', () => {
   it('removes email, phone, and token-like fields', () => {
@@ -36,5 +36,21 @@ describe('sanitizeAnalytics', () => {
 
     expect(allowed.originText).toBe('123 Main St, Seattle');
     expect(allowed).not.toHaveProperty('originTextSafe');
+  });
+
+  it('strips query and hash fragments from analytics URLs', () => {
+    expect(stripAnalyticsUrlQueryAndHash('https://podpaigo.test/results?origin=123+Main#x')).toBe(
+      'https://podpaigo.test/results',
+    );
+
+    expect(
+      sanitizeAnalyticsProperties({
+        pageUrl: 'https://podpaigo.test/results?origin=123+Main',
+        pagePath: '/results?origin=123+Main#details',
+      }),
+    ).toEqual({
+      pageUrl: 'https://podpaigo.test/results',
+      pagePath: '/results',
+    });
   });
 });

@@ -1,5 +1,10 @@
 import type { TransitJourney, TransitOption, TripData } from '../types';
 import {
+  formatResolvedTransitFarePrimary,
+  isKnownTransitFare,
+  resolveTransitFare,
+} from './transitFareResolver';
+import {
   getTransitPassCoveredLabel,
   resolveTransitPaymentRegionContext,
 } from './transitPaymentLabels';
@@ -9,7 +14,37 @@ type TransitWithComputedCost = (TransitOption | TransitJourney) & {
 };
 
 export function getTransitOneWayCost(transit: TransitOption | TransitJourney): number {
+  const resolution = transit.transitFareResolution;
+  if (resolution && !isKnownTransitFare(resolution)) {
+    return Number.NaN;
+  }
+
   return 'totalCost' in transit ? transit.totalCost : transit.price;
+}
+
+export function isTransitFareKnown(transit: TransitOption | TransitJourney): boolean {
+  if (transit.transitFareResolution) {
+    return isKnownTransitFare(transit.transitFareResolution);
+  }
+
+  const oneWay = 'totalCost' in transit ? transit.totalCost : transit.price;
+  return Number.isFinite(oneWay);
+}
+
+export function resolveTransitFareForTrip(input: {
+  transit: TransitOption | TransitJourney;
+  tripData: TripData;
+}): ReturnType<typeof resolveTransitFare> {
+  if (input.transit.transitFareResolution) {
+    return input.transit.transitFareResolution;
+  }
+
+  return resolveTransitFare({
+    destination: input.transit.routeDestination || input.tripData.destination,
+    origin: input.transit.routeOrigin || input.tripData.origin,
+    agencyName: input.transit.sourceName,
+    airportCode: input.tripData.airportCode,
+  });
 }
 
 function parseTripDateTime(date: string | undefined, time?: string): Date | null {
@@ -73,6 +108,10 @@ export function calculateTransitCost(
   }
 
   const oneWayCost = getTransitOneWayCost(transit);
+  if (!Number.isFinite(oneWayCost)) {
+    return Number.NaN;
+  }
+
   return shouldIncludeReturnTransitLeg(tripData) ? oneWayCost * 2 : oneWayCost;
 }
 
@@ -122,22 +161,33 @@ export function formatTransitCostDisplay(
       tripTotal: 0,
       oneWay: 0,
       includesReturnLeg: false,
-      primary: '$0',
+      primary: '$0 with pass',
       secondary: getTransitPassCoveredLabel(context),
     };
   }
 
+  const fareResolution = resolveTransitFareForTrip({ transit, tripData });
   const oneWay = getTransitOneWayCost(transit);
   const includesReturnLeg = shouldIncludeReturnTransitLeg(tripData);
   const tripTotal = getTransitTripTotalCost(transit, tripData);
+
+  if (!isKnownTransitFare(fareResolution) || !Number.isFinite(oneWay)) {
+    return {
+      tripTotal: Number.NaN,
+      oneWay: Number.NaN,
+      includesReturnLeg,
+      primary: fareResolution.fareLabel,
+      secondary: fareResolution.sourceLabel,
+    };
+  }
 
   if (includesReturnLeg) {
     return {
       tripTotal,
       oneWay,
       includesReturnLeg: true,
-      primary: `$${formatFareAmount(tripTotal)} round-trip est.`,
-      secondary: `$${formatFareAmount(oneWay)} one-way × 2`,
+      primary: formatResolvedTransitFarePrimary(fareResolution, tripTotal, true),
+      secondary: `$${formatFareAmount(oneWay)} one-way adult × 2`,
     };
   }
 
@@ -145,7 +195,7 @@ export function formatTransitCostDisplay(
     tripTotal,
     oneWay,
     includesReturnLeg: false,
-    primary: `$${formatFareAmount(tripTotal)} one-way est.`,
-    secondary: null,
+    primary: formatResolvedTransitFarePrimary(fareResolution, tripTotal, false),
+    secondary: fareResolution.matchKind === 'city' ? fareResolution.fareLabel : null,
   };
 }

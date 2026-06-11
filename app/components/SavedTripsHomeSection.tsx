@@ -9,7 +9,7 @@ export default function SavedTripsHomeSection() {
       <SavedTripsPanel
         compact
         title="Your saved trips"
-        description="Jump back into a familiar airport routine."
+        description="Jump back into familiar airport, downtown, event, or point-to-point plans."
       />
 
       <div className="mt-4 text-center">

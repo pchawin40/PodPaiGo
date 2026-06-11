@@ -23,7 +23,7 @@ export const RECOMMENDATION_STATUS_LABELS: Record<RecommendationStatus, string> 
   unavailable: 'Unavailable',
   not_recommended: 'Not recommended',
   route_needed: 'Route needed',
-  cheapest: 'Budget',
+  cheapest: 'Cheapest',
   live_route_needed: 'Route needed',
 };
 
@@ -85,11 +85,11 @@ export function mapComparisonVerdictToStatus(args: {
   }
 
   if (verdict === 'Live route needed' || verdict === 'Open app') {
-    return 'route_needed';
+    return 'live_route_needed';
   }
 
   if (verdict === 'Best pick') {
-    if (sort === 'cheapest' || isCheapestMode) return 'budget_option';
+    if (sort === 'cheapest' || isCheapestMode) return 'cheapest';
     if (sort === 'fastest' || isFastestMode) return 'fastest';
     return 'best_pick';
   }

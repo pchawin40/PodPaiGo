@@ -10,6 +10,7 @@ import { milesBetween } from '../../shared/geo';
 import { googleMapsSearchUrl } from '../../shared/urls';
 import { debugLog } from '../../../../utils/debug';
 import { logParkingPhotoReviewTrace } from '../../../../parking/photoReviewDebug';
+import { getAirportParkingMaxDistanceMiles } from '../../../../parking/airportValidation';
 
 type GooglePlace = {
   id?: string;
@@ -422,14 +423,14 @@ export async function getGoogleParkingPlaces(args: {
   const airportCoordinates = args.airportCoordinates ?? airport?.geoLocation;
   const airportLabel = airport?.label ?? airportCode;
   const searchQueryPlan = buildSearchQueryPlan(airportLabel);
+  const maxParkingDistanceMiles = getAirportParkingMaxDistanceMiles(airportCode);
 
-  const parkingSearchRadiusMeters = Number(
-    process.env.PARKING_SEARCH_RADIUS_METERS || 50000,
-  );
-
-  const maxParkingDistanceMiles = Number(
-    process.env.PARKING_MAX_DISTANCE_MILES || 25,
-  );
+  const configuredRadiusMeters = Number(process.env.PARKING_SEARCH_RADIUS_METERS || 50000);
+  const airportMaxRadiusMeters = Math.round(maxParkingDistanceMiles * 1609.34);
+  const parkingSearchRadiusMeters =
+    Number.isFinite(configuredRadiusMeters) && configuredRadiusMeters > 0
+      ? Math.min(configuredRadiusMeters, airportMaxRadiusMeters)
+      : airportMaxRadiusMeters;
 
   const maxReturnedOptions = Number(
     process.env.GOOGLE_PARKING_MAX_RESULTS || 50,

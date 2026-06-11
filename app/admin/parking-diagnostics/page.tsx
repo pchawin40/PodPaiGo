@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
+import TravelCard from '../../components/ui/TravelCard';
+import { useAdminStatus } from '../../components/useAdminStatus';
+import AdminNav from '../AdminNav';
 
 type ProviderRow = {
   provider: string;
@@ -100,6 +103,13 @@ function statusLabel(status: string): string {
 }
 
 export default function ParkingDiagnosticsPage() {
+  const {
+    accessToken,
+    configured,
+    isAdmin,
+    loading: adminLoading,
+    signedIn,
+  } = useAdminStatus();
   const [airportCode, setAirportCode] = useState('SEA');
   const [data, setData] = useState<DiagnosticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,11 +117,15 @@ export default function ParkingDiagnosticsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (code: string) => {
+    if (!isAdmin) return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch(`/api/parking/diagnostics?airportCode=${encodeURIComponent(code)}`);
+      const res = await fetch(`/api/parking/diagnostics?airportCode=${encodeURIComponent(code)}`, {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
       if (!res.ok) throw new Error(`Diagnostics failed (${res.status})`);
       setData(await res.json());
     } catch (err) {
@@ -119,20 +133,27 @@ export default function ParkingDiagnosticsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [accessToken, isAdmin]);
 
   useEffect(() => {
-    load(airportCode);
-  }, [airportCode, load]);
+    if (!adminLoading && isAdmin) {
+      void load(airportCode);
+    }
+  }, [adminLoading, airportCode, isAdmin, load]);
 
   async function runFullAudit() {
+    if (!isAdmin) return;
+
     setAuditing(true);
     setError(null);
 
     try {
       const res = await fetch('/api/parking/diagnostics', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify({}),
       });
 
@@ -153,6 +174,7 @@ export default function ParkingDiagnosticsPage() {
         <Link href="/" className="text-sm font-medium text-blue-700">
           ← Back to home
         </Link>
+        <AdminNav className="mt-6" />
 
         <section className="mt-8">
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
@@ -164,6 +186,31 @@ export default function ParkingDiagnosticsPage() {
           </p>
         </section>
 
+        {!configured && !isAdmin ? (
+          <TravelCard className="mt-6">
+            <p className="text-sm text-muted-foreground">Supabase auth is not configured.</p>
+          </TravelCard>
+        ) : adminLoading ? (
+          <TravelCard className="mt-6">
+            <p className="text-sm text-muted-foreground">Loading session...</p>
+          </TravelCard>
+        ) : !signedIn && !isAdmin ? (
+          <TravelCard className="mt-6">
+            <p className="text-sm text-muted-foreground">Sign in with an admin account.</p>
+            <Link
+              href="/login?redirect=/admin/parking-diagnostics"
+              className="mt-4 inline-flex rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+            >
+              Sign in
+            </Link>
+          </TravelCard>
+        ) : !isAdmin ? (
+          <TravelCard className="mt-6">
+            <p className="font-semibold text-foreground">Admin access required.</p>
+          </TravelCard>
+        ) : null}
+
+        {isAdmin ? (
         <section className="mt-8 flex flex-wrap items-end gap-4">
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Probe airport</span>
@@ -196,18 +243,19 @@ export default function ParkingDiagnosticsPage() {
             {auditing ? 'Running hub audit…' : 'Run full coverage audit'}
           </button>
         </section>
+        ) : null}
 
-        {error && (
+        {isAdmin && error && (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
             {error}
           </div>
         )}
 
-        {loading && !data && (
+        {isAdmin && loading && !data && (
           <p className="mt-8 text-sm text-slate-600">Loading diagnostics…</p>
         )}
 
-        {data && (
+        {isAdmin && data && (
           <>
             {data.diagnostics.coverageSummary && (
               <section className="mt-8 grid gap-4 md:grid-cols-4">

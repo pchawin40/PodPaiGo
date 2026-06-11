@@ -115,7 +115,7 @@ describe('parking price display', () => {
       price: 210,
       priceUnit: 'total',
       priceDisplay: 'live',
-      priceSource: 'marketplace-link',
+      priceSource: 'parkwhiz-live',
       bookingProvider: 'ParkWhiz',
       priceConfidence: 'high',
       trustStatus: 'live',

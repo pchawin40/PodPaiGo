@@ -7,6 +7,7 @@ import {
   qualifiesForSuburbanCustomerParkingInference,
   type DestinationParkingClassification,
 } from './destinationParkingClassifier';
+import { EVENT_PARKING_OUTLOOK_COPY, isEventVenueDestination } from './eventVenueDetection';
 import {
   type GoogleParkingOptionsSignals,
 } from './googleParkingOptionsSignals';
@@ -172,12 +173,30 @@ function googleHasPaidSignals(signals: GoogleParkingOptionsSignals | null | unde
 function resolveGeneralParkingOutlook(input: {
   destination: string;
   destinationKind?: string | null;
+  origin?: string | null;
   googleParkingOptions?: GoogleParkingOptionsSignals | null;
   arrivalDate?: string | null;
   arrivalTime?: string | null;
   durationMinutes?: number;
   classification: DestinationParkingClassification;
 }): ParkingOutlook {
+  if (
+    isEventVenueDestination({
+      destination: input.destination,
+      destinationKind: input.destinationKind,
+      origin: input.origin,
+    })
+  ) {
+    return {
+      status: 'paid_parking_likely',
+      headline: 'Event parking likely',
+      reason: EVENT_PARKING_OUTLOOK_COPY,
+      source: 'destination_type_inference',
+      confidence: 'medium',
+      caveat: VERIFY_CAVEAT,
+    };
+  }
+
   const signals = input.googleParkingOptions;
   const denseUrban = isDenseUrbanDestination(input.destination);
   const localRules = evaluateLocalStreetParkingRules({
@@ -381,6 +400,7 @@ export function buildParkingOutlook(input: {
   destination: string;
   destinationKind?: string | null;
   airportCode?: string | null;
+  origin?: string | null;
   googleParkingOptions?: GoogleParkingOptionsSignals | null;
   arrivalDate?: string | null;
   arrivalTime?: string | null;
@@ -424,6 +444,7 @@ export function buildParkingOutlook(input: {
   const outlook = resolveGeneralParkingOutlook({
     destination: input.destination,
     destinationKind: input.destinationKind,
+    origin: input.origin,
     googleParkingOptions: input.googleParkingOptions,
     arrivalDate: input.arrivalDate,
     arrivalTime: input.arrivalTime,

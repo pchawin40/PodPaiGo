@@ -1,3 +1,4 @@
+import { MAX_ANALYTICS_PROPERTIES_JSON_LENGTH } from './sanitizeAnalytics';
 import { ANALYTICS_EVENT_NAMES, type AnalyticsTrackPayload } from './analyticsTypes';
 
 const EVENT_NAME_SET = new Set<string>(ANALYTICS_EVENT_NAMES);
@@ -27,6 +28,14 @@ export function validateAnalyticsTrackPayload(body: unknown): AnalyticsTrackPayl
           !Array.isArray(record.event_properties)
         ? (record.event_properties as Record<string, unknown>)
         : {};
+
+  try {
+    if (JSON.stringify(eventProperties).length > MAX_ANALYTICS_PROPERTIES_JSON_LENGTH) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 
   return {
     eventName,

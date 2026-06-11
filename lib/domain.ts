@@ -115,6 +115,7 @@ function getShuttleWaitPenalty(parking: ParkingOption): number {
 import { getParkingTerminalTimeMinutes, buildParkingDriveContextFromOption } from './parking/routeMinutes';
 import { resolveTripParkingContext } from './trip/tripContext';
 import type { WeatherImpact } from './weather/types';
+import { assessTransitPracticality } from './parking/transitPracticality';
 
 function getParkingTotalMinutes(parking: ParkingOption, tripData: TripData): number {
   return getParkingTerminalTimeMinutes(
@@ -263,6 +264,13 @@ export function calculateOffAirportParkingCost(
 }
 
 export function calculateRideshareCost(rideshare: RideshareOption, tripData: TripData): number {
+  if (
+    rideshare.priceDisplay === 'check-live' ||
+    rideshare.rideshareEstimateConfidence === 'unavailable'
+  ) {
+    return 999999;
+  }
+
   if (rideshare.rideshareTripScope === 'round-trip' || rideshare.rideshareTripScope === 'one-way') {
     return rideshare.price;
   }
@@ -279,6 +287,7 @@ export {
   formatTransitCostDisplay,
   getTransitOneWayCost,
   getTransitTripTotalCost,
+  isTransitFareKnown,
   shouldIncludeReturnTransitLeg,
 } from './transit/transitPricing';
 export type { TransitCostDisplay } from './transit/transitPricing';
@@ -644,8 +653,23 @@ export function rankRecommendations(
   });
 
   const transitWaitPenalty = tripData.type === 'one-way-arrival' ? 0 : tsaEstimate.waitTime * 0.5;
+  const knownDriveMinutesForTransit =
+    [
+      ...rideshareOptions.map((option) =>
+        typeof option.driveMinutes === 'number' && Number.isFinite(option.driveMinutes)
+          ? option.driveMinutes
+          : option.duration,
+      ),
+      ...parkingOptions
+        .filter((option) => !isParkingRouteUnavailable(option))
+        .map((option) => getParkingTotalMinutes(option, tripData)),
+    ]
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+      .sort((a, b) => a - b)[0] ?? null;
+
   transitJourneys.forEach(transit => {
-    const cost = calculateTransitCost(transit, tripData);
+    const rawCost = calculateTransitCost(transit, tripData);
+    const cost = Number.isFinite(rawCost) ? rawCost : 99;
     const totalDuration = 'totalDuration' in transit ? transit.totalDuration : transit.duration;
     const transfers = 'transfers' in transit ? transit.transfers : 0;
     const hasLightRail = 'segments' in transit && Array.isArray(transit.segments)
@@ -689,7 +713,20 @@ export function rankRecommendations(
       score -= 30;
     }
 
+    const practicality = assessTransitPracticality({
+      tripData,
+      transit,
+      transitDuration: totalDuration,
+      driveMinutes: knownDriveMinutesForTransit,
+    });
+    if (!practicality.primaryEligible) {
+      score -= practicality.scorePenalty;
+    }
+
     const reasons = [];
+    if (!practicality.primaryEligible) {
+      reasons.push('Possible but impractical for this trip');
+    }
     if (isUnrealistic) reasons.push('Long door-to-door transit route');
     if (totalDuration < 60) reasons.push('Quick total journey');
     if (transfers === 0) reasons.push('Direct transit');
@@ -707,6 +744,7 @@ export function rankRecommendations(
       const totalDriveTime = driveSegments.reduce((sum, s) => sum + s.duration, 0);
       reasons.push(`Drive ${totalDriveTime} min to transit`);
     }
+    reasons.push(...practicality.reasons);
     if (familyFriendly) reasons.push('More effort with family or luggage');
     reasons.push(...weatherAdjustment.reasons);
 

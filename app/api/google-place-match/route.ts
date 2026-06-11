@@ -172,16 +172,6 @@ async function handleRequest(input: Record<string, unknown>) {
     });
   }
 
-  const destinationKind = toString(input.destinationKind);
-  if (destinationKind && destinationKind !== 'airport') {
-    return NextResponse.json({
-      ...unavailableFields(),
-      place: null,
-      cacheKey,
-      source: 'skipped-non-airport-trip',
-    });
-  }
-
   return runWithPlacesRequestBudget(`google-place-match:${cacheKey}`, async () => {
     let matchResult: PlaceMatchResult | null = null;
 

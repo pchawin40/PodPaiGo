@@ -1,5 +1,19 @@
-import { TransportAvailability, TripData, Recommendation, ParkingOption, RideshareOption, TransitOption, TransitJourney, TsaEstimate, TrafficEstimate, FlightInfo, LocationInfo } from './types';
+import {
+  TransportAvailability,
+  TripData,
+  Recommendation,
+  ParkingDiscoveryMetadata,
+  ParkingOption,
+  RideshareOption,
+  TransitOption,
+  TransitJourney,
+  TsaEstimate,
+  TrafficEstimate,
+  FlightInfo,
+  LocationInfo,
+} from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { shouldComputeDriveRouteOptions } from './routes/driveRouteProfiles';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
 import {
@@ -11,6 +25,7 @@ import {
   resolveScheduledTripDateTime,
   resolveTargetTerminalArrivalIso,
   resolveTripRouteTiming,
+  shouldUseNowForRouting,
 } from './trip/routeTiming';
 import { attachSeaCheckpointRoute } from './airports/seaCheckpointRouting';
 import { getParkingDiscoveryNotice } from './parking/parkingDiscoveryMode';
@@ -27,7 +42,7 @@ import {
   rankRecommendations
 } from './domain';
 import { getWeatherForAirport, getWeatherForPoint } from './weather/nws';
-import type { WeatherLookupResult } from './weather/types';
+import type { WeatherLookupResult, WeatherUnavailableReason } from './weather/types';
 import {
   getTransitPassAssumption,
   getTransitPassPriceNote,
@@ -42,6 +57,8 @@ import {
   buildTransitTransferLegs,
 } from './intelligence/transferLegs';
 import { isParkingRouteUnavailable } from './parking/routeStatus';
+import { isEventVenueDestination } from './parking/eventVenueDetection';
+import { classifyDestinationParking } from './parking/destinationParkingClassifier';
 import { attachTrafficRouteMetadata } from './trip/quickGo';
 import { getAirportById } from './airports/catalog';
 import { buildSeaCuratedAccessOptions } from './access/buildAccessOptions';
@@ -50,13 +67,17 @@ import {
   partitionParkingByAccessKind,
 } from './access/parkAndRideAccess';
 import { rankAccessOptions } from './access/rankAccessOptions';
+import { buildPointAbOptionScoreBreakdowns } from './parking/pointAbOptionScoring';
+import { getParkingLotsNearPoint } from './parking/inventory';
+import { resolveGooglePlaceCoordinates } from './parking/googlePlacesCache';
+import { inventoryLotToDestinationParkingOption } from './parking/inventoryToParkingOption';
 
 /**
  * Resolve a promise, but fall back to a degraded value if it does not settle in
  * `ms`. Used to isolate slow live provider calls so the results page renders with
  * partial data instead of hanging on "Recalculating...". Never rejects.
  */
-function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T | Promise<T>): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) return promise;
 
   return new Promise<T>((resolve) => {
@@ -86,7 +107,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Pr
 
 function getParkingFetchTimeoutMs(): number {
   const configured = Number(process.env.PARKING_FETCH_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 5000;
+  return Number.isFinite(configured) && configured > 0 ? configured : 15000;
 }
 
 function readPositiveEnvMs(name: string, fallback: number): number {
@@ -104,6 +125,28 @@ function getTrafficFetchTimeoutMs(): number {
   return googleTimeoutMs + mapboxTimeoutMs + 1500;
 }
 
+function getWeatherFetchTimeoutMs(): number {
+  return readPositiveEnvMs('WEATHER_FETCH_TIMEOUT_MS', 3500);
+}
+
+function unavailableWeatherLookup(
+  reason: WeatherUnavailableReason,
+  targetDateTime?: string,
+  message?: string,
+): WeatherLookupResult {
+  return {
+    weatherImpact: null,
+    context: 'unavailable',
+    unavailableReason: reason,
+    diagnostics: {
+      reason,
+      provider: 'weather.gov / National Weather Service',
+      ...(message ? { message } : {}),
+    },
+    targetDateTime,
+  };
+}
+
 function getProviderFetchTimeoutMs(provider: string): number {
   const envKey = `${provider.toUpperCase()}_FETCH_TIMEOUT_MS`;
   const configured = Number(process.env[envKey]);
@@ -119,7 +162,7 @@ function getProviderFetchTimeoutMs(provider: string): number {
 function providerFetch<T>(
   provider: string,
   fetcher: () => Promise<T>,
-  fallback: (error: unknown, timedOut: boolean) => T,
+  fallback: (error: unknown, timedOut: boolean) => T | Promise<T>,
   timeoutMs = getProviderFetchTimeoutMs(provider),
 ): Promise<T> {
   const startedAt = Date.now();
@@ -158,9 +201,13 @@ function getCoordinateResolveTimeoutMs(): number {
 }
 
 /**
- * Resolve coordinates for a trip endpoint: use existing lat/lng when present,
- * otherwise geocode the address text (cached + budget-guarded by the provider,
- * bounded by a short timeout so it never blocks the results render). Returns
+ * Resolve coordinates for a trip endpoint. Order of preference:
+ *   1. Existing lat/lng when present.
+ *   2. The Google place_id when present (autocomplete predictions carry a
+ *      place_id but no coordinates), resolved via the budget-guarded getPlace
+ *      path — cheaper and more reliable than re-geocoding free text.
+ *   3. Geocoding the address text (cached + budget-guarded by the provider).
+ * Bounded by a short timeout so it never blocks the results render. Returns
  * undefined when coordinates cannot be resolved. Never throws.
  */
 async function resolveTripCoordinate(
@@ -168,6 +215,7 @@ async function resolveTripCoordinate(
   text: string | undefined,
   existingLat: number | undefined,
   existingLng: number | undefined,
+  placeId?: string,
 ): Promise<{ lat: number; lng: number } | undefined> {
   if (
     typeof existingLat === 'number' &&
@@ -178,16 +226,26 @@ async function resolveTripCoordinate(
     return { lat: existingLat, lng: existingLng };
   }
 
-  const address = text?.trim();
-  if (!address || typeof provider.geocodeAddress !== 'function') return undefined;
+  const resolve = (async (): Promise<{ lat: number; lng: number } | undefined> => {
+    const trimmedPlaceId = placeId?.trim();
+    if (trimmedPlaceId) {
+      const fromPlace = await resolveGooglePlaceCoordinates(trimmedPlaceId, {
+        reason: 'trip_coordinate',
+      }).catch(() => null);
+      if (fromPlace) return fromPlace;
+    }
 
-  const geocode = provider.geocodeAddress(address).then(
-    (result) => result ?? undefined,
-    () => undefined,
-  );
+    const address = text?.trim();
+    if (!address || typeof provider.geocodeAddress !== 'function') return undefined;
+
+    return provider.geocodeAddress(address).then(
+      (result) => result ?? undefined,
+      () => undefined,
+    );
+  })();
 
   return withTimeout<{ lat: number; lng: number } | undefined>(
-    geocode,
+    resolve,
     getCoordinateResolveTimeoutMs(),
     () => undefined,
   );
@@ -287,6 +345,124 @@ function fallbackTrafficEstimate(tripData: TripData, timedOut: boolean): Traffic
   });
 }
 
+function hasCoordinateFallbackInputs(tripData: TripData): boolean {
+  return Boolean(
+    resolveFiniteCoordinate(tripData.originLat, tripData.originLng) &&
+      resolveFiniteCoordinate(tripData.destinationLat, tripData.destinationLng),
+  );
+}
+
+type ParkingFetchResult = {
+  options: ParkingOption[];
+  metadata?: ParkingDiscoveryMetadata;
+  failed: boolean;
+  timedOut: boolean;
+  message: string | null;
+};
+
+function parkingTimeoutMessage(hasFallbackResults: boolean): string {
+  return hasFallbackResults
+    ? 'Live parking is still updating. Showing available parking estimates.'
+    : 'Live parking search timed out. Use map search or street signs to verify nearby parking.';
+}
+
+async function loadDestinationParkingTimeoutFallback(args: {
+  tripData: TripData;
+  origin: string;
+  destination: string;
+  destinationLat?: number;
+  destinationLng?: number;
+  providerError: string;
+}): Promise<ParkingFetchResult> {
+  const coords = resolveFiniteCoordinate(args.destinationLat, args.destinationLng);
+
+  let options: ParkingOption[] = [];
+
+  if (coords) {
+    try {
+      options = await withTimeout(
+        Promise.resolve()
+          .then(() =>
+            getParkingLotsNearPoint({
+              lat: coords.lat,
+              lng: coords.lng,
+              limit: 8,
+              radiusMiles: 2.5,
+              destinationKind: args.tripData.destinationKind,
+            }),
+          )
+          .then((lots) =>
+            lots.map((lot) =>
+              inventoryLotToDestinationParkingOption({
+                lot,
+                origin: args.origin,
+                destination: args.destination,
+              }),
+            ),
+          ),
+        readPositiveEnvMs('PARKING_TIMEOUT_CACHE_FALLBACK_MS', 1200),
+        () => [] as ParkingOption[],
+      );
+    } catch (error) {
+      debugLog('parking_timeout_cache_fallback_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      options = [];
+    }
+  }
+
+  const hasFallbackResults = options.length > 0;
+  const message = parkingTimeoutMessage(hasFallbackResults);
+  const metadata: ParkingDiscoveryMetadata = {
+    status: 'partial_timeout',
+    cachedCount: options.length,
+    liveCount: 0,
+    providerErrors: [args.providerError],
+    liveRefreshPaused: true,
+    lastChecked: options
+      .map((option) => option.fetchedAt || option.lastUpdated)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1),
+    message,
+  };
+
+  return {
+    options: options.map((option) => ({
+      ...option,
+      parkingDiscoveryStatus: 'partial_timeout',
+      parkingDiscoveryMessage: 'Live availability not confirmed.',
+    })),
+    metadata,
+    failed: true,
+    timedOut: true,
+    message,
+  };
+}
+
+function isDefinitiveRouteImpossible(estimate: TrafficEstimate): boolean {
+  const text = [
+    estimate.routeUnavailableReason,
+    ...(estimate.assumptions || []),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return /\b(no route|not drivable|unreachable|not reachable|route impossible|could not calculate a driving route)\b/.test(
+    text,
+  );
+}
+
+function shouldUseCoordinateFallbackForUnavailableTraffic(
+  estimate: TrafficEstimate,
+  tripData: TripData,
+): boolean {
+  if (estimate.routeUnavailable !== true) return false;
+  if (!hasCoordinateFallbackInputs(tripData)) return false;
+  return !isDefinitiveRouteImpossible(estimate);
+}
+
 type TripDataWithTransport = TripData & {
   transportAvailability?: TransportAvailability;
   airportCode?: string;
@@ -382,42 +558,82 @@ function genericParkingFallback(airportCode: string, destination: string): Parki
   }];
 }
 
-function genericRideshareFallback(): RideshareOption[] {
+function genericRideshareFallback(args?: {
+  origin?: string;
+  destination?: string;
+  trafficEstimate?: TrafficEstimate | null;
+}): RideshareOption[] {
   const now = new Date().toISOString();
+  const driveMinutes =
+    typeof args?.trafficEstimate?.duration === 'number' &&
+    Number.isFinite(args.trafficEstimate.duration) &&
+    args.trafficEstimate.duration > 0 &&
+    !args.trafficEstimate.routeUnavailable
+      ? Math.round(args.trafficEstimate.duration)
+      : 15;
+  const destination = args?.destination?.trim() || '';
+  const origin = args?.origin?.trim() || '';
+  const mapLink =
+    origin && destination
+      ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}`
+      : 'https://www.google.com/maps';
+  const uberLink = `https://m.uber.com/ul/?${new URLSearchParams({
+    action: 'setPickup',
+    pickup: 'my_location',
+    ...(destination ? { 'dropoff[formatted_address]': destination } : {}),
+  }).toString()}`;
+
+  const buildOption = (input: {
+    id: 'uber' | 'lyft';
+    name: string;
+    waitMinutes: number;
+    sourceLink: string;
+  }): RideshareOption => {
+    const totalOptionMinutes = driveMinutes + input.waitMinutes;
+    return {
+      id: input.id,
+      name: input.name,
+      price: 35,
+      duration: totalOptionMinutes,
+      driveMinutes,
+      pickupWaitMinutes: input.waitMinutes,
+      totalOptionMinutes,
+      timingBreakdown: {
+        driveMinutes,
+        parkingBufferMinutes: null,
+        walkToDestinationMinutes: null,
+        pickupWaitMinutes: input.waitMinutes,
+        totalOptionMinutes,
+      },
+      availability: input.id === 'uber' ? 90 : 88,
+      trustStatus: 'estimated',
+      priceDisplay: 'check-live',
+      priceNote: 'Open app for live price.',
+      rideshareEstimateConfidence: 'unavailable',
+      sourceName: input.name,
+      sourceLink: input.sourceLink,
+      mapLink,
+      lastUpdated: now,
+      assumptions: [
+        'Rideshare app link shown because live Uber/Lyft quote is unavailable.',
+        `Duration uses ${driveMinutes} min drive time plus estimated ${input.waitMinutes} min pickup wait.`,
+      ],
+    };
+  };
 
   return [
-    {
+    buildOption({
       id: 'uber',
       name: 'Uber',
-      price: 30,
-      duration: 20,
-      availability: 90,
-      trustStatus: 'estimated',
-      priceDisplay: 'estimated',
-      priceNote: 'Baseline estimate only. Open Uber for final pricing.',
-      rideshareEstimateConfidence: 'baseline-estimate',
-      sourceName: 'Uber',
-      sourceLink: 'https://m.uber.com/ul/?action=setPickup&pickup=my_location',
-      mapLink: 'https://www.google.com/maps',
-      lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.', 'Not a live Uber quote.'],
-    },
-    {
+      waitMinutes: 5,
+      sourceLink: uberLink,
+    }),
+    buildOption({
       id: 'lyft',
       name: 'Lyft',
-      price: 30,
-      duration: 20,
-      availability: 90,
-      trustStatus: 'estimated',
-      priceDisplay: 'estimated',
-      priceNote: 'Baseline estimate only. Open Lyft for final pricing.',
-      rideshareEstimateConfidence: 'baseline-estimate',
-      sourceName: 'Lyft',
       sourceLink: 'https://lyft.com/ride',
-      mapLink: 'https://www.google.com/maps',
-      lastUpdated: now,
-      assumptions: ['Generic fallback rideshare option.', 'Not a live Lyft quote.'],
-    },
+      waitMinutes: 5,
+    }),
   ];
 }
 
@@ -533,6 +749,36 @@ function hasDriveSegment(transit: TransitOption): boolean {
   return segs.some((s) => s.mode === 'drive');
 }
 
+function shouldDeferQuickGoPaidParkingDiscovery(args: {
+  tripData: TripData;
+  isAirportTrip: boolean;
+  isEventDestination: boolean;
+}): boolean {
+  const { tripData, isAirportTrip, isEventDestination } = args;
+  if (tripData.tripMode !== 'quick-go') return false;
+  if (isAirportTrip || isEventDestination) return false;
+
+  const destinationKind = String(tripData.destinationKind || '').toLowerCase();
+  if (destinationKind === 'airport' || destinationKind === 'downtown') return false;
+  if (destinationKind === 'stadium' || destinationKind === 'event') return false;
+
+  const purpose = String(tripData.quickGoPurpose || '').toLowerCase();
+  const intent = String(tripData.intent || '').toLowerCase();
+  if (
+    purpose === 'parking-trip' ||
+    /parking-(trip|options)|parking options|find parking|book parking/.test(intent)
+  ) {
+    return false;
+  }
+
+  const classification = classifyDestinationParking({
+    destination: tripData.destinationName || tripData.destination,
+    destinationKind: tripData.destinationKind,
+  });
+
+  return classification.mode === 'free_likely';
+}
+
 // Recommendation engine - testable domain logic
 export class RecommendationEngine {
   static provider: DataProvider = ActiveDataProvider;
@@ -543,6 +789,18 @@ export class RecommendationEngine {
 
   static async generateRecommendations(tripData: TripData): Promise<Recommendation> {
     const isAirportTrip = !isGeneralTrip(tripData);
+    const isEventDestination =
+      !isAirportTrip &&
+      (isEventVenueDestination({
+        destination: tripData.destination,
+        destinationKind: tripData.destinationKind,
+        origin: tripData.origin,
+      }) ||
+        isEventVenueDestination({
+          destination: (tripData as TripDataWithTransport).destinationName,
+          destinationKind: tripData.destinationKind,
+          origin: tripData.origin,
+        }));
 
     const generationStartedAt = Date.now();
     debugLog('recommendation_generation_start', {
@@ -569,7 +827,13 @@ export class RecommendationEngine {
       ? resolveAirportCoordinate(tripData)
       : undefined;
     const [resolvedOriginCoords, resolvedDestinationCoords] = await Promise.all([
-      resolveTripCoordinate(this.provider, tripData.origin, tripData.originLat, tripData.originLng),
+      resolveTripCoordinate(
+        this.provider,
+        tripData.origin,
+        tripData.originLat,
+        tripData.originLng,
+        tripData.originPlaceId,
+      ),
       airportDestinationCoords
         ? Promise.resolve(airportDestinationCoords)
         : resolveTripCoordinate(
@@ -577,6 +841,7 @@ export class RecommendationEngine {
             tripData.destination,
             tripData.destinationLat,
             tripData.destinationLng,
+            tripData.destinationPlaceId,
           ),
     ]);
 
@@ -635,7 +900,15 @@ export class RecommendationEngine {
 
     const noParkingNeeded = (tripData as TripDataWithTransport).parkingPreference === 'none';
     const allowCarOptions = transportAvailability === 'car' || transportAvailability === 'all';
-    const shouldLoadParking = allowCarOptions && shouldDiscoverParkingForTrip(tripData);
+    const deferQuickGoPaidParkingDiscovery = shouldDeferQuickGoPaidParkingDiscovery({
+      tripData,
+      isAirportTrip,
+      isEventDestination,
+    });
+    const shouldLoadParking =
+      allowCarOptions &&
+      shouldDiscoverParkingForTrip(tripData) &&
+      !deferQuickGoPaidParkingDiscovery;
     const allowRideshare =
       noParkingNeeded ||
       transportAvailability === 'rideshare' ||
@@ -653,6 +926,7 @@ export class RecommendationEngine {
       noParkingNeeded,
       allowCarOptions,
       shouldLoadParking,
+      deferQuickGoPaidParkingDiscovery,
       allowRideshare,
       allowTransit,
       hasOriginCoords: Boolean(mainOriginLatLng),
@@ -662,31 +936,49 @@ export class RecommendationEngine {
       ? providerFetch(
           'parking',
           async () => {
-            const options = await this.provider.getParkingOptions(
-              tripData.origin,
-              tripData.destination,
-              buildParkingCheckInDateTime(tripData),
-              calculateParkingDuration(tripData),
-              {
-                destinationKind: tripData.destinationKind ?? 'airport',
-                airportCode: isAirportTrip
-                  ? ((tripData as TripDataWithTransport).airportCode || undefined)
-                  : undefined,
-                destinationLat: tripData.destinationLat,
-                destinationLng: tripData.destinationLng,
-                routeDepartureTime: parkingRouteDepartureIso,
-                targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
-              },
-            );
+            const parkingContext = {
+              destinationKind: tripData.destinationKind ?? 'airport',
+              destinationName:
+                (tripData as TripDataWithTransport).destinationName || undefined,
+              airportCode: isAirportTrip
+                ? ((tripData as TripDataWithTransport).airportCode || undefined)
+                : undefined,
+              destinationLat: effectiveDestinationLat,
+              destinationLng: effectiveDestinationLng,
+              destinationCoordinates: mainDestinationLatLng,
+              routeDepartureTime: parkingRouteDepartureIso,
+              targetTerminalArrivalTime: routeTiming.targetTerminalArrivalIso,
+            };
+            const checkInDateTime = buildParkingCheckInDateTime(tripData);
+            const parkingDurationMinutes = calculateParkingDuration(tripData);
+            const optionsResult = this.provider.getParkingOptionsWithMetadata
+              ? await this.provider.getParkingOptionsWithMetadata(
+                  tripData.origin,
+                  tripData.destination,
+                  checkInDateTime,
+                  parkingDurationMinutes,
+                  parkingContext,
+                )
+              : {
+                  options: await this.provider.getParkingOptions(
+                    tripData.origin,
+                    tripData.destination,
+                    checkInDateTime,
+                    parkingDurationMinutes,
+                    parkingContext,
+                  ),
+                  metadata: undefined as ParkingDiscoveryMetadata | undefined,
+                };
 
             return {
-              options,
+              options: optionsResult.options,
+              metadata: optionsResult.metadata,
               failed: false,
               timedOut: false,
               message: null as string | null,
-            };
+            } satisfies ParkingFetchResult;
           },
-          (error, timedOut) => {
+          async (error, timedOut) => {
             const message = error instanceof Error ? error.message : String(error);
             console.warn('Parking fetch failed; continuing with non-parking recommendations', {
               tripType: tripData.type,
@@ -698,23 +990,42 @@ export class RecommendationEngine {
               timedOut,
             });
 
+            if (timedOut && !isAirportTrip) {
+              return loadDestinationParkingTimeoutFallback({
+                tripData,
+                origin: tripData.origin,
+                destination: tripData.destination,
+                destinationLat: effectiveDestinationLat,
+                destinationLng: effectiveDestinationLng,
+                providerError: message,
+              });
+            }
+
+            const fallbackMessage = timedOut
+              ? parkingTimeoutMessage(false)
+              : 'Parking data unavailable right now. Try again or open directions.';
+
             return {
               options: [] as ParkingOption[],
+              metadata: {
+                status: timedOut ? 'partial_timeout' : 'provider_error',
+                providerErrors: [message],
+                message: fallbackMessage,
+              } satisfies ParkingDiscoveryMetadata,
               failed: true,
               timedOut,
-              message: timedOut
-                ? 'Live parking is still updating. Showing partial results — open directions to confirm.'
-                : 'Parking data unavailable right now. Try again or open directions.',
-            };
+              message: fallbackMessage,
+            } satisfies ParkingFetchResult;
           },
           getParkingFetchTimeoutMs(),
         )
       : Promise.resolve({
           options: [] as ParkingOption[],
+          metadata: undefined as ParkingDiscoveryMetadata | undefined,
           failed: false,
           timedOut: false,
           message: null as string | null,
-        });
+        } satisfies ParkingFetchResult);
 
     const [
       parkingResult,
@@ -827,7 +1138,47 @@ export class RecommendationEngine {
         : Promise.resolve(null),
     ]);
 
-    const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimate);
+    const replaceUnavailableTrafficWithCoordinateFallback =
+      shouldUseCoordinateFallbackForUnavailableTraffic(trafficEstimate, trafficTripData);
+    const trafficEstimateForDisplay = replaceUnavailableTrafficWithCoordinateFallback
+      ? fallbackTrafficEstimate(trafficTripData, false)
+      : trafficEstimate;
+    const effectiveTrafficEstimate = attachTrafficRouteMetadata(trafficEstimateForDisplay);
+
+    // Optional toll/HOV/express drive route comparison (Phase 1). Only runs when
+    // the feature is enabled or the user chose a toll/HOV option, so we never
+    // make extra route calls by default.
+    const driveRoutePreferences = (tripData as TripData).driveRoutePreferences;
+    const driveRouteRanking =
+      this.provider.getDriveRouteOptions &&
+      shouldComputeDriveRouteOptions({ prefs: driveRoutePreferences })
+        ? await providerFetch(
+            'drive_route_options',
+            () =>
+              this.provider.getDriveRouteOptions!(
+                tripData.origin,
+                tripData.destination,
+                mainRouteDepartureIso,
+                driveRoutePreferences,
+                {
+                  originLatLng: mainOriginLatLng,
+                  destinationLatLng: mainDestinationLatLng,
+                },
+              ),
+            () => null,
+          )
+        : null;
+
+    if (replaceUnavailableTrafficWithCoordinateFallback) {
+      debugLog('route_unavailable_replaced_with_coordinate_fallback', {
+        type: tripData.type,
+        tripMode: tripData.tripMode,
+        route: trafficEstimate.route,
+        providerSource: trafficEstimate.sourceName,
+        providerReason: trafficEstimate.routeUnavailableReason,
+        duration: effectiveTrafficEstimate.duration,
+      });
+    }
 
     debugLog('quickgo_route_timing_result', {
       destinationText: tripData.destination,
@@ -865,46 +1216,73 @@ export class RecommendationEngine {
       );
     }
 
+    const weatherTargetDateTime = isAirportTrip
+      ? routeTiming.targetTerminalArrivalIso || tripDateTime
+      : shouldUseNowForRouting(tripDateTime)
+        ? undefined
+        : tripDateTime;
+
+    const weatherTimeoutMs = getWeatherFetchTimeoutMs();
     const weatherResult = isAirportTrip
-      ? await getWeatherForAirport({
-        airportCode,
-        targetDateTime: routeTiming.targetTerminalArrivalIso || tripDateTime,
-      }).catch((): WeatherLookupResult => ({
-        weatherImpact: null,
-        context: 'unavailable' as const,
-      }))
+      ? await withTimeout(
+        getWeatherForAirport({
+          airportCode,
+          targetDateTime: weatherTargetDateTime,
+        }).catch((error): WeatherLookupResult =>
+          unavailableWeatherLookup(
+            'provider-failure',
+            weatherTargetDateTime,
+            error instanceof Error ? error.message : String(error),
+          ),
+        ),
+        weatherTimeoutMs,
+        () => unavailableWeatherLookup('timeout', weatherTargetDateTime),
+      )
       : mainDestinationLatLng
-        ? await getWeatherForPoint({
-          lat: mainDestinationLatLng.lat,
-          lng: mainDestinationLatLng.lng,
-          targetDateTime: tripDateTime,
-          currentContext: 'current-destination-weather',
-        }).catch((): WeatherLookupResult => ({
-          weatherImpact: null,
-          context: 'unavailable' as const,
-        }))
-        : {
-          weatherImpact: null,
-          context: 'forecast-unavailable' as const,
-        };
+        ? await withTimeout(
+          getWeatherForPoint({
+            lat: mainDestinationLatLng.lat,
+            lng: mainDestinationLatLng.lng,
+            targetDateTime: weatherTargetDateTime,
+            currentContext: 'current-destination-weather',
+          }).catch((error): WeatherLookupResult =>
+            unavailableWeatherLookup(
+              'provider-failure',
+              weatherTargetDateTime,
+              error instanceof Error ? error.message : String(error),
+            ),
+          ),
+          weatherTimeoutMs,
+          () => unavailableWeatherLookup('timeout', weatherTargetDateTime),
+        )
+        : unavailableWeatherLookup('missing-coordinates', weatherTargetDateTime);
 
     debugLog('weather_lookup_result', {
       type: tripData.type,
       destinationText: tripData.destination,
       isAirportTrip,
-      targetDateTime: isAirportTrip
-        ? routeTiming.targetTerminalArrivalIso || tripDateTime
-        : tripDateTime,
+      targetDateTime: weatherTargetDateTime ?? tripDateTime,
+      weatherTimeoutMs,
       destinationCoordsPresent: Boolean(mainDestinationLatLng),
       destinationResolvedViaGeocode:
         Boolean(resolvedDestinationCoords) && typeof tripData.destinationLat !== 'number',
       context: weatherResult.context,
+      unavailableReason: weatherResult.unavailableReason,
+      diagnostics: weatherResult.diagnostics,
       hasWeatherImpact: Boolean(weatherResult.weatherImpact),
       forecastRangeStart: weatherResult.forecastRangeStart,
       forecastRangeEnd: weatherResult.forecastRangeEnd,
     });
 
     const weatherImpact = weatherResult.weatherImpact;
+
+    if (!isAirportTrip && allowRideshare && rideshare.length === 0 && !effectiveTrafficEstimate.routeUnavailable) {
+      rideshare = genericRideshareFallback({
+        origin: tripData.origin,
+        destination: tripData.destination,
+        trafficEstimate: effectiveTrafficEstimate,
+      });
+    }
 
     if (isAirportTrip) {
       if (airportCode !== 'SEA') {
@@ -913,7 +1291,11 @@ export class RecommendationEngine {
         }
 
         if (allowRideshare && rideshare.length === 0 && !effectiveTrafficEstimate.routeUnavailable) {
-          rideshare = genericRideshareFallback();
+          rideshare = genericRideshareFallback({
+            origin: tripData.origin,
+            destination: tripData.destination,
+            trafficEstimate: effectiveTrafficEstimate,
+          });
         }
 
         transit = [];
@@ -984,6 +1366,25 @@ export class RecommendationEngine {
         : t.assumptions,
     }));
 
+    const eventDestinationProximityPenalty = (p: ParkingOption) => {
+      if (!isEventDestination) return 0;
+
+      const walkMinutes =
+        p.walkingMinutes ??
+        p.transferToTerminalMinutes ??
+        p.shuttleMinutes ??
+        18;
+      const distanceMiles =
+        typeof p.distance === 'number' && Number.isFinite(p.distance)
+          ? p.distance
+          : 1.5;
+      const fartherBackupPenalty = p.bestFor?.includes('Farther backup') ? 80 : 0;
+      const providerFarPenalty =
+        p.bookingProvider === 'ParkWhiz' && distanceMiles > 0.75 ? 20 : 0;
+
+      return walkMinutes * 1.5 + distanceMiles * 45 + fartherBackupPenalty + providerFarPenalty;
+    };
+
     const sortedParking = parkingWithCosts.sort((a, b) => {
       const weatherScore = (p: ParkingOption) => {
         if (!weatherImpact) return 0;
@@ -1000,8 +1401,8 @@ export class RecommendationEngine {
       };
 
       return (
-        (a.calculatedCost - weatherScore(a)) -
-        (b.calculatedCost - weatherScore(b))
+        (a.calculatedCost - weatherScore(a) + eventDestinationProximityPenalty(a)) -
+        (b.calculatedCost - weatherScore(b) + eventDestinationProximityPenalty(b))
       );
     });
     const sortedRideshare = rideshareWithCosts.sort((a, b) => a.calculatedCost - b.calculatedCost);
@@ -1136,7 +1537,8 @@ export class RecommendationEngine {
       }
 
       return (
-        (a.trueTotalCost ?? a.calculatedCost) - (b.trueTotalCost ?? b.calculatedCost) ||
+        ((a.trueTotalCost ?? a.calculatedCost) + eventDestinationProximityPenalty(a)) -
+          ((b.trueTotalCost ?? b.calculatedCost) + eventDestinationProximityPenalty(b)) ||
         (a.stressScore ?? 50) - (b.stressScore ?? 50) ||
         (a.walkingBurdenScore ?? 50) - (b.walkingBurdenScore ?? 50)
       );
@@ -1177,7 +1579,38 @@ export class RecommendationEngine {
       allAccessOptions.length > 0
         ? rankAccessOptions(allAccessOptions, tripData)
         : undefined;
+    const optionScoreBreakdowns = !isAirportTrip
+      ? buildPointAbOptionScoreBreakdowns({
+          tripData,
+          destinationLabel: tripData.destinationName || tripData.destination,
+          parkingOptions: finalParking,
+          rideshareOptions: finalRideshare,
+          transitOptions: finalTransit as TransitOption[],
+          driveMinutes: effectiveTrafficEstimate.routeUnavailable
+            ? null
+            : effectiveTrafficEstimate.duration,
+          parkingDurationMinutes,
+          weatherRisk: weatherImpact?.riskLevel,
+        })
+      : undefined;
     const hasParkingResults = finalParking.length > 0;
+    const parkingDiscoveryMetadata =
+      parkingResult.metadata ??
+      (shouldLoadParking
+        ? {
+            status: hasParkingResults ? 'live_refreshed' : 'cache_empty',
+            cachedCount: finalParking.filter((option) => option.providerSource === 'destination-cache').length,
+            liveCount: finalParking.filter((option) => option.providerSource !== 'destination-cache').length,
+          } satisfies ParkingDiscoveryMetadata
+        : deferQuickGoPaidParkingDiscovery
+          ? {
+              status: 'cache_empty',
+              cachedCount: 0,
+              liveCount: 0,
+              liveRefreshPaused: true,
+              message: 'Customer parking likely — verify signs.',
+            } satisfies ParkingDiscoveryMetadata
+        : undefined);
     const parkingDataStatus =
       !shouldLoadParking
         ? 'not_requested'
@@ -1187,10 +1620,18 @@ export class RecommendationEngine {
             ? 'unavailable'
             : 'empty';
     const parkingDataMessage =
-      parkingResult.failed && !hasParkingResults
+      parkingResult.timedOut && hasParkingResults
+        ? parkingResult.message ||
+          parkingDiscoveryMetadata?.message ||
+          parkingTimeoutMessage(true)
+      : parkingResult.failed && !hasParkingResults
         ? parkingResult.message || 'Parking data unavailable right now. Try again or open directions.'
+        : deferQuickGoPaidParkingDiscovery && !hasParkingResults
+          ? 'Customer parking likely — verify signs.'
         : shouldLoadParking && !hasParkingResults
-          ? isAirportTrip
+          ? parkingDiscoveryMetadata?.status === 'cache_empty'
+            ? 'No saved parking options found near this destination yet. Search nearby parking to verify current garages and lots.'
+            : isAirportTrip
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
           : undefined;
@@ -1229,11 +1670,16 @@ export class RecommendationEngine {
       parking: finalParking,
       rideshare: finalRideshare,
       transit: finalTransit,
+      optionScoreBreakdowns,
       accessStrategies,
       parkingDiscoveryNotice:
         shouldLoadParking
-          ? parkingResult.timedOut && hasParkingResults
-            ? 'Some live parking details are still refreshing.'
+          ? parkingDiscoveryMetadata?.liveRefreshPaused && hasParkingResults
+            ? parkingResult.timedOut
+              ? parkingDiscoveryMetadata.message || parkingTimeoutMessage(true)
+              : 'Live parking refresh paused to control API cost. Showing saved parking options.'
+            : parkingResult.timedOut && hasParkingResults
+            ? parkingDiscoveryMetadata?.message || parkingTimeoutMessage(true)
             : isAirportTrip
               ? getParkingDiscoveryNotice(finalParking.length)
               : 'Street/meter parking may be available nearby. Check signs, meter rules, loading zones, and time limits before leaving your car.'
@@ -1243,15 +1689,20 @@ export class RecommendationEngine {
       airportRouteUnavailableReason: effectiveTrafficEstimate.routeUnavailableReason,
       weatherImpact,
       weatherContext: weatherResult.context,
+      weatherUnavailableReason: weatherResult.unavailableReason,
       weatherForecastRangeStart: weatherResult.forecastRangeStart,
       weatherForecastRangeEnd: weatherResult.forecastRangeEnd,
       leaveByTime,
       tripDuration,
       trafficEstimate: effectiveTrafficEstimate,
+      driveRouteOptions: driveRouteRanking?.options,
+      driveRoutePreferences,
       flightInfo: flightInfo ?? undefined,
       locationInfo: locationInfo ?? undefined,
       parkingDataStatus,
       parkingDataMessage,
+      parkingDiscoveryStatus: parkingDiscoveryMetadata?.status,
+      parkingDiscoveryMetadata,
     };
   }
 

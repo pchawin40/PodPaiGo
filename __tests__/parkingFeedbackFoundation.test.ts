@@ -5,6 +5,10 @@ const migrationPath = path.join(
   __dirname,
   '../supabase/migrations/20260604120000_parking_feedback_foundation.sql',
 );
+const serverInsertMigrationPath = path.join(
+  __dirname,
+  '../supabase/migrations/20260610120000_parking_validation_reports_server_insert.sql',
+);
 
 describe('parking feedback foundation migration', () => {
   const sql = fs.readFileSync(migrationPath, 'utf8');
@@ -25,12 +29,23 @@ describe('parking feedback foundation migration', () => {
     expect(sql).toMatch(/parking_validation_reports_insert_anonymous[\s\S]*with check \(user_id is null\)/);
     expect(sql).toMatch(/parking_validation_reports_select_own[\s\S]*using \(user_id = auth\.uid\(\)\)/);
   });
+
+  test('later migration removes direct public inserts in favor of server-side API insert', () => {
+    const sql = fs.readFileSync(serverInsertMigrationPath, 'utf8');
+
+    expect(sql).toContain('parking_validation_reports_insert_anonymous');
+    expect(sql).toContain('parking_validation_reports_insert_authenticated');
+    expect(sql).toContain('revoke insert on public.parking_validation_reports from anon');
+    expect(sql).toContain('revoke insert on public.parking_validation_reports from authenticated');
+    expect(sql).toContain('server-side only through the validated API route');
+  });
 });
 
 describe('/api/parking/validation-report route', () => {
   beforeEach(() => {
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   test('validates required report_type and free_minutes', async () => {

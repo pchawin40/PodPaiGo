@@ -10,6 +10,7 @@ import {
   calculateParkingDuration,
   formatTransitCostDisplay,
   getTransitTripTotalCost,
+  isTransitFareKnown,
 } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
@@ -32,7 +33,11 @@ import {
   parkingRankExplanation,
   sortParkingOptionsForMode,
 } from '../../lib/parking/sortParkingOptions';
-import { buildParkingPriorityBadges } from '../../lib/parking/priorityBadges';
+import {
+  buildParkingPriorityBadges,
+  getParkingRatingReviewBadgeSemanticKey,
+  type ParkingPriorityBadge,
+} from '../../lib/parking/priorityBadges';
 import {
   getSeasonalClimateGuidance,
   seasonalClimateSummary,
@@ -48,6 +53,7 @@ import {
   isQuickGoMode,
   logQuickGoClientRoute,
   mergeStoredTripSearchParams,
+  quickGoClassificationForTrip,
   quickGoRouteHydrationStateForFinalResult,
   resolveQuickGoDriveTime,
   shouldStartQuickGoRouteRefresh,
@@ -56,13 +62,26 @@ import {
 import QuickGoResultsView from '../components/QuickGoResultsView';
 import RouteLookaheadPanel from '../components/RouteLookaheadPanel';
 import PodPaiGoAssistant from '../components/PodPaiGoAssistant';
+import TripRecalculatingLoader from '../components/TripRecalculatingLoader';
 import { useAuth } from '../components/AuthProvider';
+import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
 import OptionComparisonCard from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
+import BetaFeedbackButton from './BetaFeedbackButton';
+import { DATA_TRANSPARENCY_DISCLOSURE } from '../../lib/marketing/publicCopy';
+import DriveRouteOptionsSection from './DriveRouteOptionsSection';
+import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
+import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
 import { buildPointAbModeActions } from './DestinationModeActions';
 import { rankPointAbModes } from '../../lib/parking/pointAbRanking';
+import {
+  buildPointAbDisplayRecommendation,
+  logPointAbCanonicalFlow,
+  resolvePointAbEffectivePreference,
+} from '../../lib/parking/pointAbCanonicalFlow';
+import { buildPointAbQuickReadMessage } from '../../lib/parking/pointAbQuickRead';
 import {
   selectBestParkAndRideForPointAb,
   toPointAbParkRidePresentation,
@@ -71,7 +90,10 @@ import {
   POINT_AB_DETAILS_SECTION_IDS,
   scrollToPointAbDetailsSection,
 } from '../../lib/parking/pointAbDetailsScroll';
-import type { PointAbModeKey } from '../../lib/parking/pointAbRanking';
+import type {
+  PointAbModeKey,
+  PointAbModePresentation,
+} from '../../lib/parking/pointAbRanking';
 import { PROVIDER_LINKS } from '../../lib/providerCatalog';
 import { AddressInput } from '../trip/AddressInput';
 import { getAirportById } from '../../lib/airports/catalog';
@@ -79,7 +101,14 @@ import AirportSearchPicker from '../components/AirportSearchPicker';
 import ParkingSmartPick from './ParkingSmartPick';
 import { withAprLivePrice, getAprLivePrice } from '../../lib/parking/aprLivePrice';
 import { formatMinutes, parkingKeySafe, parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
-import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
+import {
+  buildParkingDriveContextFromOption,
+  formatRouteDisplayMinutes,
+  firstFiniteNumber,
+  resolveParkingDriveMinutesDetailed,
+  resolveParkingDriveOrRouteTimeForDisplay,
+  resolveParkingRouteTimeFallbackForDisplay,
+} from '../../lib/parking/routeMinutes';
 import { getParkingRouteCoordinates } from '../../lib/parking/parkingCoordinates';
 import { getParkingTimeSummaryTitle, getParkingTransferLinkLabel } from '../../lib/parking/parkingLabels';
 import { isCityDestinationTrip, resolveTripParkingContext, shouldDiscoverParkingForTrip } from '../../lib/trip/tripContext';
@@ -116,6 +145,10 @@ import {
   formatParkingHandoffDuration,
 } from '../../lib/parking/providerHandoff';
 import {
+  resolveProviderReserveLabel,
+  resolveProviderViewLabel,
+} from '../../lib/monetization/providerUrls';
+import {
   groupOfficialSeaGarageOptions,
   resolveOfficialSeaGarageCtas,
 } from '../../lib/parking/officialAirportGarageGroup';
@@ -130,6 +163,7 @@ import {
   parkingRouteUnavailableReason,
   withStableParkingRouteStatus,
 } from '../../lib/parking/routeStatus';
+import { isEventVenueDestination } from '../../lib/parking/eventVenueDetection';
 import { RIDESHARE_ESTIMATE_DISCLAIMER, formatRidesharePriceDisplay } from '../../lib/rideshare/estimate';
 
 import {
@@ -199,12 +233,15 @@ import {
 import SaveAccountTripButton from '../components/SaveAccountTripButton';
 import { isPodPaiGoDebugUIEnabled } from '../../lib/utils/debug';
 import { trackEvent } from '../../lib/analytics/trackEvent';
+import { getOrCreateSessionId } from '../../lib/analytics/analyticsIds';
 import { logParkingPhotoReviewTrace } from '../../lib/parking/photoReviewDebug';
+import { PricingLinksSection, type ProviderLinkItem } from './ProviderPricingCards';
+import { resolveWeatherDestinationLabel } from '../../lib/weather/destinationLabel';
+import { weatherSectionDetail } from '../../lib/weather/display';
 import {
-  getTransitPassAppliedBadge,
-  getTransitPassCoveredLabel,
-  resolveTransitPaymentRegionContext,
-} from '../../lib/transit/transitPaymentLabels';
+  getParkingReviewSummary,
+  normalizeParkingReviewSummary,
+} from '../../lib/parking/reviewSummary';
 
 type PriceableOption = {
   id?: string;
@@ -257,6 +294,7 @@ type TripDataWithExtras = TripData & {
   timeAnchor?: 'flight-departure' | 'airport-arrival';
   transitPayment?: TransitPaymentOption;
   parkingPreference?: ParkingPreference;
+  destinationPlaceId?: string;
   checkingBags?: boolean;
   bagPlan?: BagPlan;
   securityOption?: SecurityOption;
@@ -275,15 +313,17 @@ type BestTooLateSummary = {
   shortByMinutes: number;
 } | null;
 
-type ProviderLinkItem = PriceableOption;
+const POINT_AB_PARKING_UI_KEYS = new Set([
+  'drive',
+  'destination-customer',
+  'parking',
+  'street-meter',
+  'park-ride',
+]);
 
-type ParkingWeatherItem = {
-  key: string;
-  label: string;
-  date: string;
-  context: WeatherContext;
-  weatherImpact: WeatherImpact | null;
-};
+function isParkingUiRowKey(key: string): boolean {
+  return POINT_AB_PARKING_UI_KEYS.has(key);
+}
 
 
 type SortTab = RecommendationSortMode;
@@ -329,6 +369,7 @@ function parkingTimeParts(option: ParkingOption, tripContext = resolveTripParkin
   return {
     total: breakdown.totalMinutes,
     parts: breakdown.parts,
+    isPartial: breakdown.isPartial === true,
   };
 }
 
@@ -339,11 +380,13 @@ function isJiffyParkingLot(option: Pick<ParkingOption, 'name'>): boolean {
 function ParkingRouteDebugPanel({
   option,
   googleMapsUrl,
+  showInternalDebug,
 }: {
   option: ParkingOption;
   googleMapsUrl?: string | null;
+  showInternalDebug: boolean;
 }) {
-  if (!isPodPaiGoDebugUIEnabled() || !isJiffyParkingLot(option)) {
+  if (!showInternalDebug || !isJiffyParkingLot(option)) {
     return null;
   }
 
@@ -451,6 +494,145 @@ function ParkingPhotoReviewListTrace({
   return null;
 }
 
+function ParkingResultDiagnostics({
+  options,
+}: {
+  options: ParkingOption[];
+}) {
+  const loggedKeysRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    options.forEach((option) => {
+      const keyBase = String(option.id || option.name || 'unknown');
+      const summary = getParkingReviewSummary(option);
+
+      if (
+        option.googlePlaceId &&
+        typeof summary.reviewScore !== 'number' &&
+        typeof summary.reviewCount !== 'number'
+      ) {
+        const key = `missing-review:${keyBase}:${option.googlePlaceId}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] missing Google review summary', {
+            id: option.id,
+            name: option.name,
+            googlePlaceId: option.googlePlaceId,
+          });
+        }
+      }
+
+      const driveResolution = resolveParkingDriveMinutesDetailed(
+        option,
+        buildParkingDriveContextFromOption(option),
+      );
+      const fallbackRoute = resolveParkingRouteTimeFallbackForDisplay(option);
+      const aggregateTotal = firstFiniteNumber(
+        option.totalMinutes,
+        option.totalTripMinutes,
+        option.totalOptionMinutes,
+        option.timingBreakdown?.totalOptionMinutes,
+        option.routeTime?.durationMinutes,
+        option.parkingRoute?.durationMinutes,
+        option.duration,
+      );
+
+      if (
+        driveResolution.minutes <= 0 &&
+        driveResolution.source !== 'same-place' &&
+        (fallbackRoute || aggregateTotal != null)
+      ) {
+        const key = `missing-drive:${keyBase}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] missing drive-to-lot while route total exists', {
+            id: option.id,
+            name: option.name,
+            fallbackRouteMinutes: fallbackRoute?.minutes ?? null,
+            totalMinutes: aggregateTotal,
+          });
+        }
+      }
+
+      if (option.routeUnavailableReason) {
+        const key = `route-unavailable:${keyBase}:${option.routeUnavailableReason}`;
+        if (!loggedKeysRef.current.has(key)) {
+          loggedKeysRef.current.add(key);
+          console.warn('[parking-results] parking route unavailable', {
+            id: option.id,
+            name: option.name,
+            reason: option.routeUnavailableReason,
+          });
+        }
+      }
+    });
+  }, [options]);
+
+  return null;
+}
+
+function shouldLogRenderedParkingReviewDebug(option: ParkingOption): boolean {
+  return /securities building garage/i.test(option.name || '');
+}
+
+function ParkingRenderedReviewDebug({
+  component,
+  option,
+  badges,
+  canShowReviewAction,
+}: {
+  component: string;
+  option: ParkingOption | null;
+  badges: ParkingPriorityBadge[];
+  canShowReviewAction: boolean;
+}) {
+  const loggedKeysRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') return;
+    if (!option || !shouldLogRenderedParkingReviewDebug(option)) return;
+
+    const key = JSON.stringify({
+      component,
+      id: option.id || option.name,
+      googlePlaceId: option.googlePlaceId ?? null,
+      reviewScore: option.reviewScore ?? null,
+      reviewCount: option.reviewCount ?? null,
+      badges: badges.map((badge) => badge.label),
+    });
+    if (loggedKeysRef.current.has(key)) return;
+    loggedKeysRef.current.add(key);
+
+    const raw = option as ParkingOption & Record<string, unknown>;
+    console.warn('[parking-results] rendered parking option review debug', {
+      component,
+      id: option.id,
+      name: option.name,
+      provider: option.bookingProvider || option.providerSource || option.sourceName,
+      address: option.address || option.normalizedAddress || option.canonicalAddress,
+      googlePlaceId: option.googlePlaceId,
+      googleRating: raw.googleRating,
+      googleReviewCount: raw.googleReviewCount,
+      reviewScore: option.reviewScore,
+      reviewCount: option.reviewCount,
+      placeRating: raw.placeRating,
+      userRatingsTotal: raw.userRatingsTotal,
+      reviewsSummary: raw.reviewsSummary,
+      normalizedReviewSummary: getParkingReviewSummary(option),
+      canShowReviewAction,
+      reviewActionLabel: canShowReviewAction ? parkingReviewLabel(option) : null,
+      badgesGenerated: badges.map((badge) => ({
+        key: badge.key,
+        semanticKey: badge.semanticKey ?? null,
+        label: badge.label,
+      })),
+      availabilityBadge: getParkingAvailabilityDisplay(option).label,
+    });
+  }, [badges, canShowReviewAction, component, option]);
+
+  return null;
+}
+
 function needsParkingGooglePhotoReviewMetadata(option: ParkingOption | null | undefined): boolean {
   if (!option) return true;
   const hasGooglePhoto = Boolean(option.googlePhotoName || option.googlePhotoNames?.length);
@@ -501,12 +683,15 @@ function ParkingTimeSummary({
   }
 
   const breakdown = parkingTimeParts(option, tripContext);
+  const totalDisplay = breakdown.isPartial
+    ? `${formatMiniMinutes(breakdown.total)} partial`
+    : formatMiniMinutes(breakdown.total);
 
   if (compact) {
     return (
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className="font-semibold text-zinc-900">
-          Total time {formatMiniMinutes(breakdown.total)}
+          {breakdown.isPartial ? 'Partial time' : 'Total time'} {totalDisplay}
         </span>
 
         {breakdown.parts.slice(0, 3).map((part) => (
@@ -525,10 +710,10 @@ function ParkingTimeSummary({
     <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-xs font-medium text-zinc-500">
-          {getParkingTimeSummaryTitle(tripContext)}
+          {breakdown.isPartial ? 'Partial time breakdown' : getParkingTimeSummaryTitle(tripContext)}
         </span>
         <span className="text-base font-bold text-zinc-900">
-          {formatMiniMinutes(breakdown.total)}
+          {totalDisplay}
         </span>
       </div>
 
@@ -658,19 +843,8 @@ function routeEstimateHelperText(estimate?: TrafficEstimate | null): string {
     : 'Based on available route data';
 }
 
-function formatWeatherDateLabel(date: string): string {
-  const parsed = parseLocalDate(date);
-  if (!parsed) return date;
-
-  return parsed.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
-
-function buildWeatherTargetDateTime(date: string, time?: string): string {
-  return `${date}T${time || '12:00'}`;
+function routeEstimateHeroLabel(): string {
+  return 'Route time';
 }
 
 function weatherRiskText(weather: WeatherImpact): string {
@@ -679,39 +853,29 @@ function weatherRiskText(weather: WeatherImpact): string {
   return 'Plan for weather impact';
 }
 
-function weatherRiskClass(weather: WeatherImpact): string {
-  if (weather.riskLevel === 'high') return 'border-red-200 bg-red-50 text-red-800';
-  if (weather.riskLevel === 'medium') return 'border-amber-200 bg-amber-50 text-amber-900';
-  return 'border-zinc-200 bg-zinc-50 text-zinc-800';
-}
+function weatherSectionTitle(
+  context?: WeatherContext,
+  options?: { seasonalTitle?: string | null; destinationLabel?: string | null; isCityTrip?: boolean },
+): string {
+  if (options?.seasonalTitle) return options.seasonalTitle;
 
-function weatherSectionTitle(context?: WeatherContext, seasonalTitle?: string | null): string {
-  if (seasonalTitle) return seasonalTitle;
-  if (context === 'travel-time-forecast') return 'Weather for your travel time';
+  const destinationLabel = options?.destinationLabel?.trim() || null;
+  const nearDestination = destinationLabel ? `Weather near ${destinationLabel}` : null;
+
+  if (context === 'travel-time-forecast') {
+    return nearDestination || 'Weather for your travel time';
+  }
   if (context === 'current-airport-weather') return 'Current airport weather';
-  if (context === 'current-destination-weather') return 'Current destination weather';
-  if (context === 'forecast-unavailable') return 'Seasonal weather guidance';
-  return 'Weather unavailable';
-}
-
-function weatherSectionDetail(context?: WeatherContext): string {
-  if (context === 'forecast-unavailable') {
-    return 'Forecast becomes available closer to your trip.';
-  }
-
-  if (context === 'current-airport-weather') {
-    return 'Showing current conditions because a valid travel time was not provided.';
-  }
-
   if (context === 'current-destination-weather') {
-    return 'Showing current destination conditions because a valid travel time was not provided.';
+    return nearDestination || 'Current destination weather';
   }
-
-  if (context === 'invalid-travel-time') {
-    return 'We could not read the selected travel date/time for weather.';
+  if (context === 'forecast-unavailable') {
+    if (options?.isCityTrip) {
+      return nearDestination || 'Weather unavailable for this date';
+    }
+    return 'Seasonal weather guidance';
   }
-
-  return 'Weather data is currently unavailable.';
+  return nearDestination || 'Weather unavailable';
 }
 
 async function copyTextThenOpen(text: string, url: string) {
@@ -736,10 +900,6 @@ function typeLabel(type: RankedRecommendation['type']): string {
   if (type === 'rideshare') return 'Ride';
   if (type === 'parking') return 'Parking';
   return 'Transit';
-}
-
-function bestLink(option: PriceableOption): string | null {
-  return option.sourceLink || option.mapLink || null;
 }
 
 function parkingProviderSourceText(option: {
@@ -796,30 +956,6 @@ function trustedParkingBookingLink<T extends {
   if (!link) return null;
 
   return isUnreliableGeneratedParkingBookingLink(option, link) ? null : link;
-}
-
-function pricingKindLabel(kind?: string): string {
-  switch (kind) {
-    case 'live':
-      return 'Live';
-    case 'estimated':
-      return 'Estimated';
-    case 'mock':
-      return 'Mock data';
-    case 'check-live':
-    case 'from-per-day':
-      return 'Check provider';
-    default:
-      return 'Estimated';
-  }
-}
-
-function formatProviderPrice(it: PriceableOption): { primary: string; secondary?: string } {
-  const line = formatParkingPriceLine(it as ParkingOption, null);
-  return {
-    primary: line.primary,
-    secondary: line.secondary || it.priceNote,
-  };
 }
 
 function PriceLegend() {
@@ -1280,273 +1416,6 @@ function TransitParkAndRideCards({
           ) : null}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function providerIcon(providerName: string): string {
-  const name = providerName.toLowerCase();
-
-  if (name.includes('lyft')) return 'lyft';
-  if (name.includes('uber')) return 'uber';
-  if (name.includes('taxi')) return 'taxi';
-  if (name.includes('sound transit')) return '🚆';
-  if (name.includes('google maps')) return '🗺️';
-
-  return '🚗';
-}
-
-function PricingLinksSection({
-  title,
-  items,
-  transitPayment,
-  tripData,
-}: {
-  title: string;
-  items: ProviderLinkItem[];
-  transitPayment?: TransitPaymentOption;
-  tripData?: TripData | null;
-}) {
-  if (!items || items.length === 0) return null;
-
-  const isRideSection = title.toLowerCase().includes('ride');
-  const isTransitSection = title.toLowerCase().includes('transit');
-  const transitPassContext = resolveTransitPaymentRegionContext({
-    airportCode: tripData?.airportCode ?? getTripAirportCode(tripData ?? null),
-  });
-
-  return (
-    <div className="divide-y divide-slate-100 bg-white">
-      {items.map((it: ProviderLinkItem) => {
-        const trust = confidenceFromTrust((it.trustStatus || 'estimated') as TrustStatus);
-        const rideshareConfidence = rideshareConfidenceMeta(it.rideshareEstimateConfidence);
-        const ridesharePricing = isRideSection
-          ? ridesharePriceDisplay(it as AppOption)
-          : null;
-        const price = formatProviderPrice(it);
-        const link = bestLink(it);
-        const kind = it.priceDisplay as string | undefined;
-
-        const isTransitUtility =
-          isTransitSection &&
-          (it.id === 'soundtransit-planner' || it.id === 'google-maps-transit');
-
-        const transitPriceDisplay =
-          isTransitSection && tripData && typeof it.price === 'number' && !isTransitUtility
-            ? formatTransitCostDisplay(it as TransitOption, tripData)
-            : null;
-
-        const shouldShowPrice = !isTransitUtility;
-
-        const shouldShowPriceKindBadge =
-          kind && !(isTransitSection && kind === 'check-live');
-
-        const primaryPrice =
-          isTransitSection && transitPayment === 'orca-pass'
-            ? '$0'
-            : transitPriceDisplay
-              ? transitPriceDisplay.primary
-              : isRideSection
-                ? ridesharePricing?.primary || `Est. ${it.priceRangeLabel || formatMoney(it.price || 0)}`
-                : price.primary;
-
-        const secondaryPrice =
-          isTransitSection && transitPayment === 'orca-pass'
-            ? getTransitPassCoveredLabel(transitPassContext)
-            : transitPriceDisplay?.secondary
-              ? transitPriceDisplay.secondary
-              : isRideSection
-                ? ridesharePricing?.secondary || RIDESHARE_ESTIMATE_DISCLAIMER
-                : it.priceNote || price.secondary;
-
-        const primaryCta =
-          it.id === 'soundtransit-planner'
-            ? 'Official website'
-            : isTransitSection
-              ? 'View route'
-              : isRideSection
-                ? String(it.name || '').toLowerCase().includes('taxi')
-                  ? 'Find taxi'
-                  : 'Open app'
-                : 'View deal';
-
-        const sourceAndMapSame = Boolean(link && it.mapLink && link === it.mapLink);
-
-        if (isRideSection) {
-          return (
-            <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-sky-200 hover:shadow-md sm:p-4">
-                <div className="flex items-start gap-3 sm:gap-4">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-slate-900 ring-1 ring-sky-100 sm:h-12 sm:w-12">
-                    {providerIcon(it.name)}
-                  </div>
-
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <div className="text-base font-semibold leading-snug text-zinc-900">
-                      {it.name}
-                    </div>
-
-                    {primaryPrice ? (
-                      <div className="text-lg font-bold leading-snug text-zinc-900">
-                        {primaryPrice}
-                      </div>
-                    ) : null}
-
-                    {secondaryPrice && ridesharePricing?.secondary ? (
-                      <div className="text-sm font-medium leading-snug text-zinc-600">
-                        {secondaryPrice}
-                      </div>
-                    ) : null}
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {rideshareConfidence && (
-                        <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + rideshareConfidence.className}>
-                          {rideshareConfidence.label}
-                        </span>
-                      )}
-                      <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
-                        {trust.label}
-                      </span>
-                    </div>
-
-                    <p className="text-xs leading-relaxed text-zinc-500">
-                      {ridesharePricing?.primary === 'Open app for live price'
-                        ? 'Live Uber/Lyft fares are not available in PodPaiGo. Open the provider app for current pricing.'
-                        : RIDESHARE_ESTIMATE_DISCLAIMER}
-                    </p>
-
-                    <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
-                      {it.mapLink && !sourceAndMapSame && (
-                        <a
-                          href={it.mapLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-center text-sm font-medium leading-none text-zinc-800 hover:bg-zinc-50"
-                        >
-                          View route
-                        </a>
-                      )}
-
-                      {link && (
-                        <a
-                          href={link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 min-w-44 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-center text-sm font-semibold leading-none text-white hover:bg-blue-700"
-                        >
-                          {primaryCta}
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        }
-
-        return (
-          <div key={it.id || it.name} className="px-3 py-3 sm:px-5 sm:py-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-sky-200 hover:shadow-md sm:p-4">
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sm font-bold text-slate-900 ring-1 ring-sky-100 sm:h-12 sm:w-12">
-                  {providerIcon(it.name)}
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="text-base font-semibold leading-snug text-zinc-900">
-                        {it.name}
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
-                          {trust.label}
-                        </span>
-
-                        {shouldShowPriceKindBadge && (
-                          <span className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700">
-                            {pricingKindLabel(kind)}
-                          </span>
-                        )}
-
-                        {rideshareConfidence && (
-                          <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + rideshareConfidence.className}>
-                            {rideshareConfidence.label}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {shouldShowPrice && (
-                      <div className="shrink-0 text-left sm:text-right">
-                        <div className="text-lg font-bold text-zinc-900">
-                          {primaryPrice}
-                        </div>
-
-                        {isTransitSection && transitPriceDisplay ? (
-                          <div className="text-xs font-medium text-zinc-500">
-                            {transitPayment === 'orca-pass'
-                              ? getTransitPassAppliedBadge(transitPassContext)
-                              : transitPriceDisplay.includesReturnLeg
-                                ? 'round-trip fare estimate'
-                                : 'one-way fare estimate'}
-                          </div>
-                        ) : null}
-
-                        {isTransitSection && !transitPriceDisplay && typeof it.price === 'number' ? (
-                          <div className="text-xs font-medium text-zinc-500">
-                            {transitPayment === 'orca-pass'
-                              ? getTransitPassAppliedBadge(transitPassContext)
-                              : 'fare estimate'}
-                          </div>
-                        ) : null}
-
-                        {isRideSection && typeof it.price === 'number' && (
-                          <div className="text-xs font-medium text-zinc-500">
-                            ride estimate
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {secondaryPrice && (
-                    <div className="mt-2 text-xs leading-relaxed text-zinc-500">
-                      {secondaryPrice}
-                    </div>
-                  )}
-
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {it.mapLink && !sourceAndMapSame && (
-                      <a
-                        href={it.mapLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-                      >
-                        View route
-                      </a>
-                    )}
-
-                    {link && (
-                      <a
-                        href={link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-                      >
-                        {primaryCta}
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -2116,9 +1985,10 @@ function formatTag(tag: string): string {
 }
 
 function hasParkingReviewSource(option: ParkingOption): boolean {
+  const summary = getParkingReviewSummary(option);
   return Boolean(
-    typeof option.reviewScore === 'number' ||
-      typeof option.reviewCount === 'number' ||
+    typeof summary.reviewScore === 'number' ||
+      typeof summary.reviewCount === 'number' ||
       (option.googleReviews || []).some((review) => Boolean(review.text?.trim())) ||
       option.googlePlaceId ||
       option.googleMapsUri,
@@ -2126,16 +1996,18 @@ function hasParkingReviewSource(option: ParkingOption): boolean {
 }
 
 function parkingReviewLabel(option: ParkingOption): string {
-  if (typeof option.reviewScore === 'number') {
-    const rating = option.reviewScore.toFixed(1);
-    if (typeof option.reviewCount === 'number') {
-      return `★ ${rating} · ${option.reviewCount.toLocaleString()} reviews`;
+  const summary = getParkingReviewSummary(option);
+
+  if (typeof summary.reviewScore === 'number') {
+    const rating = summary.reviewScore.toFixed(1);
+    if (typeof summary.reviewCount === 'number') {
+      return `★ ${rating} · ${summary.reviewCount.toLocaleString()} reviews`;
     }
     return `★ ${rating}`;
   }
 
-  if (typeof option.reviewCount === 'number') {
-    return `${option.reviewCount.toLocaleString()} reviews`;
+  if (typeof summary.reviewCount === 'number') {
+    return `${summary.reviewCount.toLocaleString()} reviews`;
   }
 
   return 'Check reviews';
@@ -2172,6 +2044,7 @@ function OptionCard({
   alignedLeaveByTime = null,
   alignedLeaveByReason = null,
   parkingPeerOptions = [],
+  showInternalDebug = false,
 }: {
   compact?: boolean;
   item: RankedRecommendation;
@@ -2189,8 +2062,10 @@ function OptionCard({
   alignedLeaveByTime?: string | null;
   alignedLeaveByReason?: string | null;
   parkingPeerOptions?: ParkingOption[];
+  showInternalDebug?: boolean;
 }) {
   const [bookingHelperOpen, setBookingHelperOpen] = useState(false);
+  const detailsExpandedTrackedRef = useRef(false);
   const opt =
     item.type === 'parking'
       ? (withAprLivePrice(item.option as AppOption, aprLivePrices) as AppOption)
@@ -2230,7 +2105,7 @@ function OptionCard({
 
   const displayParkingOption =
     item.type === 'parking'
-      ? (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption
+      ? normalizeParkingReviewSummary((googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption)
       : null;
 
   const parkingTripContext = tripData ? resolveTripParkingContext(tripData) : 'airport_trip';
@@ -2316,6 +2191,23 @@ function OptionCard({
     item.type === 'parking' && normalizedParkingOption
       ? resolveParkingPriceTrust(normalizedParkingOption, tripData)
       : null;
+  const parkingActionOption =
+    item.type === 'parking'
+      ? ((displayParkingOption || normalizedParkingOption || opt) as ParkingOption)
+      : null;
+  const parkingActionDriveMinutes = parkingActionOption
+    ? resolveParkingDriveOrRouteTimeForDisplay(
+        parkingActionOption,
+        buildParkingDriveContextFromOption(parkingActionOption),
+      ).minutes
+    : null;
+  const parkingActionWalkMinutes =
+    parkingBreakdown?.parts.find((part) => /walk/i.test(part.label))?.minutes ?? null;
+  const parkingActionPriceTotal =
+    parkingActionOption
+      ? getParkingTotalPrice(parkingActionOption, tripData) ??
+        (typeof parkingActionOption.price === 'number' ? parkingActionOption.price : null)
+      : null;
   const activeParkingRate =
     item.type === 'parking'
       ? ((displayParkingOption || opt) as ParkingOption).activeRate
@@ -2366,6 +2258,33 @@ function OptionCard({
 
   const isRideshareCard = item.type === 'rideshare';
   const ridesharePricing = isRideshareCard ? ridesharePriceDisplay(opt) : null;
+  const rideshareConfidence = isRideshareCard
+    ? rideshareConfidenceMeta(opt.rideshareEstimateConfidence)
+    : null;
+  const parkingReviewActionOption =
+    item.type === 'parking'
+      ? normalizeParkingReviewSummary((googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption)
+      : null;
+  const parkingReviewActionSemanticKey =
+    parkingReviewActionOption &&
+    hasParkingReviewSource(parkingReviewActionOption) &&
+    onShowReviews
+      ? getParkingRatingReviewBadgeSemanticKey(parkingReviewActionOption)
+      : null;
+  const parkingPriorityBadges =
+    item.type === 'parking' && normalizedParkingOption
+      ? buildParkingPriorityBadges({
+          option: (displayParkingOption || normalizedParkingOption) as ParkingOption,
+          mode: sort,
+          tripData,
+          peers: parkingPeerOptions.length > 0
+            ? parkingPeerOptions
+            : [(displayParkingOption || normalizedParkingOption) as ParkingOption],
+          excludeSemanticKeys: [parkingReviewActionSemanticKey],
+        })
+      : [];
+  const canShowParkingReviewAction =
+    Boolean(parkingReviewActionOption && hasParkingReviewSource(parkingReviewActionOption));
 
   const nonParkingPrice =
     item.type === 'rideshare'
@@ -2376,6 +2295,14 @@ function OptionCard({
 
   return (
     <>
+    {showInternalDebug && item.type === 'parking' ? (
+      <ParkingRenderedReviewDebug
+        component="ResultsContent OptionCard"
+        option={displayParkingOption}
+        badges={parkingPriorityBadges}
+        canShowReviewAction={canShowParkingReviewAction}
+      />
+    ) : null}
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
@@ -2426,9 +2353,13 @@ function OptionCard({
                 </div>
               ) : null}
 
+              <div className="text-sm font-semibold text-zinc-800">
+                Total time {formatMinutes(item.duration)}
+              </div>
+
               <div className="flex flex-wrap items-center gap-2">
-                <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + (rideshareConfidenceMeta(opt.rideshareEstimateConfidence)?.className || trust.className)}>
-                  Estimated
+                <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + (rideshareConfidence?.className || trust.className)}>
+                  {rideshareConfidence?.label || 'Estimated'}
                 </span>
                 <span className={'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ' + trust.className}>
                   {trust.label}
@@ -2507,14 +2438,7 @@ function OptionCard({
               )}
 
               {item.type === 'parking' && normalizedParkingOption
-                ? buildParkingPriorityBadges({
-                    option: (displayParkingOption || normalizedParkingOption) as ParkingOption,
-                    mode: sort,
-                    tripData,
-                    peers: parkingPeerOptions.length > 0
-                      ? parkingPeerOptions
-                      : [(displayParkingOption || normalizedParkingOption) as ParkingOption],
-                  }).map((badge) => (
+                ? parkingPriorityBadges.map((badge) => (
                     <div
                       key={badge.key}
                       className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
@@ -2531,8 +2455,8 @@ function OptionCard({
               ) : null}
 
               {item.type === 'parking' && (() => {
-                const parking = (googleEnrichedParking?.[opt.id || ''] || opt) as ParkingOption;
-                if (!hasParkingReviewSource(parking) || !onShowReviews) return null;
+                const parking = parkingReviewActionOption;
+                if (!parking || !hasParkingReviewSource(parking) || !onShowReviews) return null;
 
                 return (
                   <button
@@ -2572,6 +2496,14 @@ function OptionCard({
               tripContext={parkingTripContext}
             />
           )}
+
+          {item.type === 'parking' &&
+          displayParkingOption &&
+          isCachedParkingOption(displayParkingOption) ? (
+            <div className="mt-4">
+              <CachedParkingNotice option={displayParkingOption} compact={compact} />
+            </div>
+          ) : null}
 
           {item.type === 'parking' && (() => {
             const parking = opt as ParkingOption;
@@ -2617,6 +2549,7 @@ function OptionCard({
             <ParkingRouteDebugPanel
               option={displayParkingOption}
               googleMapsUrl={parkingLotRouteLink}
+              showInternalDebug={showInternalDebug}
             />
           )}
 
@@ -2790,10 +2723,25 @@ function OptionCard({
               }
               airportCode={airportCode}
               parkingLotId={opt.id || null}
+              parkingLotName={String(opt.name || '') || null}
+              resultType={item.type}
+              tripType={tripData?.type ?? null}
+              rank={rank}
+              priceTotal={parkingActionPriceTotal}
+              priceLabel={parkingPrice?.primary ?? visiblePrice.primary ?? null}
+              priceSource={(opt as ParkingOption).priceSource ?? null}
+              driveToLotMinutes={parkingActionDriveMinutes}
+              walkMinutes={parkingActionWalkMinutes}
               tripId={tripId || null}
               accessToken={accessToken}
+              affiliateAttached={(opt as ParkingOption).outboundAffiliateAttached ?? false}
+              outboundSubIdParam={(opt as ParkingOption).outboundSubIdParam ?? null}
               onReserve={() => setBookingHelperOpen(true)}
-              reserveLabel={officialSeaCtas?.reserveLabel}
+              reserveLabel={
+                officialSeaCtas?.reserveLabel ||
+                resolveProviderReserveLabel(opt as ParkingOption)
+              }
+              viewProviderLabel={resolveProviderViewLabel(opt as ParkingOption)}
               infoOnlyBooking={officialSeaCtas?.isInfoOnly}
             />
           ) : compact ? (
@@ -2863,7 +2811,35 @@ function OptionCard({
       </div>
 
       {!compact && (
-        <details className="mt-4">
+        <details
+          className="mt-4"
+          onToggle={(event) => {
+            if (
+              detailsExpandedTrackedRef.current ||
+              !(event.currentTarget as HTMLDetailsElement).open ||
+              item.type !== 'parking'
+            ) {
+              return;
+            }
+            detailsExpandedTrackedRef.current = true;
+            trackEvent('parking_details_expanded', {
+              accessToken,
+              eventProperties: {
+                airportCode: airportCode || undefined,
+                tripType: tripData?.type ?? undefined,
+                resultType: item.type,
+                provider:
+                  (displayParkingOption || normalizedParkingOption)?.bookingProvider ||
+                  (displayParkingOption || normalizedParkingOption)?.sourceName ||
+                  undefined,
+                lotId: (displayParkingOption || normalizedParkingOption)?.id || undefined,
+                lotName: (displayParkingOption || normalizedParkingOption)?.name || undefined,
+                rank,
+                sourcePage: 'results',
+              },
+            });
+          }}
+        >
           <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">Details & evidence</summary>
           <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200">
             {item.type === 'parking' && parkingProviderUrl ? (
@@ -2985,7 +2961,7 @@ function OptionCard({
                   </div>
 
                   <div className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
-                    {formatMinutes(parkingBreakdown.totalMinutes)}
+                    {parkingBreakdown.totalLabel ?? formatMinutes(parkingBreakdown.totalMinutes)}
                   </div>
                 </div>
 
@@ -2997,7 +2973,7 @@ function OptionCard({
                     >
                       <div className="text-zinc-700">{part.label}</div>
                       <div className="font-medium text-zinc-900">
-                        {formatMinutes(part.minutes)}
+                        {part.display ?? formatMinutes(part.minutes)}
                       </div>
                     </div>
                   ))}
@@ -3006,10 +2982,16 @@ function OptionCard({
                 <div className="mt-3 border-t border-zinc-100 pt-3">
                   <div className="flex items-center justify-between text-sm">
                     <div className="font-semibold text-zinc-900">
-                      {parkingTripContext === 'city_destination_trip' ? 'Total to destination' : 'Total to terminal'}
+                      {parkingBreakdown.isPartial
+                        ? parkingTripContext === 'city_destination_trip'
+                          ? 'Partial to destination'
+                          : 'Partial to terminal'
+                        : parkingTripContext === 'city_destination_trip'
+                          ? 'Total to destination'
+                          : 'Total to terminal'}
                     </div>
                     <div className="font-semibold text-zinc-900">
-                      {formatMinutes(parkingBreakdown.totalMinutes)}
+                      {parkingBreakdown.totalLabel ?? formatMinutes(parkingBreakdown.totalMinutes)}
                     </div>
                   </div>
 
@@ -3444,6 +3426,642 @@ function ProviderDropdownSection({
   );
 }
 
+type PointAbDetailTimingLabels = {
+  drive?: string;
+  fallbackRoute?: string;
+  parkingBuffer?: string;
+  walk?: string;
+  pickupWait?: string;
+  total?: string;
+  totalFirst?: boolean;
+};
+
+function pointAbDetailTimingRows(
+  row: PointAbModePresentation | null | undefined,
+  labels: PointAbDetailTimingLabels = {},
+): Array<{ label: string; value: string }> {
+  const timing = row?.timing;
+  if (!timing) return [];
+
+  const detailRows = [
+    { label: labels.drive || 'Drive route', minutes: timing.driveMinutes },
+    { label: labels.parkingBuffer || 'Access/verify buffer', minutes: timing.parkingBufferMinutes },
+    { label: labels.walk || 'Walk to destination', minutes: timing.walkToDestinationMinutes },
+    { label: labels.pickupWait || 'Pickup wait', minutes: timing.pickupWaitMinutes },
+  ]
+    .filter((entry): entry is { label: string; minutes: number } =>
+      typeof entry.minutes === 'number' && Number.isFinite(entry.minutes),
+    )
+    .map((entry) => ({
+      label: entry.label,
+      value: formatMiniMinutes(entry.minutes),
+    }));
+
+  const totalMinutes = timing.totalOptionMinutes;
+  if (typeof totalMinutes !== 'number' || !Number.isFinite(totalMinutes)) {
+    return detailRows;
+  }
+
+  const totalRow = {
+    label: labels.total || 'Total to destination',
+    value: formatMiniMinutes(totalMinutes),
+  };
+
+  return labels.totalFirst ? [totalRow, ...detailRows] : [...detailRows, totalRow];
+}
+
+function PointAbModeDetailSummary({
+  row,
+  timingLabels,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  timingLabels?: PointAbDetailTimingLabels;
+}) {
+  if (!row) return null;
+
+  const timingRows = pointAbDetailTimingRows(row, timingLabels);
+  const pros = row.pros.filter(Boolean);
+  const cons = row.cons.filter(Boolean);
+
+  if (timingRows.length === 0 && pros.length === 0 && cons.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
+      {timingRows.length > 0 ? (
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Route breakdown</h3>
+          <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+            {timingRows.map((item) => (
+              <div
+                key={item.label}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-3 py-2"
+              >
+                <dt className="text-muted-foreground">{item.label}</dt>
+                <dd className="font-semibold text-foreground">{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+
+      {(pros.length > 0 || cons.length > 0) ? (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {pros.length > 0 ? (
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Pros</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {pros.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {cons.length > 0 ? (
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Cons</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                {cons.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function hasParkingPlanTiming(row: PointAbModePresentation | null | undefined): boolean {
+  const timing = row?.timing;
+  if (!timing) return false;
+
+  const hasDetailTiming = [
+    timing.driveMinutes,
+    timing.parkingBufferMinutes,
+    timing.walkToDestinationMinutes,
+    timing.pickupWaitMinutes,
+  ].some((value) => typeof value === 'number' && Number.isFinite(value));
+
+  if (hasDetailTiming) return true;
+
+  return (
+    typeof timing.totalOptionMinutes === 'number' &&
+    Number.isFinite(timing.totalOptionMinutes) &&
+    timing.totalOptionMinutes > 0
+  );
+}
+
+function ParkingPlanSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t border-border px-4 py-4 text-sm sm:px-5">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function ParkingPlanFacts({
+  facts,
+}: {
+  facts: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <dl className="grid gap-3 sm:grid-cols-3">
+      {facts.map((fact) => (
+        <div key={fact.label} className="border-l-2 border-border pl-3">
+          <dt className="text-xs font-semibold uppercase text-muted-foreground">{fact.label}</dt>
+          <dd className="mt-1 font-semibold text-foreground">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function ParkingPlanList({ items }: { items: string[] }) {
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+      {items.filter(Boolean).map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ParkingPlanTiming({
+  row,
+  timingLabels,
+  parkingOption,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  timingLabels: PointAbDetailTimingLabels;
+  parkingOption?: ParkingOption | null;
+}) {
+  if (!hasParkingPlanTiming(row)) return null;
+
+  let timingRows = pointAbDetailTimingRows(row, timingLabels);
+  const hasDriveRow = timingRows.some(
+    (item) => item.label === (timingLabels.drive || 'Drive route'),
+  );
+
+  if (!hasDriveRow && parkingOption) {
+    const displayTime = resolveParkingDriveOrRouteTimeForDisplay(
+      parkingOption,
+      buildParkingDriveContextFromOption(parkingOption),
+    );
+
+    if (
+      displayTime.minutes != null &&
+      (displayTime.source === 'fallback-route-time' ||
+        displayTime.source === 'fallback-total-time')
+    ) {
+      timingRows = [
+        {
+          label: timingLabels.fallbackRoute || displayTime.label,
+          value: formatRouteDisplayMinutes(displayTime.minutes, displayTime.source),
+        },
+        ...timingRows,
+      ];
+    }
+  }
+
+  if (timingRows.length === 0) return null;
+
+  return (
+    <ParkingPlanSection title="Timing">
+      <dl className="grid gap-2 sm:grid-cols-2">
+        {timingRows.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0"
+          >
+            <dt className="text-muted-foreground">{item.label}</dt>
+            <dd className="font-semibold text-foreground">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </ParkingPlanSection>
+  );
+}
+
+function StreetParkingPlanNote({
+  eventParkingLikely,
+  streetMeterRow,
+  showGeneralNote = false,
+}: {
+  eventParkingLikely: boolean;
+  streetMeterRow?: PointAbModePresentation | null;
+  showGeneralNote?: boolean;
+}) {
+  if (!eventParkingLikely && !streetMeterRow && !showGeneralNote) return null;
+
+  const outlookDetail =
+    !eventParkingLikely && streetMeterRow?.detailNote ? streetMeterRow.detailNote : null;
+
+  return (
+    <div id={POINT_AB_DETAILS_SECTION_IDS['street-meter']} className="scroll-mt-24">
+      <ParkingPlanSection title={eventParkingLikely ? 'Street parking warning' : 'Street parking note'}>
+        <p className="text-muted-foreground">
+          {eventParkingLikely
+            ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+            : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
+        </p>
+        {outlookDetail ? (
+          <p className="mt-2 text-muted-foreground">{outlookDetail}</p>
+        ) : null}
+      </ParkingPlanSection>
+    </div>
+  );
+}
+
+type CityParkingPlanStatus = 'loading' | 'empty' | 'unavailable';
+
+function cityParkingStatusCopy(status: CityParkingPlanStatus): { title: string; body: string } {
+  switch (status) {
+    case 'loading':
+      return {
+        title: 'Finding nearby parking…',
+        body: 'Checking garages, lots, and street rules.',
+      };
+    case 'empty':
+      return {
+        title: 'No bookable lots found yet',
+        body: 'Street parking, transit, or rideshare may still be useful. Verify signs and map results.',
+      };
+    case 'unavailable':
+    default:
+      return {
+        title: 'Parking search unavailable',
+        body: 'Open map search to verify nearby parking.',
+      };
+  }
+}
+
+function CityParkingStatusPlanSection({
+  status,
+  directionsUrl,
+  nearbyParkingSearchUrl,
+}: {
+  status: CityParkingPlanStatus;
+  directionsUrl: string | null;
+  nearbyParkingSearchUrl: string;
+}) {
+  const copy = cityParkingStatusCopy(status);
+
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS.parking}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card shadow-sm"
+    >
+      <div className="px-4 py-4 sm:px-5">
+        <h2
+          data-details-heading
+          tabIndex={-1}
+          className="text-xl font-bold text-foreground"
+        >
+          Parking plan
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          What should I do when I arrive?
+        </p>
+      </div>
+
+      <ParkingPlanSection title={copy.title}>
+        <p className="text-muted-foreground">
+          {copy.body}
+        </p>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          {directionsUrl ? (
+            <a
+              href={directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Open directions
+            </a>
+          ) : null}
+          <a
+            href={nearbyParkingSearchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+          >
+            Search nearby parking
+          </a>
+        </div>
+      </ParkingPlanSection>
+    </section>
+  );
+}
+
+function PaidParkingPlanCard({
+  row,
+  parkingOption,
+  routeToParkingUrl,
+  directionsUrl,
+  nearbyParkingSearchUrl,
+  streetMeterRow,
+  eventParkingLikely,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  parkingOption: ParkingOption | null;
+  routeToParkingUrl: string | null;
+  directionsUrl: string | null;
+  nearbyParkingSearchUrl: string;
+  streetMeterRow?: PointAbModePresentation | null;
+  eventParkingLikely: boolean;
+}) {
+  const unavailable = !row || row.unavailable || !parkingOption;
+  const priceTrust = parkingOption ? resolveParkingPriceTrust(parkingOption, null) : null;
+  const estimatedParking =
+    priceTrust?.kind === 'estimated_range' ||
+    parkingOption?.priceDisplay === 'estimated' ||
+    parkingOption?.pricingConfidence === 'estimated' ||
+    parkingOption?.priceSource === 'estimated';
+  const reason = estimatedParking
+    ? 'Estimated paid parking option'
+    : eventParkingLikely
+      ? 'Best confirmed event parking'
+      : 'Best confirmed paid option';
+  const recommendedSectionTitle = estimatedParking
+    ? 'Estimated parking nearby'
+    : 'Nearby parking options';
+  const whyItems = estimatedParking
+    ? [
+        'Nearby garages or lots may be available. Confirm live price and rules before parking.',
+        'Useful as a planning estimate while live provider details update.',
+        'More reliable than guessing street parking, but not a reserved space.',
+      ]
+    : [
+        'Confirmed paid parking option',
+        'You keep your car with you',
+        'More reliable than guessing street parking',
+      ];
+
+  return (
+    <section className="rounded-2xl border border-border bg-card shadow-sm">
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2
+              data-details-heading
+              tabIndex={-1}
+              className="text-xl font-bold text-foreground"
+            >
+              Parking plan
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What should I do when I arrive?
+            </p>
+          </div>
+
+          {!unavailable && routeToParkingUrl ? (
+            <a
+              href={routeToParkingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Route to parking
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      {unavailable ? (
+        <ParkingPlanSection title="Parking search unavailable">
+          <p className="text-muted-foreground">
+            Open map search to verify nearby parking.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            {directionsUrl ? (
+              <a
+                href={directionsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Open directions
+              </a>
+            ) : null}
+            <a
+              href={nearbyParkingSearchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+            >
+              Search nearby parking
+            </a>
+          </div>
+        </ParkingPlanSection>
+      ) : (
+        <>
+          <ParkingPlanSection title={recommendedSectionTitle}>
+            <div className="space-y-4">
+              {estimatedParking ? (
+                <p className="text-muted-foreground">
+                  Nearby garages or lots may be available. Confirm live price and rules before parking.
+                </p>
+              ) : null}
+              <div>
+                <div className="text-base font-semibold text-foreground">
+                  {parkingOption.name || row.name}
+                </div>
+                <p className="mt-1 text-muted-foreground">{reason}</p>
+              </div>
+              <ParkingPlanFacts
+                facts={[
+                  { label: 'Cost', value: row.cost },
+                  { label: 'Total time', value: row.time },
+                  { label: 'Reason', value: reason },
+                ]}
+              />
+            </div>
+          </ParkingPlanSection>
+
+          <ParkingPlanSection title="Why this option">
+            <ParkingPlanList
+              items={whyItems}
+            />
+          </ParkingPlanSection>
+
+          <ParkingPlanSection title="Before you park">
+            <ParkingPlanList
+              items={[
+                'Confirm final price',
+                'Check hours',
+                'Check event or validation rules',
+                'Check towing/private lot signs',
+              ]}
+            />
+          </ParkingPlanSection>
+
+          <ParkingPlanTiming
+            row={row}
+            parkingOption={parkingOption}
+            timingLabels={{
+              drive: 'Drive to lot',
+              fallbackRoute: 'Fallback route time',
+              parkingBuffer: 'Park/check-in buffer',
+              walk: 'Walk to destination',
+              total: 'Total to destination',
+            }}
+          />
+
+          <ParkingPlanSection title="Backup options">
+            <ParkingPlanList
+              items={[
+                'Search nearby parking if this lot is full or the price changes.',
+                'Use destination directions if you decide not to park here.',
+                'Consider transit or rideshare if parking is expensive or unavailable.',
+              ]}
+            />
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              {directionsUrl ? (
+                <a
+                  href={directionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+                >
+                  Open directions
+                </a>
+              ) : null}
+              <a
+                href={nearbyParkingSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+              >
+                Search nearby parking
+              </a>
+            </div>
+          </ParkingPlanSection>
+
+          <StreetParkingPlanNote
+            eventParkingLikely={eventParkingLikely}
+            streetMeterRow={streetMeterRow}
+            showGeneralNote
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+function CustomerParkingDetailsSection({
+  row,
+  directionsUrl,
+  streetMeterRow,
+  eventParkingLikely,
+}: {
+  row: PointAbModePresentation | null | undefined;
+  directionsUrl: string | null;
+  streetMeterRow?: PointAbModePresentation | null;
+  eventParkingLikely: boolean;
+}) {
+  if (!row) return null;
+
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS['destination-customer']}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card shadow-sm"
+    >
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2
+              data-details-heading
+              tabIndex={-1}
+              className="text-xl font-bold text-foreground"
+            >
+              Parking plan
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What should I do when I arrive?
+            </p>
+          </div>
+
+          {directionsUrl ? (
+            <a
+              href={directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Open directions
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <ParkingPlanSection title="Recommended parking">
+        <div className="space-y-4">
+          <div>
+            <div className="text-base font-semibold text-foreground">Customer parking</div>
+            <p className="mt-1 text-muted-foreground">
+              Customer or on-site parking may exist.
+            </p>
+          </div>
+          <ParkingPlanFacts
+            facts={[
+              { label: 'Cost', value: 'Free? Verify' },
+              { label: 'Total time', value: row.time },
+              { label: 'Reason', value: 'Customer or on-site parking may exist.' },
+            ]}
+          />
+        </div>
+      </ParkingPlanSection>
+
+      <ParkingPlanSection title="Before you park">
+        <ParkingPlanList
+          items={[
+            'Check customer-only signs',
+            'Confirm validation rules',
+            'Check time limits',
+            'Avoid overnight parking unless signs allow it',
+            'Watch for towing/private lot restrictions',
+            'This is not a reserved space',
+          ]}
+        />
+      </ParkingPlanSection>
+
+      <ParkingPlanTiming
+        row={row}
+        timingLabels={{
+          drive: 'Drive route',
+          parkingBuffer: 'Access/verify buffer',
+          walk: 'Walk to destination',
+          total: 'Total to destination',
+        }}
+      />
+
+      <ParkingPlanSection title="Backup options">
+        <ParkingPlanList
+          items={[
+            'Use a paid garage or lot if customer parking is full or restricted.',
+            'Use transit or rideshare if you do not want to verify parking rules.',
+          ]}
+        />
+      </ParkingPlanSection>
+
+      <StreetParkingPlanNote
+        eventParkingLikely={eventParkingLikely}
+        streetMeterRow={streetMeterRow}
+      />
+    </section>
+  );
+}
+
 function formatPlannedAirportArrival(value?: string): string | null {
   if (!value) return null;
 
@@ -3709,6 +4327,8 @@ const GOOGLE_PLACE_MATCH_CONCURRENCY = 2;
 const COLLAPSED_PARKING_DISPLAY_COUNT = 6;
 const PARKING_SHOW_MORE_INCREMENT = 10;
 const MAX_GOOGLE_PLACE_MATCH_LIMIT = 20;
+const QUICK_GO_RECOMMENDATION_SNAPSHOT_PREFIX = 'podpaigo-quickgo-recommendation';
+const QUICK_GO_RECOMMENDATION_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -3724,6 +4344,302 @@ function debugRequestId(input: string): string {
   }
 
   return Math.abs(hash).toString(36);
+}
+
+function requestKeyField(record: Record<string, unknown>, key: string): string | number | null {
+  const value = record[key];
+  return typeof value === 'string' || typeof value === 'number' ? value : null;
+}
+
+export function buildRecommendationRequestKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+  sort: SortTab;
+  travelPreferences: TripTravelPreferences;
+  showParkingAnyway: boolean;
+}): string {
+  const { tripData, searchParams, sort, travelPreferences, showParkingAnyway } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    trip: tripData,
+    identity: {
+      origin: tripData.origin,
+      originPlaceId: tripData.originPlaceId ?? null,
+      originLat: tripData.originLat ?? null,
+      originLng: tripData.originLng ?? null,
+      destination: tripData.destination,
+      destinationName: tripData.destinationName ?? null,
+      destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+      destinationLat: tripData.destinationLat ?? null,
+      destinationLng: tripData.destinationLng ?? null,
+      tripId: searchParams.get('tripId') ?? null,
+    },
+    controls: {
+      sort,
+      quickGoPreference: searchParams.get('quickGoPreference') ?? null,
+      parkingPreference:
+        searchParams.get('parkingPreference') ??
+        tripExtras.parkingPreference ??
+        null,
+      transportAvailability:
+        searchParams.get('transport') ??
+        searchParams.get('transportAvailability') ??
+        tripData.transportAvailability ??
+        null,
+      businessTravelMode: travelPreferences.businessTravelMode,
+      parkingFilters: travelPreferences.parkingFilters,
+      parkingVisibilityOverride: showParkingAnyway ? 'show_parking_anyway' : null,
+      transitPayment:
+        searchParams.get('transitPayment') ??
+        tripExtras.transitPayment ??
+        null,
+      intent: searchParams.get('intent') ?? null,
+    },
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+export function buildRecommendationProviderRequestKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): string {
+  const { tripData, searchParams } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    trip: tripData,
+    identity: {
+      origin: tripData.origin,
+      originPlaceId: tripData.originPlaceId ?? null,
+      originLat: tripData.originLat ?? null,
+      originLng: tripData.originLng ?? null,
+      destination: tripData.destination,
+      destinationName: tripData.destinationName ?? null,
+      destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+      destinationLat: tripData.destinationLat ?? null,
+      destinationLng: tripData.destinationLng ?? null,
+      tripId: searchParams.get('tripId') ?? null,
+    },
+    controls: {
+      parkingPreference:
+        searchParams.get('parkingPreference') ??
+        tripExtras.parkingPreference ??
+        null,
+      transportAvailability:
+        searchParams.get('transport') ??
+        searchParams.get('transportAvailability') ??
+        tripData.transportAvailability ??
+        null,
+      transitPayment:
+        searchParams.get('transitPayment') ??
+        tripExtras.transitPayment ??
+        null,
+      intent: searchParams.get('intent') ?? null,
+    },
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+function buildRecommendationRouteIdentityKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): string {
+  const { tripData, searchParams } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    identity: {
+      origin: tripData.origin,
+      originPlaceId: tripData.originPlaceId ?? null,
+      originLat: tripData.originLat ?? null,
+      originLng: tripData.originLng ?? null,
+      destination: tripData.destination,
+      destinationName: tripData.destinationName ?? null,
+      destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+      destinationLat: tripData.destinationLat ?? null,
+      destinationLng: tripData.destinationLng ?? null,
+      tripId: searchParams.get('tripId') ?? null,
+    },
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+/**
+ * Strong identity key for parking-related local state (recommendation parking,
+ * Google enrichment, matched/APR prices, live refresh). Parking state may only
+ * be preserved across renders when this key is unchanged; any change to the
+ * trip's route, destination identity, timing, or parking window must clear it.
+ *
+ * Deliberately excludes sort and other display-only controls so that a sort-only
+ * change preserves and re-sorts existing parking instead of clearing it.
+ */
+export function buildParkingTripIdentityKey(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): string {
+  const { tripData, searchParams } = args;
+  const tripExtras = tripData as TripDataWithExtras;
+  const tripRecord = tripData as unknown as Record<string, unknown>;
+
+  return JSON.stringify({
+    type: tripData.type,
+    origin: tripData.origin,
+    originPlaceId: tripData.originPlaceId ?? null,
+    originLat: tripData.originLat ?? null,
+    originLng: tripData.originLng ?? null,
+    destination: tripData.destination,
+    destinationName: tripData.destinationName ?? null,
+    destinationKind: tripData.destinationKind ?? null,
+    destinationPlaceId: tripExtras.destinationPlaceId ?? null,
+    destinationLat: tripData.destinationLat ?? null,
+    destinationLng: tripData.destinationLng ?? null,
+    tripId: searchParams.get('tripId') ?? null,
+    timing: {
+      arrivalDate: requestKeyField(tripRecord, 'arrivalDate'),
+      arrivalTime: requestKeyField(tripRecord, 'arrivalTime'),
+      departureDate: requestKeyField(tripRecord, 'departureDate'),
+      departureTime: requestKeyField(tripRecord, 'departureTime'),
+      returnDate: requestKeyField(tripRecord, 'returnDate'),
+      returnTime: requestKeyField(tripRecord, 'returnTime'),
+      parkingDuration: requestKeyField(tripRecord, 'parkingDuration'),
+      parkingCheckInDate: requestKeyField(tripRecord, 'parkingCheckInDate'),
+      parkingCheckInTime: requestKeyField(tripRecord, 'parkingCheckInTime'),
+      parkingCheckOutDate: requestKeyField(tripRecord, 'parkingCheckOutDate'),
+      parkingCheckOutTime: requestKeyField(tripRecord, 'parkingCheckOutTime'),
+    },
+  });
+}
+
+function logParkingStateScope(
+  event:
+    | 'preserve'
+    | 'clear'
+    | 'live_refresh_merge'
+    | 'live_refresh_ignored_stale'
+    | 'price_match_ignored_stale',
+  details: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.debug(`parking state ${event}`, details);
+}
+
+function hasResolvedTrafficEstimate(traffic: TrafficEstimate | null | undefined): traffic is TrafficEstimate {
+  return Boolean(
+    traffic &&
+      traffic.routeUnavailable !== true &&
+      Number.isFinite(traffic.duration) &&
+      traffic.duration > 0,
+  );
+}
+
+function tripHasOriginDestinationCoords(tripData: TripData): boolean {
+  return (
+    typeof tripData.originLat === 'number' &&
+    typeof tripData.originLng === 'number' &&
+    typeof tripData.destinationLat === 'number' &&
+    typeof tripData.destinationLng === 'number'
+  );
+}
+
+function preserveTrafficEstimateForSameRoute(args: {
+  tripData: TripData;
+  sameRouteIdentity: boolean;
+  previous: Recommendation | null;
+  next: Recommendation;
+}): Recommendation {
+  const previousTraffic = args.previous?.trafficEstimate;
+  const nextTraffic = args.next.trafficEstimate;
+
+  if (
+    !args.sameRouteIdentity ||
+    !tripHasOriginDestinationCoords(args.tripData) ||
+    !hasResolvedTrafficEstimate(previousTraffic) ||
+    hasResolvedTrafficEstimate(nextTraffic)
+  ) {
+    return args.next;
+  }
+
+  return {
+    ...args.next,
+    trafficEstimate: {
+      ...previousTraffic,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      assumptions: Array.from(
+        new Set([
+          ...(previousTraffic.assumptions || []),
+          'Preserved previous route estimate for the same origin and destination while refreshing preferences.',
+        ]),
+      ),
+    },
+    airportRouteUnavailable: false,
+    airportRouteUnavailableReason: undefined,
+  };
+}
+
+function preserveParkingForSameRoute(args: {
+  sameRouteIdentity: boolean;
+  previous: Recommendation | null;
+  next: Recommendation;
+}): Recommendation {
+  const previousParking = args.previous?.parking ?? [];
+  const nextParking = args.next.parking ?? [];
+
+  if (!args.sameRouteIdentity || nextParking.length > 0 || previousParking.length === 0) {
+    return args.next;
+  }
+
+  return {
+    ...args.next,
+    parking: previousParking,
+    parkingDataStatus: 'available',
+    parkingDataMessage: undefined,
+    parkingDiscoveryNotice:
+      args.next.parkingDiscoveryNotice ||
+      args.previous?.parkingDiscoveryNotice ||
+      'Showing previously found parking while nearby lots refresh.',
+  };
 }
 
 function localDateTimeParam(date: string | undefined, time: string | undefined): string | undefined {
@@ -3755,6 +4671,20 @@ function logRecommendationsFetch(
   });
 }
 
+function logRecommendationSortLocal(
+  from: SortTab,
+  to: SortTab,
+  details: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV !== 'development') return;
+
+  console.debug('recommendations sort local_rerank', {
+    from,
+    to,
+    ...details,
+  });
+}
+
 type MatchedParkingPriceEntry = {
   price: number;
   priceUnit?: string;
@@ -3762,10 +4692,145 @@ type MatchedParkingPriceEntry = {
   sourceLink?: string;
 };
 
+type QuickGoRecommendationSnapshot = {
+  tripData: TripData;
+  recommendation: Recommendation;
+  rankedOptions: RankedRecommendation[];
+  createdAt: number;
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+  providerRequestKey: string;
+};
+
 type SmartPickParkingBundles = {
   smartPickParkingOptions: ParkingOption[];
   cheapestSmartPickOptions: ParkingOption[];
 };
+
+function quickGoRecommendationSnapshotStorageKey(args: {
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+}): string {
+  return [
+    QUICK_GO_RECOMMENDATION_SNAPSHOT_PREFIX,
+    debugRequestId(args.routeIdentityKey),
+    debugRequestId(args.parkingIdentityKey),
+  ].join(':');
+}
+
+function isQuickGoRecommendationSnapshot(value: unknown): value is QuickGoRecommendationSnapshot {
+  const snapshot = value as QuickGoRecommendationSnapshot | null;
+  return Boolean(
+    snapshot &&
+      typeof snapshot === 'object' &&
+      snapshot.tripData &&
+      snapshot.recommendation &&
+      Array.isArray(snapshot.rankedOptions) &&
+      typeof snapshot.createdAt === 'number' &&
+      typeof snapshot.routeIdentityKey === 'string' &&
+      typeof snapshot.parkingIdentityKey === 'string' &&
+      typeof snapshot.providerRequestKey === 'string',
+  );
+}
+
+function readQuickGoRecommendationSnapshot(args: {
+  routeIdentityKey: string;
+  parkingIdentityKey: string;
+  now?: number;
+}): QuickGoRecommendationSnapshot | null {
+  if (typeof window === 'undefined') return null;
+
+  const key = quickGoRecommendationSnapshotStorageKey(args);
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isQuickGoRecommendationSnapshot(parsed)) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+
+    if (
+      parsed.routeIdentityKey !== args.routeIdentityKey ||
+      parsed.parkingIdentityKey !== args.parkingIdentityKey
+    ) {
+      return null;
+    }
+
+    const now = args.now ?? Date.now();
+    if (now - parsed.createdAt > QUICK_GO_RECOMMENDATION_SNAPSHOT_TTL_MS) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeQuickGoRecommendationSnapshot(snapshot: QuickGoRecommendationSnapshot): void {
+  if (typeof window === 'undefined') return;
+
+  const key = quickGoRecommendationSnapshotStorageKey({
+    routeIdentityKey: snapshot.routeIdentityKey,
+    parkingIdentityKey: snapshot.parkingIdentityKey,
+  });
+
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    // Ignore quota/private-mode failures; the full details page can still fetch normally.
+  }
+}
+
+function shouldDeferQuickGoPaidParkingFollowups(args: {
+  tripData: TripData;
+  searchParams: { get(name: string): string | null };
+}): boolean {
+  const { tripData, searchParams } = args;
+  if (!isQuickGoMode(searchParams)) return false;
+
+  const purpose = String(tripData.quickGoPurpose || searchParams.get('quickGoPurpose') || '').toLowerCase();
+  const intent = String(tripData.intent || searchParams.get('intent') || '').toLowerCase();
+  if (
+    purpose === 'parking-trip' ||
+    /parking-(trip|options)|parking options|find parking|book parking/.test(intent)
+  ) {
+    return false;
+  }
+
+  const destinationKind = String(tripData.destinationKind || '').toLowerCase();
+  if (
+    destinationKind === 'airport' ||
+    destinationKind === 'downtown' ||
+    destinationKind === 'stadium' ||
+    destinationKind === 'event'
+  ) {
+    return false;
+  }
+
+  const destination = tripData.destinationName || tripData.destination;
+  if (
+    isEventVenueDestination({
+      destination,
+      destinationKind: tripData.destinationKind,
+      origin: tripData.origin,
+    })
+  ) {
+    return false;
+  }
+
+  const classification = quickGoClassificationForTrip({
+    destination,
+    destinationKind: tripData.destinationKind,
+    airportCode: (tripData as TripDataWithExtras).airportCode,
+    detectedAirportCode: searchParams.get('detectedAirportCode'),
+  });
+
+  return classification.mode === 'free_likely';
+}
 
 type AirportCompanionCardData = {
   transportMode: AirportDayTransportMode;
@@ -3930,7 +4995,9 @@ function computeSmartPickParkingBundles(input: {
 export default function ResultsContent({ storedSearchParams }: ResultsContentProps = {}) {
   const router = useRouter();
   const { session } = useAuth();
+  const { isAdmin } = useAdminStatus();
   const accessToken = session?.access_token ?? null;
+  const showInternalDebug = isAdmin && isPodPaiGoDebugUIEnabled();
   const routeSearchParams = useSearchParams();
   const routeSearchParamsString = routeSearchParams.toString();
   const searchParams = useMemo(
@@ -3950,6 +5017,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [routeHydrationState, setRouteHydrationState] =
     useState<QuickGoRouteHydrationState>('not_started');
   const [recommendationsLoadedKey, setRecommendationsLoadedKey] = useState('');
+  const [recommendationsLoadedRouteKey, setRecommendationsLoadedRouteKey] = useState('');
   const [priorQuickGoDriveMinutes, setPriorQuickGoDriveMinutes] = useState<number | null>(null);
   const [invalidTripMessage, setInvalidTripMessage] = useState<string | null>(null);
   const [tripData, setTripData] = useState<TripData | null>(null);
@@ -3970,7 +5038,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [aprLivePrices, setAprLivePrices] = useState<Record<string, number>>({});
   const [aprLiveChecking, setAprLiveChecking] = useState(false);
   const [aprLivePartial, setAprLivePartial] = useState(false);
-  const [parkingWeather, setParkingWeather] = useState<ParkingWeatherItem[]>([]);
   const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
   const [showMapModal, setShowMapModal] = useState(false);
   const [showAirportGuideModal, setShowAirportGuideModal] = useState(false);
@@ -3983,7 +5050,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   );
 
   useEffect(() => {
-    setTravelPreferences(readTravelPreferences());
+    const next = readTravelPreferences();
+    setTravelPreferences((prev) => {
+      if (
+        prev.businessTravelMode === next.businessTravelMode &&
+        JSON.stringify(prev.parkingFilters || {}) === JSON.stringify(next.parkingFilters || {})
+      ) {
+        return prev;
+      }
+
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -3997,14 +5074,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const priceMatchKeyRef = useRef('');
   const googlePlaceAttemptedKeysRef = useRef(new Set<string>());
   const googlePhotoReviewRetryKeysRef = useRef(new Set<string>());
+  const googleReviewSummaryAttemptedKeysRef = useRef(new Set<string>());
   const googlePlaceInFlightKeysRef = useRef(new Map<string, Promise<ParkingOption>>());
   const recommendationsRequestRef = useRef<RecommendationRequestRef | null>(null);
   const recommendationsLoadedKeyRef = useRef('');
+  const recommendationsLoadedRouteKeyRef = useRef('');
   const liveRefreshInFlightKeyRef = useRef('');
   const liveRefreshLoadedKeyRef = useRef('');
+  // Active parking-state identity. Async parking writers (live refresh, price
+  // match) capture this at request time and must ignore their response if it no
+  // longer matches the active trip, so stale lots/prices never leak across trips.
+  const parkingTripIdentityKeyRef = useRef('');
   const priorQuickGoDriveMinutesRef = useRef<number | null>(null);
   const routeRequestSeq = useRef(0);
   const quickGoRouteRequestIdRef = useRef(0);
+  const sortRef = useRef<SortTab>('easiest');
 
   function parkingGoogleMatchKey(parking: ParkingOption, airportCode: string | null): string {
     const normalize = (value: string | null | undefined) =>
@@ -4037,25 +5121,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     const routeTargetLat = base.routeTargetLat ?? merged.routeTargetLat;
     const routeTargetLng = base.routeTargetLng ?? merged.routeTargetLng;
+    const hasRouteTarget =
+      typeof routeTargetLat === 'number' && typeof routeTargetLng === 'number';
+    const routeTargetMatchesCanonical =
+      hasRouteTarget &&
+      typeof canonicalLat === 'number' &&
+      typeof canonicalLng === 'number' &&
+      Math.abs(canonicalLat - routeTargetLat) <= 0.001 &&
+      Math.abs(canonicalLng - routeTargetLng) <= 0.001;
     const canonicalCoordsChanged =
       coordinateSource === 'google_place' &&
       typeof canonicalLat === 'number' &&
       typeof canonicalLng === 'number' &&
-      typeof routeTargetLat === 'number' &&
-      typeof routeTargetLng === 'number' &&
+      hasRouteTarget &&
       (Math.abs(canonicalLat - routeTargetLat) > 0.01 ||
         Math.abs(canonicalLng - routeTargetLng) > 0.01);
 
-    const gainedGooglePlaceCoords =
-      coordinateSource === 'google_place' &&
-      base.coordinateSource !== 'google_place' &&
-      typeof canonicalLat === 'number' &&
-      typeof canonicalLng === 'number';
-
     const staleDriveMinutes =
       canonicalCoordsChanged ||
-      gainedGooglePlaceCoords ||
-      (coordinateSource === 'google_place' && base.routesUsedCanonicalCoords !== true);
+      (coordinateSource === 'google_place' &&
+        hasRouteTarget &&
+        base.routesUsedCanonicalCoords !== true &&
+        !routeTargetMatchesCanonical);
 
     const driveContext = staleDriveMinutes
       ? {}
@@ -4064,11 +5151,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             merged.originToParkingMinutes ?? base.originToParkingMinutes,
           routeToParkingMinutes:
             merged.routeToParkingMinutes ?? base.routeToParkingMinutes,
+          driveToLotMinutes:
+            merged.driveToLotMinutes ?? base.driveToLotMinutes,
           driveMinutes: merged.driveMinutes ?? base.driveMinutes,
           duration: merged.duration ?? base.duration,
+          routeLegs: merged.routeLegs ?? base.routeLegs,
+          originDriveSource: merged.originDriveSource ?? base.originDriveSource,
         };
 
-    return {
+    return normalizeParkingReviewSummary({
       ...merged,
       ...driveContext,
       providerLat: base.providerLat ?? merged.providerLat ?? enriched.providerLat,
@@ -4099,11 +5190,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       sourceLink: base.sourceLink ?? merged.sourceLink ?? enriched.sourceLink,
       routesUsedCanonicalCoords: staleDriveMinutes
         ? undefined
-        : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
+        : routeTargetMatchesCanonical
+          ? true
+          : merged.routesUsedCanonicalCoords ?? base.routesUsedCanonicalCoords,
       routeTargetLat: staleDriveMinutes ? undefined : routeTargetLat,
       routeTargetLng: staleDriveMinutes ? undefined : routeTargetLng,
       ...photoFields,
-    };
+    } as ParkingOption);
   }
 
   function mergeGooglePlaceResultIntoParking(
@@ -4168,8 +5261,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   useEffect(() => {
     if (!rankedOptions.length || !tripData) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
-    if (isCityDestinationTrip(tripData)) return;
     const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
 
     const parkingOptions = rankedOptions
@@ -4273,6 +5366,90 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   }, [rankedOptions, tripData, googleEnrichedParking, visibleParkingCount]);
 
   useEffect(() => {
+    if (!rankedOptions.length || !tripData) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
+    if (!shouldDiscoverParkingForTrip(tripData)) return;
+
+    const airportCode = isCityDestinationTrip(tripData) ? null : getTripAirportCode(tripData);
+    const parkingOptions = rankedOptions
+      .filter((item) => item.type === 'parking')
+      .map((item) => item.option as ParkingOption)
+      .map((parking) => googleEnrichedParking[parking.id] || parking)
+      .filter((parking) => {
+        if (!parking.id || !parking.googlePlaceId) return false;
+        const summary = getParkingReviewSummary(parking);
+        if (typeof summary.reviewScore === 'number' || typeof summary.reviewCount === 'number') {
+          return false;
+        }
+
+        const key = `${parking.id}:${parking.googlePlaceId}`;
+        if (googleReviewSummaryAttemptedKeysRef.current.has(key)) return false;
+
+        return true;
+      })
+      .slice(0, Math.min(visibleParkingCount, MAX_GOOGLE_PLACE_MATCH_LIMIT));
+
+    if (parkingOptions.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchReviewSummaries = async () => {
+      await Promise.all(
+        parkingOptions.map(async (parking) => {
+          const key = `${parking.id}:${parking.googlePlaceId}`;
+          googleReviewSummaryAttemptedKeysRef.current.add(key);
+
+          const params = new URLSearchParams();
+          params.set('placeId', parking.googlePlaceId as string);
+          params.set('name', parking.name);
+          if (airportCode) params.set('airport', airportCode);
+          const address = parking.address || parking.normalizedAddress || parking.routeDestination;
+          if (address) params.set('address', address);
+
+          try {
+            const response = await fetch(`/api/parking-reviews?${params.toString()}`);
+            if (!response.ok || cancelled) return;
+
+            const data = await response.json();
+            const place = data?.place || {};
+            const enriched = normalizeParkingReviewSummary({
+              ...parking,
+              googlePlaceId: place.googlePlaceId || parking.googlePlaceId,
+              googlePlaceName: place.name || parking.googlePlaceName,
+              googlePlaceAddress: place.address || parking.googlePlaceAddress,
+              reviewScore:
+                typeof place.rating === 'number' ? place.rating : parking.reviewScore,
+              reviewCount:
+                typeof place.reviewCount === 'number'
+                  ? place.reviewCount
+                  : parking.reviewCount,
+              googleReviews: Array.isArray(data?.reviews)
+                ? data.reviews
+                : parking.googleReviews,
+            } as ParkingOption);
+            const summary = getParkingReviewSummary(enriched);
+
+            if (
+              typeof summary.reviewScore === 'number' ||
+              typeof summary.reviewCount === 'number'
+            ) {
+              mergeGooglePlaceResultIntoParking(parking, enriched);
+            }
+          } catch {
+            // Best-effort card summary. The modal still handles full review lookup.
+          }
+        }),
+      );
+    };
+
+    void fetchReviewSummaries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rankedOptions, tripData, googleEnrichedParking, visibleParkingCount, searchParams]);
+
+  useEffect(() => {
     if (!recommendation?.parking?.length || !tripData) return;
     if (isCityDestinationTrip(tripData)) return;
 
@@ -4370,6 +5547,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   })();
 
   const [sort, setSort] = useState<SortTab>(initialSort);
+  useEffect(() => {
+    sortRef.current = sort;
+  }, [sort]);
   const resultsViewedTracked = useRef(false);
   const lastRecalcTrackedKey = useRef<string | null>(null);
   const lastParkingCardTrackedId = useRef<string | null>(null);
@@ -4397,7 +5577,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         airportCode: tripData?.airportCode || searchParams.get('airportCode') || undefined,
       },
     });
-  }, [accessToken, selectedParkingId, searchParams, tripData?.airportCode]);
+    trackEvent('parking_result_viewed', {
+      accessToken,
+      eventProperties: {
+        lotId: selectedParkingId,
+        airportCode: tripData?.airportCode || searchParams.get('airportCode') || undefined,
+        tripType: tripData?.type ?? searchParams.get('type') ?? undefined,
+        resultType: 'parking',
+        sourcePage: 'results',
+      },
+    });
+  }, [accessToken, selectedParkingId, searchParams, tripData?.airportCode, tripData?.type]);
 
   useEffect(() => {
     // Sync URL param with current sort state
@@ -4415,6 +5605,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       trackEvent('sort_changed', {
         accessToken,
         eventProperties: { sort: next },
+      });
+      logRecommendationSortLocal(sort, next, {
+        providerRequestId: recommendationsLoadedKeyRef.current
+          ? debugRequestId(recommendationsLoadedKeyRef.current)
+          : null,
+        hasRecommendation: Boolean(recommendation),
       });
     }
     setSort(next);
@@ -4444,12 +5640,40 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     if (data) {
       const quickGoRequest = isQuickGoMode(searchParams);
-      const requestKey = JSON.stringify(data);
+      const requestKey = buildRecommendationProviderRequestKey({
+        tripData: data,
+        searchParams,
+      });
+      const routeIdentityKey = buildRecommendationRouteIdentityKey({
+        tripData: data,
+        searchParams,
+      });
+      const parkingTripIdentityKey = buildParkingTripIdentityKey({
+        tripData: data,
+        searchParams,
+      });
       const currentRequest = recommendationsRequestRef.current;
 
       const isNewTripRequest = recommendationsLoadedKeyRef.current !== requestKey;
+      const isNewRouteRequest = recommendationsLoadedRouteKeyRef.current !== routeIdentityKey;
+      // Drive parking-state clearing off the dedicated parking identity key so a
+      // sort-only change preserves parking, while any destination / origin /
+      // timing / parking-window change clears it immediately.
+      const previousParkingTripIdentityKey = parkingTripIdentityKeyRef.current;
+      const isNewParkingIdentity = previousParkingTripIdentityKey !== parkingTripIdentityKey;
 
-      if (isNewTripRequest) {
+      if (isNewParkingIdentity) {
+        logParkingStateScope('clear', {
+          previous: debugRequestId(previousParkingTripIdentityKey),
+          next: debugRequestId(parkingTripIdentityKey),
+          preserved: false,
+        });
+
+        // Point the active parking identity at the new trip *before* any async
+        // parking writer captures it, so stale in-flight responses for the prior
+        // trip can be detected and ignored.
+        parkingTripIdentityKeyRef.current = parkingTripIdentityKey;
+
         // Clear stale enrichment from previous airport/date/origin.
         // Prevents smaller-airport lots/photos/prices from leaking into SEA after edit recalculation.
         setReviewsParking(null);
@@ -4459,12 +5683,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setAprLivePartial(false);
         setAprLiveChecking(false);
         setParkingPricesChecking(false);
-        setParkingWeather([]);
         setVisibleParkingCount(COLLAPSED_PARKING_DISPLAY_COUNT);
         setSelectedParkingId(null);
 
         googlePlaceAttemptedKeysRef.current.clear();
         googlePhotoReviewRetryKeysRef.current.clear();
+        googleReviewSummaryAttemptedKeysRef.current.clear();
         googlePlaceInFlightKeysRef.current.clear();
 
         priceMatchKeyRef.current = '';
@@ -4473,6 +5697,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         setRouteHydrationState('not_started');
         priorQuickGoDriveMinutesRef.current = null;
         setPriorQuickGoDriveMinutes(null);
+      } else {
+        logParkingStateScope('preserve', {
+          parkingIdentity: debugRequestId(parkingTripIdentityKey),
+          preserved: true,
+        });
       }
 
       if (recommendationsLoadedKeyRef.current === requestKey && recommendation) {
@@ -4485,6 +5714,62 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           setLoading(false);
           return;
         }
+      }
+
+      const quickGoFullDetailsSnapshot =
+        !quickGoRequest && searchParams.get('quickGoConfirmed') === '1'
+          ? readQuickGoRecommendationSnapshot({
+              routeIdentityKey,
+              parkingIdentityKey: parkingTripIdentityKey,
+            })
+          : null;
+
+      if (quickGoFullDetailsSnapshot) {
+        if (currentRequest?.inFlight && !currentRequest.controller.signal.aborted) {
+          logRecommendationsFetch('abort', currentRequest.key, {
+            reason: 'quickgo-snapshot-hydration',
+          });
+          currentRequest.controller.abort();
+        }
+
+        const hydratedRecommendation = quickGoFullDetailsSnapshot.recommendation;
+        const hydratedRanked = rankRecommendations(
+          data,
+          hydratedRecommendation.parking,
+          hydratedRecommendation.rideshare,
+          hydratedRecommendation.transit,
+          hydratedRecommendation.tsaEstimate,
+          {
+            weatherImpact: hydratedRecommendation.weatherImpact,
+            familyFriendly:
+              searchParams.get('familyLuggageFriendly') === '1' ||
+              searchParams.get('bagPlan') === 'checked' ||
+              searchParams.get('bags') === 'yes',
+            preference: sortRef.current,
+          },
+        );
+
+        recommendationsRequestRef.current = null;
+        recommendationsLoadedKeyRef.current = requestKey;
+        recommendationsLoadedRouteKeyRef.current = routeIdentityKey;
+        setRecommendationsLoadedKey(requestKey);
+        setRecommendationsLoadedRouteKey(routeIdentityKey);
+        setInvalidTripMessage(null);
+        setFetchError(null);
+        setRecommendation(hydratedRecommendation);
+        setTripData(data);
+        setRankedOptions(hydratedRanked);
+        setLoading(false);
+        setIsRecalculating(false);
+        setShowTooLate(false);
+        logRecommendationsFetch('success', requestKey, {
+          source: 'quickgo-session-snapshot',
+          snapshotAgeMs: Date.now() - quickGoFullDetailsSnapshot.createdAt,
+          parking: hydratedRecommendation.parking?.length ?? 0,
+          rideshare: hydratedRecommendation.rideshare?.length ?? 0,
+          transit: hydratedRecommendation.transit?.length ?? 0,
+        });
+        return;
       }
 
       if (
@@ -4515,32 +5800,47 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       // Always show loading state for URL-driven recomputes (date/time/origin changes, etc.)
       setInvalidTripMessage(null);
       setFetchError(null);
-      setLoading(true);
+      const preserveSameRouteSnapshot = Boolean(recommendation) && !isNewRouteRequest;
+      setLoading(!preserveSameRouteSnapshot);
       if (isNewTripRequest) {
         setIsRecalculating(true);
       }
       setShowTooLate(false);
       const preserveQuickGoSnapshot =
         isQuickGoMode(searchParams) && Boolean(recommendation);
-      if (!preserveQuickGoSnapshot) {
+      if (!preserveQuickGoSnapshot && !preserveSameRouteSnapshot) {
         setRecommendation(null);
         setRankedOptions([]);
       }
 
       logRecommendationsFetch('start', requestKey);
+      trackEvent('recommendation_search_started', {
+        accessToken,
+        eventProperties: {
+          airportCode: data.airportCode || undefined,
+          tripType: data.type,
+          resultType: 'recommendation_results',
+          sourcePage: 'results',
+        },
+      });
       const routeRequestId = ++routeRequestSeq.current;
       quickGoRouteRequestIdRef.current = routeRequestId;
       if (quickGoRequest) {
         logQuickGoClientRoute('request_start', { routeRequestId, requestKey });
         setQuickGoRouteFetchInFlight(true);
         setClientRouteRefreshPending(true);
-        setRouteHydrationState('resolving');
+        if (isNewRouteRequest || priorQuickGoDriveMinutesRef.current == null) {
+          setRouteHydrationState('resolving');
+        }
       }
 
       fetch('/api/recommendations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(typeof window !== 'undefined'
+            ? { 'X-PodPaiGo-Session-Id': getOrCreateSessionId() }
+            : {}),
         },
         body: JSON.stringify(data),
         signal: controller.signal,
@@ -4549,9 +5849,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           const text = await response.text();
 
           if (!response.ok) {
-            throw new Error(
+            const fetchError = new Error(
               `Recommendations failed ${response.status}: ${text || 'No response body'}`
             );
+            (fetchError as Error & { status?: number }).status = response.status;
+            throw fetchError;
           }
 
           if (!text) {
@@ -4571,6 +5873,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             return;
           }
 
+          if (recommendationsRequestRef.current?.controller !== controller) {
+            logRecommendationsFetch('abort', requestKey, {
+              reason: 'stale-success',
+            });
+            return;
+          }
+
           if (
             isQuickGoMode(searchParams) &&
             routeRequestId !== quickGoRouteRequestIdRef.current
@@ -4583,8 +5892,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             return;
           }
 
+          const recForState = preserveTrafficEstimateForSameRoute({
+            tripData: data,
+            sameRouteIdentity: !isNewRouteRequest,
+            previous: recommendation,
+            next: rec,
+          });
+          const recWithPreservedParking = preserveParkingForSameRoute({
+            sameRouteIdentity: !isNewRouteRequest,
+            previous: recommendation,
+            next: recForState,
+          });
+
           recommendationsLoadedKeyRef.current = requestKey;
+          recommendationsLoadedRouteKeyRef.current = routeIdentityKey;
           setRecommendationsLoadedKey(requestKey);
+          setRecommendationsLoadedRouteKey(routeIdentityKey);
           if (lastRecalcTrackedKey.current !== requestKey) {
             lastRecalcTrackedKey.current = requestKey;
             trackEvent('recommendation_recalculated', {
@@ -4595,30 +5918,38 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               },
             });
           }
-          setRecommendation(rec);
+          setRecommendation(recWithPreservedParking);
           setTripData(data);
 
           const ranked = rankRecommendations(
             data,
-            rec.parking,
-            rec.rideshare,
-            rec.transit,
-            rec.tsaEstimate,
+            recWithPreservedParking.parking,
+            recWithPreservedParking.rideshare,
+            recWithPreservedParking.transit,
+            recWithPreservedParking.tsaEstimate,
             {
-              weatherImpact: rec.weatherImpact,
+              weatherImpact: recWithPreservedParking.weatherImpact,
               familyFriendly:
                 searchParams.get('familyLuggageFriendly') === '1' ||
                 searchParams.get('bagPlan') === 'checked' ||
                 searchParams.get('bags') === 'yes',
-              preference: ((): RecommendationSortMode => {
-                const raw = searchParams.get('quickGoPreference') || searchParams.get('sort') || 'easiest';
-                return raw === 'cheapest' || raw === 'fastest' ? raw : 'easiest';
-              })(),
+              preference: sortRef.current,
             },
           );
           setRankedOptions(ranked);
           if (quickGoRequest) {
-            const serverState = rec.trafficEstimate;
+            writeQuickGoRecommendationSnapshot({
+              tripData: data,
+              recommendation: recWithPreservedParking,
+              rankedOptions: ranked,
+              createdAt: Date.now(),
+              routeIdentityKey,
+              parkingIdentityKey: parkingTripIdentityKey,
+              providerRequestKey: requestKey,
+            });
+          }
+          if (quickGoRequest) {
+            const serverState = recWithPreservedParking.trafficEstimate;
             const resolvedDrive = resolveQuickGoDriveTime(serverState);
             if (resolvedDrive.minutes != null && !resolvedDrive.unavailable) {
               priorQuickGoDriveMinutesRef.current = resolvedDrive.minutes;
@@ -4653,9 +5984,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             }
           }
           logRecommendationsFetch('success', requestKey, {
-            parking: rec.parking?.length ?? 0,
-            rideshare: rec.rideshare?.length ?? 0,
-            transit: rec.transit?.length ?? 0,
+            parking: recWithPreservedParking.parking?.length ?? 0,
+            rideshare: recWithPreservedParking.rideshare?.length ?? 0,
+            transit: recWithPreservedParking.transit?.length ?? 0,
+          });
+          trackEvent('recommendation_search_completed', {
+            accessToken,
+            eventProperties: {
+              airportCode: data.airportCode || undefined,
+              tripType: data.type,
+              resultType: 'recommendation_results',
+              sourcePage: 'results',
+            },
           });
         })
         .catch((error) => {
@@ -4679,14 +6019,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           logRecommendationsFetch('fail', requestKey, {
             message: error instanceof Error ? error.message : String(error),
           });
+          if ((error as Error & { status?: number })?.status === 429) {
+            trackEvent('rate_limit_hit', {
+              accessToken,
+              eventProperties: {
+                airportCode: data.airportCode || undefined,
+                tripType: data.type,
+                resultType: 'recommendation_results',
+                sourcePage: 'results',
+              },
+            });
+          }
           console.error('Error fetching recommendations:', error);
           setFetchError(
             error instanceof Error
               ? error.message
               : 'Could not recalculate recommendations. Please try again.',
           );
-          setRecommendation(null);
-          setRankedOptions([]);
+          if (!preserveSameRouteSnapshot) {
+            setRecommendation(null);
+            setRankedOptions([]);
+          }
         })
         .finally(() => {
           const current = recommendationsRequestRef.current;
@@ -4752,7 +6105,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     } else {
       recommendationsRequestRef.current?.controller.abort();
       recommendationsLoadedKeyRef.current = '';
+      recommendationsLoadedRouteKeyRef.current = '';
+      parkingTripIdentityKeyRef.current = '';
       setRecommendationsLoadedKey('');
+      setRecommendationsLoadedRouteKey('');
       setRouteHydrationState('not_started');
       setInvalidTripMessage(
         'This trip is missing required details. Start a new trip to see live results.'
@@ -4762,7 +6118,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       setRankedOptions([]);
       setLoading(false);
     }
-  }, [searchParamsString]);
+  }, [searchParamsString, travelPreferences, showParkingAnyway]);
 
   useEffect(() => {
     if (!tripData || !recommendation) return;
@@ -4779,15 +6135,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           searchParams.get('familyLuggageFriendly') === '1' ||
           searchParams.get('bagPlan') === 'checked' ||
           searchParams.get('bags') === 'yes',
-        preference: ((): RecommendationSortMode => {
-          const raw = searchParams.get('quickGoPreference') || searchParams.get('sort') || 'easiest';
-          return raw === 'cheapest' || raw === 'fastest' ? raw : 'easiest';
-        })(),
+        preference: sort,
       },
     );
 
     setRankedOptions(ranked);
-  }, [recommendation, searchParams, tripData]);
+  }, [recommendation, searchParams, sort, tripData]);
 
   const weatherToneBg =
     recommendation?.weatherImpact?.riskLevel === 'high'
@@ -4917,9 +6270,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     ? ''
     : ((tripData as TripDataWithExtras)?.airportCode || searchParams.get('airport') || 'SEA').toUpperCase();
 
+  const weatherDestinationLabel = useMemo(() => {
+    if (!isCityTrip) return null;
+    return resolveWeatherDestinationLabel(
+      tripData?.destination,
+      tripData?.type === 'general-trip' ? tripData.destinationName : null,
+    );
+  }, [isCityTrip, tripData]);
+
   const seasonalClimateGuidance = useMemo(() => {
+    if (isCityTrip) return null;
     if (recommendation?.weatherImpact) return null;
     if (recommendation?.weatherContext !== 'forecast-unavailable') return null;
+    if (!currentAirportCode || currentAirportCode !== 'SEA') return null;
 
     const targetDate =
       tripData?.type === 'one-way-departure'
@@ -4931,10 +6294,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             : null;
 
     return getSeasonalClimateGuidance({
-      airportCode: currentAirportCode || 'SEA',
+      airportCode: currentAirportCode,
       targetDate,
     });
-  }, [recommendation?.weatherContext, recommendation?.weatherImpact, tripData, currentAirportCode]);
+  }, [
+    recommendation?.weatherContext,
+    recommendation?.weatherImpact,
+    tripData,
+    currentAirportCode,
+    isCityTrip,
+  ]);
 
   const currentAirport = getAirportById(currentAirportCode) || getAirportById('SEA')!;
   const displayDestination = isCityTrip
@@ -4970,13 +6339,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     recommendation?.trafficEstimate?.trustStatus === 'live' &&
     !isBackupRouteEstimate(recommendation.trafficEstimate) &&
     !isStraightLineRouteEstimate(recommendation.trafficEstimate);
-
-  const airportRouteUnavailableReason =
-    recommendation?.airportRouteUnavailableReason ||
-    recommendation?.trafficEstimate?.routeUnavailableReason ||
-    (isCityTrip
-      ? 'Drive time unavailable; open directions to confirm.'
-      : 'We could not calculate a ground route from this origin to the airport.');
 
   const extraRideProviders = useMemo(
     () => [
@@ -5040,92 +6402,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     return [googleTransit];
   }, [cityDestinationText, currentAirport, currentAirportCode, isCityTrip, tripData?.destination, tripData?.origin]);
 
-  useEffect(() => {
-    if (!tripData) {
-      setParkingWeather([]);
-      return;
-    }
-
-    const tripExtras = tripData as TripDataWithExtras;
-    const startDate =
-      tripExtras.parkingCheckInDate ||
-      (tripData.type === 'one-way-departure' ? tripData.departureDate : '');
-    const returnDate = tripExtras.parkingCheckOutDate || '';
-    const airportCode = getTripAirportCode(tripData);
-    const startTime =
-      tripData.type === 'one-way-departure'
-        ? tripData.departureTime
-        : tripExtras.parkingCheckOutTime || '12:00';
-    const returnTime = tripExtras.parkingCheckOutTime || startTime || '12:00';
-
-    const requests = [
-      startDate
-        ? {
-          key: 'parking-start',
-          label: 'Start',
-          date: startDate,
-          time: startTime,
-        }
-        : null,
-      returnDate && returnDate !== startDate
-        ? {
-          key: 'parking-return',
-          label: 'Return',
-          date: returnDate,
-          time: returnTime,
-        }
-        : null,
-    ].filter((item): item is { key: string; label: string; date: string; time: string } =>
-      Boolean(item)
-    );
-
-    if (requests.length === 0) {
-      setParkingWeather([]);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    Promise.all(
-      requests.map(async (item) => {
-        const params = new URLSearchParams({
-          targetDateTime: buildWeatherTargetDateTime(item.date, item.time),
-        });
-        if (
-          tripData.type === 'general-trip' &&
-          typeof tripData.destinationLat === 'number' &&
-          typeof tripData.destinationLng === 'number'
-        ) {
-          params.set('lat', String(tripData.destinationLat));
-          params.set('lng', String(tripData.destinationLng));
-        } else {
-          params.set('airport', airportCode);
-        }
-
-        const response = await fetch(`/api/weather?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        const data = await response.json();
-
-        return {
-          key: item.key,
-          label: item.label,
-          date: item.date,
-          context: (data?.context || 'unavailable') as WeatherContext,
-          weatherImpact: (data?.weatherImpact || null) as WeatherImpact | null,
-        };
-      })
-    )
-      .then((items) => setParkingWeather(items))
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        console.warn('selected-date weather failed', error);
-        setParkingWeather([]);
-      });
-
-    return () => controller.abort();
-  }, [tripData]);
-
   const recommendationRouteUnavailableForRefresh =
     Boolean(recommendation?.airportRouteUnavailable) ||
     Boolean(recommendation?.trafficEstimate?.routeUnavailable);
@@ -5134,6 +6410,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH === 'false') return;
     if (!tripData || !hasRecommendationForRefresh) return;
+    if (shouldDeferQuickGoPaidParkingFollowups({ tripData, searchParams })) return;
     if (!shouldDiscoverParkingForTrip(tripData)) return;
     if (loading || !recommendationsLoadedKeyRef.current) return;
     if (recommendationRouteUnavailableForRefresh) return;
@@ -5161,6 +6438,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       airportCode: isCityDestinationTrip(tripData) ? undefined : getTripAirportCode(tripData),
       origin: tripData.origin,
       destination: tripData.destination,
+      destinationName:
+        tripData.type === 'general-trip' ? tripData.destinationName : undefined,
       destinationKind: tripData.destinationKind ?? 'airport',
       destinationLat: tripData.destinationLat,
       destinationLng: tripData.destinationLng,
@@ -5171,7 +6450,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       checkInAt,
       checkOutAt,
     };
-    const refreshKey = JSON.stringify(body);
+    // Identity of the trip this refresh belongs to. Captured now and re-checked
+    // before merging so a response for a previous destination/date can never be
+    // merged into a newer trip's parking list.
+    const activeParkingIdentityKey = buildParkingTripIdentityKey({ tripData, searchParams });
+    const refreshKey = JSON.stringify({ identity: activeParkingIdentityKey, body });
 
     if (
       liveRefreshInFlightKeyRef.current === refreshKey ||
@@ -5181,7 +6464,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     const controller = new AbortController();
+    let cancelled = false;
     liveRefreshInFlightKeyRef.current = refreshKey;
+
+    const isStaleRefresh = () =>
+      cancelled ||
+      controller.signal.aborted ||
+      parkingTripIdentityKeyRef.current !== activeParkingIdentityKey;
 
     const refresh = async () => {
       try {
@@ -5197,13 +6486,35 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         }
 
         const data = await res.json();
+
+        // Ignore responses that arrived after the active trip changed. Without
+        // this, lots from a previous search (e.g. a downtown "Pier 66 Surface
+        // Lot") could merge into a newer stadium/event destination.
+        if (isStaleRefresh()) {
+          logParkingStateScope('live_refresh_ignored_stale', {
+            refreshIdentity: debugRequestId(activeParkingIdentityKey),
+            activeIdentity: debugRequestId(parkingTripIdentityKeyRef.current),
+            aborted: controller.signal.aborted,
+          });
+          return;
+        }
+
         liveRefreshLoadedKeyRef.current = refreshKey;
 
         if (Array.isArray(data?.parking) && data.parking.length > 0) {
+          const refreshed = data.parking as ParkingOption[];
+
+          logParkingStateScope('live_refresh_merge', {
+            refreshIdentity: debugRequestId(activeParkingIdentityKey),
+            lots: refreshed.length,
+          });
+
           setRecommendation((prev) => {
             if (!prev) return prev;
 
-            const refreshed = data.parking as ParkingOption[];
+            // Final guard against a same-tick trip switch between the check
+            // above and React applying the update.
+            if (isStaleRefresh()) return prev;
 
             return {
               ...prev,
@@ -5226,6 +6537,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     refresh();
 
     return () => {
+      cancelled = true;
       controller.abort();
       if (liveRefreshInFlightKeyRef.current === refreshKey) {
         liveRefreshInFlightKeyRef.current = '';
@@ -5233,6 +6545,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     };
   }, [
     tripData,
+    searchParams,
     loading,
     hasRecommendationForRefresh,
     recommendationRouteUnavailableForRefresh,
@@ -5279,6 +6592,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     if (priceMatchKeyRef.current === priceMatchKey) return;
     priceMatchKeyRef.current = priceMatchKey;
 
+    // Identity of the active trip; re-checked before applying matched prices so
+    // prices for a previous destination/date never leak onto a newer trip.
+    const activeParkingIdentityKey = buildParkingTripIdentityKey({ tripData, searchParams });
+    let cancelled = false;
+    const isStalePriceMatch = () =>
+      cancelled || parkingTripIdentityKeyRef.current !== activeParkingIdentityKey;
+
     setParkingPricesChecking(true);
 
     fetch('/api/parking/prices', {
@@ -5293,6 +6613,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     })
       .then((res) => res.json())
       .then((data) => {
+        if (isStalePriceMatch()) {
+          logParkingStateScope('price_match_ignored_stale', {
+            priceIdentity: debugRequestId(activeParkingIdentityKey),
+            activeIdentity: debugRequestId(parkingTripIdentityKeyRef.current),
+          });
+          return;
+        }
+
         const next: Record<string, {
           price: number;
           priceUnit?: PriceUnit;
@@ -5323,9 +6651,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         console.error('[parking price matches] failed', error);
       })
       .finally(() => {
+        if (isStalePriceMatch()) return;
         setParkingPricesChecking(false);
       });
-  }, [tripData, recommendation?.parking, recommendation?.weatherImpact]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripData, searchParams, recommendation?.parking, recommendation?.weatherImpact]);
 
   const { smartPickParkingOptions, cheapestSmartPickOptions } = useMemo(() => {
     if (!recommendation || !tripData) {
@@ -5444,13 +6777,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const quickGoTripDataFromParams = parseTripDataFromSearchParams(searchParams);
   const quickGoActive = isQuickGoMode(searchParams);
   const quickGoRouteData = quickGoTripDataFromParams ?? tripData;
-  const quickGoRouteRequestKeyForRender = quickGoRouteData
-    ? JSON.stringify(quickGoRouteData)
+  const quickGoRouteIdentityKeyForRender = quickGoRouteData
+    ? buildRecommendationRouteIdentityKey({
+        tripData: quickGoRouteData,
+        searchParams,
+      })
     : '';
   const effectiveRouteHydrationState =
     quickGoActive &&
-    quickGoRouteRequestKeyForRender &&
-    recommendationsLoadedKey !== quickGoRouteRequestKeyForRender
+    quickGoRouteIdentityKeyForRender &&
+    recommendationsLoadedRouteKey !== quickGoRouteIdentityKeyForRender
       ? 'not_started'
       : routeHydrationState;
   const quickGoNeedsInitialRouteRefresh =
@@ -5499,11 +6835,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   }
 
   if (loading) {
+    const loadingCityParking = Boolean(
+      quickGoTripDataFromParams && isCityDestinationTrip(quickGoTripDataFromParams),
+    );
+    const loaderTitle = loadingCityParking
+      ? 'Finding nearby parking…'
+      : isRecalculating
+        ? 'Finding the best way to go…'
+        : 'Loading options…';
+    const loaderStatusMessages = loadingCityParking
+      ? ['Checking garages, lots, and street rules.']
+      : undefined;
+
     return (
-      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center">
-        <div className="text-lg text-zinc-700">
-          {isRecalculating ? 'Recalculating…' : 'Loading options…'}
-        </div>
+      <div className="airport-page-bg flex flex-1 flex-col items-center justify-center px-4 py-10">
+        <TripRecalculatingLoader
+          title={loaderTitle}
+          statusMessages={loaderStatusMessages}
+        />
       </div>
     );
   }
@@ -5583,14 +6932,24 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
   const transportAvailability = (tripData as TripDataWithExtras).transportAvailability || 'all';
   const businessMode = travelPreferences.businessTravelMode;
-  const tripParkingPreference = (tripData as TripDataWithExtras).parkingPreference;
-  const noParkingPreferred =
-    tripParkingPreference === 'none' ||
-    businessMode === 'expense_rideshare' ||
-    businessMode === 'no_parking';
+  const rawTripParkingPreference = (tripData as TripDataWithExtras).parkingPreference;
+  const tripParkingPreference = rawTripParkingPreference;
+  const hasAppliedTravelPreference =
+    Boolean(rawTripParkingPreference) ||
+    travelPreferences.businessTravelMode !== 'standard';
+  const pointAbEffectivePreference = resolvePointAbEffectivePreference({
+    businessTravelMode: businessMode,
+    tripParkingPreference,
+    showParkingAnyway,
+  });
+  const noParkingPreferred = pointAbEffectivePreference.noParkingPreferred;
+  const parkingVisibilityMode = pointAbEffectivePreference.parkingVisibilityMode;
+  const shouldRenderParkingSections =
+    parkingVisibilityMode !== 'hidden_by_preference';
   const showParkingProviders =
+    shouldRenderParkingSections &&
     ((!noParkingPreferred && businessTravelModeNeedsParking(businessMode)) || showParkingAnyway) &&
-    (transportAvailability === 'car' || transportAvailability === 'all');
+    (transportAvailability === 'car' || transportAvailability === 'all' || showParkingAnyway);
   const showRideProviders =
     noParkingPreferred ||
     transportAvailability === 'car' ||
@@ -5750,7 +7109,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     return [...available, ...unavailable];
   })();
-  const visibleSmartPickOption = parkingDisplayOptions[0] || smartPickOption || null;
+  const enrichedParkingDisplayOptions = parkingDisplayOptions.map(
+    (option) => normalizeParkingReviewSummary(googleEnrichedParking[option.id] || option),
+  );
+  const visibleSmartPickOption =
+    enrichedParkingDisplayOptions[0] ||
+    (smartPickOption ? googleEnrichedParking[smartPickOption.id] || smartPickOption : null);
   const cityTripBestParking = isCityTrip && visibleSmartPickOption
     ? googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
     : null;
@@ -5761,11 +7125,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           sort,
           destinationLabel: cityDestinationText || tripData.destination,
           noParkingPreferred,
-          smartPickOption,
-          parkingDisplayOptions,
+          smartPickOption: visibleSmartPickOption,
+          parkingDisplayOptions: enrichedParkingDisplayOptions,
           sortedOptions,
           recommendation,
           driveMinutes: recommendation.trafficEstimate?.duration ?? null,
+          scoreBreakdowns: recommendation.optionScoreBreakdowns ?? null,
         })
       : null;
   const cityTripParkingOutlook =
@@ -5780,6 +7145,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           durationMinutes: tripData.parkingDuration ?? undefined,
         })
       : null;
+  const cityTripEventParkingLikely = cityTripParkingOutlook?.headline === 'Event parking likely';
   const cityTripParkRideSelection = (() => {
     if (!isCityTrip || !tripData) return null;
 
@@ -5799,6 +7165,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
       parkingDurationMinutes: calculateParkingDuration(tripData),
       isAirportTrip: false,
       sort,
+      arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+      arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+      transitPayment: tripData.transitPayment,
       parkingTotal,
       weatherRisk: recommendation?.weatherImpact?.riskLevel,
     });
@@ -5810,6 +7179,30 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const cityTripParkRideModeRow = cityTripPointAbRanking?.modes.find(
     (mode) => mode.key === 'park-ride',
   );
+  const cityTripCustomerParkingModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'destination-customer',
+  );
+  const cityTripCustomerParkingIsPrimary =
+    cityTripPointAbRanking?.displayRecommendationMode === 'destination-customer';
+  const cityTripPaidParkingModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'parking',
+  );
+  const cityTripStreetMeterModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'street-meter',
+  );
+  const cityTripRideshareModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'rideshare',
+  );
+  const cityTripTransitModeRow = cityTripPointAbRanking?.modes.find(
+    (mode) => mode.key === 'transit',
+  );
+  const cityTripDestinationRouteUrl =
+    isCityTrip && tripData?.origin && (cityDestinationText || tripData?.destination)
+      ? googleMapsDirectionsLink(
+          tripData.origin,
+          cityDestinationText || tripData.destination,
+        )
+      : null;
   const selectedParkingTimingOption =
     visibleSmartPickOption
       ? googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption
@@ -5852,11 +7245,34 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     recommendation.parkingDataStatus === 'unavailable'
       ? 'border-amber-200 bg-amber-50 text-amber-950'
       : 'border-sky-200 bg-sky-50 text-sky-950';
+  const parkingProviderTimedOut =
+    recommendation.parkingDiscoveryStatus === 'partial_timeout' ||
+    /parking search timed out|parking fetch timed out/i.test(
+      [
+        recommendation.parkingDataMessage,
+        recommendation.parkingDiscoveryMetadata?.message,
+        ...(recommendation.parkingDiscoveryMetadata?.providerErrors || []),
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+  const cityParkingPlanStatus: CityParkingPlanStatus =
+    isRecalculating ||
+    /still updating|refreshing|loading/i.test(recommendation.parkingDataMessage || '')
+      ? 'loading'
+      : recommendation.parkingDataStatus === 'unavailable'
+        ? parkingProviderTimedOut
+          ? 'empty'
+          : 'unavailable'
+        : 'empty';
+  const nearbyParkingSearchUrl = googleMapsSearchLink(
+    `parking near ${isCityTrip ? displayDestination : currentAirport.label}`,
+  );
 
-  const reachableParkingDisplayOptions = parkingDisplayOptions;
+  const reachableParkingDisplayOptions = enrichedParkingDisplayOptions;
 
   const remainingParking = sortRankedParkingCardsForMode({
-    rankedOptions: parkingDisplayOptions
+    rankedOptions: enrichedParkingDisplayOptions
       .filter((parkingOption) => parkingOption.id !== visibleSmartPickOption?.id)
       .map((parkingOption) =>
         rankedParkingCardFromOption({
@@ -5889,10 +7305,63 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     hiddenParkingCount,
   );
   const canShowMoreParking = hiddenParkingCount > 0;
+  const heroRideshareOption = sortedOptions.find((option) => option.type === 'rideshare')
+    ?.option as RideshareOption | undefined;
+  const heroDriveMinutes =
+    recommendation.trafficEstimate &&
+    !recommendation.trafficEstimate.routeUnavailable &&
+    Number.isFinite(recommendation.trafficEstimate.duration)
+      ? recommendation.trafficEstimate.duration
+      : null;
+  const heroPickupWaitMinutes =
+    typeof heroRideshareOption?.pickupWaitMinutes === 'number' &&
+    Number.isFinite(heroRideshareOption.pickupWaitMinutes)
+      ? heroRideshareOption.pickupWaitMinutes
+      : null;
+  const heroRideshareTotalMinutes =
+    typeof heroRideshareOption?.totalOptionMinutes === 'number' &&
+    Number.isFinite(heroRideshareOption.totalOptionMinutes)
+      ? heroRideshareOption.totalOptionMinutes
+      : typeof heroRideshareOption?.duration === 'number' &&
+          Number.isFinite(heroRideshareOption.duration)
+        ? heroRideshareOption.duration
+        : null;
+  const cityTripHeroRecommendation =
+    isCityTrip && cityTripPointAbRanking
+      ? buildPointAbDisplayRecommendation({
+          recommendationMode: cityTripPointAbRanking.recommendationMode,
+          displayRecommendationMode: cityTripPointAbRanking.displayRecommendationMode,
+          recommendedTitle: cityTripPointAbRanking.recommendedTitle,
+          recommendedReason: cityTripPointAbRanking.recommendedReason,
+          bestRideName: heroRideshareOption?.name,
+          noParkingPreferred,
+        })
+      : null;
+  if (isCityTrip && cityTripPointAbRanking) {
+    logPointAbCanonicalFlow({
+      effectivePreference: pointAbEffectivePreference,
+      sort,
+      winners: cityTripPointAbRanking.canonicalWinners,
+      heroMode: cityTripPointAbRanking.recommendationMode,
+      displayMode: cityTripPointAbRanking.displayRecommendationMode,
+    });
+  }
 
   async function handleShowReviews(parking: ParkingOption) {
     const airportCode = getTripAirportCode(tripData);
     const cached = googleEnrichedParking[parking.id];
+
+    trackEvent('google_reviews_opened', {
+      accessToken,
+      eventProperties: {
+        airportCode: airportCode || undefined,
+        tripType: tripData?.type ?? undefined,
+        provider: parking.bookingProvider || parking.sourceName || undefined,
+        lotId: parking.id || parking.providerLotId || undefined,
+        lotName: parking.name || undefined,
+        sourcePage: 'results',
+      },
+    });
 
     if (cached?.googleReviews?.length) {
       setReviewsParking(cached);
@@ -5900,6 +7369,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
 
     setReviewsParking(cached || parking);
+  }
+
+  function handleNewTripClick() {
+    trackEvent('new_trip_clicked', {
+      accessToken,
+      eventProperties: {
+        airportCode: getTripAirportCode(tripData) || undefined,
+        tripType: tripData?.type ?? undefined,
+        sourcePage: 'results',
+      },
+    });
   }
 
   return (
@@ -5927,8 +7407,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? 'Route unavailable from this origin'
                   : noViableFlyingOut
                     ? 'No reliable option gets you airport-ready on time'
-                    : isCityTrip && cityTripPointAbRanking
-                      ? cityTripPointAbRanking.recommendedTitle
+                    : isCityTrip && cityTripHeroRecommendation
+                      ? cityTripHeroRecommendation.title
                     : intent === 'flying-out' && tripData.type === 'one-way-departure' && primaryLeaveByTime
                       ? `You should leave at ${formatTimeFriendly(primaryLeaveByTime)}`
                       : recommendation.leaveByTime
@@ -5936,13 +7416,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         : 'Your best options'}
               </h1>
 
-              {isCityTrip && cityTripPointAbRanking ? (
+              {isCityTrip && cityTripHeroRecommendation ? (
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  {cityTripPointAbRanking.recommendedReason}
+                  {cityTripHeroRecommendation.reason}
                 </p>
               ) : null}
 
-              {isCityTrip && cityTripPointAbRanking && cityTripParkingOutlook ? (
+              {shouldRenderParkingSections && isCityTrip && cityTripPointAbRanking && cityTripParkingOutlook ? (
                 <PointAbHeroSummary
                   className="mt-4"
                   ranking={cityTripPointAbRanking}
@@ -5959,47 +7439,93 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 />
               ) : null}
 
-              {primaryAirportPlan.basisText ? (
+              {isCityTrip ? (
+                <div className="mt-4 rounded-2xl border border-border bg-card/80 p-4 shadow-sm">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {routeEstimateHeroLabel()}
+                  </div>
+                  <div className="mt-1 text-2xl font-bold text-foreground">
+                    {heroDriveMinutes !== null ? formatMinutes(heroDriveMinutes) : 'Couldn’t confirm'}
+                  </div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {heroDriveMinutes !== null ? (
+                      <>
+                        Origin to destination
+                        {isBackupRouteEstimate(recommendation.trafficEstimate) ||
+                        isStraightLineRouteEstimate(recommendation.trafficEstimate)
+                          ? ' · fallback estimate'
+                          : ''}
+                      </>
+                    ) : (
+                      'Drive time unavailable'
+                    )}
+                  </div>
+
+                  {noParkingPreferred ? (
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                      <div className="rounded-xl border border-border bg-muted/40 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Drive route
+                        </div>
+                        <div className="mt-1 font-semibold text-foreground">
+                          {heroDriveMinutes !== null
+                            ? formatMinutes(heroDriveMinutes)
+                            : 'Couldn’t confirm'}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-muted/40 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Pickup wait
+                        </div>
+                        <div className="mt-1 font-semibold text-foreground">
+                          {heroPickupWaitMinutes !== null
+                            ? `~${formatMinutes(heroPickupWaitMinutes)} est.`
+                            : 'Check app'}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-muted/40 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Total rideshare time
+                        </div>
+                        <div className="mt-1 font-semibold text-foreground">
+                          {heroRideshareTotalMinutes !== null
+                            ? formatMinutes(heroRideshareTotalMinutes)
+                            : 'Open app'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!isCityTrip && primaryAirportPlan.basisText ? (
                 <p className="mt-2 text-sm font-medium text-foreground">
                   {primaryAirportPlan.basisText}
                 </p>
               ) : null}
 
-              {primaryAirportPlan.parkingCheckInTiming ? (
+              {!isCityTrip && primaryAirportPlan.parkingCheckInTiming ? (
                 <div className="mt-3">
                   <ParkingCheckInTimingBanner message={primaryAirportPlan.parkingCheckInTiming} />
                 </div>
-              ) : primaryAirportPlan.warningText ? (
+              ) : !isCityTrip && primaryAirportPlan.warningText ? (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   {primaryAirportPlan.warningText}
                 </div>
               ) : null}
 
-              {airportRouteUnavailable && (
+              {airportRouteUnavailable && !isCityTrip && (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-foreground">
                   <div className="font-semibold">
-                    {isCityTrip
-                      ? recommendation.trafficEstimate?.duration
-                        ? 'Routing is degraded for this result.'
-                        : 'Drive timing could not be confirmed for this result.'
-                      : 'We could not calculate a real route from your starting location to this destination.'}
+                    We could not calculate a real route from your starting location to this destination.
                   </div>
                   <div className="mt-1">
-                    {isCityTrip
-                      ? recommendation.trafficEstimate?.duration
-                        ? 'Showing an estimated drive time. Open directions to confirm live traffic.'
-                        : 'Parking and provider options are still shown. Open directions to verify drive time.'
-                      : `Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
+                    {`Try an origin near ${displayDestination}, rideshare/taxi, or another transportation option.`}
                   </div>
-                  {airportRouteUnavailableReason && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {airportRouteUnavailableReason}
-                    </div>
-                  )}
                 </div>
               )}
 
-              {noViableFlyingOut && bestTooLateSummary?.bestLatestSafeLeave && bestTooLateSummary?.bestArrival && (
+              {!isCityTrip && noViableFlyingOut && bestTooLateSummary?.bestLatestSafeLeave && bestTooLateSummary?.bestArrival && (
                 <div className="mt-2 text-sm text-muted-foreground">
                   Best available attempt leaves at {formatTimeFriendly(bestTooLateSummary.bestLatestSafeLeave)} and reaches terminal around {formatTimeFriendly(bestTooLateSummary.recommendedBy || bestTooLateSummary.bestArrival)}.
                 </div>
@@ -6021,7 +7547,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 )}
 
               <p className="mt-2 text-sm text-muted-foreground">
-                {isCityTrip
+                {!shouldRenderParkingSections
+                  ? isCityTrip
+                    ? 'Route timing analyzed; parking sections are hidden by preference.'
+                    : 'Route timing and non-parking options analyzed; parking sections are hidden by preference.'
+                  : isCityTrip
                   ? airportRouteUnavailable
                     ? 'Route timing is unavailable; destination parking options may still be useful.'
                     : usesLiveGoogleRoute
@@ -6034,14 +7564,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     : 'Estimated route timing + airport timing + parking pricing analyzed'}
               </p>
 
-              {aprLiveChecking && parkingPricesChecking && (
+              {shouldRenderParkingSections && aprLiveChecking && parkingPricesChecking && (
                 <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
                   Updating provider parking prices…
                 </div>
               )}
 
-              {aprLivePartial && !aprLiveChecking && (
+              {shouldRenderParkingSections && aprLivePartial && !aprLiveChecking && (
                 <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 px-3 py-2 text-sm text-foreground">
                   Some provider prices could not be refreshed. Confirm final parking rates before booking.
                 </div>
@@ -6058,18 +7588,20 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             {/* Right: supporting context */}
             <div className="space-y-3 lg:border-l lg:border-border lg:pl-5">
-              {isCityTrip && tripData ? (
-                <DestinationParkingSummary
-                  destination={cityDestinationText}
-                  origin={tripData.origin}
-                  destinationKind={tripData.destinationKind}
-                  airportCode={(tripData as TripDataWithExtras).airportCode}
-                  googleParkingOptions={cityTripBestParking?.googleParkingOptions ?? null}
-                  arrivalDate={tripData.type === 'general-trip' ? tripData.arrivalDate : undefined}
-                  arrivalTime={tripData.type === 'general-trip' ? tripData.arrivalTime : undefined}
-                  durationMinutes={tripData.parkingDuration ?? undefined}
-                  onCheckNearbyParking={scrollToParkingOptions}
-                />
+              {isCityTrip ? (
+                shouldRenderParkingSections && tripData ? (
+                  <DestinationParkingSummary
+                    destination={cityDestinationText}
+                    origin={tripData.origin}
+                    destinationKind={tripData.destinationKind}
+                    airportCode={(tripData as TripDataWithExtras).airportCode}
+                    googleParkingOptions={cityTripBestParking?.googleParkingOptions ?? null}
+                    arrivalDate={tripData.type === 'general-trip' ? tripData.arrivalDate : undefined}
+                    arrivalTime={tripData.type === 'general-trip' ? tripData.arrivalTime : undefined}
+                    durationMinutes={tripData.parkingDuration ?? undefined}
+                    onCheckNearbyParking={scrollToParkingOptions}
+                  />
+                ) : null
               ) : (
                 <>
                   <AirportTripCard
@@ -6081,10 +7613,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         : primaryLeaveByTime
                     }
                     parkingPickName={
-                      primaryAirportPlan.selectedParkingName ||
-                      (smartPickOption
-                        ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
-                        : null)
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.selectedParkingName ||
+                          (smartPickOption
+                            ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
+                            : null)
+                        : null
                     }
                     bagPlan={
                       airportCompanionCard?.bagPlan ??
@@ -6097,27 +7631,37 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       'checkingBags' in tripData ? !!tripData.checkingBags : false
                     }
                     transportMode={
-                      primaryAirportPlan.selectedParkingName
+                      shouldRenderParkingSections && primaryAirportPlan.selectedParkingName
                         ? 'parking'
-                        : airportCompanionCard?.transportMode ?? null
+                        : shouldRenderParkingSections ||
+                          airportCompanionCard?.transportMode !== 'parking'
+                          ? airportCompanionCard?.transportMode ?? null
+                          : null
                     }
                     transportModeLabel={
-                      primaryAirportPlan.selectedParkingName
+                      shouldRenderParkingSections && primaryAirportPlan.selectedParkingName
                         ? 'Parking'
-                        : airportCompanionCard?.transportModeLabel ?? null
+                        : shouldRenderParkingSections ||
+                          airportCompanionCard?.transportMode !== 'parking'
+                          ? airportCompanionCard?.transportModeLabel ?? null
+                          : null
                     }
                     travelMinutes={
                       primaryAirportPlan.travelMinutes ?? airportCompanionCard?.travelMinutes ?? null
                     }
                     parkingBufferMinutes={
-                      primaryAirportPlan.parkingBufferMinutes ??
-                      airportCompanionCard?.parkingBufferMinutes ??
-                      null
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.parkingBufferMinutes ??
+                          airportCompanionCard?.parkingBufferMinutes ??
+                          null
+                        : null
                     }
                     shuttleWalkMinutes={
-                      primaryAirportPlan.shuttleWalkMinutes ??
-                      airportCompanionCard?.shuttleWalkMinutes ??
-                      null
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.shuttleWalkMinutes ??
+                          airportCompanionCard?.shuttleWalkMinutes ??
+                          null
+                        : null
                     }
                     parkingCheckInTime={primaryAirportPlan.parkingCheckInTime}
                     departureTime={
@@ -6125,52 +7669,58 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     }
                     airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
                     bookingUrl={
-                      selectedParkingTimingOption?.sourceLink ??
-                      airportCompanionCard?.bookingUrl ??
-                      null
+                      shouldRenderParkingSections
+                        ? selectedParkingTimingOption?.sourceLink ??
+                          airportCompanionCard?.bookingUrl ??
+                          null
+                        : null
                     }
                     directionsUrl={
-                      selectedParkingRouteLinks?.routeToParkingUrl ||
-                      selectedParkingTimingOption?.mapLink ||
-                      airportCompanionCard?.directionsUrl ||
-                      null
+                      shouldRenderParkingSections
+                        ? selectedParkingRouteLinks?.routeToParkingUrl ||
+                          selectedParkingTimingOption?.mapLink ||
+                          airportCompanionCard?.directionsUrl ||
+                          null
+                        : airportCompanionCard?.directionsUrl || null
                     }
                     returnDate={airportCompanionCard?.returnDate ?? null}
                     intent={intent}
                     tripData={tripData}
                   />
-                  <details className="group rounded-2xl border border-border bg-muted/40">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
-                      Route lookahead
-                      <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
-                        ▾
-                      </span>
-                    </summary>
-                    <div className="border-t border-border px-3 py-3">
-                      <RouteLookaheadPanel
-                        origin={tripData.origin}
-                        destination={
-                          currentAirport.routingAddress ||
-                          currentAirport.destinationName ||
-                          currentAirport.label
-                        }
-                        destinationLatLng={currentAirport.geoLocation}
-                        airportCode={currentAirportCode}
-                        departureDate={
-                          tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                            ? tripData.departureDate
-                            : null
-                        }
-                        departureTime={
-                          tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
-                            ? tripData.departureTime
-                            : null
-                        }
-                        airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                        disabled={airportRouteUnavailable || !tripData.origin?.trim()}
-                      />
-                    </div>
-                  </details>
+                  {showInternalDebug ? (
+                    <details className="group rounded-2xl border border-border bg-muted/40">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
+                        Route lookahead
+                        <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
+                          ▾
+                        </span>
+                      </summary>
+                      <div className="border-t border-border px-3 py-3">
+                        <RouteLookaheadPanel
+                          origin={tripData.origin}
+                          destination={
+                            currentAirport.routingAddress ||
+                            currentAirport.destinationName ||
+                            currentAirport.label
+                          }
+                          destinationLatLng={currentAirport.geoLocation}
+                          airportCode={currentAirportCode}
+                          departureDate={
+                            tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                              ? tripData.departureDate
+                              : null
+                          }
+                          departureTime={
+                            tripData.type === 'one-way-departure' || tripData.type === 'round-trip'
+                              ? tripData.departureTime
+                              : null
+                          }
+                          airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                          disabled={airportRouteUnavailable || !tripData.origin?.trim()}
+                        />
+                      </div>
+                    </details>
+                  ) : null}
                 </>
               )}
               {(recommendation.weatherImpact || recommendation.weatherContext || seasonalClimateGuidance) && (
@@ -6193,7 +7743,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     {recommendation.weatherImpact ? (
                       <>
                         <span className={`font-medium ${weatherTone}`}>
-                          {weatherSectionTitle(recommendation.weatherContext)}
+                          {weatherSectionTitle(recommendation.weatherContext, {
+                            destinationLabel: weatherDestinationLabel,
+                            isCityTrip,
+                          })}
                         </span>
                         <span className="text-xs text-zinc-500">
                           {recommendation.weatherImpact.summary}
@@ -6202,6 +7755,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                             : ''}
                           {' · '}
                           {weatherRiskText(recommendation.weatherImpact)}
+                        </span>
+                        <span className="mt-1 text-xs text-zinc-500">
+                          Forecast from weather.gov / National Weather Service
                         </span>
                       </>
                     ) : seasonalClimateGuidance ? (
@@ -6219,63 +7775,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     ) : (
                       <>
                         <span className="font-medium text-zinc-900">
-                          {weatherSectionTitle(recommendation.weatherContext)}
+                          {weatherSectionTitle(recommendation.weatherContext, {
+                            destinationLabel: weatherDestinationLabel,
+                            isCityTrip,
+                          })}
                         </span>
                         <span className="text-xs text-zinc-500">
-                          {weatherSectionDetail(recommendation.weatherContext)}
+                          {weatherSectionDetail(
+                            recommendation.weatherContext,
+                            recommendation.weatherUnavailableReason,
+                          )}
                         </span>
                       </>
                     )}
-                  </div>
-                </div>
-              )}
-
-              {parkingWeather.length > 0 && (
-                <div className="rounded-2xl border border-sky-100 bg-white p-3">
-                  <div className="text-xs font-semibold uppercase text-zinc-500">
-                    Weather for your travel dates
-                  </div>
-
-                  <div className="mt-3 grid gap-2">
-                    {parkingWeather.map((item) => (
-                      <div
-                        key={item.key}
-                        className={`rounded-xl border px-3 py-2 text-sm ${item.weatherImpact
-                          ? weatherRiskClass(item.weatherImpact)
-                          : 'border-zinc-200 bg-zinc-50 text-zinc-700'
-                          }`}
-                      >
-                        <div className="font-semibold">
-                          {item.label}: {formatWeatherDateLabel(item.date)}
-                        </div>
-
-                        {item.weatherImpact ? (
-                          <div className="mt-1 text-xs leading-5">
-                            {item.weatherImpact.summary}
-                            {typeof item.weatherImpact.temperatureF === 'number'
-                              ? ` · ${item.weatherImpact.temperatureF}°F`
-                              : ''}
-                            {' · '}
-                            {weatherRiskText(item.weatherImpact)}
-                          </div>
-                        ) : (
-                          <div className="mt-1 text-xs">
-                            {item.context === 'forecast-unavailable'
-                              ? (() => {
-                                  const guidance = getSeasonalClimateGuidance({
-                                    airportCode: currentAirportCode || 'SEA',
-                                    targetDate: item.date,
-                                  });
-                                  if (!guidance) {
-                                    return weatherSectionDetail(item.context);
-                                  }
-                                  return `${guidance.historicalLabel} · ${seasonalClimateSummary(guidance)} · ${guidance.disclaimer}`;
-                                })()
-                              : weatherSectionDetail(item.context)}
-                          </div>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </div>
               )}
@@ -6311,6 +7823,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 {tripData ? (
                   <SaveAccountTripButton tripData={tripData} intent={intent} />
                 ) : null}
+                <BetaFeedbackButton
+                  tripData={tripData}
+                  parking={selectedParkingTimingOption || visibleSmartPickOption}
+                  accessToken={accessToken}
+                />
                 <button
                   type="button"
                   onClick={() => {
@@ -6335,6 +7852,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </button>
                 <Link
                   href="/trip"
+                  onClick={handleNewTripClick}
                   className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   New trip
@@ -6374,6 +7892,16 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           )}
         </div>
 
+        {recommendation.driveRouteOptions &&
+          recommendation.driveRouteOptions.length > 0 && (
+            <div className="mt-3">
+              <DriveRouteOptionsSection
+                options={recommendation.driveRouteOptions}
+                prefs={recommendation.driveRoutePreferences}
+              />
+            </div>
+          )}
+
         {/* APR Loading / Warning States */}
         {/* {aprLiveChecking && (
           <div className="sticky top-3 z-40 mt-6 rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-950 shadow-lg">
@@ -6404,7 +7932,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               (tripData.type === 'one-way-departure' || tripData.type === 'round-trip') &&
               parkingDurationMinutes >= 18 * 60;
 
-            const bestParking = smartPickOption || parkingDisplayOptions[0] || null;
+            const bestParking = visibleSmartPickOption || smartPickOption || parkingDisplayOptions[0] || null;
 
             const tripParkingContext = resolveTripParkingContext(tripData);
 
@@ -6423,14 +7951,21 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const bestRide = sortedOptions.find((o) => o.type === 'rideshare') || null;
             const bestRideOption = bestRide?.option as RideshareOption | undefined;
-
-            const ridePrice =
+            const ridesharePriceUnavailable =
+              bestRideOption?.priceDisplay === 'check-live' ||
+              bestRideOption?.rideshareEstimateConfidence === 'unavailable';
+            const ridePriceCandidate =
               typeof bestRide?.cost === 'number' && bestRide.cost < 999999
                 ? bestRide.cost
                 : bestRideOption?.price ?? null;
 
+            const ridePrice = ridesharePriceUnavailable ? null : ridePriceCandidate;
+
             const rideDuration =
-              typeof bestRide?.duration === 'number' && bestRide.duration < 999999
+              typeof bestRideOption?.totalOptionMinutes === 'number' &&
+              Number.isFinite(bestRideOption.totalOptionMinutes)
+                ? bestRideOption.totalOptionMinutes
+                : typeof bestRide?.duration === 'number' && bestRide.duration < 999999
                 ? bestRide.duration
                 : bestRideOption?.duration ?? null;
 
@@ -6448,9 +7983,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               transitDuration !== null;
 
             const transitCost =
-              bestTransitOption && tripData && hasReliableTransit
+              bestTransitOption &&
+              tripData &&
+              hasReliableTransit &&
+              isTransitFareKnown(bestTransitOption)
                 ? getTransitTripTotalCost(bestTransitOption, tripData)
-                : typeof bestTransit?.cost === 'number' && bestTransit.cost < 999999
+                : typeof bestTransit?.cost === 'number' &&
+                    bestTransit.cost < 999999 &&
+                    (!bestTransitOption || isTransitFareKnown(bestTransitOption))
                   ? bestTransit.cost
                   : null;
 
@@ -6474,13 +8014,22 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   parkingDurationMinutes: parkingDurationMinutes,
                   isAirportTrip: false,
                   sort,
+                  arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+                  arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+                  transitPayment: tripData.transitPayment,
                   parkingTotal,
                   weatherRisk: recommendation.weatherImpact?.riskLevel,
                 })
               : null;
             const pointAbParkRide = isCityTrip
               ? toPointAbParkRidePresentation(
-                  pointAbParkRideSelection ?? { best: null, candidates: [] },
+                  pointAbParkRideSelection ?? {
+                    best: null,
+                    candidates: [],
+                    metroStatus: 'data_not_available',
+                    availabilityTier: 'data_not_available',
+                    cardHeadline: 'Park & Ride data unavailable',
+                  },
                 )
               : null;
 
@@ -6493,7 +8042,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               ? pointAbParkRide?.durationMinutes ?? null
               : bestParkRideAccess?.timing.terminalReadyMinutes ?? null;
             const parkRideReliable = isCityTrip
-              ? Boolean(pointAbParkRide?.recommended)
+              ? Boolean(pointAbParkRide?.reliable)
               : Boolean(bestParkRideAccess) &&
                 bestParkRideAccess?.recommendedForTrip !== false &&
                 !isOvernightTrip;
@@ -6512,35 +8061,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               : null;
 
             const pointAbRanking = isCityTrip
-              ? rankPointAbModes({
-                  tripData,
-                  sort,
-                  destinationLabel: cityDestinationText || tripData.destination,
-                  noParkingPreferred,
-                  bestParking,
-                  parkingTotal,
-                  parkingMinutes: parkingBreakdown?.totalMinutes ?? null,
-                  bestRideOption: bestRideOption ?? null,
-                  ridePrice,
-                  rideDuration,
-                  bestTransitOption: bestTransitOption ?? null,
-                  transitCost,
-                  transitDuration,
-                  transitCostDisplay: transitCostDisplay?.primary ?? null,
-                  hasReliableTransit,
-                  bestParkRideAccess,
-                  pointAbParkRide,
-                  parkRideCost,
-                  parkRideDuration,
-                  parkRideReliable,
-                  streetMeterParking,
-                  driveMinutes: recommendation.trafficEstimate?.duration ?? null,
-                })
+              ? cityTripPointAbRanking
               : null;
 
             const cheapestMode = (() => {
               const candidates = [
-                parkingTotal !== null && bestParking
+                parkingTotal !== null && bestParking && shouldRenderParkingSections
                   ? { key: 'parking', label: 'Parking', cost: parkingTotal }
                   : null,
                 ridePrice !== null && bestRide
@@ -6549,7 +8075,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 transitCost !== null && hasReliableTransit
                   ? { key: 'transit', label: 'Transit', cost: transitCost }
                   : null,
-                parkRideCost !== null && parkRideReliable
+                parkRideCost !== null && parkRideReliable && shouldRenderParkingSections
                   ? { key: 'park-ride', label: 'Park & Ride', cost: parkRideCost }
                   : null,
               ].filter(Boolean) as Array<{ key: string; label: string; cost: number }>;
@@ -6559,7 +8085,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             const fastestMode = (() => {
               const candidates = [
-                parkingBreakdown?.totalMinutes && bestParking
+                parkingBreakdown?.totalMinutes && bestParking && shouldRenderParkingSections
                   ? { key: 'parking', label: 'Parking', minutes: parkingBreakdown.totalMinutes }
                   : null,
                 rideDuration !== null && bestRide
@@ -6568,7 +8094,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 transitDuration !== null && hasReliableTransit
                   ? { key: 'transit', label: 'Transit', minutes: transitDuration }
                   : null,
-                parkRideDuration !== null && parkRideReliable
+                parkRideDuration !== null && parkRideReliable && shouldRenderParkingSections
                   ? { key: 'park-ride', label: 'Park & Ride', minutes: parkRideDuration }
                   : null,
               ].filter(Boolean) as Array<{ key: string; label: string; minutes: number }>;
@@ -6653,7 +8179,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               if (isOvernightTrip && mode.key === 'parking') score += 8;
               if (isOvernightTrip && mode.key === 'park-ride') score -= 120;
 
-              if (noParkingPreferred) {
+              if (!shouldRenderParkingSections) {
                 if (mode.key === 'rideshare') score += 180;
                 if (mode.key === 'parking') score -= 180;
                 if (mode.key === 'transit' && businessMode === 'no_parking') score += 18;
@@ -6712,14 +8238,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   )
                 : null;
 
-            const modeRows = pointAbRanking
-              ? pointAbRanking.modes.map((mode) => ({
+            const modeRows = (pointAbRanking
+              ? pointAbRanking.modes
+                .filter((mode) => shouldRenderParkingSections || !isParkingUiRowKey(mode.key))
+                .map((mode) => ({
                   key: mode.key,
                   label: mode.label,
                   name: mode.name,
                   cost: mode.cost,
                   costNote: mode.costNote,
+                  detailNote: mode.detailNote,
                   time: mode.time,
+                  timeLabel: mode.timeLabel,
+                  timing: mode.timing,
                   confidence: mode.confidence,
                   pros: mode.pros,
                   cons: mode.cons,
@@ -6737,6 +8268,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                             ? 'Verify rules'
                             : mode.status === 'route_needed'
                               ? 'Live route needed'
+                              : mode.status === 'not_recommended'
+                                ? 'Not recommended'
                               : mode.status === 'unavailable'
                                 ? 'Unavailable'
                                 : 'Good backup',
@@ -6754,6 +8287,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 time: parkingBreakdown?.totalMinutes
                   ? formatMinutes(parkingBreakdown.totalMinutes)
                   : 'Check route',
+                timeLabel: 'Total time',
                 confidence: bestParking ? (bestParking.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
                 pros: bestParking
                   ? [
@@ -6776,7 +8310,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ].filter(Boolean)
                   : ['Open map or provider to verify'],
                 verdict: bestParking
-                  ? noParkingPreferred
+                  ? !shouldRenderParkingSections
                     ? 'Hidden by preference'
                     : recommendationMode === 'parking'
                     ? 'Best pick'
@@ -6789,6 +8323,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 name: bestRideOption?.name || 'Uber / Lyft',
                 cost: ridePrice !== null ? `$${Math.round(ridePrice)}` : 'Open app for live price',
                 time: rideDuration !== null ? formatMinutes(rideDuration) : 'Open app',
+                timeLabel: 'Total time',
                 confidence: bestRide ? (bestRideOption?.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
                 pros: ['No parking required', 'Lowest walking burden'],
                 cons: [
@@ -6809,6 +8344,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? transitCostDisplay.primary
                   : 'Check route',
                 time: transitDuration !== null && hasReliableTransit ? formatMinutes(transitDuration) : 'Check route',
+                timeLabel: 'Total time',
                 confidence: hasReliableTransit ? 'Medium' : 'Low',
                 pros: ['Usually low cost', 'Avoids parking search'],
                 cons: [
@@ -6839,6 +8375,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   : isOvernightTrip
                     ? 'Varies by mode'
                     : 'Depends',
+                timeLabel: 'Total time',
                 confidence: bestParkRideAccess
                   ? bestParkRideAccess.confidenceScore >= 70
                     ? 'High'
@@ -6862,7 +8399,99 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     : 'Verify rules',
                 unavailable: !bestParkRideAccess || bestParkRideAccess.recommendedForTrip === false || isOvernightTrip,
               },
-            ];
+            ]).filter((row) => shouldRenderParkingSections || !isParkingUiRowKey(row.key));
+            const visibleModeKeys = new Set(modeRows.map((row) => row.key));
+
+            const parkingRecommendationHidden =
+              !shouldRenderParkingSections &&
+              isParkingUiRowKey(String(recommendationMode));
+
+            const effectiveRecommendationMode =
+              isCityTrip && pointAbRanking
+                ? pointAbRanking.displayRecommendationMode
+                : parkingRecommendationHidden
+                  ? modeRows.find((row) => row.key === 'rideshare')?.key ??
+                    modeRows.find((row) => row.key === 'transit')?.key ??
+                    recommendationMode
+                  : recommendationMode;
+
+            const quickReadCheapestCandidate = pointAbRanking?.cheapestMode ?? cheapestMode;
+            const quickReadFastestCandidate = pointAbRanking?.fastestMode ?? fastestMode;
+            const quickReadCheapestMode =
+              quickReadCheapestCandidate && visibleModeKeys.has(quickReadCheapestCandidate.key)
+                ? quickReadCheapestCandidate
+                : null;
+            const quickReadFastestMode =
+              quickReadFastestCandidate && visibleModeKeys.has(quickReadFastestCandidate.key)
+                ? quickReadFastestCandidate
+                : null;
+            const selectedModeRow = modeRows.find((row) => row.key === effectiveRecommendationMode);
+            const quickReadSelectedMode = selectedModeRow
+              ? {
+                  key: selectedModeRow.key,
+                  label: selectedModeRow.label,
+                  cost:
+                    quickReadCheapestMode?.key === selectedModeRow.key
+                      ? quickReadCheapestMode.cost
+                      : undefined,
+                  minutes:
+                    quickReadFastestMode?.key === selectedModeRow.key
+                      ? quickReadFastestMode.minutes
+                      : 'timing' in selectedModeRow
+                        ? selectedModeRow.timing?.totalOptionMinutes ?? undefined
+                        : undefined,
+                }
+              : null;
+
+            const quickReadReliableAlternative =
+              pointAbRanking?.cheapestReliableAlternative &&
+              visibleModeKeys.has(pointAbRanking.cheapestReliableAlternative.key)
+                ? pointAbRanking.cheapestReliableAlternative
+                : null;
+            const quickReadMessage = buildPointAbQuickReadMessage({
+              parkingHidden: !shouldRenderParkingSections,
+              sort,
+              selected: quickReadSelectedMode,
+              cheapest: quickReadCheapestMode,
+              fastest: quickReadFastestMode,
+              transitCostDisplay,
+              cheapestUncertainStreetMeter:
+                pointAbRanking?.cheapestStreetMeterUncertain ?? false,
+              reliableAlternative: quickReadReliableAlternative,
+              formatMinutes,
+            });
+
+            const displayRecommendationCopy =
+              isCityTrip && pointAbRanking
+                ? buildPointAbDisplayRecommendation({
+                    recommendationMode: pointAbRanking.recommendationMode,
+                    displayRecommendationMode: pointAbRanking.displayRecommendationMode,
+                    recommendedTitle,
+                    recommendedReason,
+                    bestRideName: bestRideOption?.name,
+                    noParkingPreferred,
+                  })
+                : null;
+
+            const displayRecommendedTitle = displayRecommendationCopy
+              ? displayRecommendationCopy.title
+              : parkingRecommendationHidden
+                ? effectiveRecommendationMode === 'rideshare'
+                  ? `Take ${bestRideOption?.name || 'rideshare'}`
+                  : effectiveRecommendationMode === 'transit'
+                    ? 'Take transit'
+                    : 'Compare rideshare, transit, or directions'
+                : recommendedTitle;
+
+            const displayRecommendedReason = displayRecommendationCopy
+              ? displayRecommendationCopy.reason
+              : parkingRecommendationHidden
+                ? effectiveRecommendationMode === 'rideshare'
+                  ? 'Best fit because you marked that parking is not needed for this trip.'
+                  : effectiveRecommendationMode === 'transit'
+                    ? 'Best fit if cost matters most and your schedule has enough buffer.'
+                    : 'Parking is hidden for this trip. Compare rideshare, transit, or open directions.'
+                : recommendedReason;
 
             const scrollToBestSection = (target: string) => {
               const el = document.getElementById(target);
@@ -6872,10 +8501,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             };
 
             const cardActionFor = (key: string) => {
+              if (key === 'destination-customer') {
+                return {
+                  label: 'View parking outlook',
+                  onClick: () => scrollToBestSection(POINT_AB_DETAILS_SECTION_IDS['destination-customer']),
+                };
+              }
+
+              if (key === 'drive') {
+                return {
+                  label: 'View drive details',
+                  onClick: () => scrollToBestSection(POINT_AB_DETAILS_SECTION_IDS.drive),
+                };
+              }
+
               if (key === 'parking') {
                 return {
                   label: 'View parking details',
-                  onClick: () => scrollToBestSection('parking-options-section'),
+                  onClick: () =>
+                    scrollToBestSection(
+                      isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section',
+                    ),
                 };
               }
 
@@ -6932,10 +8578,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       Smart recommendation
                     </div>
                     <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-foreground">
-                      {recommendedTitle}
+                      {displayRecommendedTitle}
                     </h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                      {recommendedReason}
+                      {displayRecommendedReason}
                     </p>
                   </div>
 
@@ -6948,7 +8594,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         ? formatTimeFriendly(primaryLeaveByTime)
                         : 'Check timing'}
                     </div>
-                    {primaryAirportPlan.basisText ? (
+                    {!isCityTrip && primaryAirportPlan.basisText ? (
                       <div className="mt-1 text-xs text-muted-foreground">
                         {primaryAirportPlan.basisText}
                       </div>
@@ -6956,23 +8602,70 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   </div>
                 </div>
 
-                <div className={`mt-4 grid grid-cols-1 gap-3 ${isCityTrip && (pointAbRanking?.modes.some((m) => m.key === 'street-meter') ? 'lg:grid-cols-5' : 'lg:grid-cols-4')} lg:items-stretch`}>
+                <div className={`mt-4 grid grid-cols-1 gap-3 ${isCityTrip ? (pointAbRanking?.modes.length ?? 0) >= 6 ? 'lg:grid-cols-6' : (pointAbRanking?.modes.length ?? 0) >= 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4' : ''} lg:items-stretch`}>
                   {modeRows.map((row) => {
-                    const selected = row.key === recommendationMode;
+                    const rowHidden =
+                      ('hiddenByPreference' in row && row.hiddenByPreference) ||
+                      (parkingVisibilityMode === 'hidden_by_preference' &&
+                        isParkingUiRowKey(row.key));
+                    const selected = !rowHidden && row.key === effectiveRecommendationMode;
                     const action = cardActionFor(row.key);
                     const cardClassName =
                       'relative rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
-                      (row.unavailable
-                        ? 'border-border bg-muted/60 opacity-80'
-                        : selected
-                          ? 'border-primary/50 bg-primary/10'
-                          : 'border-border bg-card');
+                      (rowHidden
+                        ? 'border-border bg-muted/60 opacity-75'
+                        : row.unavailable
+                          ? 'border-border bg-muted/60 opacity-80'
+                          : selected
+                            ? 'border-primary/50 bg-primary/10'
+                            : 'border-border bg-card');
+                    const visibleCheapestKey =
+                      quickReadCheapestMode?.key ??
+                      (!shouldRenderParkingSections ? null : pointAbRanking?.cheapestMode?.key ?? cheapestMode?.key);
+                    const visibleFastestKey =
+                      quickReadFastestMode?.key ??
+                      (!shouldRenderParkingSections ? null : pointAbRanking?.fastestMode?.key ?? fastestMode?.key);
 
                     if (isCityTrip) {
-                      const modeActions = buildPointAbModeActions({
-                        mode: row.key as 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride',
+                      const timingBreakdownLabels =
+                        row.key === 'drive'
+                          ? {
+                              drive: 'Drive route',
+                              total: 'Drive time',
+                            }
+                          : row.key === 'parking'
+                          ? {
+                              drive: 'Drive to lot',
+                              parkingBuffer: 'Park/check-in buffer',
+                              walk: 'Walk to destination',
+                              total: 'Total to destination',
+                            }
+                          : row.key === 'rideshare'
+                            ? {
+                                drive: 'Drive route',
+                                pickupWait: 'Pickup wait',
+                                total: 'Total rideshare time',
+                              }
+                            : row.key === 'destination-customer' || row.key === 'street-meter'
+                              ? {
+                                  drive: 'Drive route',
+                                  parkingBuffer:
+                                    row.key === 'street-meter'
+                                      ? 'Find/check parking'
+                                      : 'Access/verify buffer',
+                                  walk: 'Walk to destination',
+                                  total: 'Total to destination',
+                                  totalFirst: row.key === 'street-meter',
+                                }
+                              : undefined;
+                      const modeActions = rowHidden
+                        ? undefined
+                        : buildPointAbModeActions({
+                        mode: row.key as 'drive' | 'destination-customer' | 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride',
                         routeToParkingUrl:
-                          row.key === 'parking'
+                          row.key === 'drive'
+                            ? cityDestinationRouteUrl
+                            : row.key === 'parking'
                             ? bestParking?.mapLink ||
                               (tripData.origin && bestParking?.address
                                 ? googleMapsDirectionsLink(tripData.origin, bestParking.address)
@@ -7001,7 +8694,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         parkRideDirectionsUrl: pointAbParkRide?.directionsToLotUrl || null,
                         parkRideTransitUrl: pointAbParkRide?.transitRouteUrl || null,
                         parkRideTransitPlannerUrl: pointAbParkRide?.transitPlannerUrl || null,
-                        parkRideViable: pointAbParkRide?.recommended ?? false,
+                        parkRideViable: pointAbParkRide?.reliable ?? false,
                         onDetails: () => openPointAbModeDetails(row.key as PointAbModeKey),
                         detailsSectionId: POINT_AB_DETAILS_SECTION_IDS[row.key as PointAbModeKey],
                         detailsExpanded: expandedModeDetails === row.key,
@@ -7014,23 +8707,26 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           label={row.label}
                           name={row.name}
                           cost={row.cost}
-                          costNote={'costNote' in row ? row.costNote : undefined}
+                          costNote={row.key === 'destination-customer' ? undefined : 'costNote' in row ? row.costNote : undefined}
                           time={row.time}
+                          timeLabel={'timeLabel' in row ? row.timeLabel : undefined}
+                          timing={'timing' in row ? row.timing : undefined}
+                          timingBreakdownLabels={timingBreakdownLabels}
                           pros={row.pros}
                           cons={row.cons}
+                          reason={row.key === 'destination-customer' ? 'Verify signs before parking.' : undefined}
                           status={'status' in row ? row.status : undefined}
                           verdict={row.verdict}
                           unavailable={row.unavailable}
-                          hiddenByPreference={
-                            'hiddenByPreference' in row ? row.hiddenByPreference : false
+                          hiddenByPreference={rowHidden}
+                          onShowParkingAnyway={
+                            rowHidden && !showParkingAnyway
+                              ? () => setShowParkingAnyway(true)
+                              : undefined
                           }
                           sort={sort}
-                          isCheapestMode={
-                            (pointAbRanking?.cheapestMode?.key ?? cheapestMode?.key) === row.key
-                          }
-                          isFastestMode={
-                            (pointAbRanking?.fastestMode?.key ?? fastestMode?.key) === row.key
-                          }
+                          isCheapestMode={visibleCheapestKey === row.key}
+                          isFastestMode={visibleFastestKey === row.key}
                           selected={selected}
                           actions={modeActions}
                         />
@@ -7041,16 +8737,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       <>
                         <div className="absolute right-3 top-3">
                           <RecommendationStatusBadge
-                            status={'status' in row ? row.status : undefined}
-                            verdict={row.verdict}
+                            status={
+                              rowHidden
+                                ? 'hidden_by_preference'
+                                : 'status' in row
+                                  ? row.status
+                                  : undefined
+                            }
+                            verdict={rowHidden ? 'Hidden by preference' : row.verdict}
                             unavailable={row.unavailable}
                             sort={sort}
-                            isCheapestMode={
-                              (pointAbRanking?.cheapestMode?.key ?? cheapestMode?.key) === row.key
-                            }
-                            isFastestMode={
-                              (pointAbRanking?.fastestMode?.key ?? fastestMode?.key) === row.key
-                            }
+                            isCheapestMode={!rowHidden && visibleCheapestKey === row.key}
+                            isFastestMode={!rowHidden && visibleFastestKey === row.key}
                           />
                         </div>
 
@@ -7058,7 +8756,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           {row.confidence} confidence
                         </div>
 
-                        <div className="mt-3 text-sm font-bold text-foreground">
+                        <div
+                          className={`mt-3 text-sm font-bold ${rowHidden ? 'text-muted-foreground' : 'text-foreground'}`}
+                        >
                           {row.label}
                         </div>
 
@@ -7066,9 +8766,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           {row.name}
                         </div>
 
-                        {'hiddenByPreference' in row && row.hiddenByPreference ? (
-                          <div className="mt-2 text-xs leading-5 text-violet-800 dark:text-violet-200">
-                            Drive is cheaper, but hidden because you said no parking.
+                        {rowHidden ? (
+                          <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                            Hidden by your No parking needed preference.
                           </div>
                         ) : null}
 
@@ -7079,11 +8779,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                               {row.cost}
                             </div>
                             {'costNote' in row && row.costNote ? (
-                              <div className="mt-1 text-[11px] text-muted-foreground">{row.costNote}</div>
+                              <div className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">
+                                {row.costNote}
+                              </div>
                             ) : null}
                           </div>
                           <div className="rounded-xl border border-border bg-card/80 p-2">
-                            <div className="text-muted-foreground">Time</div>
+                            <div className="text-muted-foreground">
+                              {'timeLabel' in row && row.timeLabel ? row.timeLabel : 'Time'}
+                            </div>
                             <div className="mt-0.5 font-semibold text-foreground">
                               {row.time}
                             </div>
@@ -7101,11 +8805,31 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           </div>
                         </div>
 
-                        <div className="mt-3 inline-flex text-xs font-semibold text-primary">
-                          {action.label}
-                        </div>
+                        {rowHidden && !showParkingAnyway ? (
+                          <div className="mt-3 space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowParkingAnyway(true)}
+                              className="inline-flex w-full min-h-10 items-center justify-center rounded-2xl border border-border bg-card px-3 text-sm font-semibold text-foreground hover:bg-muted/80"
+                            >
+                              Show parking anyway
+                            </button>
+                          </div>
+                        ) : rowHidden ? null : (
+                          <div className="mt-3 inline-flex text-xs font-semibold text-primary">
+                            {action.label}
+                          </div>
+                        )}
                       </>
                     );
+
+                    if (rowHidden) {
+                      return (
+                        <div key={row.key} className={cardClassName}>
+                          {cardBody}
+                        </div>
+                      );
+                    }
 
                     return (
                       <button
@@ -7161,23 +8885,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         </div>
                       )}
                     </div>
-                  ) : cheapestMode && fastestMode ? (
-                    <>
-                      <span className="font-semibold text-foreground">Quick read:</span>{' '}
-                      Cheapest is {cheapestMode.label}{' '}
-                      {cheapestMode.key === 'transit' && transitCostDisplay
-                        ? `at ${transitCostDisplay.primary}`
-                        : `around $${Math.round(cheapestMode.cost)}`}
-                      {cheapestMode.key === 'transit' && transitCostDisplay?.secondary
-                        ? ` (${transitCostDisplay.secondary})`
-                        : ''}
-                      .
-                      Fastest is {fastestMode.label} around {formatMinutes(fastestMode.minutes)}.
-                    </>
                   ) : (
                     <>
                       <span className="font-semibold text-foreground">Quick read:</span>{' '}
-                      Some live route or price data is missing, so confirm final pricing before booking.
+                      {quickReadMessage}
                     </>
                   )}
                 </div>
@@ -7193,7 +8904,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-zinc-900">Edit trip details</h2>
-                  <p className="mt-1 text-sm text-zinc-600">Adjust your timing or origin. We’ll recalculate instantly.</p>
+                  <p className="mt-1 text-sm text-zinc-600">Adjust your timing, origin, or destination. We’ll recalculate instantly.</p>
                 </div>
                 <button
                   type="button"
@@ -7214,21 +8925,14 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       : 'border-zinc-200')
                   }
                 >
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-semibold text-zinc-950">Edit trip</h2>
-                      <p className="mt-1 text-sm text-zinc-600">
-                        Update your trip details and recalculate recommendations.
-                      </p>
-                    </div>
-                  </div>
-
                   <EditTripForm
                     initialData={editingData}
                     isSubmitting={isRecalculating || loading}
                     onSubmit={(data) => {
                       recommendationsLoadedKeyRef.current = '';
+                      recommendationsLoadedRouteKeyRef.current = '';
                       setRecommendationsLoadedKey('');
+                      setRecommendationsLoadedRouteKey('');
                       setFetchError(null);
                       setIsRecalculating(true);
                       setLoading(true);
@@ -7267,7 +8971,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           />
         ) : null}
 
-        {isPodPaiGoDebugUIEnabled() &&
+        {showInternalDebug &&
         getTripAirportCode(tripData) === 'SEA' &&
         !recommendation.accessStrategies?.options?.some((option) => option.isHiddenGem) ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
@@ -7280,38 +8984,58 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </div>
         ) : null}
 
-        <details className="group mt-6 rounded-2xl border border-border bg-card/80 shadow-sm">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
-            Travel preferences and filters
-            <span className="text-xs text-muted-foreground transition group-open:rotate-180" aria-hidden>
-              ▾
-            </span>
-          </summary>
-          <div className="border-t border-border p-3">
-            <TravelPreferencesPanel
-              value={travelPreferences}
-              onChange={setTravelPreferences}
-              embedded
-            />
-          </div>
-        </details>
+        {showInternalDebug && isCityTrip && cityTripPointAbRanking ? (
+          <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
+            <summary className="cursor-pointer font-semibold">Point A-B canonical flow</summary>
+            <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-50">
+              {JSON.stringify(
+                {
+                  effectivePreference: pointAbEffectivePreference,
+                  sort,
+                  heroMode: cityTripPointAbRanking.recommendationMode,
+                  displayMode: cityTripPointAbRanking.displayRecommendationMode,
+                  easiestWinner: cityTripPointAbRanking.canonicalWinners.easiestWinner,
+                  cheapestWinner: cityTripPointAbRanking.canonicalWinners.cheapestWinner?.key ?? null,
+                  fastestWinner: cityTripPointAbRanking.canonicalWinners.fastestWinner?.key ?? null,
+                  bestOverallWinner: cityTripPointAbRanking.canonicalWinners.bestOverallWinner,
+                  visibleOptionKeys: cityTripPointAbRanking.canonicalWinners.visibleOptionKeys,
+                  hiddenOptionKeys: cityTripPointAbRanking.canonicalWinners.hiddenOptionKeys,
+                },
+                null,
+                2,
+              )}
+            </pre>
+          </details>
+        ) : null}
 
-        {noParkingPreferred ? (
+        {showInternalDebug && isCityTrip && recommendation.optionScoreBreakdowns?.length ? (
+          <details className="mt-4 rounded-xl border border-zinc-200 bg-white p-3 text-xs text-zinc-800">
+            <summary className="cursor-pointer font-semibold">Point A-B score breakdown</summary>
+            <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-50">
+              {JSON.stringify(recommendation.optionScoreBreakdowns, null, 2)}
+            </pre>
+          </details>
+        ) : null}
+
+        {hasAppliedTravelPreference && (noParkingPreferred || showParkingAnyway) ? (
           <section className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/80 p-4 text-sm text-blue-950 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="text-base font-semibold">
-                  No parking needed / rideshare strategy
+                  {showParkingAnyway
+                    ? 'Parking is visible for comparison.'
+                    : 'No parking needed / rideshare strategy'}
                 </div>
                 <p className="mt-1 leading-6">
-                  Parking cards are hidden because this trip is marked as rideshare/no-parking.
-                  Use ride providers or transit links below, and open directions to confirm timing.
+                  {showParkingAnyway
+                    ? 'Parking options are visible for comparison. Ride providers, transit, and directions remain available.'
+                    : 'Parking is hidden. Use ride providers, transit, or directions for this trip.'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowParkingAnyway((current) => !current)}
-                className="inline-flex shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100"
+                className="inline-flex shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100 sm:self-start"
               >
                 {showParkingAnyway ? 'Hide parking again' : 'Show parking anyway'}
               </button>
@@ -7319,31 +9043,90 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </section>
         ) : null}
 
+        {shouldRenderParkingSections ? (
+          <div className="mt-6 rounded-2xl border border-border bg-card/80 p-3 shadow-sm">
+            <TravelPreferencesPanel
+              value={travelPreferences}
+              onChange={setTravelPreferences}
+              embedded
+              hideBusinessModeOptions
+            />
+          </div>
+        ) : null}
+
+        {shouldRenderParkingSections && isCityTrip && cityTripCustomerParkingIsPrimary ? (
+          <CustomerParkingDetailsSection
+            row={cityTripCustomerParkingModeRow}
+            directionsUrl={cityTripDestinationRouteUrl}
+            streetMeterRow={cityTripStreetMeterModeRow}
+            eventParkingLikely={cityTripEventParkingLikely}
+          />
+        ) : null}
+
         {
-          showParkingProviders && shouldDiscoverParkingForTrip(tripData) && parkingEmptyStateMessage && parkingDisplayOptions.length === 0 && !routeUnavailableBlocksParking && (
-            <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
-              {parkingEmptyStateMessage}
-            </div>
+          shouldRenderParkingSections &&
+          showParkingProviders &&
+          shouldDiscoverParkingForTrip(tripData) &&
+          (isCityTrip ? cityParkingPlanStatus === 'loading' || parkingEmptyStateMessage : parkingEmptyStateMessage) &&
+          parkingDisplayOptions.length === 0 &&
+          !routeUnavailableBlocksParking && (
+            isCityTrip ? (
+              <CityParkingStatusPlanSection
+                status={cityParkingPlanStatus}
+                directionsUrl={cityTripDestinationRouteUrl}
+                nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+              />
+            ) : (
+              <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
+                <div>{parkingEmptyStateMessage}</div>
+                <a
+                  href={nearbyParkingSearchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                >
+                  Search nearby parking
+                </a>
+              </div>
+            )
           )
         }
 
         {
-          showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
+          shouldRenderParkingSections && showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
             <div
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section'}
-              className={`mt-6 scroll-mt-6${isCityTrip ? ' scroll-target' : ''}`}
+              className={`mt-6 scroll-mt-24${isCityTrip ? ' scroll-target' : ''}`}
             >
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <h2
-                  className="text-xl font-bold"
-                  data-details-heading={isCityTrip ? true : undefined}
-                  tabIndex={isCityTrip ? -1 : undefined}
-                >
-                  {allParkingRoutesUnavailable
-                    ? `Parking options near ${isCityTrip ? displayDestination : currentAirport.id}`
-                    : 'Parking options'}
-                </h2>
-              </div>
+              {!isCityTrip ? (
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="text-xl font-bold">
+                    {allParkingRoutesUnavailable
+                      ? `Parking options near ${currentAirport.id}`
+                      : 'Parking options'}
+                  </h2>
+                </div>
+              ) : null}
+
+              {isCityTrip && !cityTripCustomerParkingIsPrimary ? (
+                <div className="mb-4">
+                  <PaidParkingPlanCard
+                    row={cityTripPaidParkingModeRow}
+                    parkingOption={selectedParkingTimingOption}
+                    routeToParkingUrl={
+                      selectedParkingRouteLinks?.routeToParkingUrl ||
+                      selectedParkingTimingOption?.mapLink ||
+                      (tripData?.origin && selectedParkingTimingOption?.address
+                        ? googleMapsDirectionsLink(tripData.origin, selectedParkingTimingOption.address)
+                        : cityTripDestinationRouteUrl)
+                    }
+                    directionsUrl={cityTripDestinationRouteUrl}
+                    nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+                    streetMeterRow={cityTripStreetMeterModeRow}
+                    eventParkingLikely={cityTripEventParkingLikely}
+                  />
+                </div>
+              ) : null}
 
               {recommendation.parkingDiscoveryNotice ? (
                 <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">
@@ -7359,23 +9142,28 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
               {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
                 <>
-                  <ParkingPhotoReviewListTrace
-                    stage="final_parking_option_array"
-                    options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
-                    stageNote="ResultsContent final parking option array before Smart Pick"
-                  />
-                  <ParkingPhotoReviewHandoffTrace
-                    stage="parking_smart_pick_handoff"
-                    option={googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption}
-                    stageNote="ResultsContent final selected parking object passed into ParkingSmartPick"
-                  />
+                  {showInternalDebug ? (
+                    <>
+                      <ParkingResultDiagnostics options={enrichedParkingDisplayOptions} />
+                      <ParkingPhotoReviewListTrace
+                        stage="final_parking_option_array"
+                        options={enrichedParkingDisplayOptions}
+                        stageNote="ResultsContent final parking option array before Smart Pick"
+                      />
+                      <ParkingPhotoReviewHandoffTrace
+                        stage="parking_smart_pick_handoff"
+                        option={googleEnrichedParking[visibleSmartPickOption.id] || visibleSmartPickOption}
+                        stageNote="ResultsContent final selected parking object passed into ParkingSmartPick"
+                      />
+                    </>
+                  ) : null}
                   <ParkingSmartPick
-                    options={parkingDisplayOptions.map((p) => googleEnrichedParking[p.id] || p)}
+                    options={enrichedParkingDisplayOptions}
                     tripData={tripData}
                     sortMode="best"
                     listSortMode={sort}
                     leaveByTime={primaryLeaveByTime}
-                    leaveByReason={primaryAirportPlan.basisText}
+                    leaveByReason={isCityTrip ? undefined : primaryAirportPlan.basisText}
                     selectedOption={
                       selectedParkingTimingOption || visibleSmartPickOption
                     }
@@ -7385,6 +9173,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     weatherContext={recommendation?.weatherContext}
                     onShowReviews={handleShowReviews}
                     googleEnrichedParking={googleEnrichedParking}
+                    showInternalDebug={showInternalDebug}
                   />
                 </>
               )}
@@ -7472,7 +9261,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                             : null
                         }
                         destinationLabel={isCityTrip ? displayDestination : null}
-                        parkingOptions={parkingDisplayOptions}
+                        parkingOptions={enrichedParkingDisplayOptions}
                         selectedParkingId={selectedParkingId}
                         onSelectParking={setSelectedParkingId}
                       />
@@ -7654,6 +9443,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                 <Link
                   href="/trip"
+                  onClick={handleNewTripClick}
                   className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
                 >
                   Start new trip
@@ -7674,7 +9464,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </div>
           ) : (
             <>
-              {displayableRemainingParking.length > 0 && !routeUnavailableBlocksParking && (
+              {shouldRenderParkingSections && displayableRemainingParking.length > 0 && !routeUnavailableBlocksParking && (
                 <section id="more-parking-options-section" className="mt-8 scroll-mt-6">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
@@ -7745,6 +9535,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                           parkingPeerOptions={displayedParking.map(
                             (entry) => entry.option as ParkingOption,
                           )}
+                          showInternalDebug={showInternalDebug}
                         />
                       );
                       })}
@@ -7753,7 +9544,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </section>
               )}
 
-              {routeUnavailableBlocksParking && (
+              {shouldRenderParkingSections && routeUnavailableBlocksParking && (
                 <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
                   <h2 className="text-lg font-semibold text-amber-950">
                     Parking options are unavailable from this origin
@@ -7803,6 +9594,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         googleEnrichedParking={googleEnrichedParking}
                         accessToken={accessToken}
                         tripId={searchParams.get('tripId')}
+                        showInternalDebug={showInternalDebug}
                       />
                     ))}
                   </div>
@@ -7841,12 +9633,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         </div>
 
         {/* Pricing links */}
-        {!routeUnavailableBlocksParking &&
+        {(showRideProviders || transitOptions.length > 0 || extraTransitProviders.length > 0) &&
           <div id="provider-links-section" className="mt-8 grid scroll-mt-6 grid-cols-1 items-start gap-4 lg:grid-cols-2">
             {showRideProviders && (
               <section
                 id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.rideshare : undefined}
-                className={isCityTrip ? 'scroll-target' : undefined}
+                className={isCityTrip ? 'scroll-mt-24 scroll-target' : undefined}
               >
                 <ProviderDropdownSection
                   title="Ride providers"
@@ -7857,13 +9649,25 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     (isCityTrip && expandedModeDetails === 'rideshare')
                   }
                   detailsHeading={isCityTrip}
+                  footerContent={
+                    isCityTrip ? (
+                      <PointAbModeDetailSummary
+                        row={cityTripRideshareModeRow}
+                        timingLabels={{
+                          drive: 'Drive route',
+                          pickupWait: 'Pickup wait',
+                          total: 'Total rideshare time',
+                        }}
+                      />
+                    ) : undefined
+                  }
                 />
               </section>
             )}
 
             <section
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.transit : undefined}
-              className={isCityTrip ? 'scroll-target' : undefined}
+              className={isCityTrip ? 'scroll-mt-24 scroll-target' : undefined}
             >
               <ProviderDropdownSection
                 title="Transit options"
@@ -7877,39 +9681,62 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 tripData={tripData}
                 detailsHeading={isCityTrip}
                 footerContent={
-                  !isCityTrip ? (
-                    <TransitParkAndRideCards
-                      isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
-                      options={
-                        recommendation.accessStrategies?.options?.filter(
-                          (option) =>
-                            option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
-                        ) ?? []
-                      }
-                    />
-                  ) : undefined
+                  <>
+                    {isCityTrip ? (
+                      <PointAbModeDetailSummary
+                        row={cityTripTransitModeRow}
+                        timingLabels={{ total: 'Total transit time' }}
+                      />
+                    ) : null}
+                    {shouldRenderParkingSections && !isCityTrip ? (
+                      <TransitParkAndRideCards
+                        isOvernightTrip={isOvernightAirportParkingTrip(tripData)}
+                        options={
+                          recommendation.accessStrategies?.options?.filter(
+                            (option) =>
+                              option.strategyType === 'park_and_ride_transit' && !option.isHiddenGem,
+                          ) ?? []
+                        }
+                      />
+                    ) : null}
+                  </>
                 }
               />
             </section>
 
-            <ParkingReviewsModal
-              parking={reviewsParking}
-              open={!!reviewsParking}
-              onClose={() => setReviewsParking(null)}
-              airportCode={getTripAirportCode(tripData)}
-              onResolvedParking={(parking) => {
-                if (reviewsParking) {
-                  mergeGooglePlaceResultIntoParking(reviewsParking, parking);
-                }
-              }}
-            />
+            {shouldRenderParkingSections ? (
+              <ParkingReviewsModal
+                parking={reviewsParking}
+                open={!!reviewsParking}
+                onClose={() => setReviewsParking(null)}
+                airportCode={getTripAirportCode(tripData)}
+                onResolvedParking={(parking) => {
+                  if (reviewsParking) {
+                    mergeGooglePlaceResultIntoParking(reviewsParking, parking);
+                  }
+                }}
+                onGoogleMapsReviewsClick={(parking) => {
+                  trackEvent('google_maps_reviews_clicked', {
+                    accessToken,
+                    eventProperties: {
+                      airportCode: getTripAirportCode(tripData) || undefined,
+                      tripType: tripData?.type ?? undefined,
+                      provider: parking.bookingProvider || parking.sourceName || undefined,
+                      lotId: parking.id || parking.providerLotId || undefined,
+                      lotName: parking.name || undefined,
+                      sourcePage: 'results',
+                    },
+                  });
+                }}
+              />
+            ) : null}
           </div>
         }
 
-        {isCityTrip ? (
+        {shouldRenderParkingSections && isCityTrip ? (
           <section
             id={POINT_AB_DETAILS_SECTION_IDS['park-ride']}
-            className="scroll-target mt-8 rounded-2xl border border-border bg-card shadow-sm"
+            className="scroll-mt-24 scroll-target mt-8 rounded-2xl border border-border bg-card shadow-sm"
           >
             <details
               className="group"
@@ -7938,8 +9765,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   <ParkAndRideDetailsPanel details={cityTripParkRide.details} />
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    {cityTripParkRide?.unavailableReason ||
-                      'No viable Park & Ride lot was found for this trip.'}
+                    {cityTripParkRide?.cardHeadline ||
+                      cityTripParkRide?.unavailableReason ||
+                      'Park & Ride data not available yet for this metro.'}
                   </p>
                 )}
 
@@ -7960,13 +9788,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </section>
         ) : null}
 
-        <div className="mt-10 flex justify-center">
-          <Link
-            href="/trip"
-            className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-          >
-            Plan another trip
-          </Link>
+        <div className="mt-10 space-y-6">
+          <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-muted-foreground">
+            {DATA_TRANSPARENCY_DISCLOSURE}
+          </p>
+          <div className="flex justify-center">
+            <Link
+              href="/trip"
+              onClick={handleNewTripClick}
+              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Plan another trip
+            </Link>
+          </div>
         </div>
       </main>
       {tripData && recommendation ? (
@@ -8022,6 +9856,8 @@ export function EditTripForm({
   isSubmitting?: boolean;
 }) {
   const [origin, setOrigin] = useState(initialData.origin);
+  const initialDestinationText = initialData.destinationName || initialData.destination;
+  const [destinationInput, setDestinationInput] = useState(initialDestinationText);
   const [selectedAirportCode, setSelectedAirportCode] = useState(
     ((airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA')).toUpperCase()
   );
@@ -8031,6 +9867,10 @@ export function EditTripForm({
       (airportCode || (initialData as TripDataWithExtras).airportCode || 'SEA').toUpperCase()
     );
   }, [airportCode, initialData]);
+
+  useEffect(() => {
+    setDestinationInput(initialData.destinationName || initialData.destination);
+  }, [initialData]);
 
   const [transportAvailability, setTransportAvailability] = useState<TransportAvailability>(
     initialData.transportAvailability || 'all'
@@ -8203,6 +10043,9 @@ export function EditTripForm({
     const now = new Date();
 
     if (!origin.trim()) next.push('Origin is required.');
+    if (isGeneralTripEdit && !destinationInput.trim()) {
+      next.push('Destination is required.');
+    }
 
     const validateCombinedDateTime = (dateString: string, timeString: string, label: string) => {
       if (!dateString) {
@@ -8329,7 +10172,7 @@ export function EditTripForm({
       ? null
       : getAirportById(selectedAirportCode) || getAirportById('SEA')!;
     const destination = isGeneralTripEdit
-      ? initialData.destination
+      ? destinationInput.trim()
       : selectedAirport!.routingAddress || selectedAirport!.destinationName;
 
     const normalizedDepartureDate = normalizeEditableDateInputValue(departureDate) || departureDate;
@@ -8341,6 +10184,21 @@ export function EditTripForm({
       parkingCheckInDate ? normalizeEditableDateInputValue(parkingCheckInDate) || parkingCheckInDate : '';
     const normalizedParkingCheckOutDate =
       parkingCheckOutDate ? normalizeEditableDateInputValue(parkingCheckOutDate) || parkingCheckOutDate : '';
+
+    const normalizedEditedOrigin = origin.trim().toLowerCase();
+    const normalizedInitialOrigin = initialData.origin.trim().toLowerCase();
+    const normalizedInitialOriginLabel = (initialData.originName || '').trim().toLowerCase();
+    const originMatchesInitialSelection =
+      normalizedEditedOrigin === normalizedInitialOrigin ||
+      (Boolean(normalizedInitialOriginLabel) &&
+        normalizedEditedOrigin === normalizedInitialOriginLabel);
+    const normalizedEditedDestination = destination.trim().toLowerCase();
+    const normalizedInitialDestination = initialData.destination.trim().toLowerCase();
+    const normalizedInitialDestinationLabel = (initialData.destinationName || '').trim().toLowerCase();
+    const destinationMatchesInitialSelection =
+      normalizedEditedDestination === normalizedInitialDestination ||
+      (Boolean(normalizedInitialDestinationLabel) &&
+        normalizedEditedDestination === normalizedInitialDestinationLabel);
 
     let data: TripData;
 
@@ -8362,11 +10220,20 @@ export function EditTripForm({
       data = {
         type: 'general-trip',
         origin,
+        originName: originMatchesInitialSelection ? initialData.originName : undefined,
+        originLat: originMatchesInitialSelection ? initialData.originLat : undefined,
+        originLng: originMatchesInitialSelection ? initialData.originLng : undefined,
+        originPlaceId: originMatchesInitialSelection ? initialData.originPlaceId : undefined,
         destination,
         destinationKind: initialData.destinationKind || 'general',
-        destinationName: initialData.destinationName || destination,
-        destinationLat: initialData.destinationLat,
-        destinationLng: initialData.destinationLng,
+        destinationName: destinationMatchesInitialSelection
+          ? initialData.destinationName || destination
+          : destination,
+        destinationLat: destinationMatchesInitialSelection ? initialData.destinationLat : undefined,
+        destinationLng: destinationMatchesInitialSelection ? initialData.destinationLng : undefined,
+        ...(destinationMatchesInitialSelection && (initialData as TripDataWithExtras).destinationPlaceId
+          ? { destinationPlaceId: (initialData as TripDataWithExtras).destinationPlaceId }
+          : {}),
         tripMode: initialData.tripMode,
         arrivalDate: normalizedArrivalDate,
         arrivalTime,
@@ -8707,6 +10574,17 @@ export function EditTripForm({
             placeholder="Start typing your address"
           />
         </div>
+
+        {isGeneralTripEdit ? (
+          <div className="sm:col-span-2">
+            <AddressInput
+              label="Destination"
+              value={destinationInput}
+              onChange={setDestinationInput}
+              placeholder="Start typing the destination"
+            />
+          </div>
+        ) : null}
 
         {isGeneralTripEdit && (
           <>

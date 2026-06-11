@@ -131,6 +131,71 @@ export function shouldAttemptGooglePlaceMatch(args: {
   return parkingSignal;
 }
 
+const MARKETPLACE_STABLE_ID_PROVIDERS = [
+  'parkwhiz',
+  'spothero',
+  'waypark',
+  'way',
+  'airportparkingreservations',
+  'apr',
+];
+
+const UUID_V4_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+function isUnstableIdToken(token: string): boolean {
+  // A bare UUID, or a long random hex/base blob, is request-specific and unstable.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(token)) return true;
+  return false;
+}
+
+/**
+ * Derive a stable lot identity token from a parking lot id, dropping
+ * request-specific / UUID-like suffixes so the Google Places cache key is the
+ * same for the same lot across requests.
+ *
+ * Examples:
+ *  - "65141"                                            -> "65141" (numeric DB id)
+ *  - "destination-parkwhiz-parkwhiz-65141-<optionId>"   -> "parkwhiz-65141"
+ *  - "<uuid>"                                           -> "" (no stable identity)
+ */
+export function deriveStableParkingLotIdToken(
+  parkingLotId: string | number | null | undefined,
+): string {
+  const raw = String(parkingLotId ?? '').trim();
+  if (!raw) return '';
+
+  // Clean numeric DB ids are already stable.
+  if (/^\d+$/.test(raw)) return raw;
+
+  const lower = raw.toLowerCase();
+
+  // Marketplace synthetic ids embed a stable provider location id followed by a
+  // request-specific option/quote id (e.g. destination-parkwhiz-parkwhiz-65141-<optionId>).
+  // Keep "<provider>-<locationId>" and drop the request-specific suffix.
+  const marketplaceMatch = lower.match(
+    new RegExp(`(${MARKETPLACE_STABLE_ID_PROVIDERS.join('|')})-(\\d{2,})`),
+  );
+  if (marketplaceMatch) {
+    return `${marketplaceMatch[1]}-${marketplaceMatch[2]}`;
+  }
+
+  // Strip embedded UUIDs / long random hex blobs that change per request.
+  const stripped = lower
+    .replace(UUID_V4_RE, '')
+    .replace(/[-_:][0-9a-f]{16,}(?=$|[-_:])/g, '')
+    .replace(/[-_:]{2,}/g, '-')
+    .replace(/^[-_:]+|[-_:]+$/g, '');
+
+  if (!stripped || isUnstableIdToken(stripped)) return '';
+
+  // Only keep a lot-specific token when a stable numeric identifier remains, so
+  // distinct lots are never collapsed onto a provider-only key.
+  if (!/\d{2,}/.test(stripped)) return '';
+
+  return stripped;
+}
+
 export function buildParkingGoogleCacheKey(args: {
   airportCode?: string | null;
   parkingLotId?: string | number | null;
@@ -140,7 +205,10 @@ export function buildParkingGoogleCacheKey(args: {
   const airportCode = String(args.airportCode || 'UNKNOWN').toUpperCase();
   const namePart = `name:${normalizeParkingLotName(args.lotName) || cleanText(args.lotName)}`;
   const addressPart = args.lotAddress ? `addr:${normalizeAddress(args.lotAddress)}` : '';
-  const lotIdPart = args.parkingLotId ? `id:${String(args.parkingLotId)}` : '';
+  // Prefer a stable provider/DB lot id; never include unstable UUID/request-specific
+  // ids, which previously fragmented the cache key for the same lot every request.
+  const stableLotId = deriveStableParkingLotIdToken(args.parkingLotId);
+  const lotIdPart = stableLotId ? `id:${stableLotId}` : '';
 
   return [airportCode, namePart, addressPart, lotIdPart].filter(Boolean).join('|');
 }

@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import type { ParsedTripAssistantResult } from '../../lib/ai/tripParseTypes';
 import { resolveTripPlannerStatusLabel, shouldShowDevMockProviderNote } from '../../lib/ai/tripPlanningAssistantLabel';
 import {
+  buildMultiIntentTurn,
   buildTripPlanningTurn,
   getNextMissingField,
   getTripPlanningPlaceholder,
@@ -16,6 +17,8 @@ import {
   type TripPlanningQuickReply,
   type TripPlanningTurn,
 } from '../../lib/ai/tripPlanningConversation';
+import { tripIntentToCard } from '../../lib/ai/tripIntents';
+import type { TripIntent } from '../../lib/ai/tripIntentTypes';
 import { getRecentOrigins } from '../../lib/trip/quickGo';
 import { parsedTripToSearchParams } from '../../lib/ai/parsedTripToSearchParams';
 import { buildResultsPathFromSearchParams } from '../../lib/trip/searchParams';
@@ -45,6 +48,9 @@ type ParseTripApiResponse = ParsedTripAssistantResult & {
   providerUsed?: 'mock' | 'openai';
   assistantLabel?: string;
   requiresConfirmation?: boolean;
+  intents?: TripIntent[];
+  originalText?: string;
+  primaryIntentId?: string | null;
 };
 
 export default function TripAssistantPanel({ className = '' }: TripAssistantPanelProps) {
@@ -67,6 +73,8 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     originText: ParsedTripAssistantResult['originText'];
     originSource: ParsedTripAssistantResult['originSource'];
   } | null>(null);
+  const [extractedIntents, setExtractedIntents] = useState<TripIntent[]>([]);
+  const [suggestedOrigin, setSuggestedOrigin] = useState<string | null>(null);
   const [parseTurns, setParseTurns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,8 +94,9 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     return buildTripPlanningTurn(rawParsed, locationContext, {
       originInputMode,
       originInputReason,
+      suggestedOrigin,
     });
-  }, [rawParsed, locationContext, originInputMode, originInputReason]);
+  }, [rawParsed, locationContext, originInputMode, originInputReason, suggestedOrigin]);
 
   const inputPlaceholder = useMemo(() => {
     if (!planningTurn) {
@@ -232,6 +241,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     const turn = buildTripPlanningTurn(processed, locationContext, {
       originInputMode: nextOriginInputMode,
       originInputReason: nextOriginInputReason,
+      suggestedOrigin,
     });
 
     setRawParsed(processed);
@@ -256,11 +266,27 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
     return processed;
   };
 
-  const applyParsedResponse = (data: ParsedTripAssistantResult) => {
-    const processed = reprocessParsedTrip(data);
+  const applyMultiIntentResponse = (intents: TripIntent[]) => {
+    setExtractedIntents(intents);
+    setRawParsed(null);
+    setParsed(null);
+    setOriginInputMode(false);
+    setOriginInputReason('default');
+    setEditingField(null);
+    setShowRecentOriginPicker(false);
+
+    const turn = buildMultiIntentTurn(intents.map(tripIntentToCard));
+    lastPlanningTurnRef.current = turn;
+    lastParsedRef.current = null;
+    appendMessage(createTripChatMessage('assistant', turn.acknowledgment, turn));
+  };
+
+  const startSingleIntent = (parsedResult: ParsedTripAssistantResult) => {
+    const processed = reprocessParsedTrip(parsedResult);
     const turn = buildTripPlanningTurn(processed, locationContext, { originInputMode: false });
 
     setRawParsed(processed);
+    setSuggestedOrigin(processed.originText ?? null);
     setOriginInputMode(false);
     setOriginInputReason('default');
     setEditingField(null);
@@ -268,12 +294,29 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     if (turn.status === 'ready_for_review') {
       setParsed(processed);
-      setParseTurns([]);
       appendPlanningTurn(turn, processed, { force: true });
     } else {
       setParsed(null);
       appendPlanningTurn(turn, processed, { force: true });
     }
+  };
+
+  const applyParsedResponse = (data: ParseTripApiResponse) => {
+    if (data.intents && data.intents.length > 1) {
+      applyMultiIntentResponse(data.intents);
+      return;
+    }
+
+    setExtractedIntents([]);
+    startSingleIntent(data);
+  };
+
+  const handleSelectIntent = (intent: TripIntent) => {
+    appendMessage(createTripChatMessage('user', tripIntentToCard(intent).buttonLabel));
+    setExtractedIntents([]);
+    lastPlanningTurnRef.current = null;
+    lastParsedRef.current = null;
+    startSingleIntent(intent.parsed);
   };
 
   const runParse = async (nextTurns: string[]) => {
@@ -375,6 +418,13 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
 
     if (reply.action === 'plan_trip') {
       handleConfirm();
+      return;
+    }
+
+    if (reply.action === 'select_intent') {
+      const intent = extractedIntents.find((item) => item.id === reply.intentId);
+      if (!intent) return;
+      handleSelectIntent(intent);
       return;
     }
 
@@ -541,14 +591,14 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           </div>
           {showInfo ? (
             <div className="mb-2 max-w-md rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground shadow-sm">
-              AI planning is available for signed-in users. Register or sign in to use Ask
-              PodPaiGo and save your trip context.
-              Describe your trip. PodPaiGo will ask one follow-up at a time, then fill the planner for review.
+              Describe your trip and PodPaiGo asks one quick follow-up at a time, then fills in the
+              planner for you to review. Sign in to use it and save your trip context.
             </div>
           ) : null}
           <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Use it for airport trips or quick point A to B plans.
+            Type it like a text — where you&apos;re going, when, and from where. We&apos;ll ask if we
+            need more.
           </p>
         </div>
 
@@ -605,7 +655,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             value={userText}
             onChange={(event) => setUserText(event.target.value)}
             disabled={!signedIn || authLoading || loading}
-            rows={messages.length > 0 ? 2 : 4}
+            rows={messages.length > 0 ? 2 : 3}
             placeholder={inputPlaceholder}
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />

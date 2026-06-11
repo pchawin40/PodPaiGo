@@ -1,28 +1,50 @@
 # PodPaiGo
 
-A smart airport companion for comparing parking, rideshare, transit, timing, and total trip cost — with account support, saved trips, and safe-mode API protection for local development.
+PodPaiGo is a travel decision companion for airport trips, city destinations, events, and point-to-point travel. It compares drive time, parking, transit, rideshare, timing, weather, and cost in one place — with honest labels for live, estimated, cached, and provider-linked data.
 
-## Features
+**Product status:** public beta / pre-launch. The app is free during beta. Paid plans are planned later; no billing is active yet.
 
-- **Trip planning**: Airport and point-to-point style flows with leave-by timing
-- **Mode comparison**: Parking, rideshare, taxi, and transit with confidence labels
-- **Trip-level transit pricing**: Return-leg aware fare estimates on results pages
-- **Safe-mode API protection**: Quota caps and disabled Google Places by default in local dev
-- **Accounts**: Supabase email/password plus Google sign-in
-- **Saved trips**: Save and reopen plans from your account page
-- **Monetization-ready CTAs**: Reserve parking, view provider, and directions buttons with outbound click tracking
-- **Pricing placeholder**: `/pricing` page for future Pro features (no Stripe yet)
-- **AI trip assistant**: Mock parser by default; optional live OpenAI with daily/input caps
-- **Airport command center**: Airport trip card, airline lookup, and airport guidance
-- **TSA and weather context**: Security and weather-aware scoring where available
+## What PodPaiGo does
+
+- **Airport trips** — parking, leave-by timing, TSA/checklist context, terminal guidance, rideshare, transit, and weather where available
+- **Quick Go / city trips** — drive time, destination garages and lots, street/meter outlook, Park & Ride backups, rideshare, and transit
+- **Event and stadium trips** — cautious event-parking guidance; street/meter is not promoted as the primary option unless evidence supports it
+- **Accounts** — Supabase sign-in, saved trips, and beta feedback
+- **Partner readiness** — outbound provider click tracking and optional affiliate/deep-link attribution when configured
+
+## Core honesty rules
+
+PodPaiGo is built to be partner-demo safe:
+
+- **Never fake prices** — estimated, cached, and live prices stay clearly labeled
+- **Live vs estimated vs cached** — UI and ranking copy distinguish provider-live, official, cached/from, estimated, and fallback data
+- **Separate trip logic** — airport parking, city/general parking, and event/stadium parking logic stay separate
+- **Confirm with providers** — users should always verify final price, availability, and posted parking signs before parking or booking
+
+Suggested public disclosure:
+
+> Parking prices, availability, travel times, and street rules can change. PodPaiGo labels data as live, estimated, cached, or provider-linked where possible. Always confirm final price, availability, and posted parking signs before parking.
+
+## Data sources
+
+| Source | Used for | Notes |
+|--------|----------|-------|
+| Google Routes | Drive time, route timing | Budget-guarded; may fall back to estimates |
+| Google Places | Parking discovery, reviews, photos | Often disabled locally via safe-mode env vars |
+| Weather.gov (NWS) | Trip weather context | Near-term forecasts when coordinates and timing allow |
+| ParkWhiz | Live bookable parking quotes | Where API access and quotes are available |
+| AirportParkingReservations (APR) | Cached/from airport parking rates | SEA-focused cache; confirm live checkout price |
+| SpotHero / marketplace links | Provider comparison links | Generic or search deep links; not claimed as live inventory |
+| Inventory / cached parking | Saved lots when live refresh is paused | Labeled as cached or fallback |
+| Street/meter rules modules | City outlook guidance | Seattle rules today; signs always win |
 
 ## Tech stack
 
-- **Framework**: Next.js 16 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Auth / data**: Supabase Auth + Postgres migrations
-- **Architecture**: Domain logic in `lib/` with provider and mock layers
+- **Framework:** Next.js 16 (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS
+- **Auth / data:** Supabase Auth + Postgres migrations
+- **Architecture:** Domain logic in `lib/`, UI in `app/`
 
 ## Getting started
 
@@ -30,10 +52,10 @@ A smart airport companion for comparing parking, rideshare, transit, timing, and
 
 - Node.js 18+
 - npm
-- Optional: Supabase project for auth/saved trips
-- Optional: Postgres/Supabase database for parking cache and airport data
+- Optional: Supabase project for auth, saved trips, analytics, and parking cache
+- Optional: Postgres/Supabase `DATABASE_URL` for parking inventory and provider cache
 
-### Installation
+### Install and run
 
 ```bash
 npm install
@@ -43,76 +65,52 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Environment variables
+Restart the dev server after changing `.env.local`.
 
-### Safe mode (recommended for local dev)
+### Environment variables overview
 
-These defaults in `.env.example` keep paid Google APIs off unless you opt in:
+See `.env.example` for the full list. Common groups:
+
+**Auth / site**
 
 ```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+ADMIN_EMAILS=you@example.com
+```
+
+**Google APIs (safe mode defaults in `.env.example`)**
+
+```env
+GOOGLE_MAPS_SERVER_API_KEY=
 DISABLE_GOOGLE_PLACES=true
 DISABLE_GOOGLE_PARKING_DISCOVERY=true
-DISABLE_GOOGLE_PLACE_PHOTOS=true
-MAX_GOOGLE_PLACES_CALLS_PER_REQUEST=0
-MAX_GOOGLE_PLACE_DETAILS_PER_REQUEST=0
-MAX_GOOGLE_SEARCHTEXT_PER_REQUEST=0
-MAX_GOOGLE_PHOTO_MEDIA_PER_REQUEST=0
+GOOGLE_ROUTES_DAILY_LIMIT=100
 ```
 
-See `.env.example` for route, geocoding, and live-quote caps.
-
-### Supabase auth
+**Production guardrails**
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+CRON_SECRET=                # required in production for cron routes
+RESEND_API_KEY=               # optional beta feedback email notifications
+FEEDBACK_FROM_EMAIL=
+PARKWHIZ_AFFILIATE_ID=        # optional partner attribution
 ```
 
-Google OAuth setup: see [docs/supabase-oauth-setup.md](docs/supabase-oauth-setup.md).
+**Parking provider affiliate params** — optional; if unset, original provider URLs are preserved. See `.env.example` under “Parking provider outbound affiliate/referral attribution”.
 
-### AI trip assistant
+### Supabase migrations
 
-```env
-AI_ASSISTANT_PROVIDER=mock
-DISABLE_AI_ASSISTANT=false
-MAX_AI_PARSE_CALLS_PER_REQUEST=1
-MAX_AI_PARSE_CALLS_PER_USER_DAY=20
-MAX_AI_PARSE_CALLS_PER_ANON_DAY=5
-MAX_AI_PARSE_INPUT_CHARS=1000
-# OPENAI_API_KEY=
-# OPENAI_TRIP_PARSE_MODEL=gpt-4o-mini
-```
+SQL migrations live in `supabase/migrations/`. Apply in timestamp order to your Supabase/Postgres project.
 
-Local dev defaults to mock. Production uses OpenAI only when `AI_ASSISTANT_PROVIDER=openai` and `OPENAI_API_KEY` is set.
-
-### Monetization telemetry
-
-Apply migration `20260603120000_monetization_and_ai_usage.sql` to enable:
-
-- `outbound_click_events` (RLS-protected inserts from `/api/monetization/outbound-click`)
-- `ai_usage_events` (server-side AI budget logging)
-
-## Database migrations
-
-SQL migrations live in `supabase/migrations/`.
-
-Apply them to your Supabase/Postgres project in timestamp order, for example:
-
-1. `20260530120000_national_airports_schema.sql`
-2. `20260531120000_parking_provider_tables.sql`
-3. `20260601120000_api_usage_and_route_snapshots.sql`
-4. `20260601130000_places_cache_enhancements.sql`
-5. `20260602120000_user_auth_foundation.sql`
-6. `20260603120000_monetization_and_ai_usage.sql`
-
-Using Supabase CLI (if installed):
+Using Supabase CLI:
 
 ```bash
 supabase db push
 ```
 
-Or run the SQL files manually in the Supabase SQL editor.
+Or run migration files manually in the Supabase SQL editor. Recent migrations include user auth, API usage tracking, monetization outbound clicks, parking validation reports, and parking provider tables.
 
 ## Scripts
 
@@ -129,35 +127,70 @@ Or run the SQL files manually in the Supabase SQL editor.
 
 ```
 app/
-  page.tsx              Landing page
-  trip/page.tsx         Trip planning
-  results/page.tsx      Recommendations
-  account/page.tsx      Profile + saved trips
-  login/page.tsx        Email/password + Google sign-in
-  auth/callback/        Supabase OAuth callback
+  page.tsx                 Landing page
+  trip/page.tsx            Full trip planner
+  quick-go/                Fast destination checks
+  results/                 Recommendation results
+  pricing/                 Public beta pricing page
+  account/                 Profile + saved trips
+  admin/                   Admin-only tools (server-gated)
 lib/
-  recommendationEngine.ts
-  auth/                 Saved trips, OAuth helpers, user profile
-  transit/              Trip-level transit pricing helpers
-  ai/                   Trip assistant parser
-  airports/             Airport guide + airline lookup data
-supabase/migrations/    SQL migrations
-docs/                   Setup guides (OAuth, etc.)
+  recommendationEngine.ts  Trip recommendation orchestration
+  providers.ts           Parking/route/provider enrichment
+  parking/                 Airport, city, and event parking logic
+  monetization/            Outbound click + provider URL attribution
+  marketing/publicCopy.ts  Shared public beta disclosure copy
+supabase/migrations/       SQL migrations
+AGENTS.md                  Agent instructions + change log
 ```
 
-## Testing and release checks
+## Manual testing checklist
 
-Before committing or deploying:
+Before a demo, partner call, or deploy:
+
+1. **Quick Go general trip** — named destination from autocomplete, route time, weather, parking cards, honest price labels
+2. **SEA airport trip** — parking comparison, leave-by timing, provider CTAs, no fake live labels on cached APR rows
+3. **PAE airport trip** — geographically bounded airport parking; no far-away Tacoma-area lots
+4. **Event/stadium trip** — e.g. Lumen Field / Seahawks; event parking prioritized over street/meter hero copy
+5. **Feedback submission** — Send feedback modal stores event and optional admin email notification
+6. **Outbound click tracking** — Reserve/Compare opens provider link and posts to `/api/monetization/outbound-click`
+7. **Admin gating** — non-admin users do not see Admin nav or `/admin/*` data
+8. **Pricing page** — says free during beta; no Stripe/placeholder dev copy
+
+Automated checks:
 
 ```bash
 npm test
 npm run build
 ```
 
-## Privacy
+## Deployment notes (Vercel)
 
-See the in-app [Privacy](/privacy) page for account data, saved trips, OAuth, API caching, and Google Places usage when enabled.
+- Set `CRON_SECRET` in production so cron discovery/refresh routes fail closed when unauthenticated
+- Configure API cost guardrails: `GOOGLE_*_DAILY_LIMIT`, `RECOMMENDATIONS_RATE_LIMIT_*`, `PUBLIC_API_RATE_LIMIT_*`
+- Set `ADMIN_EMAILS` for admin-only pages and internal APIs
+- Apply Supabase migrations before enabling parking validation reports or monetization tables
+- Keep `DISABLE_GOOGLE_*` flags tuned for beta cost control; enable live providers deliberately per environment
 
-## Roadmap
+## Partner / monetization status
 
-See [Roadmap](/roadmap) for implemented features and planned work.
+- **Outbound click tracking** — implemented via `/api/monetization/outbound-click`
+- **Affiliate / deep-link attribution** — centralized provider URL builder; optional env-configured affiliate params
+- **No fake commission claims** — PodPaiGo does not claim active subscriptions, live inventory everywhere, or guaranteed partner revenue
+
+## For AI agents
+
+Read `AGENTS.md` before changing routing, parking, recommendation, airport/city/event logic, or monetization behavior. Update the Recent Change Log after meaningful code changes.
+
+Key constraints:
+
+- Keep airport, city, and event parking logic separate
+- Do not fake prices or label estimated/static pricing as live
+- Do not expose admin/debug UI to normal beta users
+- Add targeted tests for behavior changes; run `npm test` and `npm run build`
+
+## Privacy and roadmap
+
+- Privacy: in-app [Privacy](/privacy) page
+- Product direction: [Roadmap](/roadmap)
+- Pricing / beta status: [Pricing](/pricing)

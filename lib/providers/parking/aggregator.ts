@@ -30,6 +30,7 @@ function toSearchContext(args: AggregateAirportParkingArgs): ParkingSearchContex
     airportCode,
     airportCoordinates: args.airportCoordinates ?? airport?.geoLocation,
     destination: args.destination,
+    destinationKind: 'airport',
     checkInDate: args.checkInDate,
     checkOutDate: args.checkOutDate,
     checkInAt: args.checkInAt,
@@ -53,7 +54,7 @@ function getProviderPartialTimeoutMs(): number {
   const configured = Number(process.env.PARKING_PROVIDER_PARTIAL_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
 
-  const overall = readPositiveMs('PARKING_FETCH_TIMEOUT_MS', 5000);
+  const overall = readPositiveMs('PARKING_FETCH_TIMEOUT_MS', 15000);
   return Math.max(1000, overall - 1000);
 }
 

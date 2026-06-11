@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import HeroBadge from './components/HeroBadge';
 import PodPaiGoAssistant from './components/PodPaiGoAssistant';
 import SavedTripsHomeSection from './components/SavedTripsHomeSection';
@@ -11,44 +12,88 @@ import SectionHeader from './components/ui/SectionHeader';
 import StatusPill from './components/ui/StatusPill';
 import TravelCard from './components/ui/TravelCard';
 import HomeAnalytics from './components/HomeAnalytics';
+import { DATA_TRANSPARENCY_SHORT, PRODUCT_TAGLINE } from '../lib/marketing/publicCopy';
 
 const featureChips = [
-  'Smart leave time',
-  'Parking picks',
-  'TSA/CLEAR',
-  'Trip checklist',
+  'Airport trips',
+  'Destination parking',
+  'Street/meter outlook',
+  'Rideshare vs transit',
+  'Park & Ride backups',
   'Saved trips',
-  'Airport companion',
 ];
 
 const features = [
   {
-    title: 'Leave-by timing',
+    title: 'Airport trips',
     description:
-      'See when to leave based on your flight time, route duration, TSA estimate, parking transfer, and airport buffer.',
+      'See when to leave, where to park, what TSA and check-in will take, and how rideshare or transit compares — all in one view.',
   },
   {
-    title: 'Compare parking, rideshare, and transit',
+    title: 'City and destination parking',
     description:
-      'View your main airport options side-by-side instead of guessing between separate apps and parking sites.',
+      'Drive time, garages and lots near your destination, the street/meter outlook, and backup options for downtown, events, and errands.',
   },
   {
-    title: 'Trip stress and luggage effort',
+    title: 'Rideshare, transit, and backups',
     description:
-      'PodPaiGo considers walking burden, shuttle friction, weather exposure, and timing risk.',
+      'When driving or parking is not the best call, see how rideshare, transit, and Park & Ride stack up instead.',
   },
   {
-    title: 'Confidence labels',
+    title: 'Honest data labels',
     description:
-      'Prices and route details are labeled as live, verified, estimated, or unavailable.',
+      'Every price, route, and parking rule is labeled live, estimated, or saved — so you always know what to double-check.',
   },
 ];
 
 const steps = [
-  'Enter your origin and airport trip details.',
-  'Choose whether you can drive, rideshare, use transit, or compare everything.',
-  'Review timing, cost, stress, weather, and transfer details.',
+  {
+    title: 'Tell us where you are going',
+    detail: 'An airport, address, garage, event, or business — type it or describe the trip.',
+  },
+  {
+    title: 'Pick what matters to you',
+    detail: 'Easiest, cheapest, or fastest. Or compare every way to get there side by side.',
+  },
+  {
+    title: 'Get one clear recommendation',
+    detail: 'The best option, why it won, what it costs, when to leave, and backups if plans change.',
+  },
 ];
+
+function PreviewMiniCard({
+  eyebrow,
+  title,
+  metricLabel,
+  metricValue,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  metricLabel: string;
+  metricValue: string;
+  children: ReactNode;
+}) {
+  return (
+    <article className="flex h-full min-h-[205px] flex-col rounded-2xl border border-white/10 bg-white/10 p-5">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-100/75">
+          {eyebrow}
+        </p>
+        <h3 className="mt-2 text-base font-semibold text-white">{title}</h3>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <span className="text-sm font-semibold text-sky-100/90">{metricLabel}</span>
+        <span className="max-w-[7rem] text-right text-xl font-bold leading-tight text-sky-300">
+          {metricValue}
+        </span>
+      </div>
+
+      <div className="mt-auto flex flex-wrap gap-2 pt-4">{children}</div>
+    </article>
+  );
+}
 
 export default function Home() {
   return (
@@ -66,12 +111,11 @@ export default function Home() {
           <HeroBadge />
 
           <h1 className="max-w-4xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl md:text-6xl">
-            Plan your airport day in one clean dashboard.
+            Know the best way to get there — and where to park.
           </h1>
 
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-            PodPaiGo compares parking, rideshare, and transit with leave-by timing, parking picks,
-            TSA estimates, and a travel checklist — all in one mobile-friendly view.
+            {PRODUCT_TAGLINE}
           </p>
 
           <div className="mt-6 flex flex-wrap gap-2">
@@ -89,18 +133,20 @@ export default function Home() {
             />
             <div className="relative flex flex-col gap-3 sm:flex-row">
               <PrimaryButton href="/trip">Plan a trip</PrimaryButton>
-              <PrimaryButton href="/#assistant" variant="secondary">
-                Try AI assistant
-              </PrimaryButton>
-              <PrimaryButton href="/airports" variant="ghost">
-                Explore airports
+              <PrimaryButton href="/quick-go" variant="secondary">
+                Try Quick Go
               </PrimaryButton>
             </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Flying soon?{' '}
+              <Link href="/airports" className="font-medium text-primary hover:underline">
+                Explore airports
+              </Link>
+              .
+            </p>
           </div>
 
-          <p className="mt-4 text-sm text-muted-foreground">
-            Live or verified data is used where available, and estimated information is clearly labeled.
-          </p>
+          <p className="mt-4 text-sm text-muted-foreground">{DATA_TRANSPARENCY_SHORT}</p>
         </div>
 
         <div className="relative">
@@ -113,47 +159,52 @@ export default function Home() {
             className="pointer-events-none absolute bottom-8 left-4 h-28 w-28 rounded-full bg-travel-teal/10 blur-3xl"
           />
           <GlassPanel className="travel-pass-frame relative overflow-hidden p-4 sm:p-6">
-          <TravelCard padding="none" className="travel-pass-card overflow-hidden border border-white/10 text-white">
-            <div className="border-b border-white/10 bg-white/5 px-5 py-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200/90">
-                Airport day preview
-              </div>
-              <div className="mt-2 text-2xl font-bold text-white">SEA · Terminal companion</div>
-            </div>
-            <div className="space-y-3 px-5 py-4">
-              <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/10 px-4 py-3">
-                <span className="text-sm font-medium text-sky-100/90">Leave by</span>
-                <span className="text-xl font-bold text-sky-300">6:42 AM</span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/8 bg-white/8 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-100/75">Parking pick</div>
-                  <div className="mt-1 text-sm font-semibold text-white">SEA Garage</div>
+            <div className="travel-pass-card overflow-hidden rounded-3xl border border-white/10 bg-slate-950 text-white">
+              <div className="border-b border-white/10 bg-white/5 px-5 py-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-200/90">
+                  Trip dashboard preview
                 </div>
-                <div className="rounded-2xl border border-white/8 bg-white/8 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-100/75">Trip stress</div>
-                  <div className="mt-1 text-sm font-semibold text-white">Low</div>
-                </div>
+                <div className="mt-2 text-2xl font-bold text-white">Airport day + city trip</div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
-                  TSA PreCheck
-                </StatusPill>
-                <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
-                  Checklist ready
-                </StatusPill>
-              </div>
-            </div>
-          </TravelCard>
+              <div className="grid items-stretch gap-3 px-5 py-4 sm:grid-cols-2">
+                <PreviewMiniCard
+                  eyebrow="Airport day"
+                  title="SEA departure"
+                  metricLabel="Leave by"
+                  metricValue="6:42 AM"
+                >
+                  <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
+                    TSA/checklist
+                  </StatusPill>
+                  <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
+                    Airport parking
+                  </StatusPill>
+                </PreviewMiniCard>
 
-          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-            <div className="rounded-2xl border border-border/80 bg-card/90 px-4 py-3 shadow-sm">
-              Home → Parking → Terminal → TSA
+                <PreviewMiniCard
+                  eyebrow="City trip"
+                  title="Downtown Seattle"
+                  metricLabel="Best option"
+                  metricValue="Drive + park"
+                >
+                  <StatusPill tone="accent" className="border-sky-300/25 bg-sky-400/15 text-sky-100">
+                    Street outlook
+                  </StatusPill>
+                  <StatusPill tone="muted" className="border-white/15 bg-white/10 text-slate-100">
+                    Park & Ride backup
+                  </StatusPill>
+                </PreviewMiniCard>
+              </div>
             </div>
-            <div className="rounded-2xl border border-border/80 bg-card/90 px-4 py-3 shadow-sm">
-              Weather and shuttle friction included in ranking.
+
+            <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+              <div className="rounded-2xl border border-border/80 bg-card/90 px-4 py-3 shadow-sm">
+                Compare easiest, cheapest, fastest, and least stressful options.
+              </div>
+              <div className="rounded-2xl border border-border/80 bg-card/90 px-4 py-3 shadow-sm">
+                Live data is used when available; saved parking and fallback estimates are labeled.
+              </div>
             </div>
-          </div>
           </GlassPanel>
         </div>
         </div>
@@ -167,10 +218,10 @@ export default function Home() {
           <div className="h-px flex-1 bg-border/70" aria-hidden="true" />
           <div className="max-w-sm text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Need something faster?
+              Fastest way to start
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Use Quick Go for simple destination checks.
+              Type one destination and get drive time, parking, and the best way there.
             </p>
           </div>
           <div className="h-px flex-1 bg-border/70" aria-hidden="true" />
@@ -184,10 +235,10 @@ export default function Home() {
       >
         <div className="mb-5 md:mb-6">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
-            Full airport planning
+            Or just describe your trip
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            For flights, parking duration, airline details, and leave-by timing.
+            Ask PodPaiGo in your own words — great for airport days, multiple stops, or “what should I do?”
           </p>
         </div>
         <TripAssistantPanel />
@@ -198,7 +249,7 @@ export default function Home() {
       <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
         <SectionHeader
           eyebrow="Why PodPaiGo"
-          title="Everything you need for airport day"
+          title="Airport days and city drives in one decision view"
           description="Built for quick scanning on your phone before you head out the door."
           className="mb-8"
         />
@@ -216,22 +267,25 @@ export default function Home() {
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:px-6 md:grid-cols-2">
           <div>
             <h2 className="text-3xl font-bold tracking-tight text-foreground">
-              Airport planning should not require five tabs.
+              Trip planning should not require five tabs.
             </h2>
             <p className="mt-4 text-muted-foreground">
               Parking sites show parking. Rideshare apps show rides. Transit apps show transit.
-              PodPaiGo helps you compare the actual airport decision: what is easiest, cheapest,
-              fastest, and least stressful for this specific trip?
+              PodPaiGo helps you compare the actual decision: what is easiest, cheapest, fastest,
+              and least stressful for this trip - whether you are going to the airport or across town.
             </p>
           </div>
 
           <div className="space-y-3">
             {steps.map((step, index) => (
-              <TravelCard key={step} padding="sm" className="flex gap-4">
+              <TravelCard key={step.title} padding="sm" className="flex gap-4">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
                   {index + 1}
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{step}</p>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{step.title}</p>
+                  <p className="mt-0.5 text-sm leading-6 text-muted-foreground">{step.detail}</p>
+                </div>
               </TravelCard>
             ))}
           </div>

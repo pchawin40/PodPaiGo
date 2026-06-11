@@ -1,4 +1,6 @@
 import { RecommendationEngine } from '../recommendationEngine';
+import { clearNwsWeatherCache } from '../weather/nws';
+import * as parkingInventory from '../parking/inventory';
 import type { DataProvider } from '../providers';
 import { getAirportById } from '../airports/catalog';
 import type {
@@ -68,16 +70,19 @@ function mockWeatherFetch(periods = [
 describe('RecommendationEngine passes destination coordinates to getTrafficEstimate', () => {
   const originalProvider = RecommendationEngine.provider;
   const originalParkingTimeout = process.env.PARKING_FETCH_TIMEOUT_MS;
+  const originalParkingTimeoutFallback = process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS;
   const originalRouteTimeout = process.env.ROUTE_FETCH_TIMEOUT_MS;
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    clearNwsWeatherCache();
     mockWeatherFetch();
   });
 
   afterEach(() => {
     RecommendationEngine.setDataProvider(originalProvider);
     global.fetch = originalFetch;
+    clearNwsWeatherCache();
     if (originalParkingTimeout == null) {
       delete process.env.PARKING_FETCH_TIMEOUT_MS;
     } else {
@@ -88,6 +93,12 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     } else {
       process.env.ROUTE_FETCH_TIMEOUT_MS = originalRouteTimeout;
     }
+    if (originalParkingTimeoutFallback == null) {
+      delete process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS;
+    } else {
+      process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = originalParkingTimeoutFallback;
+    }
+    jest.restoreAllMocks();
   });
 
   test('general Quick Go trip forwards origin and destination coordinates', async () => {
@@ -133,6 +144,129 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       expect.objectContaining({
         routePurpose: 'main_to_destination',
         originLatLng: { lat: 47.855, lng: -121.97 },
+      }),
+    );
+  });
+
+  test('customer-parking Quick Go defers live paid parking discovery', async () => {
+    const parkingSpy = jest.fn(async () => []);
+    const trafficSpy = jest.fn(async () => okTraffic);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: parkingSpy,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      quickGoPurpose: 'general-destination',
+      intent: 'general-trip',
+      origin: 'Monroe, WA',
+      originLat: 47.8554,
+      originLng: -121.9709,
+      destination: 'Fred Meyer Monroe WA',
+      destinationName: 'Fred Meyer Monroe WA',
+      destinationKind: 'general',
+      destinationLat: 47.855,
+      destinationLng: -121.97,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).not.toHaveBeenCalled();
+    expect(trafficSpy).toHaveBeenCalled();
+    expect(recommendation.parking).toHaveLength(0);
+    expect(recommendation.parkingDataStatus).toBe('not_requested');
+    expect(recommendation.parkingDataMessage).toBe('Customer parking likely — verify signs.');
+  });
+
+  test('stadium Quick Go still runs parking discovery', async () => {
+    const parkingSpy = jest.fn(async () => []);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: parkingSpy,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      quickGoPurpose: 'general-destination',
+      intent: 'general-trip',
+      origin: 'Monroe, WA',
+      originLat: 47.8554,
+      originLng: -121.9709,
+      destination: 'Lumen Field, Seattle, WA',
+      destinationName: 'Lumen Field',
+      destinationKind: 'stadium',
+      destinationLat: 47.5952,
+      destinationLng: -122.3316,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '19:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).toHaveBeenCalled();
+  });
+
+  test('general trip parking uses effective destination coordinates resolved by geocode fallback', async () => {
+    const parkingSpy = jest.fn(async () => ({
+      options: [],
+      metadata: { status: 'cache_empty' as const },
+    }));
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getParkingOptionsWithMetadata: parkingSpy as unknown as DataProvider['getParkingOptionsWithMetadata'],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+      geocodeAddress: async (address: string) => {
+        if (address === 'Monroe, WA') return { lat: 47.855, lng: -121.97 };
+        if (address === 'Pike Place Market') return { lat: 47.6097, lng: -122.3425 };
+        return null;
+      },
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Pike Place Market',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(parkingSpy).toHaveBeenCalled();
+    expect(parkingSpy.mock.calls[0]?.[4]).toEqual(
+      expect.objectContaining({
+        destinationKind: 'downtown',
+        destinationLat: 47.6097,
+        destinationLng: -122.3425,
+        destinationCoordinates: { lat: 47.6097, lng: -122.3425 },
       }),
     );
   });
@@ -213,6 +347,162 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
     expect(recommendation.trafficEstimate?.duration).toBeLessThanOrEqual(8);
     expect(recommendation.trafficEstimate?.duration).not.toBe(35);
+  });
+
+  test('Austin La Quinta to Franklin BBQ uses coordinate fallback when live routing is blocked', async () => {
+    process.env.ROUTE_FETCH_TIMEOUT_MS = '1';
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => new Promise(() => {}) as Promise<never>,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Estimated from coordinates');
+    expect(recommendation.trafficEstimate?.trustStatus).toBe('estimated');
+    expect(recommendation.trafficEstimate?.routeStatus).toBe('ready');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
+    expect(recommendation.trafficEstimate?.duration).not.toBe(35);
+  });
+
+  test('provider unavailable result does not override coordinate fallback for normal Quick Go', async () => {
+    const unavailableTraffic: TrafficEstimate = {
+      route: 'custom',
+      duration: 0,
+      congestion: 'high',
+      trustStatus: 'fallback',
+      routeUnavailable: true,
+      routeUnavailableReason: 'Route timing unavailable; open directions to confirm.',
+      sourceName: 'Cached route snapshot',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Cached provider response was unavailable.'],
+    };
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => unavailableTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.trafficEstimate?.sourceName).toBe('Estimated from coordinates');
+    expect(recommendation.trafficEstimate?.routeUnavailable).not.toBe(true);
+    expect(recommendation.trafficEstimate?.duration).toBeGreaterThan(0);
+  });
+
+  test('local Quick Go keeps rideshare app options when live quote provider is unavailable', async () => {
+    const traffic: TrafficEstimate = {
+      route: 'custom',
+      duration: 12,
+      distanceMeters: 8600,
+      congestion: 'medium',
+      trustStatus: 'live',
+      routeUnavailable: false,
+      sourceName: 'Google Routes API',
+      lastUpdated: new Date().toISOString(),
+      assumptions: [],
+    };
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => {
+        throw new Error('rideshare quote unavailable');
+      },
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => traffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      tripMode: 'quick-go',
+      origin:
+        'La Quinta Inn & Suites by Wyndham Austin Airport, East Ben White Boulevard, Austin, TX, USA',
+      originLat: 30.2146,
+      originLng: -97.6896,
+      destination: 'Franklin Barbecue, East 11th Street, Austin, TX, USA',
+      destinationName: 'Franklin Barbecue',
+      destinationKind: 'restaurant',
+      destinationLat: 30.2701,
+      destinationLng: -97.7313,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '10:00',
+      transportAvailability: 'all',
+    });
+
+    expect(recommendation.rideshare).toHaveLength(2);
+    expect(recommendation.rideshare[0]).toMatchObject({
+      name: 'Uber',
+      priceDisplay: 'check-live',
+      rideshareEstimateConfidence: 'unavailable',
+      driveMinutes: 12,
+      pickupWaitMinutes: 5,
+      duration: 17,
+      totalOptionMinutes: 17,
+    });
+    expect(recommendation.rideshare[0]?.sourceLink).toContain('https://m.uber.com/ul/');
+    expect(recommendation.rideshare[0]?.priceNote).toBe('Open app for live price.');
+    expect(recommendation.optionScoreBreakdowns?.length).toBeGreaterThan(0);
+    expect(recommendation.optionScoreBreakdowns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          mode: 'rideshare',
+          driveMinutes: 12,
+          waitMinutes: 5,
+          totalTimeMinutes: 17,
+        }),
+      ]),
+    );
   });
 
   test('local Quick Go missing coordinates returns confirm-timing state instead of bad 35 minute estimate', async () => {
@@ -309,8 +599,28 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     expect(localRecommendation.trafficEstimate?.duration).not.toBe(35);
   });
 
-  test('slow parking provider returns partial results instead of blocking', async () => {
+  test('parking provider timeout returns cached partial results instead of empty parking', async () => {
     process.env.PARKING_FETCH_TIMEOUT_MS = '1';
+    process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = '100';
+    jest.spyOn(parkingInventory, 'getParkingLotsNearPoint').mockResolvedValue([
+      {
+        id: 42,
+        airportCode: 'GENERAL',
+        name: 'Bellevue Square Garage',
+        normalizedName: 'bellevue square garage',
+        address: 'Bellevue Square, Bellevue, WA',
+        latitude: 47.615,
+        longitude: -122.203,
+        source: 'destination-cache',
+        sourceId: 'cached-bellevue-square',
+        sourceUrl: 'https://maps.example/garage',
+        isOfficial: false,
+        confidence: 0.8,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+        distanceMiles: 0.2,
+      },
+    ]);
 
     const mockProvider: DataProvider = {
       getParkingOptions: async () => new Promise(() => {}) as Promise<never>,
@@ -329,6 +639,52 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       origin: 'Monroe, WA',
       destination: 'Bellevue Square',
       destinationKind: 'general',
+      destinationLat: 47.615,
+      destinationLng: -122.203,
+      arrivalDate: '2026-06-01',
+      arrivalTime: '09:00',
+      transportAvailability: 'all',
+    };
+
+    const recommendation = await RecommendationEngine.generateRecommendations(tripData);
+
+    expect(recommendation.parking).toHaveLength(1);
+    expect(recommendation.parking[0]?.name).toBe('Bellevue Square Garage');
+    expect(recommendation.parking[0]?.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataStatus).toBe('available');
+    expect(recommendation.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataMessage).toBe(
+      'Live parking is still updating. Showing available parking estimates.',
+    );
+    expect(recommendation.parkingDiscoveryMetadata?.cachedCount).toBe(1);
+    expect(recommendation.parkingDiscoveryMetadata?.providerErrors).toContain('parking fetch timed out');
+    expect(recommendation.trafficEstimate?.duration).toBe(18);
+  });
+
+  test('parking provider timeout with no fallback results avoids partial-results copy', async () => {
+    process.env.PARKING_FETCH_TIMEOUT_MS = '1';
+    process.env.PARKING_TIMEOUT_CACHE_FALLBACK_MS = '100';
+    jest.spyOn(parkingInventory, 'getParkingLotsNearPoint').mockResolvedValue([]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => new Promise(() => {}) as Promise<never>,
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: async () => okTraffic,
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const tripData: TripData = {
+      type: 'general-trip',
+      origin: 'Monroe, WA',
+      destination: 'Bellevue Square',
+      destinationKind: 'general',
+      destinationLat: 47.615,
+      destinationLng: -122.203,
       arrivalDate: '2026-06-01',
       arrivalTime: '09:00',
       transportAvailability: 'all',
@@ -338,7 +694,11 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
 
     expect(recommendation.parking).toEqual([]);
     expect(recommendation.parkingDataStatus).toBe('unavailable');
-    expect(recommendation.parkingDataMessage).toMatch(/Live parking is still updating/);
+    expect(recommendation.parkingDiscoveryStatus).toBe('partial_timeout');
+    expect(recommendation.parkingDataMessage).toBe(
+      'Live parking search timed out. Use map search or street signs to verify nearby parking.',
+    );
+    expect(recommendation.parkingDataMessage).not.toMatch(/Showing partial results/i);
     expect(recommendation.trafficEstimate?.duration).toBe(18);
   });
 
@@ -423,6 +783,8 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
   });
 
   test('general trip weather uses geocoded destination coordinates for tomorrow forecast', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
     const trafficSpy = jest.fn(async () => okTraffic);
     const geocodeSpy = jest.fn(async (address: string) => {
       if (/pike place/i.test(address)) return { lat: 47.6097, lng: -122.3425 };
@@ -430,7 +792,7 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       return null;
     });
     const fetchMock = mockWeatherFetch([
-      { startTime: '2026-06-07T09:00:00-07:00', shortForecast: 'Seattle morning forecast' },
+      { startTime: `${tomorrowDate}T09:00:00-07:00`, shortForecast: 'Seattle morning forecast' },
     ]);
 
     const mockProvider: DataProvider = {
@@ -452,7 +814,7 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
       destination: 'Pike Place Market, Seattle, WA',
       destinationName: 'Pike Place Market',
       destinationKind: 'downtown',
-      arrivalDate: '2026-06-07',
+      arrivalDate: tomorrowDate,
       arrivalTime: '09:00',
       transportAvailability: 'all',
     });
@@ -463,6 +825,49 @@ describe('RecommendationEngine passes destination coordinates to getTrafficEstim
     );
     expect(recommendation.weatherContext).toBe('travel-time-forecast');
     expect(recommendation.weatherImpact?.summary).toBe('Seattle morning forecast');
+  });
+
+  test('Quick Go trip with destination coordinates fetches near-term weather', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10);
+    const trafficSpy = jest.fn(async () => okTraffic);
+    const fetchMock = mockWeatherFetch([
+      { startTime: `${tomorrowDate}T18:00:00-07:00`, shortForecast: 'Quick Go forecast' },
+    ]);
+
+    const mockProvider: DataProvider = {
+      getParkingOptions: async () => [],
+      getRideshareOptions: async () => [] as RideshareOption[],
+      getTransitOptions: async () => [] as TransitJourney[],
+      getTsaEstimate: async () => emptyTsa,
+      getTrafficEstimate: trafficSpy as unknown as DataProvider['getTrafficEstimate'],
+      getFlightInfo: async () => null as unknown as FlightInfo,
+      getAirportInfo: async () => ({}) as LocationInfo,
+    };
+
+    RecommendationEngine.setDataProvider(mockProvider);
+
+    const recommendation = await RecommendationEngine.generateRecommendations({
+      type: 'general-trip',
+      origin: 'Everett, WA',
+      destination: 'Pike Place Market, Seattle, WA',
+      destinationName: 'Pike Place Market',
+      destinationKind: 'downtown',
+      destinationLat: 47.6097,
+      destinationLng: -122.3425,
+      arrivalDate: tomorrowDate,
+      arrivalTime: '18:00',
+      quickGoPurpose: 'general-destination',
+      transportAvailability: 'all',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.weather.gov/points/47.6097,-122.3425',
+      expect.any(Object),
+    );
+    expect(recommendation.weatherContext).toBe('travel-time-forecast');
+    expect(recommendation.weatherUnavailableReason).toBeUndefined();
+    expect(recommendation.weatherImpact?.summary).toBe('Quick Go forecast');
   });
 
   test('Monroe -> Fred Meyer with geocoded coords falls back to a small straight-line time (not unknown, not 35)', async () => {

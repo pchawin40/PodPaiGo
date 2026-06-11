@@ -181,6 +181,98 @@ function logPlaceMetadataCache(event: string, payload: Record<string, unknown>):
   console.info(event, payload);
 }
 
+const CACHE_READ_FAILURE_LOG_INTERVAL_MS = 10_000;
+const cacheReadFailureCounts = new Map<string, number>();
+let lastCacheReadFailureLogAt = 0;
+
+/**
+ * Summarized, throttled cache-read-failure logging. A single results page with
+ * DB read timeouts should not print one warning per lot; instead we aggregate
+ * counts per read scope and emit at most one summary per interval.
+ */
+function logCacheReadFailure(scope: string): void {
+  cacheReadFailureCounts.set(scope, (cacheReadFailureCounts.get(scope) ?? 0) + 1);
+  if (process.env.NODE_ENV === 'test') return;
+  const now = Date.now();
+  if (now - lastCacheReadFailureLogAt < CACHE_READ_FAILURE_LOG_INTERVAL_MS) return;
+  lastCacheReadFailureLogAt = now;
+  console.warn(
+    '[google-places-cache] cache_read_failures',
+    Object.fromEntries(cacheReadFailureCounts),
+  );
+  cacheReadFailureCounts.clear();
+}
+
+/**
+ * Coalesces concurrent place-resolution lookups for the same lot identity during
+ * one request/search so a cache read timeout cannot trigger repeated live calls
+ * for the same place while a lookup is already in flight.
+ */
+const resolvePlaceInFlight = new Map<string, Promise<ParkingGooglePlaceCacheRecord | null>>();
+
+/**
+ * Short-lived, process-level negative cache for stable lot keys that returned no
+ * Google match after a live search. Prevents repeated live SearchText calls for
+ * the same no-match lot within one result-generation run. It is intentionally
+ * short-lived (TTL) so it never permanently blocks a future successful match.
+ */
+const NEGATIVE_PLACE_MATCH_DEFAULT_TTL_MS = 60_000;
+const negativePlaceMatchCache = new Map<string, number>();
+let dedupedNegativeSearchSkips = 0;
+let inFlightPlaceLookupShares = 0;
+let lastPlaceSearchDedupeLogAt = 0;
+const PLACE_SEARCH_DEDUPE_LOG_INTERVAL_MS = 10_000;
+
+function getNegativePlaceMatchTtlMs(): number {
+  const configured = Number(process.env.GOOGLE_PLACES_NEGATIVE_MATCH_TTL_MS);
+  if (Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return NEGATIVE_PLACE_MATCH_DEFAULT_TTL_MS;
+}
+
+function hasFreshNegativePlaceMatch(cacheKey: string): boolean {
+  const expiresAt = negativePlaceMatchCache.get(cacheKey);
+  if (!expiresAt) return false;
+  if (Date.now() >= expiresAt) {
+    negativePlaceMatchCache.delete(cacheKey);
+    return false;
+  }
+  return true;
+}
+
+function recordNegativePlaceMatch(cacheKey: string): void {
+  negativePlaceMatchCache.set(cacheKey, Date.now() + getNegativePlaceMatchTtlMs());
+}
+
+function clearNegativePlaceMatch(cacheKey: string): void {
+  negativePlaceMatchCache.delete(cacheKey);
+}
+
+function logPlaceSearchDedupeSummary(force = false): void {
+  if (process.env.NODE_ENV === 'test') return;
+  const now = Date.now();
+  if (!force && now - lastPlaceSearchDedupeLogAt < PLACE_SEARCH_DEDUPE_LOG_INTERVAL_MS) return;
+  lastPlaceSearchDedupeLogAt = now;
+  console.info('[google-places-cache] place_search_dedupe_summary', {
+    negativeCacheSkips: dedupedNegativeSearchSkips,
+    inFlightShares: inFlightPlaceLookupShares,
+    negativeCacheEntries: negativePlaceMatchCache.size,
+  });
+}
+
+export function getGooglePlacesSearchDedupeStatsForTests(): {
+  negativeCacheSkips: number;
+  inFlightShares: number;
+  negativeCacheEntries: number;
+} {
+  return {
+    negativeCacheSkips: dedupedNegativeSearchSkips,
+    inFlightShares: inFlightPlaceLookupShares,
+    negativeCacheEntries: negativePlaceMatchCache.size,
+  };
+}
+
 const SNAPSHOT_SELECT_COLUMNS = `
   cache_key,
   parking_lot_id,
@@ -489,8 +581,8 @@ async function getCachedRecordByKey(cacheKey: string): Promise<ParkingGooglePlac
     if (result.rows.length === 0) return null;
 
     return mapRowToRecord(result.rows[0]);
-  } catch (error) {
-    console.warn('Google Places stale cache read failed', error);
+  } catch {
+    logCacheReadFailure('stale_cache_read');
     return null;
   }
 }
@@ -519,8 +611,8 @@ async function getFreshCachedRecordByKey(cacheKey: string): Promise<ParkingGoogl
     if (result.rows.length === 0) return null;
 
     return mapRowToRecord(result.rows[0]);
-  } catch (error) {
-    console.warn('Google Places fresh cache read failed', error);
+  } catch {
+    logCacheReadFailure('fresh_cache_read');
     return null;
   }
 }
@@ -553,8 +645,8 @@ async function getCachedRecordByPlaceId(
     if (result.rows.length === 0) return null;
 
     return mapRowToRecord(result.rows[0]);
-  } catch (error) {
-    console.warn('Google Places place-id cache read failed', error);
+  } catch {
+    logCacheReadFailure('place_id_cache_read');
     return null;
   }
 }
@@ -915,6 +1007,11 @@ async function searchGooglePlace(args: {
   if (newApiMatch) return newApiMatch;
 
   const airport = args.airportCode ? getAirportById(args.airportCode.toUpperCase()) : null;
+  const stableCacheKey = buildParkingGoogleCacheKey({
+    airportCode: args.airportCode,
+    lotName: args.lotName,
+    lotAddress: args.lotAddress,
+  });
   const queries = buildParkingSearchQueries({
     lotName: args.lotName,
     lotAddress: args.lotAddress,
@@ -930,6 +1027,7 @@ async function searchGooglePlace(args: {
           route: 'searchGooglePlace',
           lotName: args.lotName,
           airportCode: args.airportCode ?? null,
+          cacheKey: stableCacheKey,
         },
         options?.requireDiscovery ? { discovery: true } : undefined,
       )
@@ -1090,7 +1188,12 @@ async function fetchGooglePlaceDetails(
   if (!normalizedPlaceId) return null;
 
   const cachedByPlaceId = await getCachedRecordByPlaceId(normalizedPlaceId);
-  if (cachedByPlaceId && hasUsablePlaceCoords(cachedByPlaceId)) {
+  const purpose = context?.purpose ?? 'coordinates';
+  if (
+    cachedByPlaceId &&
+    hasUsablePlaceCoords(cachedByPlaceId) &&
+    purpose !== 'reviews'
+  ) {
     logPlaceMetadataCache('google_getplace_skipped_cache_hit', {
       placeId: normalizedPlaceId,
       reason: 'supabase_place_id_cache',
@@ -1126,6 +1229,50 @@ async function fetchGooglePlaceDetails(
   } finally {
     detailsInFlight.delete(normalizedPlaceId);
   }
+}
+
+/**
+ * Resolve a Google place_id to coordinates using the cached + budget-guarded
+ * getPlace path. Returns null when the id is empty, the place has no usable
+ * location, or the live call is blocked/unavailable. Never throws.
+ *
+ * This lets trip endpoints that were selected from an autocomplete prediction
+ * (place_id only, no coordinates) get a confirmed location without an extra
+ * Geocoding API call.
+ */
+export async function resolveGooglePlaceCoordinates(
+  placeId: string | undefined | null,
+  context?: { reason?: string; cacheKey?: string | null },
+): Promise<{ lat: number; lng: number } | null> {
+  const normalizedPlaceId = placeId?.trim();
+  if (!normalizedPlaceId) return null;
+
+  let details: GoogleLegacyPlaceDetailsResult | null = null;
+  try {
+    details = await fetchGooglePlaceDetails(normalizedPlaceId, {
+      purpose: 'coordinates',
+      reason: context?.reason ?? 'destination_coordinates',
+      cacheKey: context?.cacheKey ?? normalizedPlaceId,
+    });
+  } catch {
+    return null;
+  }
+
+  if (!details) return null;
+
+  const lat = details.lat ?? details.geometry?.location?.lat;
+  const lng = details.lng ?? details.geometry?.location?.lng;
+
+  if (
+    typeof lat === 'number' &&
+    Number.isFinite(lat) &&
+    typeof lng === 'number' &&
+    Number.isFinite(lng)
+  ) {
+    return { lat, lng };
+  }
+
+  return null;
 }
 
 function buildSearchQueryCacheKey(args: {
@@ -1230,7 +1377,7 @@ export async function fetchGooglePlacePhotoNames(
   return photoNames.slice(0, limit);
 }
 
-export async function resolveParkingGooglePlace(args: {
+type ResolveParkingGooglePlaceArgs = {
   airportCode?: string | null;
   parkingLotId?: string | number | null;
   lotName: string;
@@ -1239,7 +1386,57 @@ export async function resolveParkingGooglePlace(args: {
   airportContext?: string | null;
   provider?: string | null;
   source?: string | null;
-}, options?: { maxSearchQueries?: number; requireDiscovery?: boolean }): Promise<ParkingGooglePlaceCacheRecord | null> {
+};
+
+type ResolveParkingGooglePlaceOptions = {
+  maxSearchQueries?: number;
+  requireDiscovery?: boolean;
+};
+
+export async function resolveParkingGooglePlace(
+  args: ResolveParkingGooglePlaceArgs,
+  options?: ResolveParkingGooglePlaceOptions,
+): Promise<ParkingGooglePlaceCacheRecord | null> {
+  if (
+    !shouldAttemptGooglePlaceMatch({
+      lotName: args.lotName,
+      lotAddress: args.lotAddress,
+      provider: args.provider,
+      source: args.source,
+      airportCode: args.airportCode || null,
+    })
+  ) {
+    return null;
+  }
+
+  // Coalesce concurrent lookups for the same lot identity + lookup profile so a
+  // slow/timed-out cache read does not fan out into duplicate live calls.
+  const inFlightKey = [
+    buildParkingGoogleCacheKey(args),
+    options?.requireDiscovery ? 'disc' : 'std',
+    `q:${options?.maxSearchQueries ?? 'def'}`,
+  ].join('::');
+
+  const existing = resolvePlaceInFlight.get(inFlightKey);
+  if (existing) {
+    // Reuse the in-flight live lookup instead of starting another one for the
+    // same stable lot key + lookup profile.
+    inFlightPlaceLookupShares += 1;
+    logPlaceSearchDedupeSummary();
+    return existing;
+  }
+
+  const promise = resolveParkingGooglePlaceUncached(args, options).finally(() => {
+    resolvePlaceInFlight.delete(inFlightKey);
+  });
+  resolvePlaceInFlight.set(inFlightKey, promise);
+  return promise;
+}
+
+async function resolveParkingGooglePlaceUncached(
+  args: ResolveParkingGooglePlaceArgs,
+  options?: ResolveParkingGooglePlaceOptions,
+): Promise<ParkingGooglePlaceCacheRecord | null> {
   if (!shouldAttemptGooglePlaceMatch({
     lotName: args.lotName,
     lotAddress: args.lotAddress,
@@ -1267,6 +1464,19 @@ export async function resolveParkingGooglePlace(args: {
       cacheKey,
       lotName: args.lotName,
     });
+  }
+
+  // Skip repeating a live search for a lot that just returned no Google match.
+  // Discovery/review lookups intentionally bypass the negative cache so they are
+  // never blocked from attempting their own match.
+  if (!options?.requireDiscovery && hasFreshNegativePlaceMatch(cacheKey)) {
+    dedupedNegativeSearchSkips += 1;
+    logPlaceSearchDedupeSummary();
+    logPlaceMetadataCache('place_metadata_negative_cache_hit', {
+      cacheKey,
+      lotName: args.lotName,
+    });
+    return null;
   }
 
   const freshCached = await getFreshCachedRecordByKey(cacheKey);
@@ -1487,6 +1697,11 @@ export async function resolveParkingGooglePlace(args: {
         selectedVisualSource: 'illustration',
         illustrationReason: 'No Google metadata found for this lot.',
       });
+      // Remember this miss briefly so repeated lookups in the same run do not
+      // immediately hit Google again. Discovery lookups are not negatively cached.
+      if (!options?.requireDiscovery) {
+        recordNegativePlaceMatch(cacheKey);
+      }
       return null;
     }
   }
@@ -1591,6 +1806,9 @@ export async function resolveParkingGooglePlace(args: {
         : 'google_places_details_returned_no_photo_metadata',
   });
 
+  // A live match succeeded; ensure any prior short-lived negative entry for this
+  // lot is cleared so a successful match is never blocked.
+  clearNegativePlaceMatch(cacheKey);
   setPlaceMetadataRequestCacheHit(cacheKey, record);
   return record;
 }
@@ -1873,6 +2091,13 @@ export function resetGooglePlacesCacheForTests(): void {
   searchQueryResultCache.clear();
   photoNameCache.clear();
   photoNameInFlight.clear();
+  resolvePlaceInFlight.clear();
+  negativePlaceMatchCache.clear();
+  dedupedNegativeSearchSkips = 0;
+  inFlightPlaceLookupShares = 0;
+  lastPlaceSearchDedupeLogAt = 0;
+  cacheReadFailureCounts.clear();
+  lastCacheReadFailureLogAt = 0;
   resetGooglePlacesCacheWriteForTests();
   resetPlaceMetadataRequestCacheForTests();
 }

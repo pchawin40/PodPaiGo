@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from './AuthProvider';
+import { useAdminStatus } from './useAdminStatus';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './UserMenu';
 import PrimaryButton from './ui/PrimaryButton';
@@ -14,18 +15,15 @@ type SiteHeaderProps = {
 };
 
 const DESKTOP_LINKS = [
+  { href: '/quick-go', label: 'Quick Go' },
   { href: '/airports', label: 'Airports' },
+  { href: '/how-it-works', label: 'How it works' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/roadmap', label: 'Roadmap' },
   { href: '/about', label: 'About' },
 ];
 
-const MOBILE_LINKS = [
-  { href: '/trip', label: 'Plan trip' },
-  { href: '/airports', label: 'Airports' },
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/roadmap', label: 'Roadmap' },
-];
+const MOBILE_LINKS = DESKTOP_LINKS;
 
 function navLinkClass(active: boolean, mobile = false): string {
   const base = mobile
@@ -136,8 +134,8 @@ export default function SiteHeader({
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, session, loading, configured } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { user, loading, configured } = useAuth();
+  const { isAdmin, loading: adminStatusLoading } = useAdminStatus();
 
   const closeMobileMenu = () => setMobileOpen(false);
 
@@ -145,32 +143,7 @@ export default function SiteHeader({
     if (href === '/') return pathname === '/';
     return pathname === href || pathname.startsWith(`${href}/`);
   };
-
-  useEffect(() => {
-    if (!configured || loading || !session?.access_token) {
-      setIsAdmin(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    fetch('/api/admin/status', {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled) setIsAdmin(Boolean(data?.isAdmin));
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [configured, loading, session?.access_token]);
+  const showAdmin = !loading && !adminStatusLoading && isAdmin;
 
   return (
     <header className="sticky top-0 z-50 border-b border-border glass-panel rounded-none shadow-[0_8px_30px_rgba(14,116,144,0.08)]">
@@ -214,7 +187,7 @@ export default function SiteHeader({
               {link.label}
             </Link>
           ))}
-          {isAdmin ? (
+          {showAdmin ? (
             <Link href="/admin/parking-submissions" className={navLinkClass(isActive('/admin'))}>
               Admin
             </Link>
@@ -301,7 +274,7 @@ export default function SiteHeader({
                     {link.label}
                   </Link>
                 ))}
-                {isAdmin ? (
+                {showAdmin ? (
                   <Link
                     href="/admin/parking-submissions"
                     onClick={closeMobileMenu}

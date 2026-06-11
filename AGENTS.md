@@ -1,10 +1,12 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+Read AGENTS.md first and follow it exactly.
 
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 =======
+=======
+>>>>>>> main
 Task:
 Refresh only the generated/current-state portion of AGENTS.md.
 
@@ -86,6 +88,7 @@ After updating:
 
 **Next recommended step**
 - Open `/admin/outreach` on desktop and mobile widths and confirm a long partner template preview wraps inside the preview card with internal vertical scrolling only.
+<<<<<<< HEAD
 
 ### 2026-06-10 19:29 PDT — Results recalculating loader polished
 
@@ -116,3 +119,5 @@ After updating:
 **Next recommended step**
 - Open a results page, trigger Recalculate on desktop and mobile, and confirm the car/route animation feels smooth in light and dark mode and the reduced-motion setting shows a static, readable state.
 >>>>>>> Stashed changes
+=======
+>>>>>>> main

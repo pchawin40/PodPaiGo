@@ -1,7 +1,9 @@
 import {
   estimateDriveMinutesFromStraightLineMiles,
+  firstFiniteNumber,
   getParkingTerminalTimeMinutes,
   haversineMiles,
+  resolveParkingDriveOrRouteTimeForDisplay,
   resolveParkingDriveMinutes,
   resolveParkingDriveMinutesWithFallback,
 } from '../lib/parking/routeMinutes';
@@ -27,6 +29,11 @@ describe('routeMinutes', () => {
     });
 
     expect(minutes).toBe(68);
+  });
+
+  it('picks the first positive finite numeric value', () => {
+    expect(firstFiniteNumber(0, '0', undefined, '15')).toBe(15);
+    expect(firstFiniteNumber(null, Number.NaN, -2, 'bad')).toBeNull();
   });
 
   it('computes haversine distance between two coordinates', () => {
@@ -62,6 +69,46 @@ describe('routeMinutes', () => {
     );
 
     expect(minutes).toBeGreaterThan(45);
+  });
+
+  it('does not treat 0 minutes as valid drive time unless origin and lot are the same place', () => {
+    const notSamePlace = resolveParkingDriveOrRouteTimeForDisplay({
+      id: 'lot',
+      name: 'Downtown Lot',
+      type: 'off-airport',
+      price: 12,
+      availability: 50,
+      trustStatus: 'estimated',
+      sourceName: 'Test',
+      lastUpdated: '2026-05-30T00:00:00.000Z',
+      assumptions: [],
+      originToParkingMinutes: 0,
+      routeTime: { durationMinutes: '15' },
+    } as ParkingOption);
+
+    expect(notSamePlace.minutes).toBe(15);
+    expect(notSamePlace.source).toBe('fallback-route-time');
+
+    const samePlace = resolveParkingDriveOrRouteTimeForDisplay(
+      {
+        id: 'same-place-lot',
+        name: 'Same Place Lot',
+        type: 'off-airport',
+        price: 12,
+        availability: 50,
+        trustStatus: 'estimated',
+        sourceName: 'Test',
+        lastUpdated: '2026-05-30T00:00:00.000Z',
+        assumptions: [],
+        originToParkingMinutes: 0,
+        lat: 47.6097,
+        lng: -122.3422,
+      } as ParkingOption,
+      { originLat: 47.6097, originLng: -122.3422 },
+    );
+
+    expect(samePlace.minutes).toBe(0);
+    expect(samePlace.source).toBe('same-place');
   });
 });
 
@@ -120,5 +167,121 @@ describe('parkingTimeBreakdown drive display', () => {
     );
     expect(breakdown.totalMinutes).toBeGreaterThan(60);
     expect(getParkingTerminalTimeMinutes(option, monroeOrigin)).toBe(breakdown.totalMinutes);
+  });
+
+  it('shows fallback route timing instead of a blank drive row when only route duration exists', () => {
+    const breakdown = parkingTimeBreakdown(
+      jiffyLot({
+        originToParkingMinutes: undefined,
+        routeToParkingMinutes: undefined,
+        driveMinutes: undefined,
+        routeTime: { durationMinutes: '15' },
+        lat: undefined,
+        lng: undefined,
+      } as Partial<ParkingOption>),
+      {},
+      'city_destination_trip',
+    );
+
+    expect(breakdown.parts).toEqual([
+      expect.objectContaining({
+        label: 'Fallback route time',
+        minutes: 15,
+        display: '15m route',
+      }),
+    ]);
+    expect(breakdown.totalMinutes).toBe(15);
+  });
+
+  it('uses driveToLotMinutes for city parking drive-to-lot display', () => {
+    const breakdown = parkingTimeBreakdown(
+      jiffyLot({
+        transferType: 'walk',
+        parkingBufferMinutes: 8,
+        transferToTerminalMinutes: 3,
+        walkingMinutes: 3,
+        originToParkingMinutes: undefined,
+        routeToParkingMinutes: undefined,
+        driveToLotMinutes: 14,
+        routeLegs: {
+          originToLot: {
+            durationMinutes: 14,
+            distanceMiles: 2,
+            source: 'google-routes',
+          },
+        },
+        lat: undefined,
+        lng: undefined,
+      }),
+      {},
+      'city_destination_trip',
+    );
+
+    expect(breakdown.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Drive to lot',
+          minutes: 14,
+          display: '14m',
+        }),
+      ]),
+    );
+    expect(breakdown.totalMinutes).toBe(25);
+    expect(breakdown.isPartial).toBe(false);
+  });
+
+  it('marks city parking totals partial when drive-to-lot is missing', () => {
+    const breakdown = parkingTimeBreakdown(
+      jiffyLot({
+        transferType: 'walk',
+        parkingBufferMinutes: 8,
+        transferToTerminalMinutes: 3,
+        walkingMinutes: 3,
+        originToParkingMinutes: undefined,
+        routeToParkingMinutes: undefined,
+        driveToLotMinutes: undefined,
+        driveMinutes: undefined,
+        duration: undefined,
+        lat: undefined,
+        lng: undefined,
+      }),
+      {},
+      'city_destination_trip',
+    );
+
+    expect(breakdown.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Drive to lot',
+          minutes: 0,
+          display: 'Check route',
+        }),
+      ]),
+    );
+    expect(breakdown.totalMinutes).toBe(11);
+    expect(breakdown.isPartial).toBe(true);
+    expect(breakdown.totalLabel).toBe('11 min partial');
+  });
+
+  it('does not treat zero minutes as valid city drive time unless origin and lot match', () => {
+    const breakdown = parkingTimeBreakdown(
+      jiffyLot({
+        transferType: 'walk',
+        parkingBufferMinutes: 8,
+        transferToTerminalMinutes: 3,
+        walkingMinutes: 3,
+        originToParkingMinutes: 0,
+        routeToParkingMinutes: 0,
+        driveToLotMinutes: 0,
+        lat: undefined,
+        lng: undefined,
+      }),
+      {},
+      'city_destination_trip',
+    );
+
+    const drive = breakdown.parts.find((part) => part.label === 'Drive to lot');
+    expect(drive?.display).toBe('Check route');
+    expect(breakdown.isPartial).toBe(true);
   });
 });

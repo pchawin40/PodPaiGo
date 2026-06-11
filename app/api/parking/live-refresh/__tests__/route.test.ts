@@ -3,6 +3,7 @@ import {
   getDestinationParkingOptions,
   getLiveParkingOptions,
 } from '@/lib/providers/parkingAggregator';
+import { MockProvider } from '@/lib/providers';
 
 jest.mock('@/lib/providers/parkingAggregator', () => ({
   getLiveParkingOptions: jest.fn(async () => []),
@@ -22,6 +23,7 @@ function request(body: Record<string, unknown>): Request {
 
 describe('/api/parking/live-refresh', () => {
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
   });
 
@@ -64,21 +66,34 @@ describe('/api/parking/live-refresh', () => {
     expect(getDestinationParkingOptions).not.toHaveBeenCalled();
   });
 
-  test('supports general destination parking refresh without defaulting to SEA', async () => {
-    (getDestinationParkingOptions as jest.Mock).mockResolvedValueOnce([
-      {
-        id: 'destination-lot-1',
-        name: 'Destination Garage',
-        type: 'official',
-        price: 14,
-        distance: 8,
-        availability: 70,
-        trustStatus: 'estimated',
-        sourceName: 'Fixture',
-        lastUpdated: '2026-06-01T00:00:00.000Z',
-        assumptions: [],
-      },
-    ]);
+  test('supports general destination parking refresh through route-enriched provider without defaulting to SEA', async () => {
+    const getParkingOptionsSpy = jest
+      .spyOn(MockProvider.prototype, 'getParkingOptionsWithMetadata')
+      .mockResolvedValueOnce({
+        metadata: undefined,
+        options: [
+          {
+            id: 'destination-lot-1',
+            name: 'Destination Garage',
+            type: 'official',
+            price: 14,
+            distance: 8,
+            driveToLotMinutes: 14,
+            routeLegs: {
+              originToLot: {
+                durationMinutes: 14,
+                distanceMiles: 7.2,
+                source: 'google-routes',
+              },
+            },
+            availability: 70,
+            trustStatus: 'estimated',
+            sourceName: 'Fixture',
+            lastUpdated: '2026-06-01T00:00:00.000Z',
+            assumptions: [],
+          },
+        ],
+      });
 
     const response = await POST(
       request({
@@ -98,11 +113,17 @@ describe('/api/parking/live-refresh', () => {
     expect(response.status).toBe(200);
     expect(json.status).toBe('refreshed');
     expect(json.parking).toHaveLength(1);
+    expect(json.parking[0].driveToLotMinutes).toBe(14);
+    expect(json.parking[0].routeLegs.originToLot.durationMinutes).toBe(14);
     expect(getLiveParkingOptions).not.toHaveBeenCalled();
-    expect(getDestinationParkingOptions).toHaveBeenCalledWith(
+    expect(getDestinationParkingOptions).not.toHaveBeenCalled();
+    expect(getParkingOptionsSpy).toHaveBeenCalledWith(
+      'Monroe, WA',
+      'Bellevue Square',
+      '2026-06-01T10:00:00.000Z',
+      180,
       expect.objectContaining({
-        origin: 'Monroe, WA',
-        destination: 'Bellevue Square',
+        destinationKind: 'downtown',
         destinationLat: 47.615,
         destinationLng: -122.203,
       }),

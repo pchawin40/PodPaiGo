@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 
 const messages = [
-  "Airport trip planning without the guesswork",
-  "Compare parking, rideshare, and transit in one place",
-  "Timing, cost, weather, and stress — together",
-  "Plan the full airport trip, not just the parking spot",
+  "Airport trips and city parking in one dashboard",
+  "Compare driving, parking, rideshare, transit, and backups",
+  "Street and meter estimates are clearly labeled",
+  "Airport-day timing and city-trip choices together",
 ];
 
 export default function HeroBadge() {

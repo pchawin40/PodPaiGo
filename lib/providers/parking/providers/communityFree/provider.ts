@@ -145,10 +145,10 @@ export function userParkingSpaceToParkingOption(
 export async function getCommunityFreeParkingOptions(context: ParkingSearchContext): Promise<ParkingOption[]> {
   const lat = context.destinationKind === 'airport'
     ? context.airportCoordinates?.lat
-    : context.destinationLat;
+    : context.destinationCoordinates?.lat ?? context.destinationLat;
   const lng = context.destinationKind === 'airport'
     ? context.airportCoordinates?.lng
-    : context.destinationLng;
+    : context.destinationCoordinates?.lng ?? context.destinationLng;
 
   if (typeof lat !== 'number' || typeof lng !== 'number') return [];
 

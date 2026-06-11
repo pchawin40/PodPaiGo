@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdminEmail } from '../../../../lib/admin/adminAuth';
 import {
   getAnalyticsDashboardData,
   type AnalyticsDateRange,
 } from '../../../../lib/admin/analyticsDashboard';
-import { createSupabaseAuthClient } from '../../../../lib/monetization/recordOutboundClick';
+import { requireAdmin } from '../../../../lib/auth/admin';
 
 export const runtime = 'nodejs';
 
@@ -18,19 +17,8 @@ function parseRange(value: string | null): AnalyticsDateRange {
 }
 
 export async function GET(request: NextRequest) {
-  const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || null;
-  const authClient = createSupabaseAuthClient(accessToken);
-
-  if (!authClient || !accessToken) {
-    return NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
-  }
-
-  const { data } = await authClient.auth.getUser();
-  const email = data.user?.email ?? null;
-
-  if (!isAdminEmail(email)) {
-    return NextResponse.json({ error: 'Admin access required.' }, { status: 403 });
-  }
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
 
   const range = parseRange(request.nextUrl.searchParams.get('range'));
   const airportCode = request.nextUrl.searchParams.get('airport');

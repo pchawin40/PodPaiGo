@@ -1,5 +1,6 @@
-import { WeatherContext, WeatherImpact } from './weather/types';
+import { WeatherContext, WeatherImpact, WeatherUnavailableReason } from './weather/types';
 import type { OptionIntelligence } from './intelligence/optionIntelligence';
+import type { TransitFareResolution } from './transit/transitFareResolver';
 
 export type TripType =
   | 'airport-departure'
@@ -21,7 +22,15 @@ export type DestinationKind =
   | 'event'
   | 'hospital'
   | 'restaurant'
+  | 'cafe'
+  | 'bar'
   | 'hotel'
+  | 'grocery'
+  | 'store'
+  | 'mall'
+  | 'park'
+  | 'trailhead'
+  | 'neighborhood'
   | 'general';
 
 export type TransportAvailability = 'car' | 'rideshare' | 'transit' | 'all';
@@ -33,6 +42,51 @@ export type BagPlan = 'none' | 'checked' | 'oversized';
 
 export type TransitPaymentOption = 'normal' | 'orca-pass';
 export type ParkingPreference = 'none' | 'destination' | 'nearby';
+
+/**
+ * Drive route intelligence (Phase 1).
+ *
+ * These are user inputs that influence how we ask the traffic provider for
+ * toll-aware / HOV / express-lane driving guidance. They never change parking
+ * provider logic and are additive: when absent, routing keeps its existing
+ * standard behavior.
+ */
+export type DriveRouteProfile =
+  | 'standard'
+  | 'avoid_tolls'
+  | 'toll_allowed'
+  | 'hov_possible'
+  | 'express_possible';
+
+export type VehicleOccupancy = 1 | 2 | 3 | 4;
+
+export type DriveRoutePreferences = {
+  avoidTolls: boolean;
+  hasTollPass: boolean;
+  hovEligible: boolean;
+  vehicleOccupancy: VehicleOccupancy;
+  showExpressLaneNotes: boolean;
+};
+
+/**
+ * A single comparable driving route option. Toll cost is always an estimate and
+ * HOV/express eligibility is never guaranteed — copy must stay cautious.
+ */
+export type DriveRouteOption = {
+  id: string;
+  label: string;
+  profile: DriveRouteProfile;
+  durationMinutes: number;
+  staticDurationMinutes?: number;
+  distanceMeters?: number;
+  tollEstimated: boolean;
+  tollCostMin?: number;
+  tollCostMax?: number;
+  tollPassRequired?: boolean;
+  expressLaneNote?: string;
+  trustStatus: TrustStatus;
+  sourceName: string;
+};
 export type ParkingFeatureConfidence = 'verified' | 'provider_claimed' | 'inferred' | 'unknown';
 export type ParkingFeatureKey =
   | 'covered'
@@ -67,6 +121,8 @@ type BaseTripData = {
    */
   originLat?: number;
   originLng?: number;
+  originName?: string;
+  originPlaceId?: string;
 
   /**
    * Optional destination coordinates from autocomplete/geocoding later.
@@ -75,14 +131,29 @@ type BaseTripData = {
   destinationLng?: number;
 
   /**
+   * Optional destination Google place_id from autocomplete. Lets the engine
+   * resolve confirmed coordinates without a separate Geocoding API call when
+   * the selected prediction did not carry lat/lng.
+   */
+  destinationPlaceId?: string;
+
+  /**
    * Optional flow marker. Quick Go is stored as a general trip for results, but
    * timing should still behave like "go now" instead of a full planner target arrival.
    */
   tripMode?: 'quick-go';
+  quickGoPurpose?: string;
+  intent?: string;
 
   transportAvailability?: TransportAvailability;
   transitPayment?: TransitPaymentOption;
   parkingPreference?: ParkingPreference;
+
+  /**
+   * Optional driving route intelligence inputs (toll / HOV / express lane).
+   * Additive: when omitted, routing keeps existing standard-only behavior.
+   */
+  driveRoutePreferences?: DriveRoutePreferences;
 
   /**
    * Parking is always stored in minutes internally.
@@ -199,6 +270,7 @@ export type ParkingRateResolution = {
 export type ParkingPriceSource =
   | 'official-rate'
   | 'direct-lot-rate'
+  | 'parkwhiz-live'
   | 'marketplace-link'
   | 'google-places'
   | 'estimated';
@@ -229,6 +301,45 @@ export type TransferLeg = {
   note?: string;
 };
 
+export type PointToPointTiming = {
+  driveMinutes?: number | null;
+  parkingBufferMinutes?: number | null;
+  walkToDestinationMinutes?: number | null;
+  pickupWaitMinutes?: number | null;
+  totalOptionMinutes?: number | null;
+};
+
+export type OptionScoreMode =
+  | 'parking'
+  | 'street'
+  | 'customer_parking'
+  | 'rideshare'
+  | 'transit'
+  | 'park_ride';
+
+export type OptionScoreBreakdown = {
+  optionId: string;
+  mode: OptionScoreMode;
+
+  totalCostCents: number | null;
+  totalTimeMinutes: number | null;
+  confidenceScore: number;
+  frictionScore: number;
+  walkMinutes: number | null;
+  waitMinutes: number | null;
+  driveMinutes: number | null;
+  parkingBufferMinutes: number | null;
+  sourceFreshnessScore: number;
+
+  easiestScore: number;
+  cheapestScore: number;
+  fastestScore: number;
+  bestOverallScore: number;
+
+  reasons: string[];
+  penalties: string[];
+};
+
 export type ParkAndRideRuleConfidence = 'confirmed' | 'unknown' | 'estimated';
 
 export type ParkAndRideParkingRules = {
@@ -237,6 +348,24 @@ export type ParkAndRideParkingRules = {
   permitRequired?: boolean;
   ruleConfidence: ParkAndRideRuleConfidence;
   ruleNote?: string;
+};
+
+export type ParkingDiscoveryStatus =
+  | 'live_refreshed'
+  | 'partial_timeout'
+  | 'cache_only_budget_limited'
+  | 'cache_only_quota_limited'
+  | 'cache_empty'
+  | 'provider_error';
+
+export type ParkingDiscoveryMetadata = {
+  status: ParkingDiscoveryStatus;
+  cachedCount?: number;
+  liveCount?: number;
+  providerErrors?: string[];
+  liveRefreshPaused?: boolean;
+  lastChecked?: string;
+  message?: string;
 };
 
 export type ParkingOption = {
@@ -272,14 +401,51 @@ export type ParkingOption = {
   priceNote?: string;
   priceSource?: ParkingPriceSource;
   priceConfidence?: PriceConfidence;
-  distance: number; // in minutes
+  distance?: number; // lot→destination distance in miles; unset when it cannot be measured
   /** Origin address to parking lot drive time (minutes). */
   originToParkingMinutes?: number;
   /** Same as originToParkingMinutes; used by route enrichment. */
   routeToParkingMinutes?: number;
+  /** Same origin→lot drive duration exposed for city/general-trip UI consumers. */
+  driveToLotMinutes?: number;
+  routeLegs?: {
+    originToLot?: {
+      durationMinutes?: number;
+      distanceMiles?: number;
+      source?: string;
+    };
+    driveToLot?: {
+      durationMinutes?: number;
+      distanceMiles?: number;
+      source?: string;
+    };
+  };
+  routeTime?: {
+    durationMinutes?: number | string;
+    driveMinutes?: number | string;
+    driveToLotMinutes?: number | string;
+  };
+  parkingRoute?: {
+    durationMinutes?: number | string;
+    driveToLotMinutes?: number | string;
+  };
+  trafficEstimate?: {
+    duration?: number | string;
+  };
   driveMinutes?: number;
+  driveTimeMinutes?: number | string;
+  durationMinutes?: number | string;
+  totalMinutes?: number | string;
+  totalTripMinutes?: number | string;
+  routeDurationMinutes?: number | string;
+  routeMinutes?: number | string;
+  routeToLotMinutes?: number | string;
+  drivingMinutes?: number | string;
   /** Live or estimated origin→lot drive duration in minutes. */
   duration?: number;
+  walkToDestinationMinutes?: number;
+  totalOptionMinutes?: number;
+  timingBreakdown?: PointToPointTiming;
   /** How origin→lot drive time was derived. */
   originDriveSource?: 'google-routes' | 'haversine-estimated' | 'same-place';
   /** Geocoded trip origin used for drive-time fallback. */
@@ -294,6 +460,10 @@ export type ParkingOption = {
   routeDestination?: string;
   sourceName: string;
   sourceLink?: string;
+  /** True when the outbound provider link carries configured affiliate/referral attribution. */
+  outboundAffiliateAttached?: boolean;
+  /** Provider sub-id query param name configured server-side for click correlation. */
+  outboundSubIdParam?: string;
   mapLink?: string;
   lastUpdated: string; // ISO timestamp
   assumptions: string[];
@@ -304,6 +474,17 @@ export type ParkingOption = {
   featureConfidence?: Partial<Record<ParkingFeatureKey, ParkingFeatureConfidence>>;
   reviewScore?: number; // e.g. from Google reviews, 0-5
   reviewCount?: number; // number of reviews, for context with reviewScore
+  googleRating?: number;
+  googleReviewCount?: number;
+  rating?: number;
+  placeRating?: number;
+  userRatingsTotal?: number;
+  reviewsSummary?: {
+    rating?: number;
+    reviewScore?: number;
+    reviewCount?: number;
+    userRatingsTotal?: number;
+  };
   googleReviews?: ParkingGoogleReview[];
   googleReviewsFetchedAt?: string;
   googleReviewsExpiresAt?: string;
@@ -386,6 +567,10 @@ export type ParkingOption = {
   fetchedAt?: string;
   /** How fresh the displayed price is. */
   priceFreshness?: 'live' | 'recent' | 'estimated' | 'unknown';
+  /** How this parking option was discovered for this request. */
+  parkingDiscoveryStatus?: ParkingDiscoveryStatus;
+  /** Human-readable parking discovery context for UI/debug logs. */
+  parkingDiscoveryMessage?: string;
 
   walkingBurdenScore?: number;
   walkingBurdenLabel?: string;
@@ -503,6 +688,9 @@ export type RideshareOption = {
   distanceMiles?: number;
   routeDistanceMeters?: number;
   pickupWaitMinutes?: number;
+  driveMinutes?: number;
+  totalOptionMinutes?: number;
+  timingBreakdown?: PointToPointTiming;
   duration: number; // in minutes
   availability: number;
   trustStatus: TrustStatus;
@@ -570,6 +758,7 @@ export type TransitOption = {
   weatherPenaltyLabel?: string;
 
   trueTotalCost?: number;
+  transitFareResolution?: TransitFareResolution;
 };
 
 export type TransitSegment = {
@@ -684,20 +873,27 @@ export type Recommendation = {
   parking: ParkingOption[];
   rideshare: RideshareOption[];
   transit: TransitOption[];
+  optionScoreBreakdowns?: OptionScoreBreakdown[];
   accessStrategies?: AccessRankingResult;
   tsaEstimate: TsaEstimate;
   airportRouteUnavailable?: boolean;
   airportRouteUnavailableReason?: string;
   weatherImpact?: WeatherImpact | null;
   weatherContext?: WeatherContext;
+  weatherUnavailableReason?: WeatherUnavailableReason;
   weatherForecastRangeStart?: string;
   weatherForecastRangeEnd?: string;
   leaveByTime?: string | null;
   tripDuration?: number;
   trafficEstimate?: TrafficEstimate;
+  /** Optional toll/HOV/express drive route comparison (Phase 1, gated). */
+  driveRouteOptions?: DriveRouteOption[];
+  driveRoutePreferences?: DriveRoutePreferences;
   flightInfo?: FlightInfo;
   locationInfo?: LocationInfo;
   parkingDiscoveryNotice?: string;
+  parkingDiscoveryStatus?: ParkingDiscoveryStatus;
+  parkingDiscoveryMetadata?: ParkingDiscoveryMetadata;
   parkingDataStatus?: 'not_requested' | 'available' | 'empty' | 'unavailable';
   parkingDataMessage?: string;
 };

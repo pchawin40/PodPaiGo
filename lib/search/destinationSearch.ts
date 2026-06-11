@@ -160,6 +160,7 @@ function geocoderPredictionToResult(prediction: GeocoderPrediction): Destination
     address: label,
     category,
     source: 'geocoder',
+    placeId: prediction.place_id,
     confidence: category === 'retail' ? 'high' : 'medium',
   };
 }
@@ -320,6 +321,7 @@ export function destinationSearchResultToSelection(result: DestinationSearchResu
   destinationSource: DestinationSearchResult['source'];
   destinationLat?: number;
   destinationLng?: number;
+  destinationPlaceId?: string;
   destinationConfidence: DestinationSearchResult['confidence'];
   detectedAirportCode?: string;
 } {
@@ -330,6 +332,7 @@ export function destinationSearchResultToSelection(result: DestinationSearchResu
     destinationSource: result.source,
     destinationLat: result.lat,
     destinationLng: result.lng,
+    destinationPlaceId: result.placeId,
     destinationConfidence: result.confidence,
     detectedAirportCode: result.airportCode,
   };

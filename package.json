@@ -20,10 +20,12 @@
     "lint": "eslint",
     "lint:watch": "nodemon --watch app --watch lib --ext ts,tsx --exec \"npm run lint\"",
     "typecheck": "tsc --noEmit",
-    "db:check": "node scripts/check-db-connection.js"
+    "db:check": "node scripts/check-db-connection.js",
+    "generate:brand-icons": "node scripts/generate-brand-icons.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
+    "claude": "^0.1.2",
     "codex": "^0.2.3",
     "dotenv": "^17.4.2",
     "next": "16.2.4",
@@ -31,7 +33,8 @@
     "psql": "^0.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "rg": "^0.0.2"
+    "rg": "^0.0.2",
+    "vercel": "^54.10.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
@@ -49,6 +52,7 @@
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.4.1",
     "nodemon": "^3.1.14",
+    "supabase": "^2.105.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
     "typescript": "^5"

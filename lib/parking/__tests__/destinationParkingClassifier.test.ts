@@ -4,6 +4,7 @@ import {
   inferDestinationCategory,
   shouldSearchPaidParkingForTrip,
 } from '../destinationParkingClassifier';
+import { EVENT_PARKING_OUTLOOK_COPY } from '../eventVenueDetection';
 
 describe('destinationParkingClassifier', () => {
   test('Costco maps to free_likely customer parking with high confidence', () => {
@@ -54,6 +55,35 @@ describe('destinationParkingClassifier', () => {
 
     expect(result.mode).toBe('paid_likely');
     expect(result.shouldSearchPaidParking).toBe(true);
+  });
+
+  test('Lumen Field maps to event_only paid_likely', () => {
+    const result = classifyDestinationParking({ destination: 'Lumen Field, Seattle, WA' });
+
+    expect(result.mode).toBe('paid_likely');
+    expect(result.accessType).toBe('event_only');
+    expect(result.reason).toBe(EVENT_PARKING_OUTLOOK_COPY);
+    expect(inferDestinationCategory({ destination: 'Lumen Field, Seattle, WA' })).toBe(
+      'stadium_event_venue',
+    );
+  });
+
+  test('T-Mobile Park and Climate Pledge Arena trigger event venue classification', () => {
+    expect(classifyDestinationParking({ destination: 'T-Mobile Park, Seattle, WA' }).accessType).toBe(
+      'event_only',
+    );
+    expect(
+      classifyDestinationParking({ destination: 'Climate Pledge Arena, Seattle, WA' }).accessType,
+    ).toBe('event_only');
+  });
+
+  test('Seahawks game origin with venue destination triggers event mode', () => {
+    const result = classifyDestinationParking({
+      destination: 'Lumen Field, Seattle, WA',
+      origin: 'Bellevue Seahawks game',
+    });
+
+    expect(result.accessType).toBe('event_only');
   });
 
   test('Pike Place Market maps to paid_likely', () => {
