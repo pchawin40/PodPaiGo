@@ -66,7 +66,7 @@ import TripRecalculatingLoader from '../components/TripRecalculatingLoader';
 import { useAuth } from '../components/AuthProvider';
 import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
-import OptionComparisonCard, { OPTION_COMPARISON_GRID_CLASS } from '../components/OptionComparisonCard';
+import OptionComparisonCard, { CompareOptionsDesktopHeader } from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import BetaFeedbackButton from './BetaFeedbackButton';
@@ -8745,16 +8745,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   Compare options
                 </h3>
 
-                <div className={`mt-2 hidden gap-x-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid ${OPTION_COMPARISON_GRID_CLASS}`}>
-                  <span>Option</span>
-                  <span>Status</span>
-                  <span>Cost</span>
-                  <span>Time</span>
-                  <span>Note</span>
-                  <span className="text-right">Action</span>
-                </div>
+                <CompareOptionsDesktopHeader />
 
-                <div id="compare-options-grid" className="mt-2 grid scroll-mt-24 grid-cols-1 gap-1.5">
+                <div
+                  id="compare-options-grid"
+                  className="mt-2 grid w-full max-w-full min-w-0 scroll-mt-24 grid-cols-1 gap-2 pb-24 md:pb-0"
+                  data-testid="compare-options-grid"
+                >
                   {modeRows.map((row) => {
                     const rowHidden =
                       ('hiddenByPreference' in row && row.hiddenByPreference) ||
