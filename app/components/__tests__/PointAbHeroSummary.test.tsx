@@ -88,4 +88,36 @@ describe('PointAbHeroSummary', () => {
     expect(screen.getByText('Customer parking')).toBeInTheDocument();
     expect(screen.getByText('Parking not confirmed yet')).toBeInTheDocument();
   });
+
+  test('leads with a plain-language "Our pick" line naming the best option', () => {
+    render(
+      <PointAbHeroSummary
+        ranking={ranking}
+        parkingOutlook={{
+          headline: 'Parking not confirmed yet',
+          title: 'Parking not confirmed yet',
+          body: 'Compare options.',
+          reason: 'Compare options.',
+          status: 'parking_not_confirmed',
+          source: 'unknown',
+          confidence: 'low',
+          caveat: 'Verify posted signs and lot rules.',
+          hints: [],
+          verifyNotice: 'Verify posted signs and lot rules.',
+          showSearchNearbyParking: true,
+          diagnostics: {
+            accessType: 'Public',
+            confidence: 'Not confirmed yet',
+            reason: 'Test reason',
+            recommendedAction: 'Check signs',
+          },
+        }}
+      />,
+    );
+
+    // Plain-language summary at the top names the winning option.
+    expect(screen.getByText(/Our pick: Customer parking\./)).toBeInTheDocument();
+    // The Best overall card is tagged as the recommended pick.
+    expect(screen.getByText('Our pick')).toBeInTheDocument();
+  });
 });

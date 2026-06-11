@@ -16,6 +16,7 @@ export type ParkAndRideLotStatusLabel =
   | 'Long detour'
   | 'Too far from origin'
   | 'Slow transit connection'
+  | 'No transit to destination'
   | 'Not recommended'
   | 'Useful backup'
   | 'Best pick'

@@ -76,6 +76,7 @@ describe('SiteHeader', () => {
   test('does not show admin nav for signed-out or non-admin users', async () => {
     renderHeader();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
 
     useAuth.mockReturnValue({
       user: { id: 'user-1', email: 'traveler@example.com' },
@@ -98,6 +99,7 @@ describe('SiteHeader', () => {
       });
     });
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
   });
 
   test('renders public nav links without admin for non-admin users', () => {
@@ -111,6 +113,7 @@ describe('SiteHeader', () => {
     expect(screen.getByRole('link', { name: 'About' })).toHaveAttribute('href', '/about');
     expect(screen.getByRole('link', { name: 'Plan trip' })).toHaveAttribute('href', '/trip');
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outreach email' })).not.toBeInTheDocument();
   });
 
   test('shows admin nav for signed-in admin', async () => {

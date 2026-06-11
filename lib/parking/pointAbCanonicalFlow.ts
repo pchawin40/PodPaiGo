@@ -118,7 +118,7 @@ export function computePointAbCanonicalWinners(input: {
 
   const cheapestWinner =
     [...visibleCandidates]
-      .filter((mode) => mode.reliable && mode.cost < BIG)
+      .filter((mode) => mode.reliable && mode.costKnown !== false && mode.cost < BIG)
       .sort((a, b) => a.cost - b.cost || a.minutes - b.minutes)[0] ?? null;
 
   const fastestWinner =

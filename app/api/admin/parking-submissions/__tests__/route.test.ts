@@ -141,6 +141,50 @@ describe('/api/admin/parking-submissions', () => {
     await expect(response.json()).resolves.toEqual({ parking: [] });
   });
 
+  test('admin storage configuration error includes sanitized missing env hint', async () => {
+    const originalSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    try {
+      jest.doMock('@/lib/monetization/recordOutboundClick', () => ({
+        createSupabaseAuthClient: jest.fn(() => adminAuthClient()),
+      }));
+      jest.doMock('@/lib/analytics/insertAnalyticsEvent', () => ({
+        createSupabaseServiceClient: jest.fn(() => null),
+      }));
+
+      const { GET } = await import('../route');
+
+      const response = await GET(
+        new NextRequest('http://localhost/api/admin/parking-submissions', {
+          headers: { Authorization: 'Bearer token-1' },
+        }),
+      );
+      const json = await response.json();
+
+      expect(response.status).toBe(503);
+      expect(json).toEqual({
+        error: 'database_not_configured',
+        message: 'Parking submissions storage is not configured.',
+        adminHint: 'Missing server env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.',
+      });
+      expect(JSON.stringify(json)).not.toContain('service-role-key');
+    } finally {
+      if (originalSupabaseUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      } else {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = originalSupabaseUrl;
+      }
+      if (originalServiceRoleKey === undefined) {
+        delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+      } else {
+        process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+      }
+    }
+  });
+
   test('admin API maps null optional fields without crashing', async () => {
     const serviceFrom = jest.fn((table: string) => {
       if (table === 'parking_validation_reports') {

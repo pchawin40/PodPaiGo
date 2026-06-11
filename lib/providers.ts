@@ -2788,6 +2788,10 @@ export class MockProvider implements DataProvider {
         routeEstimate.routeUnavailable || !Number.isFinite(routeEstimate.duration)
           ? 55
           : Math.max(20, Math.round(routeEstimate.duration * 1.45 + 12));
+      const longIntercityEstimate =
+        !routeEstimate.routeUnavailable &&
+        Number.isFinite(routeEstimate.duration) &&
+        routeEstimate.duration >= 120;
 
       const fareResolution = resolveTransitFare({ destination, origin });
       const oneWayFare = fareResolution.oneWayDollars ?? 0;
@@ -2811,7 +2815,7 @@ export class MockProvider implements DataProvider {
             },
           ],
           transfers: 1,
-          availability: routeEstimate.routeUnavailable ? 50 : 70,
+          availability: routeEstimate.routeUnavailable ? 50 : longIntercityEstimate ? 35 : 70,
           trustStatus: 'estimated',
           routeTrustStatus: routeEstimate.routeUnavailable ? 'fallback' : routeEstimate.trustStatus,
           routeOrigin: origin,
@@ -2823,7 +2827,10 @@ export class MockProvider implements DataProvider {
             routeEstimate.routeUnavailable
               ? 'Drive time unavailable; open transit directions to confirm route.'
               : 'Transit time estimated from entered origin and destination.',
-          ],
+            longIntercityEstimate
+              ? 'For long intercity trips, this is a planning link to verify, not a primary recommendation.'
+              : '',
+          ].filter(Boolean),
           sourceName:
             fareResolution.matchKind === 'unknown'
               ? 'Google Maps transit directions'

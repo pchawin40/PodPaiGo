@@ -255,8 +255,28 @@ async function updateUserParkingSpaceStatus(args: {
   return data ? mapUserParkingSpace(data as Partial<UserParkingSpaceRecord>) : null;
 }
 
-function jsonError(status: number, error: string, message: string) {
-  return NextResponse.json({ error, message }, { status });
+function getParkingSubmissionsStorageAdminHint(): string {
+  const missing = [
+    process.env.NEXT_PUBLIC_SUPABASE_URL ? null : 'NEXT_PUBLIC_SUPABASE_URL',
+    process.env.SUPABASE_SERVICE_ROLE_KEY ? null : 'SUPABASE_SERVICE_ROLE_KEY',
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    return `Missing server env: ${missing.join(', ')}.`;
+  }
+
+  return 'Supabase service-role client could not be created.';
+}
+
+function jsonError(status: number, error: string, message: string, adminHint?: string) {
+  return NextResponse.json(
+    {
+      error,
+      message,
+      ...(adminHint ? { adminHint } : {}),
+    },
+    { status },
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -265,7 +285,12 @@ export async function GET(request: NextRequest) {
 
   const client = createSupabaseServiceClient();
   if (!client) {
-    return jsonError(503, 'database_not_configured', 'Parking submissions storage is not configured.');
+    return jsonError(
+      503,
+      'database_not_configured',
+      'Parking submissions storage is not configured.',
+      getParkingSubmissionsStorageAdminHint(),
+    );
   }
 
   const statusRaw = request.nextUrl.searchParams.get('status') || 'pending';
@@ -305,7 +330,12 @@ export async function POST(request: NextRequest) {
 
   const client = createSupabaseServiceClient();
   if (!client) {
-    return jsonError(503, 'database_not_configured', 'Parking submissions storage is not configured.');
+    return jsonError(
+      503,
+      'database_not_configured',
+      'Parking submissions storage is not configured.',
+      getParkingSubmissionsStorageAdminHint(),
+    );
   }
 
   try {

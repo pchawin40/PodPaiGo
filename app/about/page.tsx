@@ -28,7 +28,21 @@ export default function AboutPage() {
           events, errands, pickups, and point-to-point travel.
         </p>
 
-        <TravelCard className="mt-10 space-y-6">
+        <div className="mt-8 rounded-2xl border border-primary/20 bg-primary/5 p-5">
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">
+            What the name means
+          </p>
+          <p className="mt-2 text-lg leading-8 text-foreground">
+            PodPaiGo comes from <span className="font-semibold">ปลอดภัย Go</span> — a Thai-English
+            phrase that means <span className="font-semibold">&quot;go safely.&quot;</span>
+          </p>
+          <p className="mt-2 leading-7 text-muted-foreground">
+            Before you leave, you should feel confident about how you&apos;re getting there, where
+            you&apos;ll park, what it might cost, and what to watch out for.
+          </p>
+        </div>
+
+        <TravelCard className="mt-8 space-y-6">
           <section>
             <h2 className="text-xl font-semibold text-foreground">Why it exists</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
@@ -39,20 +53,12 @@ export default function AboutPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-foreground">Why PodPaiGo?</h2>
+            <h2 className="text-xl font-semibold text-foreground">What we believe</h2>
             <p className="mt-2 leading-7 text-muted-foreground">
-              PodPaiGo started from a Thai-English phrase: <span className="font-medium text-foreground">ปลอดภัย Go</span>{' '}
-              meaning &quot;go safely.&quot;
-            </p>
-            <p className="mt-3 leading-7 text-muted-foreground">
-              The idea is simple: before you leave, you should feel confident about how you are
-              getting there, where you might park, what it may cost, and what risks to watch for.
-            </p>
-            <p className="mt-3 leading-7 text-muted-foreground">
-              That is why PodPaiGo compares route time, parking, transit, rideshare, airport
-              options, weather, and local parking rules in one place. It is not just about finding
-              the cheapest option. It is about helping you make a safer, clearer, less stressful
-              trip decision before you go.
+              PodPaiGo compares route time, parking, transit, rideshare, airport options, weather,
+              and local parking rules in one place. It is not just about finding the cheapest
+              option — it is about helping you make a safer, clearer, less stressful trip decision
+              before you go.
             </p>
           </section>
 

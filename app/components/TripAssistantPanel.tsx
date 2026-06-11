@@ -591,14 +591,14 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
           </div>
           {showInfo ? (
             <div className="mb-2 max-w-md rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground shadow-sm">
-              AI planning is available for signed-in users. Register or sign in to use Ask
-              PodPaiGo and save your trip context.
-              Describe your trip. PodPaiGo will ask one follow-up at a time, then fill the planner for review.
+              Describe your trip and PodPaiGo asks one quick follow-up at a time, then fills in the
+              planner for you to review. Sign in to use it and save your trip context.
             </div>
           ) : null}
           <h2 className="text-xl font-bold text-foreground">Describe a trip or destination</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Use it for airport trips or quick point A to B plans.
+            Type it like a text — where you&apos;re going, when, and from where. We&apos;ll ask if we
+            need more.
           </p>
         </div>
 
@@ -655,7 +655,7 @@ export default function TripAssistantPanel({ className = '' }: TripAssistantPane
             value={userText}
             onChange={(event) => setUserText(event.target.value)}
             disabled={!signedIn || authLoading || loading}
-            rows={messages.length > 0 ? 2 : 4}
+            rows={messages.length > 0 ? 2 : 3}
             placeholder={inputPlaceholder}
             className="mt-2 w-full rounded-2xl border border-border bg-card px-4 py-3 text-base text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-ring focus:ring-4 focus:ring-ring/15 dark:bg-muted/70"
           />

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import AnalyticsDashboard from '../../components/admin/AnalyticsDashboard';
 import { useAdminStatus } from '../../components/useAdminStatus';
+import AdminNav from '../AdminNav';
 import type {
   AnalyticsDashboardData,
   AnalyticsDateRange,
@@ -111,6 +112,7 @@ export default function AdminAnalyticsPage() {
         <Link href="/account" className="text-sm font-medium text-primary hover:underline">
           ← Account
         </Link>
+        <AdminNav className="mt-6" />
 
         {adminLoading ? (
           <p className="mt-8 text-sm text-muted-foreground">Loading session…</p>

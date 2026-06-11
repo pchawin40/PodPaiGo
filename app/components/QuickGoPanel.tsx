@@ -770,9 +770,10 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
               Now
             </StatusPill>
           </div>
-          <p className="mt-0.5 text-sm font-medium text-foreground">Fast point A to point B</p>
+          <p className="mt-0.5 text-sm font-medium text-foreground">The fastest way to get an answer</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Just going somewhere now? Enter a destination for drive time and parking expectations.
+            Type where you&apos;re going. We&apos;ll show the drive time, where to park, and the best
+            way to get there.
           </p>
         </div>
       </div>
@@ -932,7 +933,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
 
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Decision style
+                What matters most?
               </div>
               <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg border border-border bg-card p-1">
                 {quickGoPreferences.map((preference) => (
@@ -951,6 +952,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
                   </button>
                 ))}
               </div>
+              <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+                We compare every option — this just picks which one we highlight.
+              </p>
             </div>
           </div>
 
@@ -1002,6 +1006,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
         </div>
 
         <div className="rounded-xl border border-border/80 bg-muted/20 p-2">
+          <div className="px-1 pb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            How will you get around?
+          </div>
           <div className="grid grid-cols-3 gap-1">
             {(
               [

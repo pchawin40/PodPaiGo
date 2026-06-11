@@ -523,7 +523,7 @@ export default function ParkingLotsMap({
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                     <div className="font-semibold">{MAP_FALLBACK_MESSAGE}</div>
                     <div className="mt-1">
-                        The parking list is still available. You can open the selected map target directly in Google Maps.
+                        Your parking list still works below — tap any lot to open it in Google Maps.
                     </div>
                     <a
                         href={primaryMapTarget.href}

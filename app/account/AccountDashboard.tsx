@@ -434,6 +434,12 @@ export default function AccountDashboard() {
                     Product analytics
                   </Link>
                   <Link
+                    href="/admin/outreach"
+                    className="inline-flex items-center justify-center rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+                  >
+                    Outreach email
+                  </Link>
+                  <Link
                     href="/admin/parking-submissions"
                     className="inline-flex items-center justify-center rounded-full border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
                   >

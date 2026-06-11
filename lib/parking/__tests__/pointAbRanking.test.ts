@@ -1704,4 +1704,415 @@ describe('pointAbRanking', () => {
     expect(ranked.modes.some((m) => m.key === 'destination-customer')).toBe(false);
     expect(ranked.recommendationMode).not.toBe('destination-customer');
   });
+
+  test('long intercity trip downgrades slow estimated transit and recommends driving', () => {
+    const bendTrip = {
+      type: 'general-trip' as const,
+      origin: 'Seattle, WA',
+      originLat: 47.6062,
+      originLng: -122.3321,
+      destination: 'Bend, Oregon',
+      destinationKind: 'general' as const,
+      destinationLat: 44.0582,
+      destinationLng: -121.3153,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+    };
+    const estimatedTransit = {
+      ...cheapTransit,
+      id: 'regional-transit-to-bend',
+      name: 'Transit route to Bend',
+      duration: 470,
+      price: 4,
+      trustStatus: 'estimated' as const,
+      routeTrustStatus: 'estimated' as const,
+      sourceName: 'Google Maps transit directions',
+      assumptions: [
+        'Transit time estimated from entered origin and destination.',
+        'Open transit directions for exact route.',
+      ],
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: bendTrip,
+      sort: 'easiest',
+      destinationLabel: bendTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: estimatedTransit,
+      transitCost: 4,
+      transitDuration: 470,
+      transitCostDisplay: '$4 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 310,
+    });
+
+    const driveMode = ranked.modes.find((mode) => mode.key === 'drive');
+    const transitMode = ranked.modes.find((mode) => mode.key === 'transit');
+
+    expect(ranked.recommendationMode).toBe('drive');
+    expect(ranked.displayRecommendationMode).toBe('drive');
+    expect(ranked.cheapestMode?.key).not.toBe('transit');
+    expect(driveMode).toMatchObject({
+      label: 'Drive',
+      status: 'best_pick',
+      cost: 'Parking varies',
+    });
+    expect(transitMode).toMatchObject({
+      costNote: 'Possible but impractical',
+      status: 'not_recommended',
+      unavailable: false,
+    });
+    expect(transitMode?.cons.join(' ')).toMatch(/Much slower than driving/i);
+  });
+
+  test('intercity general trip: Park & Ride and Transit cannot win with fabricated short totals', () => {
+    const bendTrip = {
+      type: 'general-trip' as const,
+      origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+      destination: 'Bend, Oregon',
+      destinationKind: 'general' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+      originLat: 47.847,
+      originLng: -121.978,
+      destinationLat: 44.0582,
+      destinationLng: -121.3153,
+    };
+
+    const pointAbParkRideSelection = selectBestParkAndRideForPointAb({
+      origin: bendTrip.origin,
+      originLat: bendTrip.originLat,
+      originLng: bendTrip.originLng,
+      destination: bendTrip.destination,
+      destinationLat: bendTrip.destinationLat,
+      destinationLng: bendTrip.destinationLng,
+      parkingDurationMinutes: 120,
+      isAirportTrip: false,
+      sort: 'easiest',
+    });
+    const pointAbParkRide = toPointAbParkRidePresentation(pointAbParkRideSelection);
+
+    const estimatedTransit = {
+      ...cheapTransit,
+      id: 'regional-transit-to-bend',
+      name: 'Transit route to Bend',
+      duration: 63,
+      price: 4,
+      trustStatus: 'estimated' as const,
+      routeTrustStatus: 'estimated' as const,
+      sourceName: 'Google Maps transit directions',
+      assumptions: [
+        'Transit time estimated from entered origin and destination.',
+        'Open transit directions for exact route.',
+      ],
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: bendTrip,
+      sort: 'easiest',
+      destinationLabel: bendTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: estimatedTransit,
+      transitCost: 4,
+      transitDuration: 63,
+      transitCostDisplay: '$4 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      pointAbParkRide,
+      parkRideCost: pointAbParkRide?.cost ?? null,
+      parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
+      parkRideReliable: Boolean(pointAbParkRide?.reliable),
+      driveMinutes: 310,
+    });
+
+    const parkRideMode = ranked.modes.find((mode) => mode.key === 'park-ride');
+    const transitMode = ranked.modes.find((mode) => mode.key === 'transit');
+
+    // Park & Ride is not confirmed for this destination and cannot win.
+    expect(pointAbParkRide?.reliable).toBe(false);
+    expect(pointAbParkRide?.durationMinutes).toBeNull();
+    expect(parkRideMode?.name).toMatch(/not confirmed for this destination/i);
+    expect(parkRideMode?.time).toBe('Not estimated');
+    expect(parkRideMode?.status).not.toBe('best_pick');
+    expect(ranked.recommendationMode).not.toBe('park-ride');
+    expect(ranked.displayRecommendationMode).not.toBe('park-ride');
+    expect(ranked.canonicalWinners.cheapestWinner?.key).not.toBe('park-ride');
+    expect(ranked.canonicalWinners.fastestWinner?.key).not.toBe('park-ride');
+
+    // Transit's fabricated short total is hidden, not presented as a real time.
+    expect(transitMode?.time).toBe('Check route');
+    expect(transitMode?.status).toBe('not_recommended');
+    expect(ranked.recommendationMode).toBe('drive');
+  });
+
+  test('valid local Park & Ride remains eligible and usable', () => {
+    const localTrip = {
+      type: 'general-trip' as const,
+      origin: 'Lynnwood, WA',
+      destination: 'Downtown Seattle, WA',
+      destinationKind: 'downtown' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 6 * 60,
+      transportAvailability: 'all' as const,
+      originLat: 47.8209,
+      originLng: -122.2931,
+      destinationLat: 47.6062,
+      destinationLng: -122.3321,
+    };
+
+    const pointAbParkRideSelection = selectBestParkAndRideForPointAb({
+      origin: localTrip.origin,
+      originLat: localTrip.originLat,
+      originLng: localTrip.originLng,
+      destination: localTrip.destination,
+      destinationLat: localTrip.destinationLat,
+      destinationLng: localTrip.destinationLng,
+      parkingDurationMinutes: 6 * 60,
+      isAirportTrip: false,
+      sort: 'easiest',
+      parkingTotal: 32,
+    });
+    const pointAbParkRide = toPointAbParkRidePresentation(pointAbParkRideSelection);
+
+    const ranked = rankPointAbModes({
+      tripData: localTrip,
+      sort: 'easiest',
+      destinationLabel: localTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: 32,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: null,
+      transitCost: null,
+      transitDuration: null,
+      transitCostDisplay: null,
+      hasReliableTransit: false,
+      bestParkRideAccess: null,
+      pointAbParkRide,
+      parkRideCost: pointAbParkRide?.cost ?? null,
+      parkRideDuration: pointAbParkRide?.durationMinutes ?? null,
+      parkRideReliable: Boolean(pointAbParkRide?.reliable),
+      driveMinutes: 35,
+    });
+
+    const parkRideMode = ranked.modes.find((mode) => mode.key === 'park-ride');
+
+    // A real local corridor keeps Park & Ride reliable, timed, and eligible.
+    expect(pointAbParkRide?.reliable).toBe(true);
+    expect(pointAbParkRide?.durationMinutes).not.toBeNull();
+    expect(parkRideMode?.status).not.toBe('unavailable');
+    expect(parkRideMode?.status).not.toBe('not_recommended');
+    expect(ranked.canonicalWinners.visibleOptionKeys).toContain('park-ride');
+  });
+
+  test('short city trip can still recommend genuinely faster transit', () => {
+    const shortCityTrip = {
+      type: 'general-trip' as const,
+      origin: 'Capitol Hill, Seattle, WA',
+      destination: 'Downtown Bellevue, WA',
+      destinationKind: 'downtown' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: shortCityTrip,
+      sort: 'easiest',
+      destinationLabel: shortCityTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: {
+        ...cheapTransit,
+        duration: 20,
+        price: 3,
+        trustStatus: 'verified-source',
+        assumptions: ['Published city transit route.'],
+      },
+      transitCost: 3,
+      transitDuration: 20,
+      transitCostDisplay: '$3 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 60,
+    });
+
+    expect(ranked.recommendationMode).toBe('transit');
+    expect(ranked.modes.find((mode) => mode.key === 'transit')?.status).toBe('best_pick');
+    expect(ranked.modes.find((mode) => mode.key === 'drive')?.status).not.toBe('best_pick');
+  });
+
+  test('airport transit behavior remains eligible outside the general-trip intercity guard', () => {
+    const airportTrip = {
+      type: 'one-way-departure' as const,
+      origin: 'Seattle, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      destinationKind: 'airport' as const,
+      airportCode: 'SEA',
+      departureDate: '2026-06-07',
+      departureTime: '06:00',
+      transportAvailability: 'all' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: airportTrip,
+      sort: 'easiest',
+      destinationLabel: airportTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: {
+        ...cheapTransit,
+        duration: 90,
+        trustStatus: 'estimated',
+        assumptions: ['Airport transit estimate.'],
+      },
+      transitCost: 3,
+      transitDuration: 90,
+      transitCostDisplay: '$3 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 45,
+    });
+
+    expect(ranked.modes.some((mode) => mode.key === 'drive')).toBe(false);
+    expect(ranked.recommendationMode).toBe('transit');
+    expect(ranked.modes.find((mode) => mode.key === 'transit')?.status).toBe('best_pick');
+  });
+
+  test('event transit behavior remains eligible outside the general-trip intercity guard', () => {
+    const eventTrip = {
+      ...tripData,
+      origin: 'Bellevue, WA',
+      destination: 'Lumen Field, Seattle, WA',
+      destinationKind: 'stadium' as const,
+      parkingDuration: 180,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: eventTrip,
+      sort: 'easiest',
+      destinationLabel: eventTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: expensiveRide,
+      ridePrice: 55,
+      rideDuration: 32,
+      bestTransitOption: {
+        ...cheapTransit,
+        duration: 48,
+        trustStatus: 'verified-source',
+      },
+      transitCost: 3.25,
+      transitDuration: 48,
+      transitCostDisplay: '$3.25 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 28,
+    });
+
+    expect(ranked.modes.some((mode) => mode.key === 'drive')).toBe(false);
+    expect(ranked.recommendationMode).toBe('transit');
+    expect(ranked.recommendedTitle).toBe('Take transit to the game');
+  });
+
+  test('low-confidence transit does not beat known drive time', () => {
+    const lowConfidenceTrip = {
+      type: 'general-trip' as const,
+      origin: 'Seattle, WA',
+      destination: 'Tacoma, WA',
+      destinationKind: 'general' as const,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all' as const,
+    };
+
+    const ranked = rankPointAbModes({
+      tripData: lowConfidenceTrip,
+      sort: 'easiest',
+      destinationLabel: lowConfidenceTrip.destination,
+      noParkingPreferred: false,
+      bestParking: null,
+      parkingOptions: [],
+      parkingTotal: null,
+      parkingMinutes: null,
+      bestRideOption: null,
+      ridePrice: null,
+      rideDuration: null,
+      bestTransitOption: {
+        ...cheapTransit,
+        duration: 38,
+        trustStatus: 'estimated',
+        routeTrustStatus: 'fallback',
+        assumptions: ['Drive time unavailable; open transit directions to confirm route.'],
+      },
+      transitCost: 3,
+      transitDuration: 38,
+      transitCostDisplay: '$3 est.',
+      hasReliableTransit: true,
+      bestParkRideAccess: null,
+      parkRideCost: null,
+      parkRideDuration: null,
+      parkRideReliable: false,
+      driveMinutes: 45,
+    });
+
+    expect(ranked.recommendationMode).toBe('drive');
+    expect(ranked.modes.find((mode) => mode.key === 'transit')).toMatchObject({
+      status: 'not_recommended',
+      costNote: 'Possible but impractical',
+    });
+  });
 });

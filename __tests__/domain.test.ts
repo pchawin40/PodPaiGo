@@ -390,6 +390,70 @@ describe('Recommendation Ranking', () => {
     });
   });
 
+  test('rankRecommendations downgrades slow estimated transit for long general trips', () => {
+    const generalTrip: TripData = {
+      type: 'general-trip',
+      origin: 'Seattle, WA',
+      originLat: 47.6062,
+      originLng: -122.3321,
+      destination: 'Bend, Oregon',
+      destinationKind: 'general',
+      destinationLat: 44.0582,
+      destinationLng: -121.3153,
+      arrivalDate: '2026-06-07',
+      arrivalTime: '11:00',
+      parkingDuration: 120,
+      transportAvailability: 'all',
+    };
+    const driveLikeRide: RideshareOption = {
+      id: 'drive-link',
+      name: 'Driving directions',
+      price: 0,
+      priceDisplay: 'check-live',
+      rideshareEstimateConfidence: 'unavailable',
+      duration: 315,
+      driveMinutes: 310,
+      pickupWaitMinutes: 5,
+      totalOptionMinutes: 315,
+      availability: 80,
+      trustStatus: 'estimated',
+      sourceName: 'Directions',
+      lastUpdated: new Date().toISOString(),
+      assumptions: ['Route-based drive timing.'],
+    };
+    const slowTransit: TransitOption = {
+      id: 'regional-transit-to-bend',
+      name: 'Transit route to Bend',
+      price: 4,
+      duration: 470,
+      frequency: 30,
+      availability: 35,
+      trustStatus: 'estimated',
+      routeTrustStatus: 'estimated',
+      sourceName: 'Google Maps transit directions',
+      lastUpdated: new Date().toISOString(),
+      assumptions: [
+        'Transit time estimated from entered origin and destination.',
+        'Open transit directions for exact route.',
+      ],
+    };
+    const tsaEstimate: TsaEstimate = {
+      destination: generalTrip.destination,
+      waitTime: 0,
+      status: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Not applicable',
+      assumptions: [],
+    };
+
+    const result = rankRecommendations(generalTrip, [], [driveLikeRide], [slowTransit], tsaEstimate);
+
+    expect(result[0]?.type).not.toBe('transit');
+    expect(result.find((item) => item.type === 'transit')?.reasons.join(' ')).toMatch(
+      /Possible but impractical/i,
+    );
+  });
+
   test('Monroe 98272 transit returns door-to-door hub recommendations with chosen hub names', async () => {
     const provider = new MockProvider();
     const transitJourneys = await provider.getTransitOptions(

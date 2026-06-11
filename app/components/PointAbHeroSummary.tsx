@@ -13,6 +13,8 @@ type PointAbHeroSummaryProps = {
 
 function modeLabel(key: string): string {
   switch (key) {
+    case 'drive':
+      return 'Drive';
     case 'destination-customer':
       return 'Customer parking';
     case 'parking':
@@ -34,15 +36,33 @@ function SummaryCard({
   label,
   value,
   detail,
+  highlight = false,
+  tag,
 }: {
   label: string;
   value: string;
   detail?: string;
+  highlight?: boolean;
+  tag?: string;
 }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-xl border border-border bg-card/80 p-3 shadow-sm">
-      <div className="line-clamp-2 break-words text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
+    <div
+      className={
+        'min-w-0 overflow-hidden rounded-xl border p-3 shadow-sm ' +
+        (highlight
+          ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/15'
+          : 'border-border bg-card/80')
+      }
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="line-clamp-2 break-words text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        {tag ? (
+          <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+            {tag}
+          </span>
+        ) : null}
       </div>
       <div className="mt-1 line-clamp-2 break-words text-sm font-semibold text-foreground">
         {value}
@@ -94,13 +114,23 @@ export default function PointAbHeroSummary({
         ? `Drive ~${driveTimeLabel}`
         : undefined;
 
+  const bestLabel = bestMode ? modeLabel(bestMode.key) : null;
+
   return (
     <div className={className}>
+      {bestLabel ? (
+        <p className="mb-2 text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">Our pick: {bestLabel}.</span> Compare the
+          cheapest and fastest options below.
+        </p>
+      ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <SummaryCard
           label="Best overall"
           value={bestMode ? modeLabel(bestMode.key) : 'Compare options'}
           detail={bestDetail}
+          highlight={Boolean(bestMode)}
+          tag={bestMode ? 'Our pick' : undefined}
         />
         <SummaryCard
           label="Cheapest"

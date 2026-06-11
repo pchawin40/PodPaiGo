@@ -32,6 +32,32 @@ const OVERNIGHT_THRESHOLD_MINUTES = 18 * 60;
 const MAX_DRIVE_TO_LOT_MINUTES = 45;
 const MAX_TOTAL_TRIP_MINUTES = 120;
 const MAX_CORRIDOR_DETOUR_RATIO = 2.2;
+/**
+ * Park & Ride only models a local transit corridor from the lot/station to the
+ * destination. Beyond this straight-line distance there is no real local
+ * transit leg, so the estimated transit minutes would be fabricated. This
+ * matches the local metro service radius and keeps SEA/airport access (lots are
+ * well within this range of the airport) working.
+ */
+const MAX_TRANSIT_CORRIDOR_MILES = 45;
+/**
+ * Reference drive time above which a trip is treated as long-distance/intercity
+ * for the "suspiciously faster than driving" guard.
+ */
+const LONG_DISTANCE_REFERENCE_DRIVE_MINUTES = 150;
+/**
+ * On a long-distance trip, a Park & Ride total that is meaningfully shorter than
+ * just driving directly is a sign the transit leg is fabricated/incomplete (no
+ * real intercity transit), so it cannot be trusted to reach the destination.
+ */
+const SUSPICIOUS_PARK_RIDE_SPEEDUP_RATIO = 0.9;
+
+/**
+ * Reason used when the destination is outside the lot's local transit corridor,
+ * so there is no believable Park & Ride transit leg to the final destination.
+ */
+export const PARK_RIDE_DESTINATION_UNREACHABLE_REASON =
+  'Park & Ride transit does not reach this destination.';
 
 type ResolvedCoords = { lat: number; lng: number } | null;
 
@@ -58,6 +84,7 @@ const KNOWN_DESTINATION_COORDS: Array<{ pattern: RegExp; lat: number; lng: numbe
 export const PARK_RIDE_COPY = {
   dataNotAvailable: 'Park & Ride data not available yet for this metro.',
   foundNotRecommended: 'Park & Ride found, but not recommended for this trip.',
+  destinationNotConfirmed: 'Park & Ride not confirmed for this destination.',
   backupAvailable: 'Park & Ride backup available.',
   recommended: 'Park & Ride option.',
   /** @deprecated Use foundNotRecommended */
@@ -112,6 +139,7 @@ function resolveLotStatusLabel(args: {
 
   const reason = args.option.unavailableReason || '';
   if (/too far from your origin/i.test(reason)) return 'Too far from origin';
+  if (/does not reach this destination/i.test(reason)) return 'No transit to destination';
   if (/too slow for this trip/i.test(reason)) return 'Slow transit connection';
   if (/much longer than driving/i.test(reason)) return 'Long detour';
   if (reason) return 'Not recommended';
@@ -122,6 +150,7 @@ function resolveLotStatusLabel(args: {
 function unavailableReasonToStatusLabel(reason: string | undefined): ParkAndRideLotStatusLabel {
   if (!reason) return 'Not recommended';
   if (/too far from your origin/i.test(reason)) return 'Too far from origin';
+  if (/does not reach this destination/i.test(reason)) return 'No transit to destination';
   if (/too slow for this trip/i.test(reason)) return 'Slow transit connection';
   if (/much longer than driving/i.test(reason)) return 'Long detour';
   return 'Not recommended';
@@ -204,10 +233,16 @@ function finalizeSelectionResult(
     candidates: partial.candidates,
   });
 
+  const cardHeadline =
+    availabilityTier === 'not_recommended' &&
+    partial.notUsefulReason === PARK_RIDE_COPY.destinationNotConfirmed
+      ? PARK_RIDE_COPY.destinationNotConfirmed
+      : cardHeadlineForTier(availabilityTier);
+
   return {
     ...partial,
     availabilityTier,
-    cardHeadline: cardHeadlineForTier(availabilityTier),
+    cardHeadline,
   };
 }
 
@@ -451,11 +486,37 @@ function scoreFacilityCandidate(args: {
   const durationFit = durationFitPenalty(facility, parkingDurationMinutes, isOvernight);
   const directDriveMinutes = estimateDirectDriveMinutes(originCoords, destinationCoords);
 
+  // Validate that the lot's transit leg can actually reach the destination.
+  // Park & Ride only models a local transit corridor; if the destination is far
+  // outside that corridor (e.g. an intercity WA -> Bend, OR trip), the estimated
+  // transit minutes are fabricated and the lot cannot reach the destination.
+  const transitCorridorMiles =
+    destinationCoords != null
+      ? haversineMiles(facility.lat, facility.lng, destinationCoords.lat, destinationCoords.lng)
+      : null;
+  const destinationOutsideTransitCorridor =
+    transitCorridorMiles != null && transitCorridorMiles > MAX_TRANSIT_CORRIDOR_MILES;
+  // On a long-distance trip, a Park & Ride total shorter than driving directly
+  // is impossible without a real intercity transit schedule, so treat the legs
+  // as fabricated/unreachable.
+  const suspiciouslyFasterThanDrive =
+    directDriveMinutes != null &&
+    directDriveMinutes >= LONG_DISTANCE_REFERENCE_DRIVE_MINUTES &&
+    totalTimeMinutes < directDriveMinutes * SUSPICIOUS_PARK_RIDE_SPEEDUP_RATIO;
+
   let unavailableReason = durationFit.unavailableReason;
   let isRecommended = true;
   let lotStatusLabel: ParkAndRideLotStatusLabel = 'Useful backup';
 
-  if (driveToLotMinutes > MAX_DRIVE_TO_LOT_MINUTES) {
+  if (destinationOutsideTransitCorridor || suspiciouslyFasterThanDrive) {
+    // Destination reachability is checked first: if no local transit leg can
+    // reach the destination, the lot is invalid regardless of how close it is
+    // to the origin. This keeps every candidate's reason consistent so an
+    // intercity trip reports a single "not confirmed for this destination".
+    isRecommended = false;
+    unavailableReason = PARK_RIDE_DESTINATION_UNREACHABLE_REASON;
+    lotStatusLabel = 'No transit to destination';
+  } else if (driveToLotMinutes > MAX_DRIVE_TO_LOT_MINUTES) {
     isRecommended = false;
     unavailableReason = 'Park & Ride lot is too far from your origin.';
     lotStatusLabel = 'Too far from origin';
@@ -687,6 +748,16 @@ export function resolveParkAndRideForTrip(
     viableCandidates[0] ?? candidates.find((candidate) => !candidate.unavailableReason) ?? null;
 
   if (!best) {
+    // When no lot can reach the destination by transit (e.g. an intercity trip
+    // where local stations cannot serve the final destination), use the
+    // destination-not-confirmed copy instead of the generic not-recommended copy.
+    const allCandidatesUnreachable =
+      candidates.length > 0 &&
+      candidates.every(
+        (candidate) =>
+          candidate.unavailableReason === PARK_RIDE_DESTINATION_UNREACHABLE_REASON,
+      );
+
     return finalizeSelectionResult({
       best: null,
       candidates,
@@ -694,7 +765,9 @@ export function resolveParkAndRideForTrip(
       metroId: metro.id,
       metroName: metro.name,
       tripPlannerUrl: metro.tripPlannerUrl,
-      notUsefulReason: PARK_RIDE_COPY.foundNotRecommended,
+      notUsefulReason: allCandidatesUnreachable
+        ? PARK_RIDE_COPY.destinationNotConfirmed
+        : PARK_RIDE_COPY.foundNotRecommended,
     });
   }
 

@@ -313,6 +313,7 @@ type BestTooLateSummary = {
 } | null;
 
 const POINT_AB_PARKING_UI_KEYS = new Set([
+  'drive',
   'destination-customer',
   'parking',
   'street-meter',
@@ -8266,6 +8267,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                             ? 'Verify rules'
                             : mode.status === 'route_needed'
                               ? 'Live route needed'
+                              : mode.status === 'not_recommended'
+                                ? 'Not recommended'
                               : mode.status === 'unavailable'
                                 ? 'Unavailable'
                                 : 'Good backup',
@@ -8504,6 +8507,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 };
               }
 
+              if (key === 'drive') {
+                return {
+                  label: 'View drive details',
+                  onClick: () => scrollToBestSection(POINT_AB_DETAILS_SECTION_IDS.drive),
+                };
+              }
+
               if (key === 'parking') {
                 return {
                   label: 'View parking details',
@@ -8617,7 +8627,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                     if (isCityTrip) {
                       const timingBreakdownLabels =
-                        row.key === 'parking'
+                        row.key === 'drive'
+                          ? {
+                              drive: 'Drive route',
+                              total: 'Drive time',
+                            }
+                          : row.key === 'parking'
                           ? {
                               drive: 'Drive to lot',
                               parkingBuffer: 'Park/check-in buffer',
@@ -8645,9 +8660,11 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       const modeActions = rowHidden
                         ? undefined
                         : buildPointAbModeActions({
-                        mode: row.key as 'destination-customer' | 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride',
+                        mode: row.key as 'drive' | 'destination-customer' | 'parking' | 'street-meter' | 'rideshare' | 'transit' | 'park-ride',
                         routeToParkingUrl:
-                          row.key === 'parking'
+                          row.key === 'drive'
+                            ? cityDestinationRouteUrl
+                            : row.key === 'parking'
                             ? bestParking?.mapLink ||
                               (tripData.origin && bestParking?.address
                                 ? googleMapsDirectionsLink(tripData.origin, bestParking.address)

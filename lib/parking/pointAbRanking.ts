@@ -644,6 +644,9 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           totalOptionMinutes: effectiveDriveMinutes,
         }
       : null;
+  const transitRoutePresent = Boolean(input.bestTransitOption && input.transitDuration != null);
+  const transitPrimaryEligible =
+    input.hasReliableTransit && transitPracticality.primaryEligible;
   const useDriveFallback = Boolean(
     input.tripData.type === 'general-trip' &&
       input.tripData.transportAvailability !== 'transit' &&
@@ -651,11 +654,10 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       !customerCandidate &&
       !input.bestParking &&
       !input.streetMeterParking?.applicable &&
+      transitRoutePresent &&
+      !transitPrimaryEligible &&
       driveFallbackTiming,
   );
-  const transitRoutePresent = Boolean(input.bestTransitOption && input.transitDuration != null);
-  const transitPrimaryEligible =
-    input.hasReliableTransit && transitPracticality.primaryEligible;
 
   const candidates: PointAbModeCandidate[] = [
     useDriveFallback
@@ -985,12 +987,14 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
             : 'Check route',
       costNote: transitPracticality.costNote,
       time:
-        input.transitDuration != null && transitRoutePresent
+        input.transitDuration != null &&
+        transitRoutePresent &&
+        !transitPracticality.suppressDuration
           ? formatMinutesLabel(input.transitDuration)
           : 'Check route',
       timeLabel: 'Total time',
       timing:
-        input.transitDuration != null
+        input.transitDuration != null && !transitPracticality.suppressDuration
           ? {
               driveMinutes: null,
               parkingBufferMinutes: null,
@@ -1165,6 +1169,7 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
               mode.key !== 'street-meter' &&
               visibleCandidateKeys.has(mode.key) &&
               mode.reliable &&
+              mode.costKnown !== false &&
               mode.cost < BIG,
           )
           .sort((a, b) => a.cost - b.cost)[0];

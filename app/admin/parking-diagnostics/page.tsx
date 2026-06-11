@@ -5,6 +5,7 @@ import Link from 'next/link';
 import SiteHeader from '../../components/SiteHeader';
 import TravelCard from '../../components/ui/TravelCard';
 import { useAdminStatus } from '../../components/useAdminStatus';
+import AdminNav from '../AdminNav';
 
 type ProviderRow = {
   provider: string;
@@ -173,6 +174,7 @@ export default function ParkingDiagnosticsPage() {
         <Link href="/" className="text-sm font-medium text-blue-700">
           ← Back to home
         </Link>
+        <AdminNav className="mt-6" />
 
         <section className="mt-8">
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">

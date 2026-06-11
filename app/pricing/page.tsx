@@ -48,7 +48,7 @@ export default function PricingPage() {
         <SectionHeader
           eyebrow="Pricing"
           title="Free during beta"
-          description={`${PRICING_BETA_FREE_HEADLINE} ${PRICING_BETA_BILLING_NOTE}`}
+          description={`${PRICING_BETA_FREE_HEADLINE} No credit card, no catch. ${PRICING_BETA_BILLING_NOTE}`}
           className="mt-8"
         />
 

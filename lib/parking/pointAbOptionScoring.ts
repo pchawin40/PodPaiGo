@@ -36,6 +36,7 @@ import {
 } from './parkAndRideSelection';
 import type { PointAbParkRidePresentation } from './parkAndRideTypes';
 import { buildStreetMeterParkingOption } from './streetMeterParking';
+import { assessTransitPracticality } from './transitPracticality';
 
 export type PointAbSortMode = 'easiest' | 'cheapest' | 'fastest';
 export type PointAbModeKey =
@@ -537,6 +538,13 @@ export function buildPointAbOptionScoreBreakdowns(
           }
         : null;
     const cost = transitCostCents(option, input.tripData);
+    const practicality = assessTransitPracticality({
+      tripData: input.tripData,
+      destinationLabel,
+      transit: option,
+      transitDuration: duration,
+      driveMinutes,
+    });
 
     scores.push(
       buildBreakdown({
@@ -544,13 +552,24 @@ export function buildPointAbOptionScoreBreakdowns(
         mode: 'transit',
         totalCostCents: cost,
         timing,
-        confidenceScore: confidenceFromTrust(option.trustStatus),
-        frictionScore: 56 + (waitMinutes ?? 8) * 0.6 + weatherFriction,
-        sourceFreshnessScore: freshnessFromTrust(option.trustStatus),
-        reasons: ['Usually low cost.', 'Avoids parking search.'],
+        confidenceScore: practicality.primaryEligible
+          ? confidenceFromTrust(option.trustStatus)
+          : Math.min(38, confidenceFromTrust(option.trustStatus)),
+        frictionScore:
+          56 +
+          (waitMinutes ?? 8) * 0.6 +
+          weatherFriction +
+          (practicality.primaryEligible ? 0 : 42),
+        sourceFreshnessScore: practicality.primaryEligible
+          ? freshnessFromTrust(option.trustStatus)
+          : Math.min(34, freshnessFromTrust(option.trustStatus)),
+        reasons: practicality.primaryEligible
+          ? ['Usually low cost.', 'Avoids parking search.']
+          : ['Possible route to check in maps.'],
         penalties: [
           'More walking and waiting.',
           cost == null ? 'Fare is not confirmed.' : '',
+          ...practicality.reasons,
         ].filter(Boolean),
       }),
     );

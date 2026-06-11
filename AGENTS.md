@@ -1030,6 +1030,202 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Deploy to Vercel preview/production and hard-refresh the browser tab to confirm the PodPaiGo icon appears; on mobile, verify add-to-home-screen uses the new apple icon and manifest name.
 
+### 2026-06-10 18:37 PDT — Long-distance transit no longer wins unrealistic general trips
+
+**Summary**
+- Wired transit practicality assessment into general point-A-to-B Smart Recommendation scoring, canonical option scoring, and global ranked recommendation scoring.
+- Long-distance/intercity general trips now downgrade transit when it is estimated-only, low confidence, much slower than the known drive time, or has too many transfers.
+- Constrained the existing `Drive` fallback mode to downgraded-transit general trips with known drive timing and no parking provider result, so Seattle-area → Bend-style trips no longer make unrealistic transit the best overall recommendation without changing local fastest/rideshare behavior.
+- Transit remains visible as an option and is labeled `Possible but impractical` with reasons when downgraded.
+- Airport and event/stadium transit behavior remains eligible and separate; provider parking pricing logic was not changed.
+
+**Files changed**
+- `lib/parking/pointAbRanking.ts`
+- `lib/parking/pointAbCanonicalFlow.ts`
+- `lib/parking/pointAbOptionScoring.ts`
+- `lib/domain.ts`
+- `lib/providers.ts`
+- `app/results/ResultsContent.tsx`
+- `app/components/PointAbHeroSummary.tsx`
+- `lib/parking/__tests__/pointAbRanking.test.ts`
+- `__tests__/domain.test.ts`
+- `app/components/__tests__/OptionComparisonCard.test.tsx`
+- `AGENTS.md`
+
+**Why**
+- A user-tested trip to Bend, Oregon could surface Transit as the recommendation even though an intercity drive is usually faster and more practical.
+- Cheap estimated transit links should not win best overall when they are not competitive or data-backed.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/parking/__tests__/pointAbRanking.test.ts --runInBand` passed, 41 tests.
+- `npm test -- --runTestsByPath lib/parking/__tests__/pointAbOptionScoring.test.ts __tests__/domain.test.ts app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 68 tests.
+- `npm test -- --runTestsByPath lib/__tests__/providersParkingAirport.test.ts app/results/__tests__/ParkingSmartPick.test.tsx lib/parking/__tests__/pointAbCanonicalFlow.test.ts --runInBand` passed, 22 tests. Jest still printed the existing open-handle warning after this provider-heavy set.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live UI verification was run for the exact Seattle-area → Bend trip in localhost/Vercel.
+- Transit practicality thresholds are conservative beta guardrails and may need tuning after seeing more real intercity searches.
+
+**Next recommended step**
+- Re-run the Bend, Oregon trip in the UI and confirm the Smart Recommendation hero chooses driving/directions while the Transit card remains visible as `Possible but impractical`.
+
+### 2026-06-10 18:39 PDT — Admin-only Resend outreach email composer
+
+**Summary**
+- Added `/admin/outreach`, an admin-only branded partner outreach composer behind the existing admin route boundary.
+- Added `POST /api/admin/outreach-email` and safe `GET /api/admin/outreach-email` defaults/templates, both protected by `requireAdmin` and `ADMIN_EMAILS`.
+- Sends one plain-text email per request through Resend using server-side `RESEND_API_KEY`; the key is never exposed to the client.
+- Added default sender fields (`Ham from PodPaiGo <hello@podpaigo.com>`, reply-to fallback) and env overrides (`OUTREACH_FROM_EMAIL`, `OUTREACH_FROM_NAME`, `OUTREACH_REPLY_TO`, optional `OUTREACH_TEST_RECIPIENT`).
+- Added SpotHero, ParkWhiz, and APR partner outreach templates; SpotHero is the default composer template.
+- Added validation for recipient/from/reply-to emails, subject/body length, non-empty body, test-send recipient routing, no HTML/attachments, and a light in-memory per-admin rate limit.
+- Added sanitized analytics logging for successful sends (`admin_outreach_email_sent`) with recipient domain, subject, template, message id, admin user id, and test mode, without storing secrets.
+
+**Files changed**
+- `app/admin/outreach/page.tsx` (new)
+- `app/api/admin/outreach-email/route.ts` (new)
+- `app/api/admin/outreach-email/__tests__/route.test.ts` (new)
+- `lib/admin/outreachEmail.ts` (new)
+- `lib/analytics/sanitizeAnalytics.ts`
+- `.env.example`
+- `AGENTS.md`
+
+**Why**
+- Admins need a simple internal one-off outreach tool for parking provider/partner emails without exposing Resend credentials or mixing outreach with public feedback notifications.
+
+**Tests run and result**
+- `npx jest --runTestsByPath app/api/admin/outreach-email/__tests__/route.test.ts lib/analytics/__tests__/sanitizeAnalytics.test.ts --runInBand` passed, 11 tests.
+- `npm run build` passed (`/admin/outreach` and `/api/admin/outreach-email` registered).
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No bulk/newsletter behavior by design; the route sends exactly one email per request.
+- Send logging stores sanitized metadata only and depends on Supabase service-role analytics configuration; sending still succeeds if analytics storage is unavailable.
+- The composer is plain text only; no attachments or arbitrary HTML are supported yet.
+- Live Resend delivery was not tested in this local environment.
+
+**Next recommended step**
+- Set `RESEND_API_KEY`, `OUTREACH_FROM_EMAIL=hello@podpaigo.com`, `OUTREACH_FROM_NAME=Ham from PodPaiGo`, `OUTREACH_REPLY_TO=p.chawin40@gmail.com`, and optionally `OUTREACH_TEST_RECIPIENT` in Vercel; then send a test email from `/admin/outreach` and verify Resend delivery plus sanitized analytics logging.
+
+### 2026-06-10 18:49 PDT — First-time-user clarity pass (copy/layout, no scoring changes)
+
+**Summary**
+- Acted on tester feedback ("I feel like I have to sit down with you and go through it"). Made the product understandable in ~10 seconds for first-time users via copy/layout only — no scoring, ranking, provider-pricing, or airport/city/event logic changes.
+- Homepage: clearer benefit-led H1 ("Know the best way to get there — and where to park."), plain-language tagline from shared copy, reduced to one primary CTA ("Plan a trip") + one secondary ("Try Quick Go") with "Explore airports" demoted to a text link, shorter hero data note, plainer Quick Go vs Ask PodPaiGo section intros, and 3 numbered steps rewritten as title+detail ("Tell us where you're going" / "Pick what matters" / "Get one clear recommendation").
+- Shared marketing copy (`lib/marketing/publicCopy.ts`): added `PRODUCT_TAGLINE`, `PRODUCT_SHORT_TAGLINE`, and `DATA_TRANSPARENCY_SHORT` (honest but scannable). Full `DATA_TRANSPARENCY_DISCLOSURE` retained for pricing + results footer.
+- Results top-of-page summary: `PointAbHeroSummary` now leads with a plain "Our pick: <mode>. Compare the cheapest and fastest options below." line and visually highlights the Best overall card with an "Our pick" tag, so a new user instantly sees what won. Cheapest/Fastest/Parking outlook unchanged.
+- How it works: restyled from light-only Tailwind (`bg-slate-50`, `text-blue-700`) to theme tokens so dark mode works and it matches the rest of the app; simplified to 3 steps + "Six things PodPaiGo weighs."
+- Roadmap: shorter, plain-language Now/Next/Later (removed internal jargon like "Supabase destination parking inventory near any destination coordinates"); "Our promise on data" instead of "Data policy direction."
+- About: pulled the ปลอดภัย Go = "go safely" name meaning into a highlighted callout near the top; de-duplicated the in-card section into "What we believe."
+- Pricing: added "No credit card, no catch." to the header description (kept Free/Planned later/no subscriptions active copy intact).
+- Quick Go: clearer intro, labeled the previously unlabeled transport row ("How will you get around?"), renamed "Decision style" → "What matters most?" with a one-line helper ("We compare every option — this just picks which one we highlight.").
+- Ask PodPaiGo panel: shrank the oversized empty textarea (rows 4→3), plainer heading subcopy and info popover.
+- Map modal fallback: improved the (untested) sub-line copy; kept the tested headline string unchanged.
+
+**Files changed (this task only)**
+- `app/page.tsx`
+- `app/how-it-works/page.tsx`
+- `app/roadmap/page.tsx`
+- `app/about/page.tsx`
+- `app/pricing/page.tsx`
+- `app/components/QuickGoPanel.tsx`
+- `app/components/TripAssistantPanel.tsx`
+- `app/components/PointAbHeroSummary.tsx`
+- `app/results/ParkingLotsMap.tsx`
+- `lib/marketing/publicCopy.ts`
+- `lib/marketing/__tests__/publicCopy.test.tsx`
+- `app/components/__tests__/PointAbHeroSummary.test.tsx`
+
+**Why**
+- Reduce data/source/provenance overload in main views, replace jargon with plain language, give one primary CTA per screen, and put a clear "what won / why / what next" at the top of results — without touching recommendation scoring, provider pricing, or live-price honesty.
+
+**Tests run and result**
+- `npx jest --runTestsByPath app/components/__tests__/PointAbHeroSummary.test.tsx lib/marketing/__tests__/publicCopy.test.tsx app/components/__tests__/SiteHeader.test.tsx app/components/__tests__/QuickGoPanel.test.tsx app/results/__tests__/ParkingLotsMap.test.tsx --runInBand` → 28 passed (added "Our pick" + short-disclosure/tagline assertions).
+- `npx jest --runTestsByPath app/components/__tests__/PodPaiGoAssistant.test.tsx app/components/__tests__/TripAssistantConfirm.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` → 62 passed.
+- `npx jest --runTestsByPath lib/ai/__tests__/liveAiSafety.test.ts app/results/__tests__/ParkingSmartPick.test.tsx --runInBand` → passed (pricing-copy guard still satisfied).
+- `npm run build` → compiled successfully. `git diff --check` → clean.
+
+**Known remaining issues**
+- IMPORTANT: this working tree also contains separate uncommitted WIP from a concurrent session (the "Admin-only Resend outreach email composer" entry above, plus `lib/domain.ts`, `lib/parking/pointAbRanking.ts`/`pointAbOptionScoring.ts`/`pointAbCanonicalFlow.ts`, `lib/providers.ts`, `lib/analytics/sanitizeAnalytics.ts`, `app/results/ResultsContent.tsx`, `.env.example`, and untracked `app/admin/outreach/`, `app/api/admin/outreach-email/`, `lib/admin/outreachEmail.ts`). This clarity pass did NOT modify any of those files; commit the two efforts separately.
+- Airport Smart Recommendation cards still show an "X confidence" eyebrow (kept intentionally — it is asserted by `ResultsContentHookOrder` details tests; the cleaner badge-only treatment already applies to city/general cards via `OptionComparisonCard`).
+- The results hero and the lower "Smart recommendation" section still repeat title/reason; further de-duplication was deferred as too risky in the ~11k-line `ResultsContent.tsx`.
+
+**Next recommended step**
+- Visually verify in localhost: home hero (one primary CTA, plain tagline), a downtown/general results page (top "Our pick" line + highlighted Best overall card), how-it-works in dark mode, and the Quick Go transport/decision labels on mobile.
+
+### 2026-06-10 18:55 PDT — Admin outreach composer made discoverable
+
+**Summary**
+- Added a shared admin-area navigation bar with links for Parking submissions, Outreach email, Analytics, and Parking diagnostics.
+- Rendered the admin nav on the existing admin pages, including `/admin/outreach`, while leaving the public SiteHeader free of any Outreach link for non-admin users.
+- Added an Outreach email link to the existing admin-only Account Dashboard tools section.
+- Improved the parking submissions storage warning for admins by returning and displaying sanitized missing env/config names when the storage client cannot be created.
+
+**Files changed**
+- `app/admin/AdminNav.tsx`
+- `app/admin/outreach/page.tsx`
+- `app/admin/analytics/page.tsx`
+- `app/admin/parking-diagnostics/page.tsx`
+- `app/admin/parking-submissions/AdminParkingSubmissionsClient.tsx`
+- `app/account/AccountDashboard.tsx`
+- `app/api/admin/parking-submissions/route.ts`
+- `app/admin/__tests__/AdminNav.test.tsx`
+- `app/components/__tests__/SiteHeader.test.tsx`
+- `app/api/admin/parking-submissions/__tests__/route.test.ts`
+- `AGENTS.md`
+
+**Why**
+- Allowlisted admins could access `/admin/outreach` directly but had no visible admin-area link to the composer from parking submissions or account admin tools.
+- The parking submissions "storage is not configured" warning was not actionable when the API already knew the missing safe config names.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/admin/__tests__/AdminNav.test.tsx app/components/__tests__/SiteHeader.test.tsx app/api/admin/parking-submissions/__tests__/route.test.ts app/api/admin/outreach-email/__tests__/route.test.ts --runInBand` passed, 28 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No known remaining issues for this admin-navigation change.
+
+**Next recommended step**
+- Verify in localhost with an allowlisted admin and a non-admin account that `/admin/parking-submissions` shows the admin nav, `/admin/outreach` opens from it, and non-admin users still do not see Outreach links.
+
+### 2026-06-10 18:55 PDT — Long-distance Park & Ride/Transit mode validity (no fake intercity wins)
+
+**Summary**
+- Fixed the Monroe, WA → Bend, OR class of bug where Park & Ride won with an impossible ~1h 39m total and Transit showed a fabricated ~1h total, both beating a real ~6h drive.
+- Root cause: the general/city Park & Ride resolver fabricated a transit leg for any destination. `estimateTransitMinutes` caps the lot→destination leg at ~55 min, so an intercity destination (e.g. a Seattle-metro station to Bend) produced a fake short total. The metro was detected from the origin (Monroe is inside the Seattle service radius), and the eligibility checks only looked at drive-to-lot, absolute total time, and a detour ratio — none of which catch a destination that is simply not transit-reachable. The total being far shorter than the real drive was treated as "fast/good" instead of "impossible".
+- Park & Ride resolver now validates destination reachability first: it computes the straight-line lot→destination corridor distance and marks a lot unreachable when the destination is outside the local transit corridor (`MAX_TRANSIT_CORRIDOR_MILES = 45`, matches local metro radii and keeps SEA/airport-access lots well within range). It also blocks lots whose total is suspiciously shorter than a known long-distance drive (`directDrive >= 150 min` and total `< 0.9 × directDrive`). Reachability is checked before the origin-distance check so an intercity trip reports one consistent reason.
+- When no lot can reach the destination, the selection now reports `notUsefulReason`/`cardHeadline` = "Park & Ride not confirmed for this destination." (new `PARK_RIDE_COPY.destinationNotConfirmed`, new `'No transit to destination'` lot status label, exported `PARK_RIDE_DESTINATION_UNREACHABLE_REASON`). Park & Ride then renders as not-confirmed, unreliable, time "Not estimated", and is excluded from cheapest/fastest/hero winners.
+- Transit: added `suppressDuration` to `assessTransitPracticality` (true for a long-distance, non-explicit, non-data-backed trip with a duration). `rankPointAbModes` now renders the Transit time as "Check route" with null timing when suppressed, so a fabricated ~1h intercity transit total is no longer shown as a concrete time. Transit remains visible and labeled "Possible but impractical" and stays out of winners (existing long-distance guard).
+- Airport Park & Ride (`buildParkAndRideAccessFromParking` access-strategy path) and event/stadium transit are untouched: the corridor guard only affects the general/city resolver path, airport lots stay within the corridor distance of the airport, and the transit airport/event branch returns `suppressDuration: false`. No provider parking pricing/scoring logic changed.
+
+**Files changed**
+- `lib/parking/parkRideResolver.ts` (destination-reachability + suspicious-speedup guards, reordered eligibility, `destinationNotConfirmed` copy, `PARK_RIDE_DESTINATION_UNREACHABLE_REASON`, status-label parsing, card headline)
+- `lib/parking/parkAndRideTypes.ts` (`'No transit to destination'` status label)
+- `lib/parking/transitPracticality.ts` (`suppressDuration` flag + computation)
+- `lib/parking/pointAbRanking.ts` (suppress fabricated transit time/timing in display)
+- `lib/parking/__tests__/parkRideResolver.test.ts` (intercity not-confirmed test)
+- `lib/parking/__tests__/pointAbRanking.test.ts` (intercity P&R/transit cannot win; valid local P&R stays eligible)
+- `lib/parking/__tests__/transitPracticality.test.ts` (new; suppressDuration cases incl. airport/short-trip/explicit-preference)
+- `AGENTS.md`
+
+**Why**
+- Transit and Park & Ride should never be presented as faster than driving for an intercity trip with no real verified transit route; a local light-rail station (e.g. Redmond Technology Station) must not be treated as a valid Park & Ride solution to a distant city like Bend.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/parking/__tests__/parkRideResolver.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/transitPracticality.test.ts --runInBand` → 57 passed.
+- `npx jest --runTestsByPath lib/parking/__tests__/pointAbCanonicalFlow.test.ts lib/parking/__tests__/pointAbOptionScoring.test.ts lib/parking/__tests__/parkAndRidePointAb.test.tsx lib/access/__tests__/parkAndRideAccess.test.ts __tests__/domain.test.ts --runInBand` → 45 passed.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- Reachability uses straight-line corridor distance, not real transit network data; the 45-mile threshold is a conservative beta guardrail and may need tuning for unusually large real transit corridors.
+- If a destination has no resolvable coordinates, the corridor guard cannot run (it relies on lot↔destination coords); in the real flow named/typed destinations are geocoded, so this mainly affects coordinate-less inputs.
+- No live localhost/Vercel verification was run for the exact Monroe → Bend trip.
+
+**Next recommended step**
+- Re-run Monroe, WA → Bend, OR in the UI and confirm Park & Ride shows "Park & Ride not confirmed for this destination" (not a ~1h 39m winner), Transit shows "Check route" instead of a fake ~1h total, and driving/drive+parking wins; then spot-check a valid local Lynnwood → Downtown Seattle Park & Ride still works.
+
 ---
 
 # Final Response Requirement for Agents

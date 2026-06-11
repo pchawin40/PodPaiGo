@@ -12,6 +12,12 @@ export type TransitPracticalityAssessment = {
   confidence: 'High' | 'Medium' | 'Low';
   scorePenalty: number;
   costNote?: string;
+  /**
+   * True when the transit duration is fabricated/estimated-only for a
+   * long-distance trip and should not be shown as a concrete time (no real
+   * intercity transit schedule is attached).
+   */
+  suppressDuration: boolean;
   reasons: string[];
 };
 
@@ -144,6 +150,7 @@ export function assessTransitPracticality(input: {
       primaryEligible: !missingDuration && !lowConfidence,
       confidence: input.transit?.trustStatus === 'verified-source' ? 'High' : 'Medium',
       scorePenalty: 0,
+      suppressDuration: false,
       reasons: [],
     };
   }
@@ -185,6 +192,16 @@ export function assessTransitPracticality(input: {
         ? 80
         : 60;
 
+  // A long-distance trip whose only transit signal is an estimated planning link
+  // (no data-backed intercity schedule) produces a fabricated short duration
+  // (e.g. a capped ~1h estimate). Do not present that as a concrete time.
+  const suppressDuration = Boolean(
+    longDistanceTrip &&
+      !explicitTransitPreference &&
+      !dataBacked &&
+      transitDuration != null,
+  );
+
   return {
     isGeneralTrip: generalTrip,
     isAirportTrip: false,
@@ -200,6 +217,7 @@ export function assessTransitPracticality(input: {
           : 'Medium',
     scorePenalty,
     costNote: primaryEligible ? undefined : 'Possible but impractical',
+    suppressDuration,
     reasons: [...new Set(reasons)],
   };
 }

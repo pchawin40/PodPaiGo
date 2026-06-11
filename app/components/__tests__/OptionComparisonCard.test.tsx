@@ -240,6 +240,7 @@ describe('OptionComparisonCard compact layout', () => {
 
   test('exposes stable section IDs for each Point A→B mode', () => {
     expect(POINT_AB_DETAILS_SECTION_IDS).toEqual({
+      drive: 'paid-parking-details',
       'destination-customer': 'customer-parking-details',
       parking: 'paid-parking-details',
       'street-meter': 'details-street-meter',

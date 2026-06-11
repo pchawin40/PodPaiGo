@@ -1,6 +1,7 @@
 import {
   detectParkRideMetro,
   PARK_RIDE_COPY,
+  PARK_RIDE_DESTINATION_UNREACHABLE_REASON,
   resolveParkAndRideForTrip,
 } from '../parkRideResolver';
 
@@ -121,6 +122,40 @@ describe('resolveParkAndRideForTrip', () => {
     expect(result.metroStatus).toBe('data_not_available');
     expect(result.best).toBeNull();
     expect(result.notUsefulReason).toBe(PARK_RIDE_COPY.dataNotAvailable);
+  });
+
+  test('intercity Seattle-area origin to Bend, OR is not confirmed for the destination', () => {
+    const result = resolveParkAndRideForTrip({
+      origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+      originLat: 47.847,
+      originLng: -121.978,
+      destination: 'Bend, Oregon',
+      destinationLat: 44.0582,
+      destinationLng: -121.3153,
+      parkingDurationMinutes: 120,
+      isAirportTrip: false,
+      sort: 'easiest',
+    });
+
+    // The Seattle metro is detected from the origin, but no local station can
+    // reach Bend by transit, so Park & Ride must not be offered as viable.
+    expect(result.metroStatus).toBe('no_useful_connection');
+    expect(result.best).toBeNull();
+    expect(result.availabilityTier).toBe('not_recommended');
+    expect(result.notUsefulReason).toBe(PARK_RIDE_COPY.destinationNotConfirmed);
+    expect(result.cardHeadline).toBe(PARK_RIDE_COPY.destinationNotConfirmed);
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(
+      result.candidates.every(
+        (candidate) =>
+          candidate.unavailableReason === PARK_RIDE_DESTINATION_UNREACHABLE_REASON,
+      ),
+    ).toBe(true);
+    expect(
+      result.candidates.every(
+        (candidate) => candidate.lotStatusLabel === 'No transit to destination',
+      ),
+    ).toBe(true);
   });
 
   test('seeded metro without useful connection uses no-useful copy', () => {

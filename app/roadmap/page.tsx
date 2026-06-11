@@ -13,36 +13,31 @@ export const metadata: Metadata = {
 
 const roadmapGroups = [
   {
-    title: 'Now',
+    title: 'Available now',
     items: [
-      'Airport trip planner with parking, rideshare, taxi, transit, leave-by timing, TSA/checklist context, and airport guidance',
-      'Quick Go city trips for point-to-point drive time, destination parking, rideshare, transit, and Park & Ride backups',
-      'Destination parking cards for garages and lots',
-      'Street/meter parking outlook with explicit Seattle Sunday, holiday, evening, and event-zone warnings',
-      'Cached parking fallback when live refresh is paused or budget-limited',
-      'Account sign-in, saved trips, provider CTAs, and confidence labels for live, verified, cached, estimated, and fallback data',
+      'Airport trips: when to leave, parking, rideshare, transit, and TSA timing',
+      'City trips: drive time, garages and lots, and the street/meter outlook',
+      'Rideshare, transit, and Park & Ride compared side by side',
+      'Saved trips and an account to come back to',
+      'Clear labels for live, saved, and estimated data',
     ],
   },
   {
-    title: 'Next',
+    title: 'Coming next',
     items: [
-      'Supabase destination parking inventory near any destination coordinates',
-      'More U.S. city street parking rule modules beyond Seattle',
-      'Event parking warnings for major venues and special districts',
-      'Better Park & Ride ranking for city trips and airport access',
-      'Weather forecast reliability for city/general trips',
-      'Better rideshare deep links and clearer live-price fallback states',
+      'Parking coverage near more destinations and more cities',
+      'Clearer event and stadium parking warnings',
+      'More reliable weather for city trips',
+      'Better rideshare and transit links',
     ],
   },
   {
-    title: 'Later',
+    title: 'Later on',
     items: [
-      'Saved places, saved preferences, favorite trips, and favorite parking lots',
-      'Calendar integrations for flights, returns, events, errands, and recurring trips',
-      'Flight tracking auto-adjust and price/availability alerts',
-      'User-submitted parking notes and validation signals',
-      'More airports, more city coverage, and a native mobile app',
-      'Business traveler mode and richer hotel/flight integrations',
+      'Saved places, favorite trips, and favorite lots',
+      'Calendar sync and price or availability alerts',
+      'Flight tracking that adjusts your timing automatically',
+      'More airports, more cities, and a mobile app',
     ],
   },
 ];
@@ -59,8 +54,8 @@ export default function RoadmapPage() {
 
         <SectionHeader
           eyebrow="Product status"
-          title="What PodPaiGo has now and what comes next"
-          description="PodPaiGo helps travelers compare airport trips and city parking choices: drive time, destination garages/lots, street or meter outlook, rideshare, transit, Park & Ride backups, timing, cost, weather, and trip effort."
+          title="What works today, and what's coming"
+          description="PodPaiGo is in public beta. Here's an honest look at what you can use right now and what we're building next."
           className="mt-8"
         />
 
@@ -83,11 +78,11 @@ export default function RoadmapPage() {
         </section>
 
         <TravelCard className="mt-8">
-          <h2 className="text-2xl font-semibold text-foreground">Data policy direction</h2>
+          <h2 className="text-2xl font-semibold text-foreground">Our promise on data</h2>
           <p className="mt-3 leading-7 text-muted-foreground">
-            PodPaiGo will keep labeling estimates, cached options, provider errors, and live-refresh
-            limits. Street parking rules vary by city and block, so posted signs and provider rules
-            remain the final source of truth.
+            We'll always tell you what's live, saved, or estimated — and never hide it. Street
+            parking rules change block by block, so posted signs and the provider are still the
+            final word before you park.
           </p>
         </TravelCard>
 
