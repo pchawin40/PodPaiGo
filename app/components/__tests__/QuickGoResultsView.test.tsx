@@ -1111,4 +1111,168 @@ describe('QuickGoResultsView', () => {
     expect(screen.getByText('Estimated drive time: ~4 min')).toBeInTheDocument();
     expect(screen.queryByText('Drive time unavailable')).not.toBeInTheDocument();
   });
+
+  test('best way to go shows parking price and provider CTA beside Open directions', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Brighton Jones, 1st Avenue, Seattle, WA, USA',
+          destinationName: 'Brighton Jones',
+        }}
+        recommendation={recommendation}
+        rankedOptions={[
+          {
+            type: 'parking',
+            option: {
+              id: 'lot-2120',
+              name: '2120 5th Ave. Lot',
+              type: 'off-airport',
+              price: 18,
+              priceDisplay: 'live',
+              pricingConfidence: 'live',
+              priceSource: 'parkwhiz-live',
+              bookingProvider: 'ParkWhiz',
+              sourceName: 'ParkWhiz',
+              sourceLink: 'https://www.parkwhiz.com/lot/2120',
+              searchQuery: '2120 5th Ave parking Seattle',
+              availability: 80,
+              trustStatus: 'live',
+              lastUpdated: '2026-06-01T00:00:00.000Z',
+              assumptions: [],
+            },
+            score: 90,
+            cost: 18,
+            duration: 24,
+            stressScore: 55,
+            reasons: [],
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(
+      screen.getByText('Drive + park · 2120 5th Ave. Lot · $18'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reserve parking' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+  });
+
+  test('hides provider CTA when selected parking option has no source link', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Neighborhood Cafe, Seattle, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Neighborhood Cafe, Seattle, WA',
+          destinationName: 'Neighborhood Cafe',
+        }}
+        recommendation={recommendation}
+        rankedOptions={[
+          {
+            type: 'parking',
+            option: {
+              id: 'lot-local',
+              name: 'Centennial Garage',
+              type: 'off-airport',
+              price: 18,
+              priceDisplay: 'estimated',
+              priceSource: 'google-places',
+              sourceName: 'Google Places',
+              availability: 70,
+              trustStatus: 'estimated',
+              lastUpdated: '2026-06-01T00:00:00.000Z',
+              assumptions: [],
+            },
+            score: 88,
+            cost: 18,
+            duration: 22,
+            stressScore: 50,
+            reasons: [],
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(
+      screen.getByText('Drive + park · Centennial Garage · ~$18 est.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reserve parking' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check provider' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Compare parking' })).not.toBeInTheDocument();
+  });
+
+  test('shows Compare parking CTA for SpotHero parking winner', () => {
+    const params = buildQuickGoSearchParams({
+      destinationText: 'Downtown Seattle, WA',
+      origin: {
+        origin: '123 Main Street, Example City, ST',
+        originLabel: '123 Main Street, Example City, ST',
+        originSource: 'manual',
+      },
+    });
+
+    render(
+      <QuickGoResultsView
+        tripData={{
+          ...tripData,
+          destination: 'Downtown Seattle, WA',
+          destinationName: 'Downtown Seattle',
+        }}
+        recommendation={recommendation}
+        rankedOptions={[
+          {
+            type: 'parking',
+            option: {
+              id: 'sh-lot',
+              name: 'Nearby Garage',
+              type: 'off-airport',
+              price: 24,
+              priceDisplay: 'check-live',
+              bookingProvider: 'SpotHero',
+              sourceName: 'SpotHero',
+              sourceLink: 'https://spothero.com/search?search=Seattle',
+              searchQuery: 'Seattle parking',
+              availability: 75,
+              trustStatus: 'estimated',
+              lastUpdated: '2026-06-01T00:00:00.000Z',
+              assumptions: [],
+            },
+            score: 85,
+            cost: 24,
+            duration: 20,
+            stressScore: 48,
+            reasons: [],
+          },
+        ]}
+        searchParams={params}
+      />,
+    );
+
+    expect(
+      screen.getByText('Drive + park · Nearby Garage · Check live price'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compare parking' })).toBeInTheDocument();
+  });
 });
