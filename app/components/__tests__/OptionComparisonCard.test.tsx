@@ -42,7 +42,7 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.queryByText(/Routes served/i)).not.toBeInTheDocument();
   });
 
-  test('shows only the first short pro and first short con', () => {
+  test('keeps pros and cons out of the compact row', () => {
     render(
       <OptionComparisonCard
         confidence="High"
@@ -56,14 +56,17 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    expect(screen.getByText('Total time')).toBeInTheDocument();
-    expect(screen.getByText('Near destination')).toBeInTheDocument();
-    expect(screen.queryByText('Covered garage/lot')).not.toBeInTheDocument();
+    expect(screen.queryByText('Time:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cost:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Caveat:')).not.toBeInTheDocument();
     expect(screen.getByText('Paid garage')).toBeInTheDocument();
+    expect(screen.queryByText('Near destination')).not.toBeInTheDocument();
+    expect(screen.queryByText('Covered garage/lot')).not.toBeInTheDocument();
     expect(screen.queryByText('Route timing unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
   });
 
-  test('clamps the cost-tile note so long copy cannot overflow the metric tile', () => {
+  test('clamps the cost note so long copy cannot overflow the compact row', () => {
     const longNote =
       'Between 8 PM and 10 PM, some Seattle neighborhoods still require payment, and posted signs may set time limits or restrict parking entirely.';
     render(
@@ -81,11 +84,11 @@ describe('OptionComparisonCard compact layout', () => {
     );
 
     const noteEl = screen.getByText(longNote);
-    expect(noteEl).toHaveClass('line-clamp-2');
+    expect(noteEl).toHaveClass('line-clamp-1');
     expect(noteEl).toHaveClass('break-words');
   });
 
-  test('renders paid parking timing decomposition when provided', () => {
+  test('keeps paid parking timing decomposition out of the compact row', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -112,15 +115,15 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    expect(screen.getByText('Drive to lot')).toBeInTheDocument();
-    expect(screen.getByText('Park/check-in buffer')).toBeInTheDocument();
-    expect(screen.getByText('Walk to destination')).toBeInTheDocument();
-    expect(screen.getByText('Total to destination')).toBeInTheDocument();
-    expect(screen.getAllByText('12 min').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Drive to lot')).not.toBeInTheDocument();
+    expect(screen.queryByText('Park/check-in buffer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Walk to destination')).not.toBeInTheDocument();
+    expect(screen.queryByText('Total to destination')).not.toBeInTheDocument();
     expect(screen.getAllByText('25 min').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
   });
 
-  test('renders street meter timing with total first and readable labels', () => {
+  test('keeps street meter timing breakdown out of the compact row', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -148,23 +151,18 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const labels = screen
-      .getAllByText(/Total time|Drive route|Find\/check parking|Walk to destination/)
-      .map((node) => node.textContent);
-
-    expect(labels).toEqual(expect.arrayContaining([
-      'Total time',
-      'Drive route',
-      'Find/check parking',
-      'Walk to destination',
-    ]));
+    expect(screen.queryByText('Drive route')).not.toBeInTheDocument();
+    expect(screen.queryByText('Find/check parking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Walk to destination')).not.toBeInTheDocument();
+    expect(screen.queryByText('Total time')).not.toBeInTheDocument();
     expect(screen.getAllByText('1h 13m').length).toBeGreaterThan(0);
-    expect(screen.getByText('60 min')).toBeInTheDocument();
-    expect(screen.getByText('7 min')).toBeInTheDocument();
-    expect(screen.getByText('6 min')).toBeInTheDocument();
+    expect(screen.queryByText('60 min')).not.toBeInTheDocument();
+    expect(screen.queryByText('7 min')).not.toBeInTheDocument();
+    expect(screen.queryByText('6 min')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
   });
 
-  test('renders a Details action link when a target section is provided', () => {
+  test('renders one View action link when a target section is provided', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -186,11 +184,11 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const detailsLink = screen.getByRole('link', { name: 'Details' });
+    const detailsLink = screen.getByRole('link', { name: 'View' });
     expect(detailsLink).toHaveAttribute('href', '#transit-details');
   });
 
-  test('Details link exposes target href and aria-controls', () => {
+  test('View link exposes target href and aria-controls for details sections', () => {
     render(
       <OptionComparisonCard
         confidence="Medium"
@@ -212,7 +210,7 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const detailsLink = screen.getByRole('link', { name: 'Details' });
+    const detailsLink = screen.getByRole('link', { name: 'View' });
     expect(detailsLink).toHaveAttribute('aria-controls', 'rideshare-details');
     expect(detailsLink).toHaveAttribute('href', '#rideshare-details');
     expect(detailsLink).not.toHaveAttribute('aria-expanded');
@@ -278,14 +276,44 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.queryByText('Best pick')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open directions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
-    expect(
-      screen.getByText('Hidden by your No parking needed preference.'),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText('Hidden by preference').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Show parking anyway' })).toBeInTheDocument();
 
-    const card = screen.getByText('Customer parking').closest('div.rounded-2xl');
+    const card = screen.getByText('Customer parking').closest('div.rounded-xl');
     expect(card).toHaveClass('opacity-75');
     expect(card).not.toHaveClass('bg-primary/10');
+  });
+
+  test('keeps unavailable options readable with dimmed state and one Why action', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Low"
+        label="Transit"
+        name="Transit route not confirmed"
+        cost="Check route"
+        time="Check route"
+        pros={['Usually low cost']}
+        cons={['Open transit to confirm route timing']}
+        unavailable
+        verdict="Live route needed"
+        actions={[
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS.transit,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('Transit route not confirmed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Check route').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Caveat:')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Why?' })).toHaveAttribute('href', '#transit-details');
+
+    const card = screen.getByText('Transit').closest('div.rounded-xl');
+    expect(card).toHaveClass('opacity-80');
+    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
   });
 
   test('uses equal-height flex column layout with pinned actions', () => {
@@ -304,13 +332,17 @@ describe('OptionComparisonCard compact layout', () => {
 
     const card = container.firstChild as HTMLElement;
     expect(card).toHaveClass('h-full');
-    expect(card).toHaveClass('flex');
-    expect(card).toHaveClass('flex-col');
-    expect(card).toHaveClass('min-h-[17.5rem]');
-    expect(card.querySelector('.mt-auto')).toBeTruthy();
+    expect(card).toHaveClass('min-h-[4.75rem]');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass('grid');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass('sm:items-center');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass(
+      'sm:grid-cols-[minmax(220px,1.6fr)_120px_90px_90px_minmax(180px,1fr)_110px]',
+    );
+    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
+    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:self-center');
   });
 
-  test('stacks action buttons vertically for mobile-friendly cards', () => {
+  test('uses dedicated action area with desktop right-column classes', () => {
     render(
       <OptionComparisonCard
         confidence="High"
@@ -330,11 +362,14 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const actionContainer = screen.getByRole('link', { name: 'Details' }).parentElement;
-    expect(actionContainer).toHaveClass('flex-col');
+    const actionContainer = screen.getByTestId('option-comparison-actions');
+    expect(actionContainer).toHaveClass('col-span-2');
+    expect(actionContainer).toHaveClass('sm:justify-end');
+    expect(within(actionContainer).getByRole('link', { name: 'View' })).toBeInTheDocument();
+    expect(within(actionContainer).queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
   });
 
-  test('uses pinned full-width centered action buttons for wrapped labels', () => {
+  test('uses one quiet View action when a details target exists', () => {
     const { container } = render(
       <OptionComparisonCard
         confidence="Medium"
@@ -357,12 +392,18 @@ describe('OptionComparisonCard compact layout', () => {
     );
 
     const card = container.firstChild as HTMLElement;
-    expect(card.querySelector('.flex-1')).toBeTruthy();
-    expect(card.querySelector('.mt-auto')).toHaveClass('pt-4');
+    expect(card).toHaveClass('min-h-[4.75rem]');
+    expect(card).toHaveClass('cursor-pointer');
+    expect(card).toHaveClass('hover:bg-muted/30');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass(
+      'sm:grid-cols-[minmax(220px,1.6fr)_120px_90px_90px_minmax(180px,1fr)_110px]',
+    );
+    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
 
-    // Primary action and Details toggle are always visible
-    expect(screen.getByRole('link', { name: 'View ride estimates' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute('href', '#rideshare-details');
+    // Compare rows expose one small action; the full mode actions live in details sections.
+    expect(screen.queryByRole('link', { name: 'View ride estimates' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '#rideshare-details');
+    expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
 
     // Secondary action belongs in the lower detail section, not the cramped card.
     expect(screen.queryByRole('link', { name: 'Open transit route' })).not.toBeInTheDocument();
@@ -406,7 +447,7 @@ describe('OptionComparisonCard compact layout', () => {
     expect(within(cardContainer).queryByText(/Parking rules/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Routes served/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByRole('link', { name: 'Rules' })).not.toBeInTheDocument();
-    expect(within(cardContainer).getByRole('link', { name: 'Details' })).toHaveAttribute(
+    expect(within(cardContainer).getByRole('link', { name: 'View' })).toHaveAttribute(
       'href',
       '#park-ride-details',
     );

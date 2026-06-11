@@ -284,11 +284,19 @@ export function formatParkingPriceLine(
 
   let primary: string;
   let badge: string | null = null;
+  let officialRangeCaveat: string | null = null;
 
   if (confidence === 'live' && totalIsExact) {
     primary = `Live ${totalText} total`;
-  } else if (confidence === 'official') {
+  } else if (confidence === 'official' && totalIsExact) {
     primary = `Official ${totalText} total`;
+  } else if (confidence === 'official') {
+    primary = `Estimated ${totalText} total`;
+    badge = 'Official rate range';
+    officialRangeCaveat =
+      option.type === 'official'
+        ? 'Final price depends on the garage and rate you choose. Confirm with the airport.'
+        : 'Final price depends on the rate you choose. Confirm on the official site.';
   } else if (confidence === 'recent') {
     primary = totalIsExact ? `Recent ${totalText} total` : `Estimated ${totalText} total`;
   } else if (confidence === 'final_on_provider' && !hasDisplayableTotal) {
@@ -305,10 +313,11 @@ export function formatParkingPriceLine(
 
   const dailyPrefix = showDailyApprox && !dailyIsExact ? '~' : '';
   const baseSecondary = dailyIsExact
-    ? `${dailyPrefix}${formatMoney(daily.min)}/day for ${days} day${days === 1 ? '' : 's'}`
-    : `${dailyPrefix}${dailyText}/day for ${days} day${days === 1 ? '' : 's'}`;
-  const secondary =
-    confidence === 'final_on_provider' || confidence === 'estimated' || badge === 'Estimated range'
+    ? `Based on ${dailyPrefix}${formatMoney(daily.min)}/day × ${days} day${days === 1 ? '' : 's'}`
+    : `Based on ${dailyPrefix}${dailyText}/day × ${days} day${days === 1 ? '' : 's'}`;
+  const secondary = officialRangeCaveat
+    ? `${baseSecondary}. ${officialRangeCaveat}`
+    : confidence === 'final_on_provider' || confidence === 'estimated' || badge === 'Estimated range'
       ? `${baseSecondary}. Provider controls final price.`
       : baseSecondary;
 

@@ -95,6 +95,29 @@ describe('ParkingSmartPick fallback', () => {
     expect(screen.getByText('Sort lenses')).toBeInTheDocument();
   });
 
+  test('booking helper check-in/check-out details are collapsed until expanded', () => {
+    const routeAvailableParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="best"
+      />,
+    );
+
+    const summary = screen.getByText('Booking helper · check-in & check-out times');
+    const details = summary.closest('details');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details).toContainElement(screen.getByText('Copy times'));
+  });
+
   test('shows a recommended parking card even when route timing is unavailable', () => {
     render(
       <ParkingSmartPick

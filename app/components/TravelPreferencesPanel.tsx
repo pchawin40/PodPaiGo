@@ -121,12 +121,14 @@ export default function TravelPreferencesPanel({
       ) : null}
 
       {!hideParkingFilters ? (
-        <div className="mt-6">
-          <div className="text-sm font-medium text-foreground">Parking filters</div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Filters use verified or provider-claimed features. Inferred claims stay visible but do not pass strict filters.
+        <div className="mt-4 rounded-xl border border-border bg-card/70 px-3 py-2">
+          <div className="text-sm font-medium text-foreground">
+            Filter parking
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Narrow lots by features. Always confirm details with the provider.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap gap-1.5">
             {FILTER_KEYS.map((key) => {
               const active = Boolean(preferences.parkingFilters[key]);
               return (

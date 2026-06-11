@@ -2,9 +2,7 @@
 
 import type { ReactNode } from 'react';
 import RecommendationStatusBadge from './RecommendationStatusBadge';
-import DestinationModeActions, {
-  type DestinationModeAction,
-} from '../results/DestinationModeActions';
+import type { DestinationModeAction } from '../results/DestinationModeActions';
 import type { RecommendationStatus } from '../../lib/recommendationStatusBadge';
 import type { PointToPointTiming } from '../../lib/types';
 
@@ -16,46 +14,6 @@ type TimingBreakdownLabels = {
   total?: string;
   totalFirst?: boolean;
 };
-
-function timingMinutesLabel(minutes: number | null | undefined, total = false): string | null {
-  if (typeof minutes !== 'number' || !Number.isFinite(minutes)) return null;
-  const rounded = Math.round(minutes);
-  if (!total || rounded < 60) return `${rounded} min`;
-  const hours = Math.floor(rounded / 60);
-  const mins = rounded % 60;
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-}
-
-function buildTimingRows(
-  timing: PointToPointTiming | null | undefined,
-  labels: TimingBreakdownLabels | undefined,
-): Array<{ label: string; value: string }> {
-  if (!timing) return [];
-
-  const detailRows = [
-    { label: labels?.drive || 'Drive route', value: timingMinutesLabel(timing.driveMinutes) },
-    {
-      label: labels?.parkingBuffer || 'Access / verify',
-      value: timingMinutesLabel(timing.parkingBufferMinutes),
-    },
-    {
-      label: labels?.walk || 'Walk to destination',
-      value: timingMinutesLabel(timing.walkToDestinationMinutes),
-    },
-    { label: labels?.pickupWait || 'Pickup wait', value: timingMinutesLabel(timing.pickupWaitMinutes) },
-  ].filter((row): row is { label: string; value: string } => Boolean(row.value));
-
-  const total = timingMinutesLabel(timing.totalOptionMinutes, true);
-  if (total) {
-    const totalRow = { label: labels?.total || 'Total to destination', value: total };
-    const rows = labels?.totalFirst
-      ? [totalRow, ...detailRows]
-      : [...detailRows, totalRow];
-    return rows.length >= 2 ? rows : [];
-  }
-
-  return detailRows.length >= 2 ? detailRows : [];
-}
 
 export type OptionComparisonCardProps = {
   confidence: string;
@@ -84,19 +42,59 @@ export type OptionComparisonCardProps = {
   className?: string;
 };
 
+export const OPTION_COMPARISON_GRID_CLASS =
+  'sm:grid-cols-[minmax(220px,1.6fr)_120px_90px_90px_minmax(180px,1fr)_110px]';
+
 const DETAILS_LINK_CLASS =
-  'flex w-full min-h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-center text-sm font-semibold leading-tight whitespace-normal text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800';
+  'inline-flex min-h-7 w-full items-center justify-center rounded-full border border-slate-200 bg-white px-2.5 text-center text-xs font-semibold leading-tight whitespace-normal text-slate-800 hover:bg-slate-50 sm:w-auto dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800';
+
+const PRIMARY_LINK_CLASS =
+  'inline-flex min-h-7 w-full items-center justify-center rounded-full border border-primary/30 bg-primary/5 px-2.5 text-center text-xs font-semibold leading-tight text-primary hover:bg-primary/10 sm:w-auto';
+
+function modeIcon(label: string): string {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('ride') && !normalized.includes('rideshare')) return '🅿️';
+  if (normalized.includes('rideshare') || normalized.includes('uber') || normalized.includes('lyft')) return '🚕';
+  if (normalized.includes('transit')) return '🚆';
+  if (normalized.includes('walk')) return '🚶';
+  if (normalized.includes('street') || normalized.includes('meter')) return '🅿️';
+  if (normalized.includes('parking') || normalized.includes('garage') || normalized.includes('lot')) return '🚗';
+  if (normalized.includes('drive')) return '🚗';
+  return '•';
+}
+
+function compactCaveat({
+  isHidden,
+  unavailable,
+  name,
+  reason,
+  cons,
+}: {
+  isHidden: boolean;
+  unavailable?: boolean;
+  name: string;
+  reason?: string;
+  cons: string[];
+}): string {
+  if (isHidden) return 'Hidden by preference';
+  if (unavailable && /not confirmed|not available|unavailable/i.test(name)) return name;
+  return reason || cons[0] || 'Check details';
+}
+
+function compactActionLabel(label: string): string {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('why') || normalized.includes('unavailable')) return 'Why?';
+  if (normalized.includes('show')) return 'Show';
+  return 'View';
+}
 
 export default function OptionComparisonCard({
+  confidence,
   label,
   name,
   cost,
   costNote,
   time,
-  timeLabel = 'Time',
-  timing,
-  timingBreakdownLabels,
-  pros,
   cons,
   reason,
   status,
@@ -112,157 +110,159 @@ export default function OptionComparisonCard({
   footer,
   className = '',
 }: OptionComparisonCardProps) {
-  const shortPro = pros[0] ?? '';
-  const shortCon = cons[0] ?? '';
   const isHidden = Boolean(hiddenByPreference);
 
-  const detailsActionObj = actions?.find((a) => a.label === 'Details' || a.label === 'Why unavailable');
+  const detailsActionObj = actions?.find((a) =>
+    a.label === 'Details' || a.label === 'Why unavailable' || a.label === 'See why unavailable',
+  );
   const nonDetailsActions = actions?.filter((a) => a !== detailsActionObj) ?? [];
   const primaryAction = nonDetailsActions[0];
-  const hasDetailsToggle = Boolean(detailsActionObj);
+  const visibleAction = detailsActionObj ?? primaryAction;
+  const visibleActionClass = unavailable ? DETAILS_LINK_CLASS : PRIMARY_LINK_CLASS;
+  const visibleActionLabel = visibleAction ? (unavailable ? 'Why?' : compactActionLabel(visibleAction.label)) : null;
 
   const cardClassName =
-    'relative flex h-full min-h-[17.5rem] flex-col rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
+    'relative h-full min-h-[4.75rem] rounded-xl border px-3 py-2.5 text-left shadow-sm transition ' +
     (isHidden
       ? 'border-border bg-muted/60 opacity-75'
       : unavailable
         ? 'border-border bg-muted/60 opacity-80'
         : selected
-          ? 'border-primary/50 bg-primary/10'
+          ? 'border-primary/60 bg-primary/10 ring-1 ring-primary/20'
           : 'border-border bg-card') +
+    (visibleAction && !isHidden ? ' cursor-pointer hover:border-primary/30 hover:bg-muted/30' : '') +
     (className ? ` ${className}` : '');
 
   const badgeStatus = isHidden ? 'hidden_by_preference' : status;
   const badgeVerdict = isHidden ? 'Hidden by preference' : verdict;
-  const timingRows = isHidden ? [] : buildTimingRows(timing, timingBreakdownLabels);
 
-  const showInlineDetails = !hasDetailsToggle && !isHidden;
   const detailsHref = detailsActionObj?.ariaControls
     ? `#${detailsActionObj.ariaControls}`
     : detailsActionObj?.href;
-  const detailsLabel = detailsActionObj?.label || 'Details';
+  const caveat = compactCaveat({ isHidden, unavailable, name, reason, cons });
 
   return (
     <div className={cardClassName} role="group" aria-label={`${label} recommendation`}>
-      <div className="absolute right-3 top-3">
-        <RecommendationStatusBadge
-          status={badgeStatus}
-          verdict={badgeVerdict}
-          unavailable={unavailable}
-          sort={sort}
-          isCheapestMode={isHidden ? false : isCheapestMode}
-          isFastestMode={isHidden ? false : isFastestMode}
-        />
-      </div>
-
-      <div className={`flex-1${isHidden ? ' text-muted-foreground' : ''}`}>
-        <div className={`text-sm font-bold ${isHidden ? 'text-muted-foreground' : 'text-foreground'}`}>
-          {label}
-        </div>
-
-        <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">{name}</div>
-
-        {isHidden ? (
-          <div className="mt-2 text-xs leading-5 text-muted-foreground">
-            Hidden by your No parking needed preference.
+      <div
+        className={`grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 sm:items-center ${OPTION_COMPARISON_GRID_CLASS}`}
+        data-testid="option-comparison-row"
+      >
+        <div className="flex min-w-0 gap-3 sm:items-center">
+          <div
+            className="flex h-8 w-8 shrink-0 self-start items-center justify-center rounded-full border border-border bg-card text-base sm:self-center"
+            aria-hidden="true"
+          >
+            {modeIcon(label)}
           </div>
-        ) : null}
+          <div className={`min-w-0 flex-1 sm:self-center${isHidden ? ' text-muted-foreground' : ''}`}>
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <div className={`min-w-0 truncate text-sm font-semibold ${isHidden ? 'text-muted-foreground' : 'text-foreground'}`}>
+                {label}
+              </div>
+            </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-xl border border-border bg-card/80 p-2">
-            <div className="text-muted-foreground">Cost</div>
-            <div className="mt-0.5 font-semibold text-foreground">{cost}</div>
+            <div className="mt-0.5 min-w-0 text-xs leading-4 text-muted-foreground">
+              <span className="line-clamp-1 break-words">{name}</span>
+            </div>
+
+            <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs leading-5 sm:hidden">
+              <span className="font-semibold text-foreground">{cost}</span>
+              <span className="text-muted-foreground">·</span>
+              <span className="font-semibold text-foreground">{time}</span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">{badgeVerdict || confidence}</span>
+            </div>
+
             {costNote ? (
-              <div className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">
+              <div className="mt-0.5 line-clamp-1 break-words text-[11px] text-muted-foreground">
                 {costNote}
               </div>
             ) : null}
           </div>
-          <div className="rounded-xl border border-border bg-card/80 p-2">
-            <div className="text-muted-foreground">{timeLabel}</div>
-            <div className="mt-0.5 font-semibold text-foreground">{time}</div>
-          </div>
         </div>
 
-        {!isHidden && reason ? (
-          <div className="mt-2 text-xs text-muted-foreground">{reason}</div>
-        ) : null}
+        <div className="hidden min-w-0 justify-self-start sm:flex sm:items-center sm:self-center">
+          <RecommendationStatusBadge
+            status={badgeStatus}
+            verdict={badgeVerdict}
+            unavailable={unavailable}
+            sort={sort}
+            isCheapestMode={isHidden ? false : isCheapestMode}
+            isFastestMode={isHidden ? false : isFastestMode}
+          />
+        </div>
 
-        {showInlineDetails && timingRows.length > 0 ? (
-          <div className="mt-2 rounded-xl border border-border bg-card/70 p-2 text-xs leading-5">
-            {timingRows.map((row) => (
-              <div key={row.label} className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">{row.label}</span>
-                <span className="font-semibold text-foreground">{row.value}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <div className="hidden min-w-0 break-words text-xs font-semibold tabular-nums text-foreground sm:flex sm:items-center sm:self-center">
+          {cost}
+        </div>
 
-        {showInlineDetails ? (
-          <div className="mt-3 space-y-2 text-xs leading-5">
-            {shortPro ? (
-              <div>
-                <span className="font-semibold text-foreground">Pro: </span>
-                <span className="text-muted-foreground">{shortPro}</span>
-              </div>
-            ) : null}
-            {shortCon ? (
-              <div>
-                <span className="font-semibold text-foreground">Con: </span>
-                <span className="text-muted-foreground">{shortCon}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+        <div className="hidden min-w-0 break-words text-xs font-semibold tabular-nums text-foreground sm:flex sm:items-center sm:self-center">
+          {time}
+        </div>
 
-      <div className="mt-auto flex flex-col items-center gap-2 pt-4">
-        {isHidden ? (
-          onShowParkingAnyway ? (
-            <button
-              type="button"
-              onClick={onShowParkingAnyway}
-              className="flex w-full min-h-10 items-center justify-center rounded-2xl border border-border bg-card px-4 text-center text-sm font-semibold leading-tight text-foreground hover:bg-muted/80"
-            >
-              Show parking anyway
-            </button>
-          ) : null
-        ) : hasDetailsToggle ? (
-          <>
-            {primaryAction ? (
-              <DestinationModeActions compact actions={[primaryAction]} />
-            ) : null}
-            {detailsHref ? (
-              <a
-                href={detailsHref}
-                onClick={(event) => {
-                  if (detailsActionObj?.onClick) {
-                    event.preventDefault();
-                    detailsActionObj.onClick();
-                  }
-                }}
-                aria-controls={detailsActionObj?.ariaControls}
-                className={DETAILS_LINK_CLASS}
-              >
-                {detailsLabel}
-              </a>
-            ) : (
+        <div className="col-span-2 min-w-0 text-xs leading-5 text-muted-foreground sm:col-span-1 sm:flex sm:items-center sm:self-center sm:leading-tight">
+          <span className="line-clamp-2 break-words sm:line-clamp-1">{caveat}</span>
+        </div>
+
+        <div
+          className="col-span-2 flex w-full gap-2 sm:col-span-1 sm:w-auto sm:min-w-14 sm:items-center sm:justify-end sm:self-center"
+          data-testid="option-comparison-actions"
+        >
+          {isHidden ? (
+            onShowParkingAnyway ? (
               <button
                 type="button"
-                onClick={detailsActionObj?.onClick}
-                aria-controls={detailsActionObj?.ariaControls}
+                onClick={onShowParkingAnyway}
                 className={DETAILS_LINK_CLASS}
               >
-                {detailsLabel}
+                Show parking anyway
               </button>
-            )}
-          </>
-        ) : actions && actions.length > 0 ? (
-          <DestinationModeActions compact actions={actions} />
-        ) : null}
+            ) : null
+          ) : visibleAction ? (
+            visibleAction === detailsActionObj && detailsHref ? (
+                <a
+                  href={detailsHref}
+                  onClick={(event) => {
+                    if (detailsActionObj?.onClick) {
+                      event.preventDefault();
+                      detailsActionObj.onClick();
+                    }
+                  }}
+                  aria-controls={detailsActionObj?.ariaControls}
+                  className={visibleActionClass}
+                >
+                  {visibleActionLabel}
+                </a>
+            ) : visibleAction.href ? (
+              <a
+                href={visibleAction.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={visibleActionClass}
+              >
+                {visibleActionLabel}
+              </a>
+            ) : (
+                <button
+                  type="button"
+                  onClick={visibleAction.onClick}
+                  disabled={visibleAction.disabled}
+                  aria-controls={detailsActionObj?.ariaControls}
+                  className={
+                    visibleAction.disabled
+                      ? visibleActionClass + ' cursor-not-allowed opacity-60'
+                      : visibleActionClass
+                  }
+                >
+                  {visibleActionLabel}
+                </button>
+            )
+          ) : null}
+        </div>
 
-        {footer}
+        {footer ? (
+          <div className="col-span-2 sm:col-start-2 sm:col-span-2">{footer}</div>
+        ) : null}
       </div>
     </div>
   );

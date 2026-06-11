@@ -1010,9 +1010,11 @@ export default function ParkingSmartPick({
             </div>
           ) : null}
 
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="font-semibold text-slate-950">Booking helper</div>
+          <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-950">
+              Booking helper · check-in &amp; check-out times
+            </summary>
+            <div className="mt-2 flex justify-end">
               <button
                 type="button"
                 onClick={() => void copyText(handoff.copySummary)}
@@ -1050,7 +1052,7 @@ export default function ParkingSmartPick({
                 ? 'Verify these times at provider checkout.'
                 : 'Open provider and enter these times.'}
             </div>
-          </div>
+          </details>
 
           <details className="mt-4">
             <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">

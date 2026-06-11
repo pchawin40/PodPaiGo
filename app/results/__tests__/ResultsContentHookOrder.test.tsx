@@ -1382,6 +1382,49 @@ describe('ResultsContent hook order', () => {
     expect(screen.getByText('SEA_CURATED_ACCESS=1')).toBeInTheDocument();
   });
 
+  test('airport results render one clear recommended plan summary with caveat and CTAs', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(cityTripRecommendationWithParking());
+
+    const params = new URLSearchParams({
+      type: 'one-way-departure',
+      intent: 'flying-out',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      airportCode: 'SEA',
+      departureDate: '2027-06-07',
+      departureTime: '10:00',
+      transport: 'all',
+      transitPayment: 'normal',
+      parkingPreference: 'nearby',
+    });
+
+    render(<ResultsContent storedSearchParams={params.toString()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Recommended plan')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Smart recommendation')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Recommended plan')).toHaveLength(1);
+
+    const summary = screen.getByTestId('recommended-plan-summary');
+    expect(within(summary).getByText(/Recommended:/)).toBeInTheDocument();
+    expect(within(summary).getByTestId('recommended-plan-inline-metrics')).toHaveTextContent(
+      /Medium confidence/,
+    );
+    expect(within(summary).getByTestId('recommended-plan-why')).toHaveTextContent(
+      /Can cost more than transit/,
+    );
+    expect(
+      within(summary).getByRole('button', { name: 'Compare options' }),
+    ).toBeInTheDocument();
+    expect(within(summary).queryByText('Main caveat')).not.toBeInTheDocument();
+
+    expect(document.getElementById('compare-options-grid')).toBeInTheDocument();
+  });
+
   test('hides more parking options while no-parking preference is active', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
@@ -1425,7 +1468,7 @@ describe('ResultsContent hook order', () => {
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Pickup wait').length).toBeGreaterThan(0);
     expect(screen.getByText('Check app')).toBeInTheDocument();
-    expect(screen.queryByText('Parking filters')).not.toBeInTheDocument();
+    expect(screen.queryByText('Filter parking')).not.toBeInTheDocument();
     expect(screen.queryByText('More parking options')).not.toBeInTheDocument();
     expect(screen.queryByText('Test Garage One')).not.toBeInTheDocument();
     expect(screen.queryByText('Test Garage Two')).not.toBeInTheDocument();
@@ -1435,8 +1478,11 @@ describe('ResultsContent hook order', () => {
     await waitFor(() => {
       expect(screen.getByText('Parking is visible for comparison.')).toBeInTheDocument();
       expect(screen.getByText('More parking options')).toBeInTheDocument();
-      expect(screen.getByText('Parking filters')).toBeInTheDocument();
+      expect(screen.getByText('Filter parking')).toBeInTheDocument();
     });
+    expect(screen.queryByText(/inferred claims/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/strict filters/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/provider-claimed/i)).not.toBeInTheDocument();
     expect(screen.getAllByText('Test Garage Two').length).toBeGreaterThan(0);
     expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
     expect(screen.queryByText('Travel preferences')).not.toBeInTheDocument();
@@ -1562,11 +1608,24 @@ describe('ResultsContent hook order', () => {
     });
     expect(screen.getAllByText('28 min').length).toBeGreaterThan(0);
     expect(screen.queryByText('Drive time couldn’t be confirmed')).not.toBeInTheDocument();
-    expect(screen.getByText('Parking filters')).toBeInTheDocument();
+    expect(screen.getByText('Filter parking')).toBeInTheDocument();
+    expect(screen.getByText('Filter parking').closest('details')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Narrow lots by features. Always confirm details with the provider.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Covered')).toBeInTheDocument();
+    expect(screen.getByText('Secured')).toBeInTheDocument();
+    expect(screen.getByText('Shuttle')).toBeInTheDocument();
+    expect(screen.getByText('EV charging')).toBeInTheDocument();
+    expect(screen.getByText('Valet')).toBeInTheDocument();
+    expect(screen.getByText('Self-park')).toBeInTheDocument();
+    expect(screen.queryByText(/inferred claims/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/strict filters/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/provider-claimed/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Car and parking preference')).not.toBeInTheDocument();
   });
 
-  test('general-trip Details links target lower option detail sections', async () => {
+  test('general-trip View links target lower option detail sections', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationForPreferenceToggle();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -1595,7 +1654,7 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
     });
 
-    const detailsLinks = screen.getAllByRole('link', { name: 'Details' });
+    const detailsLinks = screen.getAllByRole('link', { name: 'View' });
     const hrefs = detailsLinks.map((link) => link.getAttribute('href'));
 
     expect(hrefs).toContain('#customer-parking-details');
@@ -1688,13 +1747,13 @@ describe('ResultsContent hook order', () => {
     });
 
     const customerDetailsLink = screen
-      .getAllByRole('link', { name: 'Details' })
+      .getAllByRole('link', { name: 'View' })
       .find((link) => link.getAttribute('href') === '#customer-parking-details');
     expect(customerDetailsLink).toBeDefined();
 
     const customerCard = screen.getByRole('group', { name: 'Customer parking recommendation' });
     expect(within(customerCard).getByText('Customer parking')).toBeInTheDocument();
-    expect(within(customerCard).getByText('Free? Verify')).toBeInTheDocument();
+    expect(within(customerCard).getAllByText('Free? Verify').length).toBeGreaterThan(0);
     expect(within(customerCard).getByText('Verify signs before parking.')).toBeInTheDocument();
     expect(
       within(customerCard).queryByText('Check signs, validation, time limits, and towing rules'),

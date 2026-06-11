@@ -71,7 +71,7 @@ describe('parking price display', () => {
 
     const line = parkingPriceLine(option, sevenDayTrip);
     expect(line.primary).toContain('$210 total');
-    expect(line.secondary).toContain('$30/day for 7 days');
+    expect(line.secondary).toContain('Based on $30/day × 7 days');
     expect(line.confidence).toBe('official');
   });
 
@@ -87,7 +87,28 @@ describe('parking price display', () => {
     expect(line.primary).toContain('Estimated');
     expect(line.primary).toContain('total');
     expect(line.primary).toMatch(/\$/);
-    expect(line.secondary).toContain('/day for 7 days');
+    expect(line.secondary).toContain('/day × 7 days');
+  });
+
+  test('official price range is explained as an estimate built from daily rates', () => {
+    const option = parkingOption({
+      name: 'SEA Airport Garage',
+      type: 'official',
+      price: 0,
+      priceMin: 12,
+      priceMax: 28,
+      priceUnit: 'per-day',
+      priceSource: 'official-rate',
+    });
+
+    const line = parkingPriceLine(option, sevenDayTrip);
+    expect(line.confidence).toBe('official');
+    expect(line.primary).toContain('Estimated');
+    expect(line.primary).toContain('$84–$196 total');
+    expect(line.primary).not.toMatch(/^Official/);
+    expect(line.badge).toBe('Official rate range');
+    expect(line.secondary).toContain('Based on ~$12–$28/day × 7 days');
+    expect(line.secondary).toContain('Confirm with the airport.');
   });
 
   test('official known daily rate still displays', () => {
@@ -105,7 +126,7 @@ describe('parking price display', () => {
     expect(canDisplayParkingPrice(option)).toBe(true);
     const line = parkingPriceLine(option, sevenDayTrip);
     expect(line.primary).toContain('$259 total');
-    expect(line.secondary).toContain('$37/day for 7 days');
+    expect(line.secondary).toContain('Based on $37/day × 7 days');
     expect(line.confidence).toBe('official');
   });
 

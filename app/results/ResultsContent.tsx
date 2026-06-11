@@ -66,7 +66,7 @@ import TripRecalculatingLoader from '../components/TripRecalculatingLoader';
 import { useAuth } from '../components/AuthProvider';
 import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
-import OptionComparisonCard from '../components/OptionComparisonCard';
+import OptionComparisonCard, { OPTION_COMPARISON_GRID_CLASS } from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import BetaFeedbackButton from './BetaFeedbackButton';
@@ -8339,7 +8339,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {
                 key: 'transit',
                 label: 'Transit',
-                name: bestTransitOption?.name || 'Google Maps / Sound Transit',
+                name: hasReliableTransit
+                  ? bestTransitOption?.name || 'Google Maps / Sound Transit'
+                  : 'Transit route not confirmed',
                 cost: transitCostDisplay && hasReliableTransit
                   ? transitCostDisplay.primary
                   : 'Check route',
@@ -8364,7 +8366,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   ? bestParkRideAccess.displayName
                   : isOvernightTrip
                     ? 'Not available for overnight airport parking'
-                    : 'Only if lot rules allow it',
+                    : 'Park & Ride not confirmed for this trip',
                 cost: bestParkRideAccess
                   ? bestParkRideAccess.pricing.displayPrimary
                   : isOvernightTrip
@@ -8575,7 +8577,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      Smart recommendation
+                      Recommended plan
                     </div>
                     <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-foreground">
                       {displayRecommendedTitle}
@@ -8602,7 +8604,81 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   </div>
                 </div>
 
-                <div className={`mt-4 grid grid-cols-1 gap-3 ${isCityTrip ? (pointAbRanking?.modes.length ?? 0) >= 6 ? 'lg:grid-cols-6' : (pointAbRanking?.modes.length ?? 0) >= 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4' : ''} lg:items-stretch`}>
+                {(() => {
+                  const selectedRowHidden = selectedModeRow
+                    ? ('hiddenByPreference' in selectedModeRow &&
+                        Boolean(selectedModeRow.hiddenByPreference)) ||
+                      (parkingVisibilityMode === 'hidden_by_preference' &&
+                        isParkingUiRowKey(selectedModeRow.key))
+                    : false;
+                  if (!selectedModeRow || selectedRowHidden || selectedModeRow.unavailable) {
+                    return null;
+                  }
+                  const heroAction = cardActionFor(selectedModeRow.key);
+                  const heroCaveat = selectedModeRow.cons[0] || 'No major caveats noted';
+                  const heroWhyWon = [...selectedModeRow.pros.slice(0, 2), heroCaveat].filter(Boolean);
+                  return (
+                    <div
+                      className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4"
+                      data-testid="recommended-plan-summary"
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-wide text-primary">
+                        Recommended
+                      </div>
+                      <div className="mt-1 text-lg font-bold leading-tight text-foreground">
+                        Recommended: {displayRecommendedTitle}
+                      </div>
+                      <div
+                        className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-foreground"
+                        data-testid="recommended-plan-inline-metrics"
+                      >
+                        <span>{selectedModeRow.cost}</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span>{selectedModeRow.time}</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span>{selectedModeRow.confidence} confidence</span>
+                      </div>
+
+                      {heroWhyWon.length > 0 ? (
+                        <div className="mt-2 text-sm leading-6" data-testid="recommended-plan-why">
+                          <span className="text-muted-foreground">{heroWhyWon.join(' · ')}</span>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={heroAction.onClick}
+                          className="inline-flex min-h-10 items-center justify-center rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
+                        >
+                          {heroAction.label}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollToBestSection('compare-options-grid')}
+                          className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted/80"
+                        >
+                          Compare options
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Compare options
+                </h3>
+
+                <div className={`mt-2 hidden gap-x-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid ${OPTION_COMPARISON_GRID_CLASS}`}>
+                  <span>Option</span>
+                  <span>Status</span>
+                  <span>Cost</span>
+                  <span>Time</span>
+                  <span>Note</span>
+                  <span className="text-right">Action</span>
+                </div>
+
+                <div id="compare-options-grid" className="mt-2 grid scroll-mt-24 grid-cols-1 gap-1.5">
                   {modeRows.map((row) => {
                     const rowHidden =
                       ('hiddenByPreference' in row && row.hiddenByPreference) ||
@@ -8610,15 +8686,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         isParkingUiRowKey(row.key));
                     const selected = !rowHidden && row.key === effectiveRecommendationMode;
                     const action = cardActionFor(row.key);
-                    const cardClassName =
-                      'relative rounded-2xl border p-4 pt-10 text-left shadow-sm transition ' +
-                      (rowHidden
-                        ? 'border-border bg-muted/60 opacity-75'
-                        : row.unavailable
-                          ? 'border-border bg-muted/60 opacity-80'
-                          : selected
-                            ? 'border-primary/50 bg-primary/10'
-                            : 'border-border bg-card');
                     const visibleCheapestKey =
                       quickReadCheapestMode?.key ??
                       (!shouldRenderParkingSections ? null : pointAbRanking?.cheapestMode?.key ?? cheapestMode?.key);
@@ -8733,143 +8800,45 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       );
                     }
 
-                    const cardBody = (
-                      <>
-                        <div className="absolute right-3 top-3">
-                          <RecommendationStatusBadge
-                            status={
-                              rowHidden
-                                ? 'hidden_by_preference'
-                                : 'status' in row
-                                  ? row.status
-                                  : undefined
-                            }
-                            verdict={rowHidden ? 'Hidden by preference' : row.verdict}
-                            unavailable={row.unavailable}
-                            sort={sort}
-                            isCheapestMode={!rowHidden && visibleCheapestKey === row.key}
-                            isFastestMode={!rowHidden && visibleFastestKey === row.key}
-                          />
-                        </div>
-
-                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          {row.confidence} confidence
-                        </div>
-
-                        <div
-                          className={`mt-3 text-sm font-bold ${rowHidden ? 'text-muted-foreground' : 'text-foreground'}`}
-                        >
-                          {row.label}
-                        </div>
-
-                        <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                          {row.name}
-                        </div>
-
-                        {rowHidden ? (
-                          <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                            Hidden by your No parking needed preference.
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                          <div className="rounded-xl border border-border bg-card/80 p-2">
-                            <div className="text-muted-foreground">Cost</div>
-                            <div className="mt-0.5 font-semibold text-foreground">
-                              {row.cost}
-                            </div>
-                            {'costNote' in row && row.costNote ? (
-                              <div className="mt-1 line-clamp-2 break-words text-[11px] text-muted-foreground">
-                                {row.costNote}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="rounded-xl border border-border bg-card/80 p-2">
-                            <div className="text-muted-foreground">
-                              {'timeLabel' in row && row.timeLabel ? row.timeLabel : 'Time'}
-                            </div>
-                            <div className="mt-0.5 font-semibold text-foreground">
-                              {row.time}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 space-y-2 text-xs leading-5">
-                          <div>
-                            <span className="font-semibold text-foreground">Pros: </span>
-                            <span className="text-muted-foreground">{row.pros.join(', ')}</span>
-                          </div>
-                          <div>
-                            <span className="font-semibold text-foreground">Cons: </span>
-                            <span className="text-muted-foreground">{row.cons.join(', ')}</span>
-                          </div>
-                        </div>
-
-                        {rowHidden && !showParkingAnyway ? (
-                          <div className="mt-3 space-y-2">
-                            <button
-                              type="button"
-                              onClick={() => setShowParkingAnyway(true)}
-                              className="inline-flex w-full min-h-10 items-center justify-center rounded-2xl border border-border bg-card px-3 text-sm font-semibold text-foreground hover:bg-muted/80"
-                            >
-                              Show parking anyway
-                            </button>
-                          </div>
-                        ) : rowHidden ? null : (
-                          <div className="mt-3 inline-flex text-xs font-semibold text-primary">
-                            {action.label}
-                          </div>
-                        )}
-                      </>
-                    );
-
-                    if (rowHidden) {
-                      return (
-                        <div key={row.key} className={cardClassName}>
-                          {cardBody}
-                        </div>
-                      );
-                    }
-
                     return (
-                      <button
+                      <OptionComparisonCard
                         key={row.key}
-                        type="button"
-                        onClick={action.onClick}
-                        className={
-                          cardClassName +
-                          ' cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+                        confidence={row.confidence}
+                        label={row.label}
+                        name={row.name}
+                        cost={row.cost}
+                        costNote={'costNote' in row ? row.costNote : undefined}
+                        time={row.time}
+                        timeLabel={'timeLabel' in row ? row.timeLabel : undefined}
+                        pros={row.pros}
+                        cons={row.cons}
+                        status={'status' in row ? row.status : undefined}
+                        verdict={row.verdict}
+                        unavailable={row.unavailable}
+                        hiddenByPreference={rowHidden}
+                        onShowParkingAnyway={
+                          rowHidden && !showParkingAnyway
+                            ? () => setShowParkingAnyway(true)
+                            : undefined
                         }
-                      >
-                        {cardBody}
-                      </button>
+                        sort={sort}
+                        isCheapestMode={!rowHidden && visibleCheapestKey === row.key}
+                        isFastestMode={!rowHidden && visibleFastestKey === row.key}
+                        selected={selected}
+                        actions={rowHidden ? undefined : [{ label: action.label, onClick: action.onClick }]}
+                      />
                     );
                   })}
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                <div className="mt-3 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
                   {isOvernightTrip ? (
-                    <div className="space-y-2">
-                      <div>
-                        <span className="font-semibold text-foreground">
-                          Overnight trip detected
-                        </span>
-                        <span className="text-foreground">
-                          {' '}
-                          ({Math.max(1, Math.round(calculateParkingDuration(tripData) / (24 * 60)))}{' '}
-                          {Math.round(calculateParkingDuration(tripData) / (24 * 60)) === 1
-                            ? 'day'
-                            : 'days'}
-                          )
-                        </span>
-                      </div>
-                      <p>
-                        Park &amp; Ride options are not recommended because overnight parking rules
-                        are often unverified. Airport and off-airport hotel lots were prioritized
-                        for this trip length.
-                      </p>
+                    <div>
+                      <span className="font-semibold text-foreground">Note: </span>
+                      Overnight Park &amp; Ride is usually not recommended because parking rules are
+                      often unverified. Airport and off-airport hotel lots are prioritized.
                       {showParkRideReason && (
-                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
                           <div className="font-semibold">
                             Why Park & Ride is unavailable for this trip
                           </div>
