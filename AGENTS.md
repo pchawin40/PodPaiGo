@@ -32,7 +32,7 @@ After updating:
 **Active priorities**
 - Public results flow should stay lean: Recommended plan, Compare options, compact parking filters, parking/provider cards, details/evidence, map/actions. Do not reintroduce the giant public `Parking plan` block with Nearby parking options / Why this option / Before you park / Timing / Backup options / Street parking note sections.
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
-- Compare options should scan like a compact table/scoreboard on desktop with fixed columns: Option, Status, Cost, Time, Note, Action; on mobile use stacked compact cards (no horizontal table overflow).
+- Compare options should scan like a compact table/scoreboard on md+ desktop with fixed columns: Option, Status, Cost, Time, Note, Action; below md use stacked compact cards only (`md:hidden` mobile cards, `hidden md:grid` desktop rows/header — no horizontal table overflow).
 - Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders. Parking rows should keep a useful anchor even when the old plan card is hidden.
 - Keep essential parking actions available outside the hidden plan: Route to parking in parking cards, View parking details via hero/Compare anchors, Map, reserve/provider CTAs, and details/evidence where already useful. Do not show `Search nearby parking` in normal results when parking options/cards already exist; true empty/unavailable fallbacks may use `Open Google Maps parking search`.
 - Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route; paid garage/lot timing must be full-trip timing or clearly estimated/partial, never a local-only leg presented as total. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
@@ -65,7 +65,7 @@ After updating:
 - Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
 - Airport + city results: Recommended hero shows title, inline cost/time/confidence metrics, why line, primary CTA, and Compare options scroll.
 - Compare options desktop: airport and city rows align to the same fixed columns as the header, desktop cells are vertically centered, selected option is highlighted without becoming huge, each row has only one quiet action (View or Why?), row hover/pointer affordance is present, no compact-row Details/pro-con mini box appears, and long notes/cost notes clamp without overflow.
-- Compare options mobile: stacked compact cards per option (icon, label, status badge, name, cost · time, note, one action); no desktop table headers or horizontal overflow; actions stay clear of the Ask PodPaiGo floating button.
+- Compare options mobile (<md): stacked compact cards per option (icon, label, status badge, name, cost · time, note, one action); desktop OPTION/STATUS/COST/TIME/NOTE header hidden; no horizontal overflow; compare grid has bottom padding so Ask PodPaiGo does not cover actions.
 - Parking filters: public results show a visible compact "Filter parking" section with Excel-style feature counts on chips (e.g. `Covered (2)`), zero-count chips muted, user-facing helper copy, and no developer terms like inferred claims / provider-claimed / strict filters.
 - Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; official airport price ranges read as estimates with daily-rate basis and confirm-with-airport caveat.
 <!-- AGENT_STATE_END -->
@@ -579,3 +579,38 @@ After updating:
 
 **Summary**
 - Updated the Current PodPaiGo State section inside the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` markers for mobile stacked Compare options cards and desktop table retention; no changelog history was deleted.
+
+### 2026-06-11 — Compare options mobile cards use md breakpoint split
+
+**Summary**
+- Moved Compare options responsive split from `sm` to `md`: mobile stacked cards (`md:hidden`), desktop scoreboard rows/header (`hidden md:grid`).
+- Extracted `CompareOptionsDesktopHeader`, `MobileCompareOptionCard`, and `DesktopCompareOptionRow` with shared normalized presentation data and `OptionComparisonAction`.
+- Compare grid uses `w-full max-w-full min-w-0` and `pb-24 md:pb-0` so cards fit the viewport and actions clear the Ask PodPaiGo floating button.
+- Unavailable mobile cards skip duplicate name line when the subtitle is already the not-confirmed message.
+- Preserved timing/source honesty, selected highlight, unavailable dimming, and single View/Why? action; no scoring/ranking/pricing/route logic changes.
+- Refreshed AGENTS.md current-state summary.
+
+**Files changed**
+- `app/components/OptionComparisonCard.tsx`
+- `app/components/__tests__/OptionComparisonCard.test.tsx`
+- `app/results/ResultsContent.tsx`
+- `AGENTS.md`
+
+**Why**
+- Phones were still hitting the desktop table at the `sm` (640px) breakpoint or seeing column headers/overflow; true mobile needed an explicit md-split with no desktop grid classes on the card wrapper.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/components/__tests__/OptionComparisonCard.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/__tests__/RecommendationStatus.test.ts --runInBand` passed, 111 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live phone screenshot verification; coverage is DOM/class-based plus production build.
+
+**Next recommended step**
+- Hard-refresh on a phone (<768px width) and confirm Compare options shows stacked cards with no OPTION/STATUS header row.
+
+### 2026-06-11 — AGENTS.md current-state summary refreshed (md breakpoint compare cards)
+
+**Summary**
+- Updated Current PodPaiGo State active priorities and beta checklist for md breakpoint mobile/desktop Compare options split; no changelog history was deleted.
