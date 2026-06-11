@@ -20,12 +20,14 @@ type TravelPreferencesPanelProps = {
   embedded?: boolean;
   hideParkingFilters?: boolean;
   hideBusinessModeOptions?: boolean;
+  /** Excel-style counts from the base/unfiltered parking lot list. */
+  featureCounts?: Partial<Record<keyof ParkingFeatureFilters, number>>;
 };
 
 const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; detail: string }> = [
   {
     value: 'standard',
-    label: 'I’m driving / need parking',
+    label: "I'm driving / need parking",
     detail: 'Show parking normally and let Smart Pick choose parking when it is best.',
   },
   {
@@ -42,6 +44,18 @@ const BUSINESS_MODE_OPTIONS: Array<{ value: BusinessTravelMode; label: string; d
 
 const FILTER_KEYS = Object.keys(PARKING_FILTER_LABELS) as Array<keyof ParkingFeatureFilters>;
 
+function filterChipLabel(
+  key: keyof ParkingFeatureFilters,
+  featureCounts?: Partial<Record<keyof ParkingFeatureFilters, number>>,
+): string {
+  const base = PARKING_FILTER_LABELS[key];
+  const count = featureCounts?.[key];
+  if (typeof count === 'number') {
+    return `${base} (${count})`;
+  }
+  return base;
+}
+
 export default function TravelPreferencesPanel({
   value,
   onChange,
@@ -49,6 +63,7 @@ export default function TravelPreferencesPanel({
   embedded = false,
   hideParkingFilters = false,
   hideBusinessModeOptions = false,
+  featureCounts,
 }: TravelPreferencesPanelProps) {
   const [preferences, setPreferences] = useState<TripTravelPreferences>(
     value || DEFAULT_TRAVEL_PREFERENCES,
@@ -131,14 +146,22 @@ export default function TravelPreferencesPanel({
           <div className="mt-2 flex flex-wrap gap-1.5">
             {FILTER_KEYS.map((key) => {
               const active = Boolean(preferences.parkingFilters[key]);
+              const count = featureCounts?.[key];
+              const zeroCount = typeof count === 'number' && count === 0;
               return (
                 <button
                   key={key}
                   type="button"
                   onClick={() => toggleFilter(key)}
                   className="rounded-full"
+                  aria-disabled={zeroCount ? true : undefined}
                 >
-                  <StatusPill tone={active ? 'primary' : 'muted'}>{PARKING_FILTER_LABELS[key]}</StatusPill>
+                  <StatusPill
+                    tone={active ? 'primary' : zeroCount ? 'muted' : 'muted'}
+                    className={zeroCount && !active ? 'opacity-60' : undefined}
+                  >
+                    {filterChipLabel(key, featureCounts)}
+                  </StatusPill>
                 </button>
               );
             })}

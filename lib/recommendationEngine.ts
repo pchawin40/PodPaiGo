@@ -1641,7 +1641,7 @@ export class RecommendationEngine {
           ? 'Customer parking likely — verify signs.'
         : shouldLoadParking && !hasParkingResults
           ? parkingDiscoveryMetadata?.status === 'cache_empty'
-            ? 'No saved parking options found near this destination yet. Search nearby parking to verify current garages and lots.'
+            ? 'No saved parking options found near this destination yet. Open map search to verify current garages and lots.'
             : isAirportTrip
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'

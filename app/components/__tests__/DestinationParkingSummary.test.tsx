@@ -92,7 +92,7 @@ describe('DestinationParkingSummary', () => {
     expect(screen.getAllByText(/could not verify exact parking rules/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Verify posted signs and lot rules/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Search nearby parking' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View parking options' })).toBeInTheDocument();
   });
 
   test('shows reason, source chips, and caveat above the fold', () => {

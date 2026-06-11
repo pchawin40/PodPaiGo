@@ -26,30 +26,37 @@ After updating:
 # Current PodPaiGo State
 
 **Product focus**
-- Beta trip-planning results experience for airport, point A→B/city, and Quick Go trips, prioritizing fast scanning: one concise recommended answer, honest price/time caveats, and compact Compare options rows where full details are needed.
+- Beta trip-planning results for airport, point A→B/city, event/stadium, and Quick Go trips, prioritizing fast scanning: one concise recommended answer, compact Compare options rows, honest price/time caveats, parking/provider cards, and lower details/evidence only where useful.
+- Normal public results should not show the old large `Parking plan` card; parking actions now live in the recommended hero, Compare row actions, compact parking anchors, parking cards, provider cards, map, and details sections.
 
 **Active priorities**
-- Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route. A distance-band fallback (e.g. an airport band applied to a long intercity trip) is re-based on the known main drive time plus pickup wait, and shows "Open app for live estimate" / no concrete duration when no reliable drive route exists. Rideshare timing reconciliation happens once at the engine level so Compare options, Quick Go Best Way, option scoring, and Full Trip Details tell the same timing story. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
+- Public results flow should stay lean: Recommended plan, Compare options, compact parking filters, parking/provider cards, details/evidence, map/actions. Do not reintroduce the giant public `Parking plan` block with Nearby parking options / Why this option / Before you park / Timing / Backup options / Street parking note sections.
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
 - Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
-- Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders.
+- Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders. Parking rows should keep a useful anchor even when the old plan card is hidden.
+- Keep essential parking actions available outside the hidden plan: Route to parking in parking cards, View parking details via hero/Compare anchors, Map, reserve/provider CTAs, and details/evidence where already useful. Do not show `Search nearby parking` in normal results when parking options/cards already exist; true empty/unavailable fallbacks may use `Open Google Maps parking search`.
+- Route-mode timing must stay honest and source-aware: rideshare is a car ride and must never look faster than the main origin→destination drive route; paid garage/lot timing must be full-trip timing or clearly estimated/partial, never a local-only leg presented as total. Never fake a precise duration when the underlying route leg is missing, stale, estimated-only, or impossible.
 - Quick Go Best Way must use practical total origin-to-destination timing: estimated/fallback intercity transit and local Park & Ride corridor estimates must not win over known drive/rideshare unless the user explicitly selected transit-only.
 - Quick Go best-way picks should still honor materially faster verified local transit/rideshare, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" for free/customer-parking or impractical-transit trips.
-- Public filter UI should stay visible, user-facing, and compact; keep technical filter/evidence language out of the main results page.
-- Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows should not read as report cards.
+- Public filter UI should stay visible, user-facing, and compact with Excel-style feature counts on filter chips (e.g. `Covered (2)`); keep technical filter/evidence language out of the main results page.
+- Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows and parking cards should not read as report cards.
 - Preserve pricing honesty everywhere: live / estimated / official rate range / check provider / open app / check route must remain explicit.
 - Keep airport parking, city/general parking, and event/stadium parking logic separate; never fake or mislabel live prices.
-- Public/non-admin surfaces must stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
+- Public/non-admin surfaces must stay free of debug/env diagnostics (debug UI gate is admin AND debug flag). Old parking-plan cards may be inspected only behind internal debug/admin gates.
 
 **Current known issues**
-- Rideshare long-distance timing fix (re-base on main drive route; never faster than driving; suppress fake duration for unconfirmed distance-band fallbacks) is covered by rideshare estimate, mode-timing, and point A→B ranking unit tests plus the production build; no live Bend route/browser validation was run.
-- Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
-- Quick Go Bend/intercity transit suppression is covered by resolver, Quick Go view, Park & Ride, and point A→B ranking tests; no live Bend route/browser validation was run for the latest resolver guard.
+- Public Parking plan removal is covered by ResultsContent DOM tests, parking card/provider/Compare/ranking regression tests, and production build; no live browser/mobile screenshot pass yet.
+- Rideshare long-distance timing, paid garage/lot full-trip timing, Quick Go Bend/intercity transit suppression, and Park & Ride unavailable wording are covered by targeted unit/DOM tests plus production build; no live Bend route/browser validation was run.
+- Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters, compact parking anchors/status notices) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
 - Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
 - Pre-existing unit failures unrelated to timing remain in OptionComparisonCard layout (parkAndRidePointAb), TripRecalculatingLoader reduced-motion, inventory provider airport scoping, and parking route live-limit suites; they fail identically on a clean tree.
 
 **Beta validation checklist**
-- Long-distance point A→B (e.g. Monroe/Seattle-area → Bend, OR): rideshare time equals the main drive route plus pickup wait (not a ~1h 17m distance-band estimate), drive / drive+park stay the timed routes, transit stays "Check route", paid garage/lot reads as the full trip chain with an `est.` label (never a 12-min local leg), and Park & Ride shows an "Unavailable" badge with "Not estimated" time when not confirmed; the same timing appears in the Recommended hero, Compare options, and Full Trip Details.
+- Public city/general results: no `Parking plan` heading and no large plan subsections; Recommended plan and Compare options still render; parking details anchors land on compact parking sections; Route to parking, View parking details, Map, and reserve/provider actions remain available; `Search nearby parking` does not render when parking cards already exist.
+- Event/stadium results: street parking warnings remain available in the separate street details section, not inside a giant parking plan.
+- City parking empty/unavailable states: show compact Parking options status copy with Open directions and, when useful, `Open Google Maps parking search`; do not use the `Search nearby parking` label.
+- Airport results: parking cards, provider cards, map, recommended plan hero, compare options, official-rate copy, and airport/event separation remain unchanged.
+- Long-distance point A→B (e.g. Monroe/Seattle-area → Bend, OR): rideshare time equals the main drive route plus pickup wait (not a ~1h 17m distance-band estimate), drive / drive+park stay the timed routes, transit stays "Check route", paid garage/lot reads as the full trip chain with an `est.` label when a main-drive fallback is used (never a 12-min local leg), and Park & Ride shows an "Unavailable" badge with "Not estimated" time when not confirmed.
 - Local point A→B: rideshare may legitimately read slightly slower than the raw drive (drive route + pickup), can still win on convenience, and verified faster transit/rideshare is preserved.
 - Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, Bend-style estimated intercity transit does not appear as a 1h Best Way, and a distance-band rideshare estimate does not win Best Way as faster than driving.
 - General/city Park & Ride: local corridor estimates remain usable for valid metro trips, but intercity destinations outside the corridor show Park & Ride not confirmed / no transit to destination and cannot win Best Way.
@@ -58,7 +65,7 @@ After updating:
 - Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
 - Airport + city results: Recommended hero shows title, inline cost/time/confidence metrics, why line, primary CTA, and Compare options scroll.
 - Compare options: airport and city rows align to the same fixed desktop columns as the header, desktop cells are vertically centered, selected option is highlighted without becoming huge, each row has only one quiet action (View or Why?), row hover/pointer affordance is present, no compact-row Details/pro-con mini box appears, and long notes/cost notes clamp without overflow.
-- Parking filters: public results show a visible compact "Filter parking" section with feature chips, user-facing helper copy, and no developer terms like inferred claims / provider-claimed / strict filters.
+- Parking filters: public results show a visible compact "Filter parking" section with Excel-style feature counts on chips (e.g. `Covered (2)`), zero-count chips muted, user-facing helper copy, and no developer terms like inferred claims / provider-claimed / strict filters.
 - Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; official airport price ranges read as estimates with daily-rate basis and confirm-with-airport caveat.
 <!-- AGENT_STATE_END -->
 
@@ -445,3 +452,95 @@ After updating:
 
 **Next recommended step**
 - Re-run the Monroe/Seattle-area → Bend, OR general trip in localhost/Vercel and confirm Paid garage/lot reads ~6h 30m est. (not 12 min) in the Recommended hero, Compare options, and Full Trip Details, and that Park & Ride shows an "Unavailable" badge with "Not estimated" time.
+
+### 2026-06-10 22:38 PDT — Public Parking plan section hidden
+
+**Summary**
+- Hid the large public city/general `Parking plan` card by default so results flow from Recommended plan and Compare options into compact parking options/provider cards, details/evidence, map/actions.
+- Kept parking actions available elsewhere: `Route to parking` remains on parking cards, `View parking details` anchors land on compact parking sections, and `Search nearby parking` appears in compact parking headers/status notices.
+- Moved street/event parking warning copy into a separate compact street details section instead of the old plan card.
+- Kept old paid/empty parking-plan cards behind internal admin/debug rendering only; scoring, ranking, pricing, route logic, airport/city/event behavior, and backend code were not changed.
+- AGENTS.md current-state summary was refreshed.
+
+**Files changed**
+- `app/results/ResultsContent.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 34 tests.
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ProviderPricingCards.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/parkingFilters.test.ts lib/__tests__/RecommendationStatus.test.ts --runInBand` passed, 130 tests.
+- `npm run build` passed.
+
+**Known remaining issues**
+- No live browser/mobile screenshot verification was run for the hidden Parking plan pass; coverage is DOM tests plus production build.
+
+### 2026-06-10 23:15 PDT — Parking filter counts and Search nearby parking CTA cleanup
+
+**Summary**
+- Added Excel-style feature counts to parking filter chips (e.g. `Covered (2)`, `Valet (0)`) computed from the base/unfiltered parking lot list before active filters apply, using the same strict matching rules as filter behavior.
+- Zero-count chips render muted; filter toggle behavior is unchanged.
+- Removed the confusing normal-public `Search nearby parking` CTA from results when parking options/cards are already shown; empty/unavailable fallbacks now use `Open Google Maps parking search` instead.
+- Renamed DestinationParkingSummary scroll helper from `Search nearby parking` to `View parking options` when that callback is used outside results.
+- Filter scoring, ranking, pricing, route logic, airport/city/event separation, and backend APIs were not changed.
+
+**Files changed**
+- `lib/parking/parkingFilters.ts` (`countParkingFeatureMatches`)
+- `lib/parking/__tests__/parkingFilters.test.ts`
+- `app/components/TravelPreferencesPanel.tsx`
+- `app/results/ResultsContent.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `app/components/DestinationParkingSummary.tsx`
+- `app/components/__tests__/DestinationParkingSummary.test.tsx`
+- `AGENTS.md`
+
+**Why**
+- Filter chips did not show how many lots matched each feature, making filters hard to scan.
+- `Search nearby parking` implied PodPaiGo had not already searched, even when parking cards were visible.
+
+**Tests run and result**
+- `npx jest --runTestsByPath lib/parking/__tests__/parkingFilters.test.ts app/results/__tests__/ResultsContentHookOrder.test.tsx app/components/__tests__/DestinationParkingSummary.test.tsx lib/__tests__/providersParkingAirport.test.ts --runInBand` passed, 58 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser pass for filter chip counts or hidden search CTA; coverage is DOM/unit tests plus production build.
+
+**Next recommended step**
+- Open a city/general result with multiple parking lots and confirm filter chips show counts, zero-count chips look muted, parking cards/route actions render, and no normal `Search nearby parking` button appears.
+
+### 2026-06-10 23:16 PDT — Search nearby parking CTA preserved with hidden Parking plan
+
+**Summary**
+- Restored the compact public city/general `Search nearby parking` action in parking option headers and empty/unavailable parking status notices to satisfy the hidden-Parking-plan UX requirement.
+- Kept the large public `Parking plan` card hidden by default; scoring, ranking, provider pricing, route logic, airport/city/event behavior, and backend code remain unchanged.
+- Preserved the newer parking filter count and DestinationParkingSummary label changes; this only reconciles the results-page CTA requirement.
+- AGENTS.md current-state summary was refreshed.
+
+**Files changed**
+- `app/results/ResultsContent.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ProviderPricingCards.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx app/components/__tests__/DestinationParkingSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/parkingFilters.test.ts lib/__tests__/RecommendationStatus.test.ts lib/__tests__/providersParkingAirport.test.ts --runInBand` passed, 147 tests. Jest printed its existing open-handle warning after completion.
+- `npm run build` passed.
+
+### 2026-06-10 22:47 PDT — Search nearby parking removed from normal results
+
+**Summary**
+- Removed the remaining normal-public `Search nearby parking` CTA from the city/general Parking options section header when parking cards already exist.
+- Kept the Parking options title/helper copy, parking cards, Route to parking, View parking details anchors, Map, reserve/provider CTAs, and details/evidence surfaces.
+- Renamed true empty/unavailable fallback map-search links to `Open Google Maps parking search` and changed fallback copy away from the `Search nearby parking` phrase.
+- Scoring, ranking, provider pricing, route logic, airport/city/event separation, backend search, and map behavior were not changed.
+- AGENTS.md current-state summary was refreshed.
+
+**Files changed**
+- `app/results/ResultsContent.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `lib/recommendationEngine.ts`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ProviderPricingCards.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx app/components/__tests__/DestinationParkingSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/parkingFilters.test.ts lib/__tests__/RecommendationStatus.test.ts lib/__tests__/providersParkingAirport.test.ts --runInBand` passed, 147 tests. Jest printed its existing open-handle warning after completion.
+- `npm run build` passed.

@@ -140,7 +140,7 @@ export default function DestinationParkingSummary({
               onClick={onCheckNearbyParking}
               className="inline-flex items-center rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
             >
-              Search nearby parking
+              View parking options
             </button>
           ) : null}
 
