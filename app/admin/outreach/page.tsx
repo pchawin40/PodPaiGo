@@ -213,8 +213,8 @@ export default function AdminOutreachPage() {
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-          <TravelCard>
+        <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+          <TravelCard className="min-w-0">
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <FieldLabel>Template</FieldLabel>
@@ -283,8 +283,8 @@ export default function AdminOutreachPage() {
                 <textarea
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
-                  rows={18}
-                  className="rounded-xl border border-border bg-card px-3 py-2 font-mono text-sm leading-6 text-foreground"
+                  rows={20}
+                  className="min-h-[28rem] resize-y rounded-xl border border-border bg-card px-3 py-2 font-mono text-sm leading-6 text-foreground"
                 />
               </div>
 
@@ -308,29 +308,32 @@ export default function AdminOutreachPage() {
             </div>
           </TravelCard>
 
-          <TravelCard>
+          <TravelCard className="min-w-0">
             <h2 className="text-xl font-semibold text-foreground">Preview</h2>
             <div className="mt-4 space-y-3 rounded-2xl border border-border bg-muted/40 p-4 text-sm">
-              <div>
+              <div className="min-w-0 break-words [overflow-wrap:anywhere]">
                 <span className="font-semibold text-foreground">From: </span>
                 <span className="text-muted-foreground">
                   {fromName || defaults.fromName} &lt;{fromEmail || defaults.fromEmail}&gt;
                 </span>
               </div>
-              <div>
+              <div className="min-w-0 break-words [overflow-wrap:anywhere]">
                 <span className="font-semibold text-foreground">Reply-To: </span>
                 <span className="text-muted-foreground">{replyTo || defaults.replyTo}</span>
               </div>
-              <div>
+              <div className="min-w-0 break-words [overflow-wrap:anywhere]">
                 <span className="font-semibold text-foreground">To: </span>
                 <span className="text-muted-foreground">{to || 'partner@example.com'}</span>
               </div>
-              <div>
+              <div className="min-w-0 break-words [overflow-wrap:anywhere]">
                 <span className="font-semibold text-foreground">Subject: </span>
                 <span className="text-muted-foreground">{subject || selectedTemplate?.subject || 'Untitled'}</span>
               </div>
             </div>
-            <pre className="mt-4 max-h-[36rem] whitespace-pre-wrap rounded-2xl border border-border bg-slate-950 p-4 text-sm leading-6 text-slate-100">
+            <pre
+              data-testid="outreach-email-preview-body"
+              className="mt-4 max-h-[36rem] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-2xl border border-border bg-slate-950 p-4 font-sans text-sm leading-6 text-slate-100 [overflow-wrap:anywhere]"
+            >
               {body || 'Choose a template or write a message.'}
             </pre>
             <p className="mt-4 text-xs leading-5 text-muted-foreground">

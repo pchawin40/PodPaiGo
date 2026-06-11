@@ -26,6 +26,19 @@ jest.mock('@/app/components/AuthProvider', () => ({
   useAuth: () => ({ session: null }),
 }));
 
+let mockResultsIsAdmin = false;
+
+jest.mock('@/app/components/useAdminStatus', () => ({
+  useAdminStatus: () => ({
+    configured: true,
+    loading: false,
+    signedIn: mockResultsIsAdmin,
+    isAdmin: mockResultsIsAdmin,
+    accessToken: mockResultsIsAdmin ? 'admin-token' : null,
+    statusCode: mockResultsIsAdmin ? 200 : 403,
+  }),
+}));
+
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
@@ -443,11 +456,28 @@ function searchParamsFromResultsPath(path: string): URLSearchParams {
   return new URLSearchParams(payload.query);
 }
 
+function restoreEnvVar(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
 describe('ResultsContent hook order', () => {
   const originalLiveRefresh = process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH;
+  const originalDebugLogs = process.env.DEBUG_LOGS;
+  const originalDebugUi = process.env.NEXT_PUBLIC_DEBUG_UI;
+  const originalAdminDebug = process.env.NEXT_PUBLIC_ENABLE_ADMIN_DEBUG;
+  const originalAllowLocalAdmin = process.env.ALLOW_LOCAL_ADMIN;
 
   afterEach(() => {
-    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = originalLiveRefresh;
+    restoreEnvVar('NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH', originalLiveRefresh);
+    restoreEnvVar('DEBUG_LOGS', originalDebugLogs);
+    restoreEnvVar('NEXT_PUBLIC_DEBUG_UI', originalDebugUi);
+    restoreEnvVar('NEXT_PUBLIC_ENABLE_ADMIN_DEBUG', originalAdminDebug);
+    restoreEnvVar('ALLOW_LOCAL_ADMIN', originalAllowLocalAdmin);
+    mockResultsIsAdmin = false;
     window.localStorage.clear();
     window.sessionStorage.clear();
     mockRouterReplace.mockClear();
@@ -1292,6 +1322,64 @@ describe('ResultsContent hook order', () => {
     expect(addressInputs).toHaveLength(1);
     expect(addressInputs[0]).toHaveValue('Monroe, WA');
     expect(within(panel as HTMLElement).queryByText(/^Destination$/)).not.toBeInTheDocument();
+  });
+
+  test('non-admin airport results do not render SEA curated access diagnostic even when debug flag is enabled', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    process.env.NEXT_PUBLIC_ENABLE_ADMIN_DEBUG = 'true';
+    mockResultsIsAdmin = false;
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(cityTripRecommendation());
+
+    const params = new URLSearchParams({
+      type: 'one-way-departure',
+      intent: 'flying-out',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      airportCode: 'SEA',
+      departureDate: '2027-06-07',
+      departureTime: '10:00',
+      transport: 'all',
+      transitPayment: 'normal',
+      parkingPreference: 'nearby',
+    });
+
+    render(<ResultsContent storedSearchParams={params.toString()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit trip' })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('SEA curated access diagnostic')).not.toBeInTheDocument();
+    expect(screen.queryByText('SEA_CURATED_ACCESS=1')).not.toBeInTheDocument();
+  });
+
+  test('admin debug airport results can render SEA curated access diagnostic intentionally', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    process.env.NEXT_PUBLIC_ENABLE_ADMIN_DEBUG = 'true';
+    mockResultsIsAdmin = true;
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(cityTripRecommendation());
+
+    const params = new URLSearchParams({
+      type: 'one-way-departure',
+      intent: 'flying-out',
+      origin: 'Monroe, WA',
+      destination: 'Seattle-Tacoma International Airport',
+      airportCode: 'SEA',
+      departureDate: '2027-06-07',
+      departureTime: '10:00',
+      transport: 'all',
+      transitPayment: 'normal',
+      parkingPreference: 'nearby',
+    });
+
+    render(<ResultsContent storedSearchParams={params.toString()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SEA curated access diagnostic')).toBeInTheDocument();
+    });
+    expect(screen.getByText('SEA_CURATED_ACCESS=1')).toBeInTheDocument();
   });
 
   test('hides more parking options while no-parking preference is active', async () => {

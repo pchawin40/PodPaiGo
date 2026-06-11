@@ -4996,7 +4996,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const { session } = useAuth();
   const { isAdmin } = useAdminStatus();
   const accessToken = session?.access_token ?? null;
-  const showInternalDebug = isAdmin || isPodPaiGoDebugUIEnabled();
+  const showInternalDebug = isAdmin && isPodPaiGoDebugUIEnabled();
   const routeSearchParams = useSearchParams();
   const routeSearchParamsString = routeSearchParams.toString();
   const searchParams = useMemo(
