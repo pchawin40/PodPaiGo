@@ -32,7 +32,8 @@ After updating:
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
 - Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
 - Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders.
-- Quick Go best-way picks should honor the ranked smart option when it is materially faster, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" only for free/customer-parking trips without a stronger ranked option.
+- Quick Go Best Way must use practical total origin-to-destination timing: estimated/fallback intercity transit and local Park & Ride corridor estimates must not win over known drive/rideshare unless the user explicitly selected transit-only.
+- Quick Go best-way picks should still honor materially faster verified local transit/rideshare, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" for free/customer-parking or impractical-transit trips.
 - Public filter UI should stay visible, user-facing, and compact; keep technical filter/evidence language out of the main results page.
 - Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows should not read as report cards.
 - Preserve pricing honesty everywhere: live / estimated / official rate range / check provider / open app / check route must remain explicit.
@@ -41,11 +42,12 @@ After updating:
 
 **Current known issues**
 - Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
-- Quick Go smart-pick selection is covered by resolver and card tests; no live route/browser validation was run for the latest resolver tweak.
+- Quick Go Bend/intercity transit suppression is covered by resolver, Quick Go view, Park & Ride, and point A→B ranking tests; no live Bend route/browser validation was run for the latest resolver guard.
 - Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
 
 **Beta validation checklist**
-- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster ranked rideshare/transit options are not overwritten by generic Drive, and No car transport stays honored.
+- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, and Bend-style estimated intercity transit does not appear as a 1h Best Way.
+- General/city Park & Ride: local corridor estimates remain usable for valid metro trips, but intercity destinations outside the corridor show Park & Ride not confirmed / no transit to destination and cannot win Best Way.
 - Non-admin SEA airport results: no env/config diagnostic text; options render normally.
 - /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
 - Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
@@ -327,3 +329,26 @@ After updating:
 - `npm test -- --runTestsByPath lib/trip/__tests__/quickGo.test.ts --runInBand` passed, 36 tests.
 - `npm test -- --runTestsByPath app/components/__tests__/QuickGoResultsView.test.tsx --runInBand` passed, 25 tests.
 - `git diff --check` passed.
+
+### 2026-06-10 21:27 PDT — Quick Go intercity transit Best Way guard
+
+**Summary**
+- Quick Go Best Way now applies the existing transit-practicality guard before trusting a ranked transit option.
+- Estimated/fallback intercity transit, such as Monroe/Seattle-area origin to Bend, OR with a suspicious short transit duration, is filtered out of default Best Way and falls back to Drive when a drive time is known.
+- Verified local transit can still win when it is genuinely faster, and transit-only preference still honors transit.
+- AGENTS.md current-state summary was refreshed.
+
+**Files changed**
+- `lib/trip/quickGo.ts`
+- `lib/trip/__tests__/quickGo.test.ts`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/trip/__tests__/quickGo.test.ts --runInBand` passed, 39 tests.
+- `npm test -- --runTestsByPath app/components/__tests__/QuickGoResultsView.test.tsx lib/parking/__tests__/pointAbRanking.test.ts lib/parking/__tests__/parkRideResolver.test.ts --runInBand` passed, 78 tests.
+- `npm test -- --runTestsByPath __tests__/domain.test.ts lib/parking/__tests__/transitPracticality.test.ts lib/parking/__tests__/pointAbOptionScoring.test.ts --runInBand` passed, 26 tests.
+- `npm run build` passed.
+- `git diff --check` passed.
+
+**Known remaining issues**
+- No live browser route validation was run for the Bend example.

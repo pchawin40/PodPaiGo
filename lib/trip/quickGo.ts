@@ -6,8 +6,15 @@ import {
   type DestinationParkingClassification,
 } from '../parking/destinationParkingClassifier';
 import { evaluateLocalStreetParkingRules } from '../parking/localParkingRules';
+import { assessTransitPracticality } from '../parking/transitPracticality';
 import type { RankedRecommendation } from '../domain';
-import type { DestinationKind, TrafficEstimate, TransportAvailability, TripData } from '../types';
+import type {
+  DestinationKind,
+  TrafficEstimate,
+  TransitOption,
+  TransportAvailability,
+  TripData,
+} from '../types';
 import { debugLog } from '../utils/debug';
 import { buildResultsPathFromSearchParams } from './searchParams';
 import { deriveParkingWindowFromArrival } from './parkingWindow';
@@ -747,6 +754,46 @@ function findRankedOption(
   type: RankedRecommendation['type'],
 ): RankedRecommendation | null {
   return rankedOptions.find((option) => option.type === type) ?? null;
+}
+
+function finitePositiveMinutes(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+function rankedTransitOption(option: RankedRecommendation | null): TransitOption | null {
+  if (!option || option.type !== 'transit') return null;
+  return option.option as TransitOption;
+}
+
+function rankedTransitDuration(option: RankedRecommendation | null): number | null {
+  if (!option) return null;
+  const transit = rankedTransitOption(option);
+  if (!transit) return null;
+
+  return (
+    finitePositiveMinutes(option.duration) ??
+    finitePositiveMinutes((transit as { totalDuration?: unknown }).totalDuration) ??
+    finitePositiveMinutes(transit.duration)
+  );
+}
+
+function isQuickGoTransitPrimaryEligible(input: {
+  tripData: TripData;
+  option: RankedRecommendation;
+  driveMinutes: number | null;
+}): boolean {
+  const transit = rankedTransitOption(input.option);
+  if (!transit) return false;
+
+  return assessTransitPracticality({
+    tripData: input.tripData,
+    destinationLabel: input.tripData.destinationName || input.tripData.destination,
+    transit,
+    transitDuration: rankedTransitDuration(input.option),
+    driveMinutes: input.driveMinutes,
+  }).primaryEligible;
 }
 
 function formatRankedOptionLabel(option: RankedRecommendation | null): string | null {
@@ -1644,10 +1691,32 @@ export function resolveQuickGoBestWay(input: {
     input.classification.mode === 'unknown';
 
   const rideshareOption = findRankedOption(input.rankedOptions, 'rideshare');
-  const transitOption = findRankedOption(input.rankedOptions, 'transit');
+  const rawTransitOption = findRankedOption(input.rankedOptions, 'transit');
   const parkingOption = findRankedOption(input.rankedOptions, 'parking');
-  const rankedBest = input.rankedOptions[0] ?? null;
-  const rankedBackup = input.rankedOptions[1] ?? null;
+  const rawRankedBest = input.rankedOptions[0] ?? null;
+  const topTransitSuppressed =
+    rawRankedBest?.type === 'transit' &&
+    !isQuickGoTransitPrimaryEligible({
+      tripData: input.tripData,
+      option: rawRankedBest,
+      driveMinutes: input.driveMinutes,
+    });
+  const rankedOptionsForBestWay = transitPreferred
+    ? input.rankedOptions
+    : input.rankedOptions.filter(
+        (option) =>
+          option.type !== 'transit' ||
+          isQuickGoTransitPrimaryEligible({
+            tripData: input.tripData,
+            option,
+            driveMinutes: input.driveMinutes,
+          }),
+      );
+  const transitOption = transitPreferred
+    ? rawTransitOption
+    : findRankedOption(rankedOptionsForBestWay, 'transit');
+  const rankedBest = rankedOptionsForBestWay[0] ?? null;
+  const rankedBackup = rankedOptionsForBestWay[1] ?? null;
 
   if (transitPreferred) {
     return {
@@ -1664,6 +1733,20 @@ export function resolveQuickGoBestWay(input: {
       backupWayLabel: drivingAvailable ? 'Drive' : 'Transit',
       bestOption: rideshareOption || rankedBest,
       backupOption: drivingAvailable ? parkingOption || rankedBackup : transitOption || rankedBackup,
+    };
+  }
+
+  if (topTransitSuppressed && drivingAvailable && hasDriveTime) {
+    const backupOption =
+      rankedBest?.type === 'parking'
+        ? rideshareOption || rankedBackup
+        : rankedBest || rideshareOption || rankedBackup;
+
+    return {
+      bestWayLabel: formatDriveRecommendationLabel(parkingOption),
+      backupWayLabel: formatRankedOptionLabel(backupOption) || 'Rideshare / taxi',
+      bestOption: parkingOption,
+      backupOption,
     };
   }
 

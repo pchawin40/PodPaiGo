@@ -448,6 +448,171 @@ describe('quickGo', () => {
     expect(result.bestOption?.type).toBe('rideshare');
   });
 
+  test('Quick Go does not recommend estimated intercity transit as Best Way', () => {
+    const classification = classifyDestinationParking({ destination: 'Bend, Oregon' });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLat: 47.847,
+        originLng: -121.978,
+        destination: 'Bend, Oregon',
+        destinationKind: 'general',
+        destinationLat: 44.0582,
+        destinationLng: -121.3153,
+        arrivalDate: '2026-06-07',
+        arrivalTime: '11:00',
+        parkingDuration: 120,
+        transportAvailability: 'all',
+      },
+      rankedOptions: [
+        {
+          type: 'transit',
+          option: {
+            id: 'regional-transit-to-bend',
+            name: 'Transit route to Bend',
+            price: 4,
+            duration: 63,
+            frequency: 15,
+            availability: 35,
+            trustStatus: 'estimated',
+            routeTrustStatus: 'fallback',
+            sourceName: 'Google Maps transit directions',
+            lastUpdated: '2026-06-01T00:00:00.000Z',
+            assumptions: [
+              'Transit time estimated from entered origin and destination.',
+              'Open transit directions for exact route.',
+            ],
+          },
+          score: 95,
+          cost: 4,
+          duration: 63,
+          stressScore: 45,
+          reasons: [],
+        },
+        {
+          type: 'rideshare',
+          option: {
+            id: 'rideshare',
+            name: 'Rideshare',
+            duration: 315,
+            price: 220,
+            trustStatus: 'estimated',
+          },
+          score: 80,
+          cost: 220,
+          duration: 315,
+          stressScore: 65,
+          reasons: [],
+        },
+      ],
+      driveMinutes: 310,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Drive');
+    expect(result.backupWayLabel).toBe('Rideshare / taxi');
+    expect(result.bestOption?.type).not.toBe('transit');
+  });
+
+  test('Quick Go still lets verified local transit beat driving', () => {
+    const classification = classifyDestinationParking({ destination: 'Downtown Bellevue, WA' });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: 'Capitol Hill, Seattle, WA',
+        originLat: 47.6253,
+        originLng: -122.3222,
+        destination: 'Downtown Bellevue, WA',
+        destinationKind: 'downtown',
+        destinationLat: 47.6101,
+        destinationLng: -122.2015,
+        arrivalDate: '2026-06-07',
+        arrivalTime: '11:00',
+        parkingDuration: 120,
+        transportAvailability: 'all',
+      },
+      rankedOptions: [
+        {
+          type: 'transit',
+          option: {
+            id: 'local-transit',
+            name: 'Transit route to Bellevue',
+            price: 3,
+            duration: 20,
+            frequency: 10,
+            availability: 80,
+            trustStatus: 'verified-source',
+            sourceName: 'Transit',
+            lastUpdated: '2026-06-01T00:00:00.000Z',
+            assumptions: ['Published city transit route.'],
+          },
+          score: 96,
+          cost: 3,
+          duration: 20,
+          stressScore: 70,
+          reasons: [],
+        },
+      ],
+      driveMinutes: 38,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Transit');
+    expect(result.bestOption?.type).toBe('transit');
+  });
+
+  test('Quick Go transit-only preference still honors transit', () => {
+    const classification = classifyDestinationParking({ destination: 'Bend, Oregon' });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '13907 Chain Lake Rd, Monroe, WA 98272',
+        originLat: 47.847,
+        originLng: -121.978,
+        destination: 'Bend, Oregon',
+        destinationKind: 'general',
+        destinationLat: 44.0582,
+        destinationLng: -121.3153,
+        arrivalDate: '2026-06-07',
+        arrivalTime: '11:00',
+        parkingDuration: 120,
+        transportAvailability: 'transit',
+      },
+      rankedOptions: [
+        {
+          type: 'transit',
+          option: {
+            id: 'regional-transit-to-bend',
+            name: 'Transit route to Bend',
+            price: 4,
+            duration: 63,
+            frequency: 15,
+            availability: 35,
+            trustStatus: 'estimated',
+            routeTrustStatus: 'fallback',
+            sourceName: 'Google Maps transit directions',
+            lastUpdated: '2026-06-01T00:00:00.000Z',
+            assumptions: [
+              'Transit time estimated from entered origin and destination.',
+              'Open transit directions for exact route.',
+            ],
+          },
+          score: 95,
+          cost: 4,
+          duration: 63,
+          stressScore: 45,
+          reasons: [],
+        },
+      ],
+      driveMinutes: 310,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Transit');
+    expect(result.bestOption?.type).toBe('transit');
+  });
+
   test('SEA Airport uses airport parking rules', () => {
     const classification = quickGoClassificationForTrip({
       destination: 'SEA Airport',
