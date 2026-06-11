@@ -764,6 +764,21 @@ function formatRankedOptionLabel(option: RankedRecommendation | null): string | 
   return 'Transit';
 }
 
+function formatDriveRecommendationLabel(parkingOption: RankedRecommendation | null): string {
+  return formatRankedOptionLabel(parkingOption) || 'Drive';
+}
+
+function isRankedOptionMateriallyFasterThanDrive(
+  option: RankedRecommendation | null,
+  driveMinutes: number | null,
+): boolean {
+  if (!option || option.type === 'parking') return false;
+  if (driveMinutes == null || !Number.isFinite(driveMinutes) || driveMinutes <= 0) {
+    return false;
+  }
+  return Number.isFinite(option.duration) && option.duration + 1 < driveMinutes;
+}
+
 export type QuickGoRouteStatus =
   | 'idle'
   | 'resolving_coordinates'
@@ -1657,8 +1672,17 @@ export function resolveQuickGoBestWay(input: {
     drivingAvailable &&
     (hasDriveTime || input.classification.confidence === 'high')
   ) {
+    if (isRankedOptionMateriallyFasterThanDrive(rankedBest, input.driveMinutes)) {
+      return {
+        bestWayLabel: formatRankedOptionLabel(rankedBest) || 'Compare options',
+        backupWayLabel: formatDriveRecommendationLabel(parkingOption),
+        bestOption: rankedBest,
+        backupOption: parkingOption,
+      };
+    }
+
     return {
-      bestWayLabel: 'Drive',
+      bestWayLabel: formatDriveRecommendationLabel(parkingOption),
       backupWayLabel: 'Rideshare / taxi',
       bestOption: parkingOption,
       backupOption: rideshareOption || rankedBackup,
@@ -1666,8 +1690,17 @@ export function resolveQuickGoBestWay(input: {
   }
 
   if (drivingAvailable && !restrictedOrPaidParking && hasDriveTime) {
+    if (isRankedOptionMateriallyFasterThanDrive(rankedBest, input.driveMinutes)) {
+      return {
+        bestWayLabel: formatRankedOptionLabel(rankedBest) || 'Compare options',
+        backupWayLabel: formatDriveRecommendationLabel(parkingOption),
+        bestOption: rankedBest,
+        backupOption: parkingOption,
+      };
+    }
+
     return {
-      bestWayLabel: 'Drive',
+      bestWayLabel: formatDriveRecommendationLabel(parkingOption),
       backupWayLabel: formatRankedOptionLabel(rideshareOption) || 'Rideshare / taxi',
       bestOption: parkingOption,
       backupOption: rideshareOption || rankedBackup,

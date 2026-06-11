@@ -363,6 +363,91 @@ describe('quickGo', () => {
     expect(result.bestWayLabel).toBe('Drive');
   });
 
+  test('Quick Go keeps the concrete parking smart pick label when drive wins', () => {
+    const classification = classifyDestinationParking({ destination: 'Neighborhood market' });
+    const parkingOption = {
+      id: 'customer-lot',
+      name: 'Customer Lot',
+      type: 'off-airport' as const,
+      price: 0,
+      distance: 1,
+      availability: 90,
+      trustStatus: 'estimated' as const,
+      sourceName: 'Test parking',
+      lastUpdated: '2026-06-01T00:00:00.000Z',
+      assumptions: [],
+      transferType: 'walk' as const,
+      transferToTerminalMinutes: 4,
+      walkingMinutes: 4,
+    };
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '123 Main Street',
+        destination: 'Neighborhood market',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+        transportAvailability: 'all',
+      },
+      rankedOptions: [
+        {
+          type: 'parking',
+          option: parkingOption,
+          score: 95,
+          cost: 0,
+          duration: 12,
+          stressScore: 85,
+          reasons: [],
+        },
+        {
+          type: 'rideshare',
+          option: { id: 'rideshare', name: 'Rideshare', duration: 16, price: 20, trustStatus: 'estimated' },
+          score: 80,
+          cost: 20,
+          duration: 16,
+          stressScore: 70,
+          reasons: [],
+        },
+      ],
+      driveMinutes: 8,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Drive + park · Customer Lot');
+    expect(result.bestOption?.type).toBe('parking');
+  });
+
+  test('Quick Go does not override a materially faster smart pick with generic Drive', () => {
+    const classification = classifyDestinationParking({ destination: 'Neighborhood market' });
+    const result = resolveQuickGoBestWay({
+      tripData: {
+        type: 'general-trip',
+        origin: '123 Main Street',
+        destination: 'Neighborhood market',
+        arrivalDate: '2026-06-01',
+        arrivalTime: '10:00',
+        transportAvailability: 'all',
+      },
+      rankedOptions: [
+        {
+          type: 'rideshare',
+          option: { id: 'rideshare', name: 'Rideshare', duration: 12, price: 20, trustStatus: 'estimated' },
+          score: 92,
+          cost: 20,
+          duration: 12,
+          stressScore: 72,
+          reasons: [],
+        },
+      ],
+      driveMinutes: 18,
+      classification,
+    });
+
+    expect(result.bestWayLabel).toBe('Rideshare / taxi');
+    expect(result.backupWayLabel).toBe('Drive');
+    expect(result.bestOption?.type).toBe('rideshare');
+  });
+
   test('SEA Airport uses airport parking rules', () => {
     const classification = quickGoClassificationForTrip({
       destination: 'SEA Airport',

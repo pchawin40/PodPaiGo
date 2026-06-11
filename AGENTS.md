@@ -26,12 +26,13 @@ After updating:
 # Current PodPaiGo State
 
 **Product focus**
-- Beta trip-planning results experience for airport and point A→B/city trips, prioritizing fast mobile/desktop scanning: one concise Recommended answer plus compact Compare options scoreboard rows.
+- Beta trip-planning results experience for airport, point A→B/city, and Quick Go trips, prioritizing fast scanning: one concise recommended answer, honest price/time caveats, and compact Compare options rows where full details are needed.
 
 **Active priorities**
 - Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
 - Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
 - Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders.
+- Quick Go best-way picks should honor the ranked smart option when it is materially faster, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" only for free/customer-parking trips without a stronger ranked option.
 - Public filter UI should stay visible, user-facing, and compact; keep technical filter/evidence language out of the main results page.
 - Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows should not read as report cards.
 - Preserve pricing honesty everywhere: live / estimated / official rate range / check provider / open app / check route must remain explicit.
@@ -40,9 +41,11 @@ After updating:
 
 **Current known issues**
 - Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
+- Quick Go smart-pick selection is covered by resolver and card tests; no live route/browser validation was run for the latest resolver tweak.
 - Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
 
 **Beta validation checklist**
+- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster ranked rideshare/transit options are not overwritten by generic Drive, and No car transport stays honored.
 - Non-admin SEA airport results: no env/config diagnostic text; options render normally.
 - /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
 - Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
@@ -307,3 +310,20 @@ After updating:
 - `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx lib/parking/__tests__/parkingFilters.test.ts --runInBand` passed, 39 tests.
 - `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx app/components/__tests__/PointAbHeroSummary.test.tsx __tests__/parkAndRideAccess.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/__tests__/RecommendationStatus.test.ts __tests__/parkingPriceDisplay.test.ts lib/access/__tests__/pricingLadder.test.ts lib/parking/__tests__/priceDisplay.test.ts lib/parking/__tests__/parkingTrustCleanup.test.ts lib/parking/__tests__/parkingFilters.test.ts app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ProviderPricingCards.test.tsx --runInBand` passed, 148 tests.
 - `npm run build` passed.
+
+### 2026-06-10 21:16 PDT — Quick Go smart recommendation pick fixed
+
+**Summary**
+- Updated Quick Go best-way resolution so a materially faster ranked smart option is not overwritten by generic Drive.
+- Preserved concrete parking labels when a parking smart pick wins, while keeping synthetic Drive for free/customer-parking trips without a stronger ranked option.
+- AGENTS.md current-state summary was refreshed.
+
+**Files changed**
+- `lib/trip/quickGo.ts`
+- `lib/trip/__tests__/quickGo.test.ts`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/trip/__tests__/quickGo.test.ts --runInBand` passed, 36 tests.
+- `npm test -- --runTestsByPath app/components/__tests__/QuickGoResultsView.test.tsx --runInBand` passed, 25 tests.
+- `git diff --check` passed.
