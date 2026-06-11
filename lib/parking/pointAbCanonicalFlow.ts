@@ -188,6 +188,7 @@ export function resolvePointAbRecommendationMode(input: {
 }
 
 const PARKING_UI_KEYS = new Set<PointAbModeKey>([
+  'drive',
   'destination-customer',
   'parking',
   'street-meter',
@@ -243,6 +244,13 @@ export function buildPointAbDisplayRecommendation(input: {
     return {
       title: 'Take transit',
       reason: 'Best fit if cost matters most and your schedule has enough buffer.',
+    };
+  }
+
+  if (input.displayRecommendationMode === 'drive') {
+    return {
+      title: 'Drive to your destination',
+      reason: 'Best fit when driving is more practical than the visible transit or rideshare options.',
     };
   }
 

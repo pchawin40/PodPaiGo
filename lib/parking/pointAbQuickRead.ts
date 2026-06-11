@@ -1,6 +1,7 @@
 import type { PointAbModeKey } from './pointAbRanking';
 
 export const POINT_AB_PARKING_COMPARISON_KEYS = new Set<PointAbModeKey>([
+  'drive',
   'destination-customer',
   'parking',
   'street-meter',

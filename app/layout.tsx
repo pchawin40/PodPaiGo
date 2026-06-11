@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
 import './globals.css';
 import AppProviders from './components/AppProviders';
@@ -11,6 +11,23 @@ export const metadata: Metadata = {
   },
   description:
     'Plan airport trips and city parking in one clean dashboard. Compare drive time, parking, street or meter rules, rideshare, transit, and airport-day details.',
+  applicationName: 'PodPaiGo',
+  appleWebApp: {
+    capable: true,
+    title: 'PodPaiGo',
+    statusBarStyle: 'default',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [{ url: '/apple-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#2563EB',
 };
 
 export default function RootLayout({

@@ -992,6 +992,44 @@ Add new entries below this line. Do not delete prior entries unless explicitly a
 **Next recommended step**
 - Set/verify the Vercel public browser key and referrer restrictions, redeploy, then open a production results page on a phone and confirm the parking map renders; temporarily break the key/referrer in preview to confirm the fallback CTA appears.
 
+### 2026-06-10 18:25 PDT — PodPaiGo favicon, app icons, and PWA manifest
+
+**Summary**
+- Replaced the default Next/Vercel `app/favicon.ico` with the PodPaiGo header logo mark (sky-to-blue gradient, route + car icon).
+- Added canonical brand SVG at `lib/branding/podPaiGoMark.svg` plus Next metadata files `app/icon.svg`, `app/icon.png`, and `app/apple-icon.png`.
+- Added `app/manifest.ts` for mobile/PWA install metadata and public copies (`public/icon.svg`, `public/icon-512.png`, `public/apple-icon.png`) for manifest/static serving.
+- Updated root `app/layout.tsx` metadata/icons and `viewport.themeColor`; added `npm run generate:brand-icons` to regenerate raster icons from the SVG source.
+
+**Files changed**
+- `lib/branding/podPaiGoMark.svg` (new)
+- `scripts/generate-brand-icons.mjs` (new)
+- `app/favicon.ico` (replaced)
+- `app/icon.svg` (new)
+- `app/icon.png` (new)
+- `app/apple-icon.png` (new)
+- `app/manifest.ts` (new)
+- `app/layout.tsx`
+- `public/icon.svg` (new)
+- `public/icon-512.png` (new)
+- `public/apple-icon.png` (new)
+- `package.json`
+- `AGENTS.md`
+
+**Why**
+- Browser tabs and mobile add-to-home-screen should show the PodPaiGo brand instead of the default Vercel/Next favicon before partner outreach and public beta demos.
+
+**Tests run and result**
+- No dedicated favicon test added; this is static asset/metadata wiring only.
+- `npm run build` passed (`/manifest.webmanifest`, `/icon.svg`, `/icon.png`, `/apple-icon.png` routes registered).
+- `git diff --check` passed.
+
+**Known remaining issues**
+- `SiteHeader` still inlines the logo SVG separately; it matches the brand file but is not yet imported from a shared React component.
+- Regenerating PNG/ICO assets requires running `npm run generate:brand-icons` after editing `lib/branding/podPaiGoMark.svg`.
+
+**Next recommended step**
+- Deploy to Vercel preview/production and hard-refresh the browser tab to confirm the PodPaiGo icon appears; on mobile, verify add-to-home-screen uses the new apple icon and manifest name.
+
 ---
 
 # Final Response Requirement for Agents
