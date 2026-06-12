@@ -6,22 +6,20 @@ import SavedTripsHomeSection from './components/SavedTripsHomeSection';
 import SiteHeader from './components/SiteHeader';
 import TripAssistantPanel from './components/TripAssistantPanel';
 import QuickGoPanel from './components/QuickGoPanel';
+import ExpandableSection from './components/ui/ExpandableSection';
 import GlassPanel from './components/ui/GlassPanel';
 import PrimaryButton from './components/ui/PrimaryButton';
 import SectionHeader from './components/ui/SectionHeader';
 import StatusPill from './components/ui/StatusPill';
 import TravelCard from './components/ui/TravelCard';
 import HomeAnalytics from './components/HomeAnalytics';
-import { DATA_TRANSPARENCY_SHORT, PRODUCT_TAGLINE } from '../lib/marketing/publicCopy';
+import {
+  DATA_TRANSPARENCY_DISCLOSURE,
+  DATA_TRANSPARENCY_SHORT,
+  PRODUCT_TAGLINE,
+} from '../lib/marketing/publicCopy';
 
-const featureChips = [
-  'Airport trips',
-  'Destination parking',
-  'Street/meter outlook',
-  'Rideshare vs transit',
-  'Park & Ride backups',
-  'Saved trips',
-];
+const featureChips = ['Airport trips', 'Destination parking', 'Rideshare vs transit'];
 
 const features = [
   {
@@ -38,11 +36,6 @@ const features = [
     title: 'Rideshare, transit, and backups',
     description:
       'When driving or parking is not the best call, see how rideshare, transit, and Park & Ride stack up instead.',
-  },
-  {
-    title: 'Honest data labels',
-    description:
-      'Every price, route, and parking rule is labeled live, estimated, or saved — so you always know what to double-check.',
   },
 ];
 
@@ -246,14 +239,14 @@ export default function Home() {
 
       <SavedTripsHomeSection />
 
-      <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
+      <section className="mx-auto max-w-6xl px-4 pb-10 sm:px-6">
         <SectionHeader
           eyebrow="Why PodPaiGo"
-          title="Airport days and city drives in one decision view"
+          title="What PodPaiGo helps with"
           description="Built for quick scanning on your phone before you head out the door."
-          className="mb-8"
+          className="mb-6"
         />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3">
           {features.map((feature) => (
             <TravelCard key={feature.title} padding="sm">
               <h2 className="font-semibold text-foreground">{feature.title}</h2>
@@ -263,32 +256,38 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-y border-border bg-card/50 backdrop-blur">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:px-6 md:grid-cols-2">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight text-foreground">
-              Trip planning should not require five tabs.
-            </h2>
-            <p className="mt-4 text-muted-foreground">
+      <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
+        <div className="space-y-3">
+          <ExpandableSection
+            title="How it works"
+            summary="Three steps from destination to one clear recommendation"
+          >
+            <p className="text-sm leading-6 text-muted-foreground">
               Parking sites show parking. Rideshare apps show rides. Transit apps show transit.
-              PodPaiGo helps you compare the actual decision: what is easiest, cheapest, fastest,
-              and least stressful for this trip - whether you are going to the airport or across town.
+              PodPaiGo compares the actual decision: what is easiest, cheapest, fastest, and least
+              stressful for this trip — whether you are going to the airport or across town.
             </p>
-          </div>
+            <div className="mt-4 space-y-3">
+              {steps.map((step, index) => (
+                <div key={step.title} className="flex gap-4">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{step.title}</p>
+                    <p className="mt-0.5 text-sm leading-6 text-muted-foreground">{step.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ExpandableSection>
 
-          <div className="space-y-3">
-            {steps.map((step, index) => (
-              <TravelCard key={step.title} padding="sm" className="flex gap-4">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                  {index + 1}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{step.title}</p>
-                  <p className="mt-0.5 text-sm leading-6 text-muted-foreground">{step.detail}</p>
-                </div>
-              </TravelCard>
-            ))}
-          </div>
+          <ExpandableSection
+            title="How PodPaiGo uses data"
+            summary="Live, estimated, cached, and provider-linked labels explained"
+          >
+            <p className="text-sm leading-6 text-muted-foreground">{DATA_TRANSPARENCY_DISCLOSURE}</p>
+          </ExpandableSection>
         </div>
       </section>
 

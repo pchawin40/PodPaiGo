@@ -62,6 +62,9 @@ describe('TripFlow option button selected state', () => {
     fireEvent.click(screen.getByRole('button', { name: /Airport trip/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
+    // Airport readiness details are collapsed by default; expand to reach security options.
+    fireEvent.click(screen.getByRole('button', { name: /Airport readiness/i }));
+
     const securitySection = await screen.findByText('Security');
     const securityGrid = securitySection.parentElement;
     expect(securityGrid).toBeTruthy();
@@ -95,6 +98,9 @@ describe('TripFlow option button selected state', () => {
     fireEvent.change(screen.getByLabelText('Departure time'), {
       target: { value: '09:00' },
     });
+
+    // Airport readiness details are collapsed by default; expand to reach security options.
+    fireEvent.click(screen.getByRole('button', { name: /Airport readiness/i }));
 
     const securitySection = await screen.findByText('Security');
     const securityGrid = securitySection.parentElement;

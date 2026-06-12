@@ -33,6 +33,7 @@ import { trackEvent } from '../../lib/analytics/trackEvent';
 import type { TransportAvailability } from '../../lib/types';
 import PrimaryButton from './ui/PrimaryButton';
 import StatusPill from './ui/StatusPill';
+import ExpandableSection from './ui/ExpandableSection';
 
 type QuickGoPanelProps = {
   className?: string;
@@ -264,6 +265,9 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
   const recentDestinations = useMemo(() => getRecentDestinations(), []);
   const canUseGeo = geolocationSupported;
   const originSummary = compactOriginLabel(originInputText, originSelection);
+  const preferenceLabel =
+    quickGoPreferences.find((option) => option.key === quickGoPreference)?.label ?? 'Easiest';
+  const customizeSummary = `${preferenceLabel} · ${timingMode === 'now' ? 'leaving now' : 'leaving later'}`;
 
   const detectedAirportCode = useMemo(
     () => resolveAirportCode(destinationSelection, destinationText),
@@ -770,10 +774,8 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
               Now
             </StatusPill>
           </div>
-          <p className="mt-0.5 text-sm font-medium text-foreground">The fastest way to get an answer</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Type where you&apos;re going. We&apos;ll show the drive time, where to park, and the best
-            way to get there.
+            Type where you&apos;re going — we&apos;ll show drive time, parking, and the best way there.
           </p>
         </div>
       </div>
@@ -871,7 +873,12 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
           </p>
         ) : null}
 
-        <div className="grid gap-3 rounded-xl border border-border/80 bg-muted/20 p-3">
+        <ExpandableSection
+          title="Customize trip"
+          summary={customizeSummary}
+          contentClassName="space-y-3"
+        >
+          <div className="grid gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Trip purpose
@@ -1005,8 +1012,8 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/80 bg-muted/20 p-2">
-          <div className="px-1 pb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div>
+          <div className="pb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             How will you get around?
           </div>
           <div className="grid grid-cols-3 gap-1">
@@ -1036,6 +1043,7 @@ export default function QuickGoPanel({ className = '' }: QuickGoPanelProps) {
             })}
           </div>
         </div>
+        </ExpandableSection>
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="text-muted-foreground">Starting from:</span>

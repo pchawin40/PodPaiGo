@@ -69,6 +69,8 @@ describe('TripFlow general parking window', () => {
     fireEvent.change(document.querySelector('input[type="time"]')!, {
       target: { value: '09:00' },
     });
+    // Parking preferences are collapsed by default; expand to reach the duration field.
+    fireEvent.click(screen.getByRole('button', { name: /Parking preferences/i }));
     fireEvent.change(screen.getByRole('spinbutton'), {
       target: { value: '8' },
     });

@@ -26,34 +26,32 @@ After updating:
 # Current PodPaiGo State
 
 **Product focus**
-- Beta trip-planning results experience for airport, point A→B/city, and Quick Go trips, prioritizing fast scanning: one concise recommended answer, honest price/time caveats, and compact Compare options rows where full details are needed.
+- Beta trip-planning experience for airport, point A→B/city, and Quick Go trips, built around progressive disclosure: every major screen shows the primary answer/action first, with customization, explanations, evidence, and caveats collapsed behind expandable sections. Honest live/estimated/cached/provider labels stay visible.
 
 **Active priorities**
-- Results-page UX clarity: "Recommended" hero should read as a direct answer (title, inline metrics, why line, primary CTA), not a dashboard of boxed tiles.
-- Compare options should scan like a compact table/scoreboard with fixed desktop columns: Option, Status, Cost, Time, Note, Action.
-- Each compare row should expose one quiet action only: available rows use View, unavailable rows use Why?; no duplicate Details controls and no row-level pro/con mini expanders.
-- Quick Go Best Way must use practical total origin-to-destination timing: estimated/fallback intercity transit and local Park & Ride corridor estimates must not win over known drive/rideshare unless the user explicitly selected transit-only.
-- Quick Go best-way picks should still honor materially faster verified local transit/rideshare, preserve concrete parking labels when a parking option wins, and use synthetic "Drive" for free/customer-parking or impractical-transit trips.
-- Public filter UI should stay visible, user-facing, and compact; keep technical filter/evidence language out of the main results page.
-- Keep pros/cons, timing breakdowns, and evidence in lower Details sections/expanders; compact rows should not read as report cards.
-- Preserve pricing honesty everywhere: live / estimated / official rate range / check provider / open app / check route must remain explicit.
-- Keep airport parking, city/general parking, and event/stadium parking logic separate; never fake or mislabel live prices.
-- Public/non-admin surfaces must stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
+- Progressive disclosure uses the shared `app/components/ui/ExpandableSection.tsx` (accessible button + `aria-expanded`/`aria-controls`, chevron, optional `summary`, controlled or uncontrolled `open`; body stays mounted via the `hidden` attribute so form values and validation persist while collapsed). No external UI libraries.
+- Home page above the fold = hero headline + tagline + 3 feature chips + Plan a trip / Try Quick Go + Quick Go panel; "How it works" (steps) and "How PodPaiGo uses data" (full disclosure) are collapsed sections; the short data-transparency line stays quiet in the hero; footer/privacy/about and `PodPaiGoAssistant` remain.
+- QuickGoPanel default view = destination input + Quick Go CTA + "Starting from … Change"; trip purpose, timing, preference, parking duration, leave-time, family/luggage, and transport availability all live in a collapsed "Customize trip" section. Origin editor stays behind the existing Change button; geolocation/recent/saved origin, query params, analytics, and autocomplete are unchanged.
+- TripFlow step 2 keeps essentials visible (general: destination, origin, date/time; airport: airport, origin, departure/arrival time, See options) and collapses Transportation preferences, general Parking preferences/advanced time, Airline/flight details, and Airport readiness (compact "Recommended buffer: X min" summary). The airport "Parking time" section holds the required trip date, so it is a controlled ExpandableSection that starts open and auto-reopens on parking-date validation errors. Validation behavior is otherwise unchanged.
+- Quick Go results card keeps destination, best way, drive/total time, leave-by, parking expectation, and one primary CTA visible; Why this recommendation / Parking details / Backup option are collapsed. Urgent airport-prompt and warning cards stay visible.
+- Results page preserves the lean Recommended plan hero + compact Compare options; do NOT reintroduce the old large public Parking plan block; keep CTAs (Open directions, Route to parking, Reserve/Compare provider, View parking details) and honest labels visible.
+- Compare options stay a compact scoreboard with fixed desktop columns (Option, Status, Cost, Time, Note, Action), one quiet action per row (View / Why?), and pros/cons/timing/evidence in lower Details sections.
+- Quick Go Best Way uses practical total origin-to-destination timing (estimated/fallback intercity transit and local Park & Ride corridor estimates must not beat known drive/rideshare unless transit-only is selected); honor materially faster verified local transit/rideshare; synthetic "Drive" for free/customer-parking or impractical-transit trips.
+- Keep airport, city/general, and event/stadium parking logic separate; never fake or mislabel live prices. Public/non-admin surfaces stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
 
 **Current known issues**
-- Recent visual changes (admin outreach preview wrapping, results recalculating loader, concise Recommended hero, fixed-column vertically centered Compare options scoreboard rows, simplified parking filters) are verified by DOM/class tests and production build only; no live browser/mobile screenshot pass yet.
-- Quick Go Bend/intercity transit suppression is covered by resolver, Quick Go view, Park & Ride, and point A→B ranking tests; no live Bend route/browser validation was run for the latest resolver guard.
-- Parking lot list cards below the hero are still fairly dense; future passes can move more per-lot details behind expanders.
+- All UI/UX progressive-disclosure changes are verified by Jest/DOM tests, typecheck, lint (no new issues), and production build only; no live browser/mobile screenshot pass yet.
+- Parking lot list cards below the results hero are still fairly dense; per-lot details/evidence remain a documented future pass. ResultsContent was intentionally not restructured this pass to avoid risk in the heavily-tested 11k-line file.
+- Quick Go Bend/intercity transit suppression is covered by tests only; no live Bend route/browser validation.
+- Pre-existing full-suite failures unrelated to this work: `lib/parking/__tests__/parkAndRidePointAb.test.tsx`, `app/components/__tests__/TripRecalculatingLoader.test.tsx`, `lib/__tests__/providersParkingRouteLimit.test.ts`, `lib/providers/parking/providers/inventory/__tests__/provider.test.ts` (none import the changed UI modules).
 
 **Beta validation checklist**
-- Quick Go results: free/customer parking still recommends Drive when appropriate, concrete parking winners show `Drive + park · [lot]`, materially faster verified local rideshare/transit options are not overwritten by generic Drive, transit-only stays honored, and Bend-style estimated intercity transit does not appear as a 1h Best Way.
-- General/city Park & Ride: local corridor estimates remain usable for valid metro trips, but intercity destinations outside the corridor show Park & Ride not confirmed / no transit to destination and cannot win Best Way.
-- Non-admin SEA airport results: no env/config diagnostic text; options render normally.
-- /admin/outreach desktop + mobile: long preview wraps inside the card with internal scrolling only.
-- Results Recalculate: loader animation smooth in light/dark; reduced-motion shows a static, readable state.
-- Airport + city results: Recommended hero shows title, inline cost/time/confidence metrics, why line, primary CTA, and Compare options scroll.
-- Compare options: airport and city rows align to the same fixed desktop columns as the header, desktop cells are vertically centered, selected option is highlighted without becoming huge, each row has only one quiet action (View or Why?), row hover/pointer affordance is present, no compact-row Details/pro-con mini box appears, and long notes/cost notes clamp without overflow.
-- Parking filters: public results show a visible compact "Filter parking" section with feature chips, user-facing helper copy, and no developer terms like inferred claims / provider-claimed / strict filters.
+- ExpandableSection: collapsed sections keep children mounted (form values/validation persist); toggle exposes `aria-expanded`; chevron rotates; controlled `open`/`onOpenChange` works (used by TripFlow Parking time).
+- Home: above the fold reads as one promise + actions; "How it works" and "How PodPaiGo uses data" expand/collapse; footer/privacy/about and the PodPaiGoAssistant remain.
+- QuickGoPanel: a first-time user sees destination + Quick Go without parsing options; "Customize trip" expands to all settings; geolocation/recent/saved origin, query params, analytics, and keyboard autocomplete still work.
+- TripFlow: collapsed sections expand correctly; airport "Parking time" starts open and auto-opens when a parking date error needs fixing; hidden fields still submit/validate; "See options" submits with correct params.
+- Quick Go results: destination, best way, drive/total time, leave-by, parking expectation, and Open directions visible; Why / Parking details / Backup expand; airport prompt still visible.
+- Results: Recommended plan hero is the first answer; Compare options stay compact with one quiet action per row; no large public Parking plan block reappears; honest live/estimated/cached/provider labels and key CTAs stay visible.
 - Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; official airport price ranges read as estimates with daily-rate basis and confirm-with-airport caveat.
 <!-- AGENT_STATE_END -->
 
@@ -352,3 +350,45 @@ After updating:
 
 **Known remaining issues**
 - No live browser route validation was run for the Bend example.
+
+### 2026-06-11 — Progressive-disclosure UI/UX cleanup (ExpandableSection)
+
+**Summary**
+- Added reusable `app/components/ui/ExpandableSection.tsx`: accessible button with `aria-expanded`/`aria-controls`, chevron indicator, optional one-line `summary`, `defaultOpen`, and controlled `open`/`onOpenChange`. Matches the ppg-section-panel/travel-card look, no external libraries, mobile-compact. The body stays mounted via the `hidden` attribute so collapsed form fields keep their values and still submit/validate.
+- QuickGoPanel: default view trimmed to title + one helper line + destination input + Quick Go CTA + "Starting from … Change"; trip purpose, timing now/later, what-matters-most, parking duration, leave-time, family/luggage, and "How will you get around?" moved into a collapsed "Customize trip" section. Origin editor still lives behind the existing Change button; geolocation/recent/saved origin, query params, analytics, and autocomplete unchanged.
+- Home page: feature chips reduced from 6 to 3; "Why PodPaiGo" grid trimmed to 3 cards ("What PodPaiGo helps with"); the five-tabs blurb + steps moved into a collapsed "How it works" section; added a collapsed "How PodPaiGo uses data" section with the full data-transparency disclosure; hero short transparency line and footer/about/privacy + PodPaiGoAssistant preserved.
+- TripFlow step 2: collapsed Transportation preferences, general Parking preferences (incl. advanced parking time), Airline/flight details, and Airport readiness (compact "Recommended buffer: X min" summary). Essentials stay visible. Airport "Parking time" (which carries the required trip date) is a controlled ExpandableSection that starts open and auto-reopens on `parkingCheckInDate`/`parkingCheckOutDate` errors; validation behavior is otherwise unchanged.
+- Quick Go results card (`QuickGoResultsCard`): kept destination, best way, drive/total time, leave-by highlight, parking expectation, and the Open directions CTA visible; moved stress/weather/guidance into "Why this recommendation?", parking confidence into "Parking details", and the backup label into "Backup option". Urgent airport-prompt card untouched.
+- ResultsContent: verified only — the lean Recommended plan hero and compact Compare options are intact and no large public Parking plan block was reintroduced; the dense per-lot lists were intentionally left for a future pass to avoid risk in the heavily-tested file.
+- No recommendation/scoring/parking business logic was changed; honest live/estimated/cached/official/provider labels remain visible.
+
+**Files changed**
+- `app/components/ui/ExpandableSection.tsx` (new)
+- `app/components/ui/__tests__/ExpandableSection.test.tsx` (new)
+- `app/components/QuickGoPanel.tsx`
+- `app/components/QuickGoResultsCard.tsx`
+- `app/page.tsx`
+- `app/trip/TripFlow.tsx`
+- `app/trip/__tests__/TripFlowOptionButtons.test.tsx` (expand collapsed Airport readiness before reaching Security)
+- `app/trip/__tests__/TripFlowParkingWindow.test.tsx` (expand collapsed Parking preferences before reaching duration)
+- `AGENTS.md`
+
+**Why**
+- The app exposed too many settings/explanations at once (Quick Go options, dense trip form, busy landing page, report-card Quick Go results). Progressive disclosure surfaces the primary answer/action first and tucks optional settings, evidence, and caveats behind expand/collapse, making the beta feel simpler and more modern without removing functionality.
+
+**Tests run and result**
+- `npm run typecheck` — clean for all changed source files (only pre-existing `__tests__` type errors remain, unrelated to this work).
+- `npm run lint` — no new issues in changed files (pre-existing repo errors/warnings only).
+- `npm test` (full suite) — 1315 passed, 5 skipped; 5 pre-existing failures in 4 suites that do not import the changed UI modules (`parkAndRidePointAb`, `TripRecalculatingLoader`, `providersParkingRouteLimit`, inventory `provider`).
+- Focused: `QuickGoPanel`, `QuickGoResultsView`, `TripFlowAirportDate`, `TripFlowOptionButtons`, `TripFlowParkingWindow`, `ExpandableSection` — 52 passed.
+- `npm run build` — compiled successfully (67/67 static pages).
+- `git diff --check` — passed.
+
+**Known remaining issues**
+- DOM/test + build verified only; no live browser/mobile screenshot pass yet.
+- Results page per-lot parking list cards remain dense; deferred to a future pass.
+
+### 2026-06-11 — AGENTS.md current-state summary refreshed
+
+**Summary**
+- Refreshed the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` Current PodPaiGo State section (product focus, active priorities, current known issues, beta validation checklist) to reflect the progressive-disclosure UI/UX direction and the shared ExpandableSection component; no changelog history was deleted and the Event Parking Rules, Mandatory Change Memory Rule, and Required End-of-Task Format were left intact.
