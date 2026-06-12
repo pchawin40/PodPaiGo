@@ -1,5 +1,5 @@
 import type { ParkingOption } from '../../types';
-import { filterParkingOptionsByFeatures, matchesParkingFeatureFilters } from '../parkingFilters';
+import { filterParkingOptionsByFeatures, matchesParkingFeatureFilters, countParkingFeatureMatches } from '../parkingFilters';
 
 const SAMPLE: ParkingOption = {
   id: 'garage',
@@ -81,5 +81,52 @@ describe('parkingFilters', () => {
     };
 
     expect(matchesParkingFeatureFilters(unknownCovered, { covered: true })).toBe(false);
+  });
+
+  test('countParkingFeatureMatches returns Excel-style counts on the base lot list', () => {
+    const shuttleLot: ParkingOption = {
+      ...SAMPLE,
+      id: 'shuttle',
+      name: 'Airport Shuttle Lot',
+      covered: false,
+      transferType: 'shuttle',
+      sourceName: 'AirportParkingReservations',
+      bookingProvider: 'AirportParkingReservations',
+      providerSource: 'airportparkingreservations',
+    };
+    const openLot: ParkingOption = {
+      ...SAMPLE,
+      id: 'open',
+      name: 'Open Economy Lot',
+      covered: false,
+      bestFor: [],
+    };
+
+    const lots = [SAMPLE, shuttleLot, openLot];
+    const counts = countParkingFeatureMatches(lots);
+
+    expect(counts.covered).toBeGreaterThanOrEqual(1);
+    expect(counts.shuttle).toBe(1);
+    expect(counts.selfPark).toBeGreaterThanOrEqual(2);
+    expect(counts.evCharging).toBe(0);
+  });
+
+  test('feature filter counts ignore active filters (base list only)', () => {
+    const shuttleLot: ParkingOption = {
+      ...SAMPLE,
+      id: 'shuttle-only',
+      name: 'Shuttle Lot',
+      covered: false,
+      transferType: 'shuttle',
+      sourceName: 'APR',
+      bookingProvider: 'AirportParkingReservations',
+      providerSource: 'airportparkingreservations',
+    };
+    const lots = [SAMPLE, shuttleLot];
+    const filtered = filterParkingOptionsByFeatures(lots, { shuttle: true });
+
+    expect(filtered).toHaveLength(1);
+    expect(countParkingFeatureMatches(lots).shuttle).toBe(1);
+    expect(countParkingFeatureMatches(filtered).shuttle).toBe(1);
   });
 });

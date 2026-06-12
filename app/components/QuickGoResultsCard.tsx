@@ -1,11 +1,26 @@
 'use client';
 
 import type { RankedRecommendation } from '../../lib/domain';
+import { trackEvent } from '../../lib/analytics/trackEvent';
 import { googleMapsDirectionsLink } from '../../lib/maps';
+import type { OutboundClickPayload } from '../../lib/monetization/outboundClickTypes';
+import {
+  appendClickCorrelationToOutboundUrl,
+  extractSanitizedTargetHost,
+} from '../../lib/monetization/providerUrls';
+import {
+  copyTextThenOpenWithTracking,
+  openTrackedUrl,
+} from '../../lib/monetization/trackOutboundClick';
 import type { DestinationParkingClassification } from '../../lib/parking/destinationParkingClassifier';
 import { parkingTimeBreakdown } from '../../lib/parking/routeDisplay';
 import { buildParkingDriveContextFromOption } from '../../lib/parking/routeMinutes';
 import { isParkingRouteUnavailable } from '../../lib/parking/routeStatus';
+import {
+  formatQuickGoBestWayDisplayLabel,
+  resolveQuickGoProviderCta,
+  type QuickGoProviderCta,
+} from '../../lib/trip/quickGoSummary';
 import { resolveTripParkingContext } from '../../lib/trip/tripContext';
 import {
   isQuickGoAirportTrip,
@@ -168,6 +183,91 @@ function parkingTotalBreakdown(
   };
 }
 
+function createOutboundClickId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  }
+  return `ppg${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildQuickGoProviderTracking(
+  cta: QuickGoProviderCta,
+  destinationUrl: string,
+  clickId: string,
+): OutboundClickPayload {
+  return {
+    eventType: cta.eventType,
+    provider: cta.provider,
+    airportCode: cta.airportCode,
+    parkingLotId: cta.parkingLotId,
+    destinationUrl,
+    metadata: {
+      surface: 'quick-go-summary',
+      sourcePage: 'quick-go-results',
+      resultType: 'quick-go',
+      tripType: cta.tripType ?? undefined,
+      lotName: cta.parkingLotName ?? undefined,
+      priceTotal: cta.priceTotal ?? undefined,
+      priceLabel: cta.priceLabel ?? undefined,
+      priceSource: cta.priceSource ?? undefined,
+      affiliateAttached: cta.affiliateAttached,
+      targetHost: extractSanitizedTargetHost(destinationUrl),
+      outboundClickId: clickId,
+    },
+  };
+}
+
+function QuickGoProviderCtaButton({ cta }: { cta: QuickGoProviderCta }) {
+  const handleClick = () => {
+    const clickId = createOutboundClickId();
+    const { url: trackedUrl } = appendClickCorrelationToOutboundUrl(
+      cta.url,
+      {
+        provider: cta.provider,
+        airportCode: cta.airportCode,
+        tripType: cta.tripType,
+        parkingLotId: cta.parkingLotId,
+        clickId,
+      },
+      cta.outboundSubIdParam,
+    );
+
+    if (!trackedUrl) return;
+
+    trackEvent('parking_cta_clicked', {
+      eventProperties: {
+        provider: cta.provider ?? undefined,
+        airportCode: cta.airportCode ?? undefined,
+        lotId: cta.parkingLotId ?? undefined,
+        lotName: cta.parkingLotName ?? undefined,
+        resultType: 'quick-go',
+        tripType: cta.tripType ?? undefined,
+        priceTotal: cta.priceTotal ?? undefined,
+        priceLabel: cta.priceLabel ?? undefined,
+        priceSource: cta.priceSource ?? undefined,
+        affiliateAttached: cta.affiliateAttached,
+        sourcePage: 'quick-go-results',
+        ctaType: cta.eventType,
+      },
+    });
+
+    const tracking = buildQuickGoProviderTracking(cta, trackedUrl, clickId);
+
+    if (cta.useCopyThenOpen) {
+      void copyTextThenOpenWithTracking(cta.searchQuery, trackedUrl, tracking);
+      return;
+    }
+
+    openTrackedUrl(trackedUrl, tracking);
+  };
+
+  return (
+    <PrimaryButton type="button" variant="secondary" onClick={handleClick}>
+      {cta.label}
+    </PrimaryButton>
+  );
+}
+
 function quickGoParkingContextForTrip(
   tripData: TripData,
   destination: string,
@@ -230,6 +330,12 @@ export default function QuickGoResultsCard({
     tripData.origin && destination
       ? googleMapsDirectionsLink(tripData.origin, destination, 'driving')
       : null;
+  const bestWayDisplayLabel = formatQuickGoBestWayDisplayLabel(
+    bestWayLabel,
+    bestOption,
+    tripData,
+  );
+  const providerCta = resolveQuickGoProviderCta(bestOption, tripData);
   const formattedLeaveBy = formatLeaveTimeLabel(leaveByTime);
   const weatherText = weatherImpact
     ? weatherImpact.riskLevel === 'low'
@@ -302,7 +408,7 @@ export default function QuickGoResultsCard({
           <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Best way to go
           </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">{bestWayLabel}</dd>
+          <dd className="mt-2 text-lg font-semibold text-foreground">{bestWayDisplayLabel}</dd>
         </div>
 
         <div
@@ -404,9 +510,12 @@ export default function QuickGoResultsCard({
 
       </dl>
 
-      {directionsUrl ? (
-        <div className="mt-6">
-          <PrimaryButton href={directionsUrl}>Open directions</PrimaryButton>
+      {directionsUrl || providerCta ? (
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {directionsUrl ? (
+            <PrimaryButton href={directionsUrl}>Open directions</PrimaryButton>
+          ) : null}
+          {providerCta ? <QuickGoProviderCtaButton cta={providerCta} /> : null}
         </div>
       ) : null}
 

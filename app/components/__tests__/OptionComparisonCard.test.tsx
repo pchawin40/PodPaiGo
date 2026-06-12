@@ -2,7 +2,10 @@
  * @jest-environment jsdom
  */
 import { render, screen, within } from '@testing-library/react';
-import OptionComparisonCard from '../OptionComparisonCard';
+import OptionComparisonCard, {
+  CompareOptionsDesktopHeader,
+  OPTION_COMPARISON_GRID_CLASS,
+} from '../OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../ParkAndRideDetailsPanel';
 import {
   POINT_AB_DETAILS_SECTION_IDS,
@@ -59,7 +62,7 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.queryByText('Time:')).not.toBeInTheDocument();
     expect(screen.queryByText('Cost:')).not.toBeInTheDocument();
     expect(screen.queryByText('Caveat:')).not.toBeInTheDocument();
-    expect(screen.getByText('Paid garage')).toBeInTheDocument();
+    expect(screen.getAllByText('Paid garage').length).toBeGreaterThan(0);
     expect(screen.queryByText('Near destination')).not.toBeInTheDocument();
     expect(screen.queryByText('Covered garage/lot')).not.toBeInTheDocument();
     expect(screen.queryByText('Route timing unavailable')).not.toBeInTheDocument();
@@ -83,7 +86,7 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const noteEl = screen.getByText(longNote);
+    const noteEl = screen.getAllByText(longNote)[0]!;
     expect(noteEl).toHaveClass('line-clamp-1');
     expect(noteEl).toHaveClass('break-words');
   });
@@ -184,8 +187,8 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const detailsLink = screen.getByRole('link', { name: 'View' });
-    expect(detailsLink).toHaveAttribute('href', '#transit-details');
+    const detailsLinks = screen.getAllByRole('link', { name: 'View' });
+    expect(detailsLinks.some((link) => link.getAttribute('href') === '#transit-details')).toBe(true);
   });
 
   test('View link exposes target href and aria-controls for details sections', () => {
@@ -210,9 +213,11 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const detailsLink = screen.getByRole('link', { name: 'View' });
+    const detailsLink = screen
+      .getAllByRole('link', { name: 'View' })
+      .find((link) => link.getAttribute('href') === '#rideshare-details');
+    expect(detailsLink).toBeDefined();
     expect(detailsLink).toHaveAttribute('aria-controls', 'rideshare-details');
-    expect(detailsLink).toHaveAttribute('href', '#rideshare-details');
     expect(detailsLink).not.toHaveAttribute('aria-expanded');
   });
 
@@ -272,16 +277,129 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    expect(screen.getByText('Hidden')).toBeInTheDocument();
+    expect(screen.getAllByText('Hidden').length).toBeGreaterThan(0);
     expect(screen.queryByText('Best pick')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open directions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
     expect(screen.getAllByText('Hidden by preference').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: 'Show parking anyway' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Show parking anyway' }).length).toBeGreaterThan(0);
 
-    const card = screen.getByText('Customer parking').closest('div.rounded-xl');
+    const card = screen.getByTestId('option-comparison-mobile-card').closest('div.rounded-xl');
     expect(card).toHaveClass('opacity-75');
     expect(card).not.toHaveClass('bg-primary/10');
+  });
+
+  test('desktop header renders column labels only for md+ layout', () => {
+    render(<CompareOptionsDesktopHeader />);
+
+    const header = screen.getByTestId('compare-options-desktop-header');
+    expect(header).toHaveClass('hidden');
+    expect(header).toHaveClass('md:grid');
+    expect(within(header).getByText('Option')).toBeInTheDocument();
+    expect(within(header).getByText('Status')).toBeInTheDocument();
+    expect(within(header).getByText('Cost')).toBeInTheDocument();
+    expect(within(header).getByText('Time')).toBeInTheDocument();
+    expect(within(header).getByText('Note')).toBeInTheDocument();
+    expect(within(header).getByText('Action')).toBeInTheDocument();
+  });
+
+  test('renders mobile stacked cards and hides desktop table row on small screens', () => {
+    render(
+      <OptionComparisonCard
+        confidence="High"
+        label="Airport parking"
+        name="Official SEA Airport Garage"
+        cost="$18"
+        time="6h 28m"
+        pros={['Official airport option']}
+        cons={['May cost more than transit']}
+        status="cheapest"
+        isCheapestMode
+        actions={[
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS.parking,
+          },
+        ]}
+      />,
+    );
+
+    const mobileCard = screen.getByTestId('option-comparison-mobile-card');
+    expect(mobileCard).toHaveClass('md:hidden');
+    expect(within(mobileCard).getByText('Airport parking')).toBeInTheDocument();
+    expect(within(mobileCard).getByText('Cheapest')).toBeInTheDocument();
+    expect(within(mobileCard).getByText('Official SEA Airport Garage')).toBeInTheDocument();
+    expect(within(mobileCard).getByText('May cost more than transit')).toBeInTheDocument();
+    expect(within(mobileCard).getByRole('link', { name: 'View' })).toBeInTheDocument();
+    expect(screen.queryByText('Option')).not.toBeInTheDocument();
+
+    const desktopRow = screen.getByTestId('option-comparison-row');
+    expect(desktopRow).toHaveClass('hidden');
+    expect(desktopRow).toHaveClass('md:grid');
+    expect(desktopRow).toHaveClass(OPTION_COMPARISON_GRID_CLASS);
+  });
+
+  test('renders desktop table row cells while mobile card stays in the DOM', () => {
+    const { container } = render(
+      <OptionComparisonCard
+        confidence="Medium"
+        label="Transit"
+        name="Sound Transit"
+        cost="$6"
+        time="52 min"
+        pros={['Usually low cost']}
+        cons={['More walking and waiting']}
+        actions={[
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS.transit,
+          },
+        ]}
+      />,
+    );
+
+    const desktopRow = screen.getByTestId('option-comparison-row');
+    expect(desktopRow).toHaveClass('md:grid');
+    expect(within(desktopRow).getAllByText('$6').length).toBeGreaterThan(0);
+    expect(within(desktopRow).getAllByText('52 min').length).toBeGreaterThan(0);
+    expect(within(desktopRow).getByText('More walking and waiting')).toBeInTheDocument();
+    expect(within(desktopRow).getByRole('link', { name: 'View' })).toBeInTheDocument();
+    expect(screen.getByTestId('option-comparison-mobile-card')).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="option-comparison-actions-desktop"]')).toBeInTheDocument();
+  });
+
+  test('mobile unavailable Park & Ride card shows Why? and not View', () => {
+    render(
+      <OptionComparisonCard
+        confidence="Low"
+        label="Park & Ride"
+        name="Park & Ride not confirmed for this destination"
+        cost="Not estimated"
+        time="Not estimated"
+        pros={[]}
+        cons={['Park & Ride not confirmed for this destination']}
+        unavailable
+        verdict="Unavailable"
+        actions={[
+          {
+            label: 'Details',
+            onClick: () => undefined,
+            ariaControls: POINT_AB_DETAILS_SECTION_IDS['park-ride'],
+          },
+        ]}
+      />,
+    );
+
+    const mobileCard = screen.getByTestId('option-comparison-mobile-card');
+    expect(within(mobileCard).getByText('Unavailable')).toBeInTheDocument();
+    expect(
+      within(mobileCard).getAllByText('Park & Ride not confirmed for this destination').length,
+    ).toBeGreaterThan(0);
+    expect(within(mobileCard).getAllByText('Not estimated').length).toBeGreaterThanOrEqual(2);
+    expect(within(mobileCard).getByRole('link', { name: 'Why?' })).toBeInTheDocument();
+    expect(within(mobileCard).queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
   });
 
   test('keeps unavailable options readable with dimmed state and one Why action', () => {
@@ -309,11 +427,14 @@ describe('OptionComparisonCard compact layout', () => {
     expect(screen.getAllByText('Transit route not confirmed').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Check route').length).toBeGreaterThan(0);
     expect(screen.queryByText('Caveat:')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Why?' })).toHaveAttribute('href', '#transit-details');
+    expect(
+      screen.getAllByRole('link', { name: 'Why?' }).some((link) => link.getAttribute('href') === '#transit-details'),
+    ).toBe(true);
 
-    const card = screen.getByText('Transit').closest('div.rounded-xl');
+    const card = screen.getByRole('group', { name: 'Transit recommendation' });
     expect(card).toHaveClass('opacity-80');
-    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
+    expect(screen.getByTestId('option-comparison-actions-desktop')).toHaveClass('md:justify-end');
+    expect(screen.getAllByRole('link', { name: 'Why?' }).length).toBeGreaterThan(0);
   });
 
   test('uses equal-height flex column layout with pinned actions', () => {
@@ -333,13 +454,11 @@ describe('OptionComparisonCard compact layout', () => {
     const card = container.firstChild as HTMLElement;
     expect(card).toHaveClass('h-full');
     expect(card).toHaveClass('min-h-[4.75rem]');
-    expect(screen.getByTestId('option-comparison-row')).toHaveClass('grid');
-    expect(screen.getByTestId('option-comparison-row')).toHaveClass('sm:items-center');
-    expect(screen.getByTestId('option-comparison-row')).toHaveClass(
-      'sm:grid-cols-[minmax(220px,1.6fr)_120px_90px_90px_minmax(180px,1fr)_110px]',
-    );
-    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
-    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:self-center');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass('md:grid');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass('md:items-center');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass(OPTION_COMPARISON_GRID_CLASS);
+    expect(screen.getByTestId('option-comparison-actions-desktop')).toHaveClass('md:justify-end');
+    expect(screen.getByTestId('option-comparison-actions-desktop')).toHaveClass('md:self-center');
   });
 
   test('uses dedicated action area with desktop right-column classes', () => {
@@ -362,9 +481,8 @@ describe('OptionComparisonCard compact layout', () => {
       />,
     );
 
-    const actionContainer = screen.getByTestId('option-comparison-actions');
-    expect(actionContainer).toHaveClass('col-span-2');
-    expect(actionContainer).toHaveClass('sm:justify-end');
+    const actionContainer = screen.getByTestId('option-comparison-actions-desktop');
+    expect(actionContainer).toHaveClass('md:justify-end');
     expect(within(actionContainer).getByRole('link', { name: 'View' })).toBeInTheDocument();
     expect(within(actionContainer).queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
   });
@@ -395,14 +513,14 @@ describe('OptionComparisonCard compact layout', () => {
     expect(card).toHaveClass('min-h-[4.75rem]');
     expect(card).toHaveClass('cursor-pointer');
     expect(card).toHaveClass('hover:bg-muted/30');
-    expect(screen.getByTestId('option-comparison-row')).toHaveClass(
-      'sm:grid-cols-[minmax(220px,1.6fr)_120px_90px_90px_minmax(180px,1fr)_110px]',
-    );
-    expect(screen.getByTestId('option-comparison-actions')).toHaveClass('sm:justify-end');
+    expect(screen.getByTestId('option-comparison-row')).toHaveClass(OPTION_COMPARISON_GRID_CLASS);
+    expect(screen.getByTestId('option-comparison-actions-desktop')).toHaveClass('md:justify-end');
 
     // Compare rows expose one small action; the full mode actions live in details sections.
     expect(screen.queryByRole('link', { name: 'View ride estimates' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '#rideshare-details');
+    expect(
+      screen.getAllByRole('link', { name: 'View' }).some((link) => link.getAttribute('href') === '#rideshare-details'),
+    ).toBe(true);
     expect(screen.queryByRole('link', { name: 'Details' })).not.toBeInTheDocument();
 
     // Secondary action belongs in the lower detail section, not the cramped card.
@@ -447,10 +565,11 @@ describe('OptionComparisonCard compact layout', () => {
     expect(within(cardContainer).queryByText(/Parking rules/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByText(/Routes served/i)).not.toBeInTheDocument();
     expect(within(cardContainer).queryByRole('link', { name: 'Rules' })).not.toBeInTheDocument();
-    expect(within(cardContainer).getByRole('link', { name: 'View' })).toHaveAttribute(
-      'href',
-      '#park-ride-details',
-    );
+    expect(
+      within(cardContainer)
+        .getAllByRole('link', { name: 'View' })
+        .some((link) => link.getAttribute('href') === '#park-ride-details'),
+    ).toBe(true);
 
     const { container: detailsContainer } = render(
       <ParkAndRideDetailsPanel details={presentation!.details} />,

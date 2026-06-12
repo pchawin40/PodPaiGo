@@ -31,7 +31,7 @@ import {
   resolveStreetMeterTiming,
 } from './pointAbModeTiming';
 import { shouldExcludeFromPointAbQuickRead } from './pointAbQuickRead';
-import { resolvePaidParkingDriveToLotMinutes } from './pointAbOptionScoring';
+import { resolvePaidParkingDriveToLotMinutesDetailed } from './pointAbOptionScoring';
 import {
   estimateDriveMinutesFromStraightLineMiles,
   haversineMiles,
@@ -593,7 +593,10 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
     driveMinutes: effectiveDriveMinutes,
     rideshare: input.bestRideOption,
   });
-  const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? input.rideDuration ?? null;
+  // Timing is the single source of truth: when resolveRideshareTiming suppresses
+  // a duration (unreliable fallback with no main drive route), do not fall back
+  // to the raw option duration, which would resurrect the bad estimate.
+  const rideDisplayMinutes = rideshareTiming?.totalOptionMinutes ?? null;
   const hasRideshareOption = Boolean(input.bestRideOption || rideshareTiming);
   // When no direct route data but rideshare has drive timing, use it as a customer parking proxy
   const effectiveCustomerDriveMinutes = effectiveDriveMinutes ?? rideshareTiming?.driveMinutes ?? null;
@@ -613,13 +616,19 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
   const parkingRouteUnavailable = input.bestParking
     ? isParkingRouteUnavailable(input.bestParking)
     : false;
-  const parkingDriveToLotMinutes = resolvePaidParkingDriveToLotMinutes(input.bestParking);
+  const parkingDriveToLot = resolvePaidParkingDriveToLotMinutesDetailed(input.bestParking);
   const parkingTiming = resolvePaidGarageTiming({
-    driveMinutes: parkingDriveToLotMinutes,
+    driveMinutes: parkingDriveToLot.minutes,
     parkingMinutes: input.parkingMinutes,
     parking: input.bestParking,
+    mainDriveMinutes: effectiveDriveMinutes,
+    driveRouteConfirmed: parkingDriveToLot.routeConfirmed,
   });
   const parkingDisplayMinutes = parkingTiming?.totalOptionMinutes ?? null;
+  // Only the local parking/walk leg is known; there is no honest trip total.
+  const parkingTimingPartial = Boolean(parkingTiming?.partial);
+  // Drive leg estimated from the main origin→destination route.
+  const parkingTimingEstimated = parkingTiming?.driveSource === 'main-drive-estimate';
   const streetMeterTiming = input.streetMeterParking?.applicable
     ? resolveStreetMeterTiming({
         driveMinutes: effectiveDriveMinutes,
@@ -890,7 +899,12 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       name: input.bestParking?.name || 'No parking option found',
       cost: parkingCostDisplay,
       costNote: primaryParkingHint,
-      time: parkingDisplayMinutes != null ? formatMinutesLabel(parkingDisplayMinutes) : 'Check route',
+      time:
+        parkingDisplayMinutes != null
+          ? `${formatMinutesLabel(parkingDisplayMinutes)}${parkingTimingEstimated ? ' est.' : ''}`
+          : parkingTimingPartial
+            ? 'Drive time needed'
+            : 'Check route',
       timeLabel: 'Total time',
       timing: parkingTiming,
       confidence: input.bestParking ? (input.bestParking.trustStatus === 'live' ? 'High' : 'Medium') : 'Low',
@@ -905,6 +919,12 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       cons: input.bestParking
         ? [
             input.noParkingPreferred ? 'You marked parking as not needed' : 'May cost more than transit',
+            parkingTimingPartial
+              ? 'Partial timing only — origin-to-lot drive time is missing'
+              : '',
+            parkingTimingEstimated
+              ? 'Drive-to-lot time estimated from your main drive route'
+              : '',
             parkingRouteUnavailable
               ? parkingDisplayMinutes != null
                 ? 'Backup route estimate; open directions to confirm'
@@ -1048,6 +1068,8 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
             : 'Low',
       pros: parkRide.pros.length > 0 ? parkRide.pros : ['Good for same-day transit trips'],
       cons: parkRide.cons,
+      // A Park & Ride path with no usable timing is effectively unavailable /
+      // not confirmed for this destination, not merely "not recommended".
       status: parkRide.unavailable
         ? 'unavailable'
         : parkRide.availabilityTier === 'recommended'
@@ -1055,9 +1077,13 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
           : parkRide.availabilityTier === 'backup_available'
             ? 'easy_backup'
             : parkRide.availabilityTier === 'not_recommended'
-              ? 'not_recommended'
+              ? parkRide.durationMinutes == null
+                ? 'unavailable'
+                : 'not_recommended'
               : 'unavailable',
-      unavailable: parkRide.unavailable,
+      unavailable:
+        parkRide.unavailable ||
+        (parkRide.availabilityTier === 'not_recommended' && parkRide.durationMinutes == null),
       hiddenByPreference: false,
     },
   ].map((row) => ({

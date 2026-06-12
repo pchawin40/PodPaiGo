@@ -307,6 +307,16 @@ export type PointToPointTiming = {
   walkToDestinationMinutes?: number | null;
   pickupWaitMinutes?: number | null;
   totalOptionMinutes?: number | null;
+  /**
+   * True when only a local leg (parking/check-in/walk) is known and the
+   * origin-to-lot drive leg is missing, so no honest trip total exists.
+   */
+  partial?: boolean;
+  /**
+   * Set when the drive leg was estimated from the main origin→destination
+   * drive route instead of a confirmed origin→lot route.
+   */
+  driveSource?: 'main-drive-estimate';
 };
 
 export type OptionScoreMode =
@@ -695,6 +705,18 @@ export type RideshareOption = {
   availability: number;
   trustStatus: TrustStatus;
   routeTrustStatus?: TrustStatus;
+  /**
+   * True when the drive duration/distance came from a real origin→destination
+   * route. False when it fell back to a distance-band estimate (e.g. an airport
+   * band applied because the route was unavailable). Absent is treated as
+   * confirmed for backward compatibility.
+   */
+  routeConfirmed?: boolean;
+  /**
+   * True when the rideshare drive leg was re-based on the main origin→destination
+   * drive route (rideshare is a car ride and cannot be faster than driving).
+   */
+  timingDerivedFromDrive?: boolean;
   routeOrigin?: string;
   routeDestination?: string;
   sourceName: string;

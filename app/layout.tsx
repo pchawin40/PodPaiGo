@@ -24,6 +24,9 @@ export const metadata: Metadata = {
     ],
     apple: [{ url: '/apple-icon.png', sizes: '180x180', type: 'image/png' }],
   },
+  other: {
+    'fo-verify': '7ee7c653-188f-4783-bf94-b1075d761e10',
+  },
 };
 
 export const viewport: Viewport = {

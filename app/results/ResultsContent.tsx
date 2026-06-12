@@ -24,7 +24,7 @@ import {
   FlexibleDateInput,
   normalizeFlexibleDateInputValue,
 } from '../components/FlexibleDateInput';
-import { filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
+import { countParkingFeatureMatches, filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
 import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
   getParkingComparableCost,
@@ -66,7 +66,7 @@ import TripRecalculatingLoader from '../components/TripRecalculatingLoader';
 import { useAuth } from '../components/AuthProvider';
 import { useAdminStatus } from '../components/useAdminStatus';
 import RecommendationStatusBadge from '../components/RecommendationStatusBadge';
-import OptionComparisonCard, { OPTION_COMPARISON_GRID_CLASS } from '../components/OptionComparisonCard';
+import OptionComparisonCard, { CompareOptionsDesktopHeader } from '../components/OptionComparisonCard';
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import BetaFeedbackButton from './BetaFeedbackButton';
@@ -3443,18 +3443,26 @@ function pointAbDetailTimingRows(
   const timing = row?.timing;
   if (!timing) return [];
 
+  // Drive leg estimated from the main origin→destination route (no confirmed
+  // origin→lot route); keep the estimate label visible in detail rows.
+  const driveEstimated = timing.driveSource === 'main-drive-estimate';
+
   const detailRows = [
-    { label: labels.drive || 'Drive route', minutes: timing.driveMinutes },
+    {
+      label: labels.drive || 'Drive route',
+      minutes: timing.driveMinutes,
+      estimated: driveEstimated,
+    },
     { label: labels.parkingBuffer || 'Access/verify buffer', minutes: timing.parkingBufferMinutes },
     { label: labels.walk || 'Walk to destination', minutes: timing.walkToDestinationMinutes },
     { label: labels.pickupWait || 'Pickup wait', minutes: timing.pickupWaitMinutes },
   ]
-    .filter((entry): entry is { label: string; minutes: number } =>
+    .filter((entry): entry is { label: string; minutes: number; estimated?: boolean } =>
       typeof entry.minutes === 'number' && Number.isFinite(entry.minutes),
     )
     .map((entry) => ({
       label: entry.label,
-      value: formatMiniMinutes(entry.minutes),
+      value: `${formatMiniMinutes(entry.minutes)}${entry.estimated ? ' est.' : ''}`,
     }));
 
   const totalMinutes = timing.totalOptionMinutes;
@@ -3464,7 +3472,7 @@ function pointAbDetailTimingRows(
 
   const totalRow = {
     label: labels.total || 'Total to destination',
-    value: formatMiniMinutes(totalMinutes),
+    value: `${formatMiniMinutes(totalMinutes)}${driveEstimated ? ' est.' : ''}`,
   };
 
   return labels.totalFirst ? [totalRow, ...detailRows] : [...detailRows, totalRow];
@@ -3682,6 +3690,45 @@ function StreetParkingPlanNote({
   );
 }
 
+function StreetParkingDetailsSection({
+  eventParkingLikely,
+  streetMeterRow,
+}: {
+  eventParkingLikely: boolean;
+  streetMeterRow?: PointAbModePresentation | null;
+}) {
+  if (!eventParkingLikely && !streetMeterRow) return null;
+
+  const title = eventParkingLikely ? 'Street parking warning' : 'Street parking note';
+  const outlookDetail =
+    !eventParkingLikely && streetMeterRow?.detailNote ? streetMeterRow.detailNote : null;
+
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS['street-meter']}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card shadow-sm"
+    >
+      <div className="px-4 py-4 sm:px-5">
+        <h2
+          data-details-heading
+          tabIndex={-1}
+          className="text-lg font-bold text-foreground"
+        >
+          {title}
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {eventParkingLikely
+            ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+            : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
+        </p>
+        {outlookDetail ? (
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{outlookDetail}</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 type CityParkingPlanStatus = 'loading' | 'empty' | 'unavailable';
 
 function cityParkingStatusCopy(status: CityParkingPlanStatus): { title: string; body: string } {
@@ -3755,11 +3802,83 @@ function CityParkingStatusPlanSection({
             rel="noopener noreferrer"
             className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
           >
-            Search nearby parking
+            Open Google Maps parking search
           </a>
         </div>
       </ParkingPlanSection>
     </section>
+  );
+}
+
+function CityParkingStatusNotice({
+  status,
+  directionsUrl,
+  nearbyParkingSearchUrl,
+}: {
+  status: CityParkingPlanStatus;
+  directionsUrl: string | null;
+  nearbyParkingSearchUrl: string;
+}) {
+  const copy = cityParkingStatusCopy(status);
+
+  return (
+    <section
+      id={POINT_AB_DETAILS_SECTION_IDS.parking}
+      className="mt-6 scroll-mt-24 rounded-2xl border border-border bg-card p-4 text-sm shadow-sm sm:p-5"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2
+            data-details-heading
+            tabIndex={-1}
+            className="text-lg font-bold text-foreground"
+          >
+            Parking options
+          </h2>
+          <div className="mt-2 font-semibold text-foreground">{copy.title}</div>
+          <p className="mt-1 leading-6 text-muted-foreground">{copy.body}</p>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          {directionsUrl ? (
+            <a
+              href={directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Open directions
+            </a>
+          ) : null}
+          <a
+            href={nearbyParkingSearchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+          >
+            Open Google Maps parking search
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CityParkingOptionsHeader() {
+  return (
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h2
+          data-details-heading
+          tabIndex={-1}
+          className="text-xl font-bold text-foreground"
+        >
+          Parking options
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          Review nearby lots, pricing, route actions, and provider details.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -3859,7 +3978,7 @@ function PaidParkingPlanCard({
               rel="noopener noreferrer"
               className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
             >
-              Search nearby parking
+              Open Google Maps parking search
             </a>
           </div>
         </ParkingPlanSection>
@@ -3920,7 +4039,7 @@ function PaidParkingPlanCard({
           <ParkingPlanSection title="Backup options">
             <ParkingPlanList
               items={[
-                'Search nearby parking if this lot is full or the price changes.',
+                'Compare other listed lots if this one is full or the price changes.',
                 'Use destination directions if you decide not to park here.',
                 'Consider transit or rideshare if parking is expensive or unavailable.',
               ]}
@@ -3936,14 +4055,6 @@ function PaidParkingPlanCard({
                   Open directions
                 </a>
               ) : null}
-              <a
-                href={nearbyParkingSearchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
-              >
-                Search nearby parking
-              </a>
             </div>
           </ParkingPlanSection>
 
@@ -3961,12 +4072,10 @@ function PaidParkingPlanCard({
 function CustomerParkingDetailsSection({
   row,
   directionsUrl,
-  streetMeterRow,
   eventParkingLikely,
 }: {
   row: PointAbModePresentation | null | undefined;
   directionsUrl: string | null;
-  streetMeterRow?: PointAbModePresentation | null;
   eventParkingLikely: boolean;
 }) {
   if (!row) return null;
@@ -3982,13 +4091,19 @@ function CustomerParkingDetailsSection({
             <h2
               data-details-heading
               tabIndex={-1}
-              className="text-xl font-bold text-foreground"
+              className="text-lg font-bold text-foreground"
             >
-              Parking plan
+              Customer parking details
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              What should I do when I arrive?
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Customer or on-site parking may exist. Verify signs, validation rules,
+              time limits, and towing restrictions before leaving your car.
             </p>
+            {eventParkingLikely ? (
+              <p className="mt-2 text-sm leading-6 text-amber-800">
+                Event-day rules can override normal parking access. Confirm posted signs and venue restrictions.
+              </p>
+            ) : null}
           </div>
 
           {directionsUrl ? (
@@ -4003,61 +4118,6 @@ function CustomerParkingDetailsSection({
           ) : null}
         </div>
       </div>
-
-      <ParkingPlanSection title="Recommended parking">
-        <div className="space-y-4">
-          <div>
-            <div className="text-base font-semibold text-foreground">Customer parking</div>
-            <p className="mt-1 text-muted-foreground">
-              Customer or on-site parking may exist.
-            </p>
-          </div>
-          <ParkingPlanFacts
-            facts={[
-              { label: 'Cost', value: 'Free? Verify' },
-              { label: 'Total time', value: row.time },
-              { label: 'Reason', value: 'Customer or on-site parking may exist.' },
-            ]}
-          />
-        </div>
-      </ParkingPlanSection>
-
-      <ParkingPlanSection title="Before you park">
-        <ParkingPlanList
-          items={[
-            'Check customer-only signs',
-            'Confirm validation rules',
-            'Check time limits',
-            'Avoid overnight parking unless signs allow it',
-            'Watch for towing/private lot restrictions',
-            'This is not a reserved space',
-          ]}
-        />
-      </ParkingPlanSection>
-
-      <ParkingPlanTiming
-        row={row}
-        timingLabels={{
-          drive: 'Drive route',
-          parkingBuffer: 'Access/verify buffer',
-          walk: 'Walk to destination',
-          total: 'Total to destination',
-        }}
-      />
-
-      <ParkingPlanSection title="Backup options">
-        <ParkingPlanList
-          items={[
-            'Use a paid garage or lot if customer parking is full or restricted.',
-            'Use transit or rideshare if you do not want to verify parking rules.',
-          ]}
-        />
-      </ParkingPlanSection>
-
-      <StreetParkingPlanNote
-        eventParkingLikely={eventParkingLikely}
-        streetMeterRow={streetMeterRow}
-      />
     </section>
   );
 }
@@ -7088,6 +7148,23 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     sort,
   });
 
+  const parkingOptionsBeforeFeatureFilter = (() => {
+    const options = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
+
+    const groupedOfficial = groupOfficialSeaGarageOptions(
+      options,
+      sort,
+      tripData,
+      tripData?.airportCode || getTripAirportCode(tripData),
+    );
+
+    return canonicalizeParkingOptions(groupedOfficial);
+  })();
+
+  // Excel-style counts: how many lots in the current result set match each
+  // feature, before active parking filters are applied.
+  const parkingFeatureCounts = countParkingFeatureMatches(parkingOptionsBeforeFeatureFilter);
+
   const parkingDisplayOptions = (() => {
     const options = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
 
@@ -7599,7 +7676,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     arrivalDate={tripData.type === 'general-trip' ? tripData.arrivalDate : undefined}
                     arrivalTime={tripData.type === 'general-trip' ? tripData.arrivalTime : undefined}
                     durationMinutes={tripData.parkingDuration ?? undefined}
-                    onCheckNearbyParking={scrollToParkingOptions}
                   />
                 ) : null
               ) : (
@@ -8669,16 +8745,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   Compare options
                 </h3>
 
-                <div className={`mt-2 hidden gap-x-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid ${OPTION_COMPARISON_GRID_CLASS}`}>
-                  <span>Option</span>
-                  <span>Status</span>
-                  <span>Cost</span>
-                  <span>Time</span>
-                  <span>Note</span>
-                  <span className="text-right">Action</span>
-                </div>
+                <CompareOptionsDesktopHeader />
 
-                <div id="compare-options-grid" className="mt-2 grid scroll-mt-24 grid-cols-1 gap-1.5">
+                <div
+                  id="compare-options-grid"
+                  className="mt-2 grid w-full max-w-full min-w-0 scroll-mt-24 grid-cols-1 gap-2 pb-24 md:pb-0"
+                  data-testid="compare-options-grid"
+                >
                   {modeRows.map((row) => {
                     const rowHidden =
                       ('hiddenByPreference' in row && row.hiddenByPreference) ||
@@ -9019,6 +9092,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               onChange={setTravelPreferences}
               embedded
               hideBusinessModeOptions
+              featureCounts={parkingFeatureCounts}
             />
           </div>
         ) : null}
@@ -9027,7 +9101,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           <CustomerParkingDetailsSection
             row={cityTripCustomerParkingModeRow}
             directionsUrl={cityTripDestinationRouteUrl}
-            streetMeterRow={cityTripStreetMeterModeRow}
             eventParkingLikely={cityTripEventParkingLikely}
           />
         ) : null}
@@ -9040,11 +9113,19 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           parkingDisplayOptions.length === 0 &&
           !routeUnavailableBlocksParking && (
             isCityTrip ? (
-              <CityParkingStatusPlanSection
-                status={cityParkingPlanStatus}
-                directionsUrl={cityTripDestinationRouteUrl}
-                nearbyParkingSearchUrl={nearbyParkingSearchUrl}
-              />
+              showInternalDebug ? (
+                <CityParkingStatusPlanSection
+                  status={cityParkingPlanStatus}
+                  directionsUrl={cityTripDestinationRouteUrl}
+                  nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+                />
+              ) : (
+                <CityParkingStatusNotice
+                  status={cityParkingPlanStatus}
+                  directionsUrl={cityTripDestinationRouteUrl}
+                  nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+                />
+              )
             ) : (
               <div className={`mt-6 rounded-xl border p-4 text-sm ${parkingEmptyStateClass}`}>
                 <div>{parkingEmptyStateMessage}</div>
@@ -9054,7 +9135,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   rel="noopener noreferrer"
                   className="mt-3 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
                 >
-                  Search nearby parking
+                  Open Google Maps parking search
                 </a>
               </div>
             )
@@ -9078,23 +9159,27 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               ) : null}
 
               {isCityTrip && !cityTripCustomerParkingIsPrimary ? (
-                <div className="mb-4">
-                  <PaidParkingPlanCard
-                    row={cityTripPaidParkingModeRow}
-                    parkingOption={selectedParkingTimingOption}
-                    routeToParkingUrl={
-                      selectedParkingRouteLinks?.routeToParkingUrl ||
-                      selectedParkingTimingOption?.mapLink ||
-                      (tripData?.origin && selectedParkingTimingOption?.address
-                        ? googleMapsDirectionsLink(tripData.origin, selectedParkingTimingOption.address)
-                        : cityTripDestinationRouteUrl)
-                    }
-                    directionsUrl={cityTripDestinationRouteUrl}
-                    nearbyParkingSearchUrl={nearbyParkingSearchUrl}
-                    streetMeterRow={cityTripStreetMeterModeRow}
-                    eventParkingLikely={cityTripEventParkingLikely}
-                  />
-                </div>
+                showInternalDebug ? (
+                  <div className="mb-4">
+                    <PaidParkingPlanCard
+                      row={cityTripPaidParkingModeRow}
+                      parkingOption={selectedParkingTimingOption}
+                      routeToParkingUrl={
+                        selectedParkingRouteLinks?.routeToParkingUrl ||
+                        selectedParkingTimingOption?.mapLink ||
+                        (tripData?.origin && selectedParkingTimingOption?.address
+                          ? googleMapsDirectionsLink(tripData.origin, selectedParkingTimingOption.address)
+                          : cityTripDestinationRouteUrl)
+                      }
+                      directionsUrl={cityTripDestinationRouteUrl}
+                      nearbyParkingSearchUrl={nearbyParkingSearchUrl}
+                      streetMeterRow={cityTripStreetMeterModeRow}
+                      eventParkingLikely={cityTripEventParkingLikely}
+                    />
+                  </div>
+                ) : (
+                  <CityParkingOptionsHeader />
+                )
               ) : null}
 
               {recommendation.parkingDiscoveryNotice ? (
@@ -9600,6 +9685,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
             </>
           )}
         </div>
+
+        {shouldRenderParkingSections && isCityTrip && !showInternalDebug ? (
+          <StreetParkingDetailsSection
+            eventParkingLikely={cityTripEventParkingLikely}
+            streetMeterRow={cityTripStreetMeterModeRow}
+          />
+        ) : null}
 
         {/* Pricing links */}
         {(showRideProviders || transitOptions.length > 0 || extraTransitProviders.length > 0) &&

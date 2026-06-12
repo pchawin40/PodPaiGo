@@ -424,15 +424,10 @@ function installResultsFetchMock(recommendation: Recommendation) {
   return fetchMock;
 }
 
-function getParkingPlanCard(sectionId = 'paid-parking-details'): HTMLElement {
+function getParkingDetailsSection(sectionId = 'paid-parking-details'): HTMLElement {
   const detailsSection = document.getElementById(sectionId);
   expect(detailsSection).toBeInTheDocument();
-  const heading = within(detailsSection as HTMLElement).getByRole('heading', {
-    name: 'Parking plan',
-  });
-  const planCard = heading.closest('section');
-  expect(planCard).toBeInTheDocument();
-  return planCard as HTMLElement;
+  return detailsSection as HTMLElement;
 }
 
 function getRouteTimeCard(): HTMLElement {
@@ -1124,16 +1119,16 @@ describe('ResultsContent hook order', () => {
     render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Estimated parking nearby')).toBeInTheDocument();
+      expect(screen.getAllByText('Estimated Garage Placeholder').length).toBeGreaterThan(0);
     });
 
-    const planCard = getParkingPlanCard();
-    expect(within(planCard).getByText('Estimated Garage Placeholder')).toBeInTheDocument();
-    expect(
-      within(planCard).getAllByText('Nearby garages or lots may be available. Confirm live price and rules before parking.').length,
-    ).toBeGreaterThan(0);
-    expect(within(planCard).queryByText('Best confirmed paid option')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Confirmed paid parking option')).not.toBeInTheDocument();
+    const parkingSection = getParkingDetailsSection();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getAllByText('Estimated Garage Placeholder').length).toBeGreaterThan(0);
+    expect(within(parkingSection).getAllByText('Estimated range').length).toBeGreaterThan(0);
+    expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirmed paid parking option')).not.toBeInTheDocument();
   });
 
   test('actual priced lots replace estimated placeholder when returned', async () => {
@@ -1205,7 +1200,8 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText('Estimated Garage Placeholder')).not.toBeInTheDocument();
-    expect(screen.getByText('Nearby parking options')).toBeInTheDocument();
+    expect(within(getParkingDetailsSection()).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(screen.queryByText('Nearby parking options')).not.toBeInTheDocument();
   });
 
   test('general-trip edit panel has one clean heading and renders prefilled origin and destination inputs', async () => {
@@ -1613,12 +1609,12 @@ describe('ResultsContent hook order', () => {
     expect(
       screen.getByText('Narrow lots by features. Always confirm details with the provider.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Covered')).toBeInTheDocument();
-    expect(screen.getByText('Secured')).toBeInTheDocument();
-    expect(screen.getByText('Shuttle')).toBeInTheDocument();
-    expect(screen.getByText('EV charging')).toBeInTheDocument();
-    expect(screen.getByText('Valet')).toBeInTheDocument();
-    expect(screen.getByText('Self-park')).toBeInTheDocument();
+    expect(screen.getByText(/Covered \(\d+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Secured \(\d+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Shuttle \(\d+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/EV charging \(\d+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Valet \(\d+\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Self-park \(\d+\)/)).toBeInTheDocument();
     expect(screen.queryByText(/inferred claims/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/strict filters/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/provider-claimed/i)).not.toBeInTheDocument();
@@ -1752,9 +1748,9 @@ describe('ResultsContent hook order', () => {
     expect(customerDetailsLink).toBeDefined();
 
     const customerCard = screen.getByRole('group', { name: 'Customer parking recommendation' });
-    expect(within(customerCard).getByText('Customer parking')).toBeInTheDocument();
+    expect(within(customerCard).getAllByText('Customer parking').length).toBeGreaterThan(0);
     expect(within(customerCard).getAllByText('Free? Verify').length).toBeGreaterThan(0);
-    expect(within(customerCard).getByText('Verify signs before parking.')).toBeInTheDocument();
+    expect(within(customerCard).getAllByText('Verify signs before parking.').length).toBeGreaterThan(0);
     expect(
       within(customerCard).queryByText('Check signs, validation, time limits, and towing rules'),
     ).not.toBeInTheDocument();
@@ -1763,17 +1759,16 @@ describe('ResultsContent hook order', () => {
 
     const detailsSection = document.getElementById('customer-parking-details');
     expect(detailsSection).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByRole('heading', { name: 'Parking plan' })).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Recommended parking')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Before you park')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Check customer-only signs')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Confirm validation rules')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Check time limits')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('Watch for towing/private lot restrictions')).toBeInTheDocument();
-    expect(within(detailsSection as HTMLElement).getByText('This is not a reserved space')).toBeInTheDocument();
-
-    expect(screen.getAllByRole('heading', { name: 'Parking plan' })).toHaveLength(1);
-    expect(within(detailsSection as HTMLElement).getByText('Customer parking')).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByRole('heading', { name: 'Customer parking details' })).toBeInTheDocument();
+    expect(
+      within(detailsSection as HTMLElement).getByText(
+        'Customer or on-site parking may exist. Verify signs, validation rules, time limits, and towing restrictions before leaving your car.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).queryByText('Recommended parking')).not.toBeInTheDocument();
+    expect(within(detailsSection as HTMLElement).queryByText('Before you park')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
     const paidParkingSection = document.getElementById('paid-parking-details');
     expect(paidParkingSection).toBeInTheDocument();
     expect(
@@ -1783,7 +1778,7 @@ describe('ResultsContent hook order', () => {
     expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
   });
 
-  test('paid parking details render a parking plan with recommendation, reasons, checklist, timing, and street note', async () => {
+  test('paid parking details hide the parking plan and keep parking actions plus street note', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -1801,35 +1796,28 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
     });
 
-    const planCard = getParkingPlanCard();
+    const parkingSection = getParkingDetailsSection();
 
-    expect(within(planCard).getByRole('heading', { name: 'Parking plan' })).toBeInTheDocument();
-    expect(within(planCard).queryByText('Parking options')).not.toBeInTheDocument();
-    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
-    expect(within(planCard).getByText('Why this option')).toBeInTheDocument();
-    expect(within(planCard).getByText('Before you park')).toBeInTheDocument();
-    expect(within(planCard).getByText('Timing')).toBeInTheDocument();
-    expect(within(planCard).getByText('Test Garage One')).toBeInTheDocument();
-    expect(within(planCard).getAllByText('Best confirmed paid option').length).toBeGreaterThan(0);
-    expect(within(planCard).getByText('Confirmed paid parking option')).toBeInTheDocument();
-    expect(within(planCard).getByText('More reliable than guessing street parking')).toBeInTheDocument();
-    expect(within(planCard).getByText('Confirm final price')).toBeInTheDocument();
-    expect(within(planCard).getByText('Check hours')).toBeInTheDocument();
-    expect(within(planCard).getByText('Check event or validation rules')).toBeInTheDocument();
-    expect(within(planCard).getByText('Check towing/private lot signs')).toBeInTheDocument();
-    expect(within(planCard).getByText('Drive to lot')).toBeInTheDocument();
-    expect(within(planCard).getByText('Park/check-in buffer')).toBeInTheDocument();
-    expect(within(planCard).getByText('Walk to destination')).toBeInTheDocument();
-    expect(within(planCard).getByRole('link', { name: 'Route to parking' })).toBeInTheDocument();
-    expect(within(planCard).getByText('Street parking note')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    expect(within(parkingSection).getByRole('link', { name: 'Route to parking' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Nearby parking options')).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Why this option')).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Before you park')).not.toBeInTheDocument();
+
+    const streetSection = document.getElementById('details-street-meter');
+    expect(streetSection).toBeInTheDocument();
+    expect(within(streetSection as HTMLElement).getByRole('heading', { name: 'Street parking note' })).toBeInTheDocument();
     expect(
-      within(planCard).getByText(
+      within(streetSection as HTMLElement).getByText(
         'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.',
       ),
     ).toBeInTheDocument();
   });
 
-  test('stadium parking plan labels street parking as a warning, not recommended parking', async () => {
+  test('stadium parking labels street parking as a warning outside the parking plan', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -1853,20 +1841,23 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
     });
 
-    const planCard = getParkingPlanCard();
+    const parkingSection = getParkingDetailsSection();
+    const streetSection = document.getElementById('details-street-meter');
 
-    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
-    expect(within(planCard).getByText('Street parking warning')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(streetSection).toBeInTheDocument();
+    expect(within(streetSection as HTMLElement).getByText('Street parking warning')).toBeInTheDocument();
     expect(
-      within(planCard).getByText(
+      within(streetSection as HTMLElement).getByText(
         'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.',
       ),
     ).toBeInTheDocument();
-    expect(within(planCard).queryByText('Street / meter parking')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Street parking note')).not.toBeInTheDocument();
+    expect(within(streetSection as HTMLElement).queryByText('Street / meter parking')).not.toBeInTheDocument();
+    expect(within(streetSection as HTMLElement).queryByText('Street parking note')).not.toBeInTheDocument();
   });
 
-  test('parking plan omits timing section when route timing is missing', async () => {
+  test('parking details keep route-timing honesty after hiding the parking plan', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
     recommendation.parking = [
@@ -1891,13 +1882,16 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
     });
 
-    const planCard = getParkingPlanCard();
+    const parkingSection = getParkingDetailsSection();
 
-    expect(within(planCard).getByText('Nearby parking options')).toBeInTheDocument();
-    expect(within(planCard).queryByText('Timing')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Drive to lot')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Park/check-in buffer')).not.toBeInTheDocument();
-    expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    // The old plan timing row is hidden, but the remaining parking card still avoids a fake
+    // precise route time when the lot route is unavailable.
+    expect(within(parkingSection).getAllByText('Route timing unavailable').length).toBeGreaterThan(0);
+    expect(
+      within(parkingSection).getAllByText('Showing best available parking estimate. Open directions to confirm route timing.').length,
+    ).toBeGreaterThan(0);
   });
 
   test('route time card shows unavailable timing without directions link or debug warning copy', async () => {
@@ -1932,10 +1926,11 @@ describe('ResultsContent hook order', () => {
       ),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Route budget exceeded/i)).not.toBeInTheDocument();
-    expect(getParkingPlanCard()).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(getParkingDetailsSection()).toBeInTheDocument();
   });
 
-  test('city trip with no parking data renders empty parking plan', async () => {
+  test('city trip with no parking data renders compact parking status actions', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendation();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -1947,16 +1942,19 @@ describe('ResultsContent hook order', () => {
       expect(screen.getByText('General trip')).toBeInTheDocument();
     });
 
-    const planCard = getParkingPlanCard();
+    const parkingSection = getParkingDetailsSection();
     const routeTimeCard = getRouteTimeCard();
-    expect(within(planCard).getByText('No bookable lots found yet')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByText('No bookable lots found yet')).toBeInTheDocument();
     expect(
-      within(planCard).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
+      within(parkingSection).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
     ).toBeInTheDocument();
-    expect(within(planCard).queryByText('Route breakdown')).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Route breakdown')).not.toBeInTheDocument();
     expect(within(routeTimeCard).queryByRole('link', { name: /Open directions/i })).not.toBeInTheDocument();
-    expect(within(planCard).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
-    expect(within(planCard).getByRole('link', { name: 'Search nearby parking' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('link', { name: 'Open directions' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('link', { name: 'Open Google Maps parking search' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
   });
 
   test('city trip unavailable parking response renders search unavailable only when no fallback exists', async () => {
@@ -1975,13 +1973,16 @@ describe('ResultsContent hook order', () => {
       expect(screen.getByText('General trip')).toBeInTheDocument();
     });
 
-    const planCard = getParkingPlanCard();
-    expect(within(planCard).getByText('Parking search unavailable')).toBeInTheDocument();
-    expect(within(planCard).getByText('Open map search to verify nearby parking.')).toBeInTheDocument();
-    expect(within(planCard).queryByText('Parking data unavailable')).not.toBeInTheDocument();
+    const parkingSection = getParkingDetailsSection();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByText('Parking search unavailable')).toBeInTheDocument();
+    expect(within(parkingSection).getByText('Open map search to verify nearby parking.')).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('link', { name: 'Open Google Maps parking search' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Parking data unavailable')).not.toBeInTheDocument();
   });
 
-  test('city trip parking timeout keeps customer and street fallback plan', async () => {
+  test('city trip parking timeout keeps customer and street fallback without parking plan', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation: Recommendation = {
       ...cityTripRecommendation(),
@@ -2015,13 +2016,16 @@ describe('ResultsContent hook order', () => {
       expect(screen.getByText('General trip')).toBeInTheDocument();
     });
 
-    const planCard = getParkingPlanCard();
+    const parkingSection = getParkingDetailsSection();
     expect(screen.getAllByText('Check customer parking first').length).toBeGreaterThan(0);
-    expect(within(planCard).getByText('No bookable lots found yet')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
+    expect(within(parkingSection).getByText('No bookable lots found yet')).toBeInTheDocument();
     expect(
-      within(planCard).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
+      within(parkingSection).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),
     ).toBeInTheDocument();
-    expect(within(planCard).queryByText('Parking search unavailable')).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('link', { name: 'Open Google Maps parking search' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Parking search unavailable')).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing partial results/i)).not.toBeInTheDocument();
   });
 

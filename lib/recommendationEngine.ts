@@ -13,6 +13,7 @@ import {
   LocationInfo,
 } from './types';
 import { ActiveDataProvider, DataProvider } from './providers';
+import { reconcileRideshareDriveTiming } from './rideshare/estimate';
 import { shouldComputeDriveRouteOptions } from './routes/driveRouteProfiles';
 import { shouldDiscoverParkingForTrip } from './trip/tripContext';
 import { debugLog } from './utils/debug';
@@ -1442,7 +1443,17 @@ export class RecommendationEngine {
       };
     });
 
-    const enrichedRideshare = sortedRideshare.map((option) => {
+    // Rideshare is a car ride: re-base its drive leg on the main drive route so
+    // a distance-band fallback can never make rideshare look faster than driving
+    // (e.g. a long intercity trip showing a 1h ride against a 6h drive). Only
+    // timing fields change; pricing is untouched. This corrects the option data
+    // once so every consumer (point A→B ranking, Quick Go, scoring, details)
+    // tells the same timing story.
+    const mainDriveMinutesForRideshare = effectiveTrafficEstimate.routeUnavailable
+      ? null
+      : effectiveTrafficEstimate.duration;
+    const enrichedRideshare = sortedRideshare.map((rawOption) => {
+      const option = reconcileRideshareDriveTiming(rawOption, mainDriveMinutesForRideshare);
       const intelligence = buildOptionIntelligence('rideshare', option, tripData, weatherImpact);
 
       return {
@@ -1630,7 +1641,7 @@ export class RecommendationEngine {
           ? 'Customer parking likely — verify signs.'
         : shouldLoadParking && !hasParkingResults
           ? parkingDiscoveryMetadata?.status === 'cache_empty'
-            ? 'No saved parking options found near this destination yet. Search nearby parking to verify current garages and lots.'
+            ? 'No saved parking options found near this destination yet. Open map search to verify current garages and lots.'
             : isAirportTrip
             ? 'No parking found near this airport yet.'
             : 'No parking found near this destination yet.'
