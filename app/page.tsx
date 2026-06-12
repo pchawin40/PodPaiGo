@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import HeroBadge from './components/HeroBadge';
 import PodPaiGoAssistant from './components/PodPaiGoAssistant';
@@ -19,13 +18,6 @@ import {
   DATA_TRANSPARENCY_SHORT,
   PRODUCT_TAGLINE,
 } from '../lib/marketing/publicCopy';
-
-/** FlexOffers Publisher Pro site ownership verification (home page only). */
-export const metadata: Metadata = {
-  other: {
-    'fo-verify': '7ee7c653-188f-4783-bf94-b1075d761e10',
-  },
-};
 
 const featureChips = ['Airport trips', 'Destination parking', 'Rideshare vs transit'];
 

@@ -1510,7 +1510,7 @@ export default function TripFlow() {
                         </span>
                       ))}
                     </div>
-                  </div>
+                  </ExpandableSection>
                 )}
 
                 <div className="ppg-section-panel md:col-span-2 rounded-2xl p-4">
@@ -1642,13 +1642,27 @@ export default function TripFlow() {
                   )}
 
                 {isAirportTrip && (intent === 'flying-out' || intent === 'parking-trip') && (
-                  <div className="md:col-span-2 rounded-2xl border border-border bg-card p-4">
-                    <div className="text-sm font-medium text-foreground">Parking time</div>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  <ExpandableSection
+                    title="Parking time"
+                    summary={
+                      resolveAirportTripDateRaw(state).trim()
+                        ? `Trip date: ${resolveAirportTripDateRaw(state).trim()}`
+                        : 'Set parking check-in date & departure'
+                    }
+                    className="md:col-span-2"
+                    contentClassName="space-y-4"
+                    open={
+                      parkingTimeOpen ||
+                      Boolean(fieldErrors.parkingCheckInDate) ||
+                      Boolean(fieldErrors.parkingCheckOutDate)
+                    }
+                    onOpenChange={setParkingTimeOpen}
+                  >
+                    <p className="text-xs leading-5 text-muted-foreground">
                       Parking check-in date is used as your airport trip date. Leave time is calculated from your departure time and parking plan.
                     </p>
 
-                    <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div id="parking-checkin-field">
                         <label className="block text-sm font-medium text-foreground">
                           Parking check-in date
@@ -1742,7 +1756,7 @@ export default function TripFlow() {
                         />
                       </div>
                     </div>
-                  </div>
+                  </ExpandableSection>
                 )}
                 <div id="origin-field" className="md:col-span-2">
                   <div
@@ -1790,7 +1804,19 @@ export default function TripFlow() {
                 )}
 
                 {isGeneralTrip && intentCopy(intent).wantsParkingDuration && (
-                  <div id="parking-duration-field" className="ppg-section-panel md:col-span-2 rounded-2xl p-4">
+                  <ExpandableSection
+                    title="Parking preferences"
+                    summary={
+                      state.parkingPreference === 'none'
+                        ? 'No parking needed'
+                        : state.parkingPreference === 'destination'
+                          ? 'Parking likely at destination'
+                          : 'Find parking nearby'
+                    }
+                    className="md:col-span-2"
+                    contentClassName="space-y-4"
+                  >
+                    <div id="parking-duration-field">
                     <div className="text-sm font-medium text-foreground">Need parking?</div>
                     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                       {[
@@ -2025,7 +2051,8 @@ export default function TripFlow() {
                         ) : null}
                       </div>
                     )}
-                  </div>
+                    </div>
+                  </ExpandableSection>
                 )}
               </div>
 
