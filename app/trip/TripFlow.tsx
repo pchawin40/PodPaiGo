@@ -1221,7 +1221,12 @@ export default function TripFlow() {
                         <div className="mt-1">{airportGuide.note}</div>
                       </div>
                       {intent && intentCopy(intent).wantsAirline ? (
-                        <div className="mt-4">
+                        <ExpandableSection
+                          title="Airline / flight details"
+                          summary={state.airlineOrFlight.trim() || 'Optional — helps refine timing'}
+                          className="mt-4"
+                          contentClassName="space-y-3"
+                        >
                           <AirlineCombobox
                             value={state.airlineOrFlight}
                             onChange={(value) =>
@@ -1233,7 +1238,7 @@ export default function TripFlow() {
                             airlineOrFlight={state.airlineOrFlight}
                             className="mt-3"
                           />
-                        </div>
+                        </ExpandableSection>
                       ) : null}
                     </div>
                   )}
@@ -1258,7 +1263,13 @@ export default function TripFlow() {
                       </p>
                     </div>
                   )}
-                  <div className="mt-6 text-sm font-medium text-foreground">What can you use today?</div>
+                  <ExpandableSection
+                    title="Transportation preferences"
+                    summary={transportAvailabilityLabel[state.transportAvailability]}
+                    className="mt-6"
+                    contentClassName="space-y-4"
+                  >
+                  <div className="text-sm font-medium text-foreground">What can you use today?</div>
                   <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {(
                       [
@@ -1305,33 +1316,29 @@ export default function TripFlow() {
                     />
                   )}
                   <div className="mt-2 text-xs text-muted-foreground">Default: Compare all</div>
+                  </ExpandableSection>
                 </div>
 
                 {intent === 'flying-out' && (
-                  <div className="ppg-callout-panel rounded-2xl p-4 md:col-span-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium text-foreground">Airport readiness</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Helps estimate how early you should arrive before your flight.
-                        </div>
-                      </div>
+                  <ExpandableSection
+                    title="Airport readiness"
+                    summary={`Recommended buffer: ${
+                      calculateAirportReadinessBuffer({
+                        bagPlan: state.bagPlan,
+                        securityOption: state.securityOption,
+                        flightType: state.flightType,
+                        cabin: state.cabin,
+                      }).bufferMinutes
+                    } min`}
+                    className="ppg-callout-panel md:col-span-2"
+                    contentClassName="space-y-4"
+                  >
+                    <p className="text-xs text-muted-foreground">
+                      Helps estimate how early you should arrive before your flight. Recommended
+                      buffer updates as you change bag, security, flight, and cabin below.
+                    </p>
 
-                      <div className="rounded-xl border border-primary/25 bg-primary/10 px-3 py-2 text-right">
-                        <div className="text-xs font-medium text-primary">Recommended</div>
-                        <div className="text-lg font-bold text-foreground">
-                          {calculateAirportReadinessBuffer({
-                            bagPlan: state.bagPlan,
-                            securityOption: state.securityOption,
-                            flightType: state.flightType,
-                            cabin: state.cabin,
-                          }).bufferMinutes}{' '}
-                          min
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 space-y-4">
+                    <div className="space-y-4">
                       <div>
                         <div className="text-xs font-semibold uppercase text-muted-foreground">
                           Bag plan
