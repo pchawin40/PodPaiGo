@@ -23,3 +23,7 @@ export const PRICING_BETA_BILLING_NOTE = 'No billing is active yet. Paid plans a
 
 export const PRICING_DATA_HONESTY_NOTE =
   'Some parking prices are live or provider-supplied; others are estimates or cached fallbacks. Always confirm final pricing, availability, and parking rules with the provider or posted signs.';
+
+/** Short affiliate/provider disclosure for compact spots near parking CTAs. */
+export const PROVIDER_AFFILIATE_DISCLOSURE_SHORT =
+  'Some links may earn PodPaiGo a commission. Prices and availability are controlled by the provider. Always confirm before booking.';

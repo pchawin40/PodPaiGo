@@ -270,7 +270,9 @@ export function selectCanonicalPointAbWinner(input: {
         b.easiestScore - a.easiestScore ||
         a.frictionScore - b.frictionScore ||
         (a.totalTimeMinutes ?? Number.MAX_SAFE_INTEGER) -
-          (b.totalTimeMinutes ?? Number.MAX_SAFE_INTEGER),
+          (b.totalTimeMinutes ?? Number.MAX_SAFE_INTEGER) ||
+        (a.totalCostCents ?? Number.MAX_SAFE_INTEGER) -
+          (b.totalCostCents ?? Number.MAX_SAFE_INTEGER),
     )[0] ?? null
   );
 }
@@ -378,6 +380,7 @@ function parkRideTiming(option: PointAbParkRidePresentation): PointToPointTiming
   return {
     driveMinutes: routeBreakdown.driveMinutes,
     parkingBufferMinutes: null,
+    transitMinutes: routeBreakdown.transitMinutes,
     walkToDestinationMinutes: routeBreakdown.walkMinutes,
     pickupWaitMinutes: routeBreakdown.waitMinutes,
     totalOptionMinutes: option.durationMinutes,

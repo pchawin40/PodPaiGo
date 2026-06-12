@@ -95,7 +95,7 @@ describe('ParkingSmartPick fallback', () => {
     expect(screen.getByText('Sort lenses')).toBeInTheDocument();
   });
 
-  test('booking helper check-in/check-out details are collapsed until expanded', () => {
+  test('details use compact sections and keep booking times collapsed by default', () => {
     const routeAvailableParking: ParkingOption = {
       ...routeUnavailableParking,
       routeUnavailable: false,
@@ -111,11 +111,17 @@ describe('ParkingSmartPick fallback', () => {
       />,
     );
 
-    const summary = screen.getByText('Booking helper · check-in & check-out times');
-    const details = summary.closest('details');
-    expect(details).not.toBeNull();
-    expect(details?.open).toBe(false);
-    expect(details).toContainElement(screen.getByText('Copy times'));
+    const toggle = screen.getByRole('button', { name: 'Details' });
+    expect(toggle).not.toBeNull();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('Booking')).toBeInTheDocument();
+    expect(screen.getByText('Timing')).toBeInTheDocument();
+    expect(screen.getByText('Why this option')).toBeInTheDocument();
+    expect(screen.getByText('Price/source')).toBeInTheDocument();
+    expect(screen.getByText('Copy times')).toBeInTheDocument();
+    expect(screen.queryByText('Booking helper · check-in & check-out times')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Directions from lot' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Terminal step' })).not.toBeInTheDocument();
   });
 
   test('shows a recommended parking card even when route timing is unavailable', () => {
@@ -129,7 +135,7 @@ describe('ParkingSmartPick fallback', () => {
     );
 
     expect(screen.getAllByText('Jiffy Airport Parking Lot SEA').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Route timing unavailable').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Route timing unavailable/).length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(
         'Showing best available parking estimate. Open directions to confirm route timing.',
@@ -187,6 +193,8 @@ describe('ParkingSmartPick fallback', () => {
       'data-photo-name',
       'places/jiffy/photos/primary',
     );
+    expect(screen.getByRole('button', { name: '★ 4.6 · 1,248 reviews' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getAllByText('★ 4.6 · 1,248 reviews')).toHaveLength(1);
     expect(screen.queryByText('Google reviews')).not.toBeInTheDocument();
     expect(
@@ -227,6 +235,8 @@ describe('ParkingSmartPick fallback', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { name: '★ 4.7 · 981 reviews' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getAllByText('★ 4.7 · 981 reviews')).toHaveLength(1);
   });
 
@@ -271,7 +281,30 @@ describe('ParkingSmartPick fallback', () => {
       />,
     );
 
+    expect(screen.getByRole('button', { name: '★ 4.4 · 312 reviews' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getAllByText('★ 4.4 · 312 reviews')).toHaveLength(1);
+  });
+
+  test('does not show a fake rating badge when review summary is missing', () => {
+    const routeAvailableParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[routeAvailableParking]}
+        selectedOption={routeAvailableParking}
+        tripData={tripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.queryByText(/★/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d[\d,]* reviews/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Check reviews')).not.toBeInTheDocument();
   });
 
   test('details show fallback route time instead of blank drive-to-lot timing', () => {
@@ -314,7 +347,10 @@ describe('ParkingSmartPick fallback', () => {
       />,
     );
 
-    expect(screen.getAllByText('15m total').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/15m total/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+
     expect(screen.getAllByText('Fallback route time').length).toBeGreaterThan(0);
     expect(screen.getAllByText('15m route').length).toBeGreaterThan(0);
     expect(screen.queryByText('—')).not.toBeInTheDocument();
@@ -458,5 +494,40 @@ describe('ParkingSmartPick fallback', () => {
 
     expect(screen.getAllByText('Walk time not confirmed').length).toBeGreaterThan(0);
     expect(screen.queryByText('5m')).not.toBeInTheDocument();
+  });
+
+  test('uses range-based secondary pricing copy on the Smart Pick card', () => {
+    const rangeParking: ParkingOption = {
+      ...routeUnavailableParking,
+      routeUnavailable: false,
+      routeUnavailableReason: undefined,
+      price: 18,
+      priceMin: 12,
+      priceMax: 24,
+      priceUnit: 'per-day',
+      priceDisplay: 'estimated',
+      priceSource: 'estimated',
+      pricingConfidence: 'estimated',
+      trustStatus: 'estimated',
+      sourceName: 'Estimated provider',
+      bookingProvider: undefined,
+    };
+
+    render(
+      <ParkingSmartPick
+        options={[rangeParking]}
+        selectedOption={rangeParking}
+        tripData={tripData}
+        sortMode="best"
+      />,
+    );
+
+    expect(screen.getAllByText('Estimated $12–$24 total').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        'Based on provider rate range for 1 day. Final price controlled by provider.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText((text) => text.includes('$18/day'))).not.toBeInTheDocument();
   });
 });

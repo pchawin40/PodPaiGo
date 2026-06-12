@@ -44,6 +44,9 @@ type ParkingProviderActionsProps = {
   reserveLabel?: string;
   viewProviderLabel?: string;
   infoOnlyBooking?: boolean;
+  showPrimaryActions?: boolean;
+  showTransferAction?: boolean;
+  showDisclosure?: boolean;
 };
 
 function createOutboundClickId(): string {
@@ -142,8 +145,11 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
     props.transferLinkLabel ||
     (props.parkingToTerminalUrl ? 'Parking to terminal' : 'Parking to destination');
 
+  const rootClass = props.compact
+    ? 'flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center'
+    : 'flex w-full flex-col gap-2';
   const buttonClass = props.compact
-    ? 'inline-flex w-full items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold'
+    ? 'inline-flex min-h-10 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold sm:w-auto'
     : 'inline-flex w-full items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold';
 
   const secondaryButtonClass =
@@ -167,8 +173,8 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
   };
 
   return (
-    <div className="flex w-full flex-col gap-2">
-      {ctas.reserveEnabled ? (
+    <div className={rootClass}>
+      {props.showPrimaryActions !== false && ctas.reserveEnabled ? (
         <button
           type="button"
           onClick={() => {
@@ -198,7 +204,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         >
           {ctas.reserveLabel}
         </button>
-      ) : ctas.viewProviderEnabled ? (
+      ) : props.showPrimaryActions !== false && ctas.viewProviderEnabled ? (
         <button
           type="button"
           onClick={() => openProviderUrl(ctas.viewProviderUrl, 'view_provider', 'view_provider')}
@@ -206,7 +212,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         >
           {ctas.viewProviderLabel}
         </button>
-      ) : (
+      ) : props.showPrimaryActions !== false ? (
         <button
           type="button"
           disabled
@@ -217,9 +223,9 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         >
           {ctas.reserveLabel}
         </button>
-      )}
+      ) : null}
 
-      {ctas.directionsEnabled ? (
+      {props.showPrimaryActions !== false && ctas.directionsEnabled ? (
         <button
           type="button"
           onClick={() => {
@@ -243,7 +249,7 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         </button>
       ) : null}
 
-      {transferUrl ? (
+      {props.showTransferAction !== false && transferUrl ? (
         <button
           type="button"
           onClick={() => {
@@ -267,7 +273,9 @@ export default function ParkingProviderActions(props: ParkingProviderActionsProp
         </button>
       ) : null}
 
-      <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">{AFFILIATE_DISCLOSURE}</p>
+      {props.showDisclosure !== false && props.showPrimaryActions !== false ? (
+        <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">{AFFILIATE_DISCLOSURE}</p>
+      ) : null}
     </div>
   );
 }

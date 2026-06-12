@@ -284,6 +284,85 @@ describe('sortParkingOptionsForMode', () => {
     expect(ids(sorted)).toEqual(['trusted-live', 'untrusted-close']);
   });
 
+  test('easiest uses price as a secondary factor for similarly easy parking options', () => {
+    const cheaper = lot({
+      id: 'cheaper',
+      price: 12,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      trustStatus: 'live',
+      originToParkingMinutes: 10,
+      walkingMinutes: 3,
+    });
+    const expensive = lot({
+      id: 'expensive',
+      price: 45,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      trustStatus: 'live',
+      originToParkingMinutes: 10,
+      walkingMinutes: 3,
+    });
+
+    expect(ids(sortParkingOptionsForMode([expensive, cheaper], 'easiest'))).toEqual([
+      'cheaper',
+      'expensive',
+    ]);
+  });
+
+  test('easiest keeps a meaningfully easier lot above a far cheap lot', () => {
+    const closeExpensive = lot({
+      id: 'close-expensive',
+      price: 55,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      trustStatus: 'live',
+      originToParkingMinutes: 8,
+      walkingMinutes: 2,
+      distanceToAirport: 0.2,
+    });
+    const farCheap = lot({
+      id: 'far-cheap',
+      price: 5,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      trustStatus: 'live',
+      originToParkingMinutes: 32,
+      walkingMinutes: 9,
+      distanceToAirport: 3,
+    });
+
+    expect(ids(sortParkingOptionsForMode([farCheap, closeExpensive], 'easiest'))).toEqual([
+      'close-expensive',
+      'far-cheap',
+    ]);
+  });
+
+  test('easiest does not let unknown price beat known reasonable price when ease is similar', () => {
+    const known = lot({
+      id: 'known',
+      price: 18,
+      priceDisplay: 'live',
+      pricingConfidence: 'live',
+      trustStatus: 'live',
+      originToParkingMinutes: 10,
+      walkingMinutes: 3,
+    });
+    const unknown = lot({
+      id: 'unknown',
+      price: 0,
+      priceDisplay: 'check-live',
+      trustStatus: 'live',
+      originToParkingMinutes: 10,
+      walkingMinutes: 3,
+    });
+
+    expect(ids(sortParkingOptionsForMode([unknown, known], 'easiest'))).toEqual([
+      'known',
+      'unknown',
+    ]);
+  });
+
   test('cheapest does not award badge to estimated range when live exact exists', () => {
     const liveExact = lot({
       id: 'live',

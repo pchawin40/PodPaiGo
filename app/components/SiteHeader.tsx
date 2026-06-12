@@ -12,6 +12,7 @@ import PrimaryButton from './ui/PrimaryButton';
 type SiteHeaderProps = {
   ctaHref?: string;
   ctaLabel?: string;
+  showCta?: boolean;
 };
 
 const DESKTOP_LINKS = [
@@ -131,6 +132,7 @@ function AuthActions({
 export default function SiteHeader({
   ctaHref = '/trip',
   ctaLabel = 'Plan trip',
+  showCta = true,
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -196,7 +198,7 @@ export default function SiteHeader({
 
         <div className="hidden items-center gap-2 lg:flex">
           <ThemeToggle compact />
-          <AuthActions ctaHref={ctaHref} ctaLabel={ctaLabel} />
+          <AuthActions ctaHref={ctaHref} ctaLabel={ctaLabel} showPlanTrip={showCta} />
         </div>
 
         <div className="flex items-center gap-1.5 lg:hidden">
@@ -290,6 +292,7 @@ export default function SiteHeader({
                 ctaLabel={ctaLabel}
                 onNavigate={closeMobileMenu}
                 layout="mobile"
+                showPlanTrip={showCta}
               />
             </nav>
           </div>

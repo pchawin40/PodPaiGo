@@ -43,6 +43,18 @@ export type BagPlan = 'none' | 'checked' | 'oversized';
 export type TransitPaymentOption = 'normal' | 'orca-pass';
 export type ParkingPreference = 'none' | 'destination' | 'nearby';
 
+export type EventParkingSignal = {
+  source: 'ticketmaster' | 'static-venue';
+  status: 'confirmed-event' | 'venue-caution' | 'none';
+  eventName?: string;
+  venueName?: string;
+  eventStartLocal?: string;
+  eventUrl?: string;
+  distanceMiles?: number;
+  confidence: 'high' | 'medium' | 'low';
+  warningCopy: string;
+};
+
 /**
  * Drive route intelligence (Phase 1).
  *
@@ -304,6 +316,7 @@ export type TransferLeg = {
 export type PointToPointTiming = {
   driveMinutes?: number | null;
   parkingBufferMinutes?: number | null;
+  transitMinutes?: number | null;
   walkToDestinationMinutes?: number | null;
   pickupWaitMinutes?: number | null;
   totalOptionMinutes?: number | null;

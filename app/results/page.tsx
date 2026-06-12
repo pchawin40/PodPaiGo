@@ -1,13 +1,13 @@
 'use client';
 
 import { Suspense } from 'react';
-import SiteHeader from '../components/SiteHeader';
 import ResultsContent from './ResultsContent';
+import ResultsSiteHeader from './ResultsSiteHeader';
 
 export default function ResultsPage() {
   return (
     <>
-      <SiteHeader ctaHref="/trip" ctaLabel="New trip" />
+      <ResultsSiteHeader />
 
       <Suspense
         fallback={

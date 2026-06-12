@@ -14,17 +14,21 @@ import {
 } from '../../lib/domain';
 import { RankedRecommendation } from '../../lib/domain';
 import AirlineLookupPanel from '../components/AirlineLookupPanel';
-import AirportTripCard from '../components/AirportTripCard';
 import DestinationParkingSummary from '../components/DestinationParkingSummary';
-import PointAbHeroSummary from '../components/PointAbHeroSummary';
-import { buildParkingOutlook } from '../../lib/parking/parkingOutlook';
+import ResultsRecommendationHero from '../components/results/ResultsRecommendationHero';
+import CompactTripTimeline from '../components/results/CompactTripTimeline';
+import ParkingFilterBar from '../components/results/ParkingFilterBar';
 import { computeCityTripPointAbRanking } from '../../lib/parking/cityTripPointAbContext';
 import { buildStreetMeterParkingOption } from '../../lib/parking/streetMeterParking';
 import {
   FlexibleDateInput,
   normalizeFlexibleDateInputValue,
 } from '../components/FlexibleDateInput';
-import { countParkingFeatureMatches, filterParkingOptionsByFeatures } from '../../lib/parking/parkingFilters';
+import {
+  countParkingFeatureMatches,
+  filterParkingOptionsByFeatures,
+  hasActiveParkingFilters,
+} from '../../lib/parking/parkingFilters';
 import { getVisibleParkingFeatureBadges } from '../../lib/parking/featureConfidence';
 import {
   getParkingComparableCost,
@@ -46,9 +50,9 @@ import ParkingCheckInTimingBanner from './ParkingCheckInTimingBanner';
 import {
   businessTravelModeNeedsParking,
   readTravelPreferences,
+  writeTravelPreferences,
   type TripTravelPreferences,
 } from '../../lib/trip/travelPreferences';
-import TravelPreferencesPanel from '../components/TravelPreferencesPanel';
 import {
   isQuickGoMode,
   logQuickGoClientRoute,
@@ -70,7 +74,10 @@ import OptionComparisonCard, { CompareOptionsDesktopHeader } from '../components
 import ParkAndRideDetailsPanel from '../components/ParkAndRideDetailsPanel';
 import ParkingProviderActions from './ParkingProviderActions';
 import BetaFeedbackButton from './BetaFeedbackButton';
-import { DATA_TRANSPARENCY_DISCLOSURE } from '../../lib/marketing/publicCopy';
+import {
+  DATA_TRANSPARENCY_DISCLOSURE,
+  PROVIDER_AFFILIATE_DISCLOSURE_SHORT,
+} from '../../lib/marketing/publicCopy';
 import DriveRouteOptionsSection from './DriveRouteOptionsSection';
 import CachedParkingNotice, { isCachedParkingOption } from './CachedParkingNotice';
 import { getParkingAvailabilityDisplay } from '../../lib/parking/availabilityDisplay';
@@ -139,7 +146,7 @@ import {
   parkingPriceLine,
   getParkingTotalPrice,
 } from '../../lib/parking/priceDisplay';
-import { resolveParkingPriceTrust } from '../../lib/parking/priceTrust';
+import { resolveParkingPriceTrust, type ParkingPriceTrust } from '../../lib/parking/priceTrust';
 import {
   buildParkingProviderHandoff,
   formatParkingHandoffDuration,
@@ -163,8 +170,14 @@ import {
   parkingRouteUnavailableReason,
   withStableParkingRouteStatus,
 } from '../../lib/parking/routeStatus';
-import { isEventVenueDestination } from '../../lib/parking/eventVenueDetection';
+import {
+  EVENT_STREET_METER_FALLBACK_CON,
+  isEventVenueDestination,
+} from '../../lib/parking/eventVenueDetection';
 import { RIDESHARE_ESTIMATE_DISCLAIMER, formatRidesharePriceDisplay } from '../../lib/rideshare/estimate';
+import { buildStaticEventVenueSignal } from '../../lib/events/eventParkingSignal';
+import EventParkingWarning from './EventParkingWarning';
+import { shouldShowResultsNewTripCta } from './resultsNewTripCta';
 
 import {
   parseHHMMToMinutes,
@@ -191,7 +204,8 @@ import {
   TransitPaymentOption,
   ParkingPreference,
   TransitOption,
-  RideshareOption
+  RideshareOption,
+  type EventParkingSignal,
 } from '../../lib/types';
 import {
   costOf,
@@ -371,6 +385,148 @@ function parkingTimeParts(option: ParkingOption, tripContext = resolveTripParkin
     parts: breakdown.parts,
     isPartial: breakdown.isPartial === true,
   };
+}
+
+function compactParkingTimeDescriptor(parts: Array<{ label: string; minutes: number; display?: string }>): string | null {
+  const walk = parts.find((part) => /walk/i.test(part.label));
+  if (walk && walk.minutes > 0 && walk.minutes <= 6) return 'closest walk';
+
+  const drive = parts.find((part) => /drive|route/i.test(part.label));
+  if (drive) {
+    const driveLabel = formatParkingPartMinutes(drive);
+    if (walk && walk.minutes > 0 && walk.minutes <= 10) {
+      return `${driveLabel} drive + short walk`;
+    }
+    const shuttle = parts.find((part) => /shuttle/i.test(part.label));
+    if (shuttle) return `${driveLabel} drive + shuttle`;
+    const transfer = parts.find((part) => /transit|terminal|destination/i.test(part.label));
+    if (transfer) return `${driveLabel} drive + transfer`;
+    return `${driveLabel} drive`;
+  }
+
+  return null;
+}
+
+function compactParkingPriceBadge(
+  option: ParkingOption,
+  priceTrust: ParkingPriceTrust | null,
+): ParkingPriorityBadge | null {
+  if (!priceTrust) return null;
+
+  const baseClassName = priceTrust.badgeClassName;
+
+  if (
+    priceTrust.kind === 'live_final_provider_price' ||
+    priceTrust.kind === 'live_marketplace_price'
+  ) {
+    return { key: 'compact-live-price', label: 'Live price', className: baseClassName };
+  }
+
+  if (priceTrust.kind === 'official_rate') {
+    return { key: 'compact-official-price', label: 'Official estimate', className: baseClassName };
+  }
+
+  if (
+    option.priceDisplay === 'from-per-day' ||
+    String(option.priceSource || '') === 'provider-linked' ||
+    String(option.pricingConfidence || '') === 'cached'
+  ) {
+    return { key: 'compact-provider-linked', label: 'Provider-linked', className: baseClassName };
+  }
+
+  if (priceTrust.kind === 'check_provider' || priceTrust.kind === 'price_unknown') {
+    return { key: 'compact-check-provider', label: 'Check provider', className: baseClassName };
+  }
+
+  return { key: 'compact-estimated-price', label: 'Estimated price', className: baseClassName };
+}
+
+function compactParkingReviewBadge(option: ParkingOption | null): ParkingPriorityBadge | null {
+  if (!option) return null;
+
+  const summary = getParkingReviewSummary(option);
+  if (
+    typeof summary.reviewScore !== 'number' &&
+    typeof summary.reviewCount !== 'number'
+  ) {
+    return null;
+  }
+
+  return {
+    key: 'compact-reviews',
+    semanticKey: getParkingRatingReviewBadgeSemanticKey(option) ?? undefined,
+    label: parkingReviewLabel(option),
+    className:
+      'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100',
+  };
+}
+
+function normalizeCompactParkingPriorityBadge(
+  badge: ParkingPriorityBadge,
+  rank: number,
+): ParkingPriorityBadge | null {
+  if (
+    badge.key === 'reviews' ||
+    badge.key === 'live-price' ||
+    badge.key === 'official-price' ||
+    badge.key === 'estimated-range' ||
+    badge.key === 'possible-low-estimate' ||
+    badge.key === 'check-provider' ||
+    badge.key === 'shuttle'
+  ) {
+    return null;
+  }
+
+  if (badge.key === 'mode-easiest' || badge.key === 'mode-fastest') {
+    return null;
+  }
+
+  if (badge.key === 'mode-best' && rank !== 1) {
+    return null;
+  }
+
+  if (badge.key === 'mode-best') {
+    return { ...badge, label: 'Best overall' };
+  }
+
+  return badge;
+}
+
+function buildCompactParkingVisibleBadges({
+  badges,
+  option,
+  priceTrust,
+  rank,
+}: {
+  badges: ParkingPriorityBadge[];
+  option: ParkingOption | null;
+  priceTrust: ParkingPriceTrust | null;
+  rank: number;
+}): ParkingPriorityBadge[] {
+  const priceBadge = option ? compactParkingPriceBadge(option, priceTrust) : null;
+  const reviewBadge = compactParkingReviewBadge(option);
+  const priorityBadges = badges
+    .map((badge) => normalizeCompactParkingPriorityBadge(badge, rank))
+    .filter((badge): badge is ParkingPriorityBadge => Boolean(badge))
+    .filter((badge) => badge.key !== 'reviews' && badge.key !== 'compact-reviews');
+  const candidates = [
+    ...priorityBadges.slice(0, 1),
+    priceBadge,
+    reviewBadge,
+    ...priorityBadges.slice(1),
+  ].filter((badge): badge is ParkingPriorityBadge => Boolean(badge));
+  const seenLabels = new Set<string>();
+  const visible: ParkingPriorityBadge[] = [];
+
+  for (const badge of candidates) {
+    const key = badge.label.toLowerCase();
+    if (seenLabels.has(key)) continue;
+    seenLabels.add(key);
+    visible.push(badge);
+    if (visible.length >= 3) break;
+  }
+
+  return visible;
 }
 
 function isJiffyParkingLot(option: Pick<ParkingOption, 'name'>): boolean {
@@ -688,21 +844,15 @@ function ParkingTimeSummary({
     : formatMiniMinutes(breakdown.total);
 
   if (compact) {
-    return (
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-semibold text-zinc-900">
-          {breakdown.isPartial ? 'Partial time' : 'Total time'} {totalDisplay}
-        </span>
+    const descriptor = compactParkingTimeDescriptor(breakdown.parts);
 
-        {breakdown.parts.slice(0, 3).map((part) => (
-          <span
-            key={`${part.label}-${part.minutes}`}
-            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
-          >
-            {part.label} {formatParkingPartMinutes(part)}
-          </span>
-        ))}
-      </div>
+    return (
+      <p className="mt-3 text-sm font-semibold text-zinc-800">
+        {breakdown.isPartial ? totalDisplay : `${totalDisplay} total`}
+        {descriptor ? (
+          <span className="font-medium text-zinc-600"> · {descriptor}</span>
+        ) : null}
+      </p>
     );
   }
 
@@ -2285,6 +2435,34 @@ function OptionCard({
       : [];
   const canShowParkingReviewAction =
     Boolean(parkingReviewActionOption && hasParkingReviewSource(parkingReviewActionOption));
+  const compactParkingVisibleBadges =
+    item.type === 'parking' && compact
+      ? buildCompactParkingVisibleBadges({
+          badges: parkingPriorityBadges,
+          option: (displayParkingOption || normalizedParkingOption) as ParkingOption | null,
+          priceTrust: parkingPriceTrust,
+          rank,
+        })
+      : parkingPriorityBadges;
+  const compactParkingHiddenBadges =
+    item.type === 'parking' && compact
+      ? (() => {
+          const visibleLabels = new Set(
+            compactParkingVisibleBadges.map((badge) => badge.label.toLowerCase()),
+          );
+          return parkingPriorityBadges.filter(
+            (badge) => !visibleLabels.has(badge.label.toLowerCase()),
+          );
+        })()
+      : [];
+  const compactParkingShowsReviewBadge =
+    item.type === 'parking' &&
+    compact &&
+    compactParkingVisibleBadges.some((badge) =>
+      badge.key === 'compact-reviews' ||
+      badge.key === 'reviews' ||
+      badge.semanticKey?.includes('rating-review'),
+    );
 
   const nonParkingPrice =
     item.type === 'rideshare'
@@ -2292,6 +2470,60 @@ function OptionCard({
       : typeof opt.price === 'number' && opt.price > 0
         ? `${opt.priceDisplay === 'estimated' ? 'Est. ' : ''}${formatMoney(opt.price)}`
         : visiblePrice.primary;
+  const renderParkingProviderActions = ({
+    showPrimaryActions = true,
+    showTransferAction = true,
+    showDisclosure = true,
+  }: {
+    showPrimaryActions?: boolean;
+    showTransferAction?: boolean;
+    showDisclosure?: boolean;
+  } = {}) => {
+    if (item.type !== 'parking') return null;
+
+    return (
+      <ParkingProviderActions
+        compact={compact}
+        bookingUrl={parkingProviderUrl}
+        providerUrl={officialSeaCtas?.providerUrl || parkingProviderUrl}
+        routeToParkingUrl={parkingLotRouteLink || opt.mapLink || null}
+        parkingToTerminalUrl={parkingToTerminalRouteLink}
+        parkingToDestinationUrl={parkingToDestinationRouteLink}
+        transferLinkLabel={parkingTransferLinkLabel}
+        searchQuery={opt.searchQuery || safeParkingSearchQuery}
+        provider={
+          (opt as ParkingOption).officialGarageGroupId
+            ? 'SEA Airport / Port of Seattle'
+            : opt.bookingProvider || opt.sourceName || opt.name
+        }
+        airportCode={airportCode}
+        parkingLotId={opt.id || null}
+        parkingLotName={String(opt.name || '') || null}
+        resultType={item.type}
+        tripType={tripData?.type ?? null}
+        rank={rank}
+        priceTotal={parkingActionPriceTotal}
+        priceLabel={parkingPrice?.primary ?? visiblePrice.primary ?? null}
+        priceSource={(opt as ParkingOption).priceSource ?? null}
+        driveToLotMinutes={parkingActionDriveMinutes}
+        walkMinutes={parkingActionWalkMinutes}
+        tripId={tripId || null}
+        accessToken={accessToken}
+        affiliateAttached={(opt as ParkingOption).outboundAffiliateAttached ?? false}
+        outboundSubIdParam={(opt as ParkingOption).outboundSubIdParam ?? null}
+        onReserve={() => setBookingHelperOpen(true)}
+        reserveLabel={
+          officialSeaCtas?.reserveLabel ||
+          resolveProviderReserveLabel(opt as ParkingOption)
+        }
+        viewProviderLabel={resolveProviderViewLabel(opt as ParkingOption)}
+        infoOnlyBooking={officialSeaCtas?.isInfoOnly}
+        showPrimaryActions={showPrimaryActions}
+        showTransferAction={showTransferAction}
+        showDisclosure={showDisclosure}
+      />
+    );
+  };
 
   return (
     <>
@@ -2306,11 +2538,13 @@ function OptionCard({
     <div
       id={`option-${item.type}-${String(opt?.id || rank)}`}
       className={
-        'rounded-3xl border bg-white/95 p-4 shadow-sm shadow-sky-900/5 transition hover:border-sky-200 sm:p-5 ' +
+        (item.type === 'parking' && compact
+          ? 'rounded-2xl border bg-white/95 p-3 shadow-sm shadow-sky-900/5 transition hover:border-sky-200 sm:p-4 '
+          : 'rounded-3xl border bg-white/95 p-4 shadow-sm shadow-sky-900/5 transition hover:border-sky-200 sm:p-5 ') +
         (!routeUnavailable && timing.status === 'too-late' ? 'border-red-200' : 'border-zinc-200')
       }
     >
-      {item.type === 'parking' && displayParkingOption && (
+      {item.type === 'parking' && displayParkingOption && !compact && (
         <div className="mb-4">
           <ParkingLotVisual
             option={displayParkingOption}
@@ -2321,7 +2555,25 @@ function OptionCard({
         </div>
       )}
 
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div
+        data-testid={item.type === 'parking' && compact ? 'compact-parking-option-summary' : undefined}
+        className={
+          item.type === 'parking' && compact
+            ? 'grid gap-4 md:grid-cols-[9rem_minmax(0,1fr)] md:items-start'
+            : 'flex flex-col gap-4 md:flex-row md:items-start md:justify-between'
+        }
+      >
+        {item.type === 'parking' && displayParkingOption && compact ? (
+          <div className="h-24 w-full shrink-0 overflow-hidden rounded-xl sm:h-28 md:w-36">
+            <ParkingLotVisual
+              option={displayParkingOption}
+              tripContext={parkingTripContext}
+              airportCode={airportCode}
+              photoPriority={parkingPhotoPriority}
+            />
+          </div>
+        ) : null}
+
         <div className="min-w-0 flex-1">
           {isRideshareCard ? (
             <div className="space-y-2">
@@ -2438,23 +2690,45 @@ function OptionCard({
               )}
 
               {item.type === 'parking' && normalizedParkingOption
-                ? parkingPriorityBadges.map((badge) => (
+                ? compactParkingVisibleBadges.map((badge) => {
+                    const isReviewBadge =
+                      badge.key === 'compact-reviews' ||
+                      badge.key === 'reviews' ||
+                      badge.semanticKey?.includes('rating-review');
+                    if (isReviewBadge && parkingReviewActionOption && onShowReviews) {
+                      return (
+                        <button
+                          key={badge.key}
+                          type="button"
+                          onClick={() => onShowReviews(parkingReviewActionOption)}
+                          data-testid={compact ? 'compact-parking-visible-badge' : undefined}
+                          className={`rounded-full border px-2.5 py-1 text-xs font-semibold hover:bg-amber-100 ${badge.className}`}
+                          title="See review details"
+                        >
+                          {badge.label}
+                        </button>
+                      );
+                    }
+
+                    return (
                     <div
                       key={badge.key}
+                      data-testid={compact ? 'compact-parking-visible-badge' : undefined}
                       className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
                     >
                       {badge.label}
                     </div>
-                  ))
+                    );
+                  })
                 : null}
 
-              {parkingPrice?.badge && item.type === 'parking' ? (
+              {parkingPrice?.badge && item.type === 'parking' && !compact ? (
                 <div className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
                   {parkingPrice.badge}
                 </div>
               ) : null}
 
-              {item.type === 'parking' && (() => {
+              {item.type === 'parking' && !compact && (() => {
                 const parking = parkingReviewActionOption;
                 if (!parking || !hasParkingReviewSource(parking) || !onShowReviews) return null;
 
@@ -2496,6 +2770,25 @@ function OptionCard({
               tripContext={parkingTripContext}
             />
           )}
+
+          {item.type === 'parking' && compact ? (
+            <p className="mt-2 line-clamp-2 text-sm text-zinc-600">
+              {parkingRankExplanation(
+                (displayParkingOption || (opt as ParkingOption)) as ParkingOption,
+                sort,
+                tripData,
+              )}
+            </p>
+          ) : null}
+
+          {item.type === 'parking' && compact ? (
+            <div className="mt-4" data-testid="compact-parking-action-row">
+              {renderParkingProviderActions({
+                showTransferAction: false,
+                showDisclosure: false,
+              })}
+            </div>
+          ) : null}
 
           {item.type === 'parking' &&
           displayParkingOption &&
@@ -2705,45 +2998,10 @@ function OptionCard({
           )} */}
         </div>
 
+        {!(item.type === 'parking' && compact) ? (
         <div className="flex w-full shrink-0 flex-col gap-2 md:w-auto md:min-w-40 md:items-stretch">
           {item.type === 'parking' ? (
-            <ParkingProviderActions
-              compact={compact}
-              bookingUrl={parkingProviderUrl}
-              providerUrl={officialSeaCtas?.providerUrl || parkingProviderUrl}
-              routeToParkingUrl={parkingLotRouteLink || opt.mapLink || null}
-              parkingToTerminalUrl={parkingToTerminalRouteLink}
-              parkingToDestinationUrl={parkingToDestinationRouteLink}
-              transferLinkLabel={parkingTransferLinkLabel}
-              searchQuery={opt.searchQuery || safeParkingSearchQuery}
-              provider={
-                (opt as ParkingOption).officialGarageGroupId
-                  ? 'SEA Airport / Port of Seattle'
-                  : opt.bookingProvider || opt.sourceName || opt.name
-              }
-              airportCode={airportCode}
-              parkingLotId={opt.id || null}
-              parkingLotName={String(opt.name || '') || null}
-              resultType={item.type}
-              tripType={tripData?.type ?? null}
-              rank={rank}
-              priceTotal={parkingActionPriceTotal}
-              priceLabel={parkingPrice?.primary ?? visiblePrice.primary ?? null}
-              priceSource={(opt as ParkingOption).priceSource ?? null}
-              driveToLotMinutes={parkingActionDriveMinutes}
-              walkMinutes={parkingActionWalkMinutes}
-              tripId={tripId || null}
-              accessToken={accessToken}
-              affiliateAttached={(opt as ParkingOption).outboundAffiliateAttached ?? false}
-              outboundSubIdParam={(opt as ParkingOption).outboundSubIdParam ?? null}
-              onReserve={() => setBookingHelperOpen(true)}
-              reserveLabel={
-                officialSeaCtas?.reserveLabel ||
-                resolveProviderReserveLabel(opt as ParkingOption)
-              }
-              viewProviderLabel={resolveProviderViewLabel(opt as ParkingOption)}
-              infoOnlyBooking={officialSeaCtas?.isInfoOnly}
-            />
+            renderParkingProviderActions({ showTransferAction: false })
           ) : compact ? (
             <div className="flex flex-col gap-2">
               {!routeUnavailable && sourceLink && (
@@ -2808,11 +3066,12 @@ function OptionCard({
             </>
           )}
         </div>
+        ) : null}
       </div>
 
-      {!compact && (
+      {(item.type === 'parking' || !compact) && (
         <details
-          className="mt-4"
+          className="ppg-section-panel group mt-4 overflow-hidden rounded-2xl"
           onToggle={(event) => {
             if (
               detailsExpandedTrackedRef.current ||
@@ -2840,8 +3099,302 @@ function OptionCard({
             });
           }}
         >
-          <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">Details & evidence</summary>
-          <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200">
+          <summary className="flex w-full cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
+            <span className="block text-sm font-semibold text-foreground">
+              {item.type === 'parking' ? 'Details' : 'Details & evidence'}
+            </span>
+            <span
+              aria-hidden
+              className="shrink-0 text-sm text-muted-foreground transition-transform duration-200 group-open:rotate-180"
+            >
+              ▾
+            </span>
+          </summary>
+          <div className="border-t border-border px-4 py-3 text-sm text-zinc-700 dark:text-zinc-200">
+            {(item.type as string) === 'parking' ? (
+              <div className="space-y-4 divide-y divide-zinc-200/70 dark:divide-zinc-700/70">
+                <section className="space-y-2">
+                  <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    Booking
+                  </div>
+                  <dl className="grid gap-2 sm:grid-cols-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-zinc-500 dark:text-zinc-400">Provider</dt>
+                      <dd className="text-right font-medium text-zinc-950 dark:text-zinc-50">
+                        {parkingProviderHandoff?.providerName ||
+                          (displayParkingOption || opt as ParkingOption).bookingProvider ||
+                          (displayParkingOption || opt as ParkingOption).sourceName ||
+                          'Parking provider'}
+                      </dd>
+                    </div>
+                    {parkingProviderHandoff?.window ? (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <dt className="text-zinc-500 dark:text-zinc-400">Check-in</dt>
+                          <dd className="text-right font-medium text-zinc-950 dark:text-zinc-50">
+                            {parkingProviderHandoff.window.checkInDate}{' '}
+                            {parkingProviderHandoff.window.checkInTime}
+                          </dd>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <dt className="text-zinc-500 dark:text-zinc-400">Check-out</dt>
+                          <dd className="text-right font-medium text-zinc-950 dark:text-zinc-50">
+                            {parkingProviderHandoff.window.checkOutDate}{' '}
+                            {parkingProviderHandoff.window.checkOutTime}
+                          </dd>
+                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <dt className="text-zinc-500 dark:text-zinc-400">Duration</dt>
+                          <dd className="text-right font-medium text-zinc-950 dark:text-zinc-50">
+                            {formatParkingHandoffDuration(parkingProviderHandoff.window.durationMinutes)}
+                          </dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3 sm:col-span-2">
+                        <dt className="text-zinc-500 dark:text-zinc-400">Parking window</dt>
+                        <dd className="text-right font-medium text-zinc-950 dark:text-zinc-50">
+                          Check selected trip dates/times
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {parkingProviderHandoff ? (
+                      <button
+                        type="button"
+                        onClick={() => void copyText(parkingProviderHandoff.copySummary)}
+                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        Copy times
+                      </button>
+                    ) : null}
+                    {parkingProviderUrl ? (
+                      <a
+                        href={parkingProviderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        View provider
+                      </a>
+                    ) : null}
+                  </div>
+                  <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    Confirm final price and parking window at provider checkout.
+                  </p>
+                </section>
+
+                <section className="space-y-2 pt-4">
+                  <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    Timing
+                  </div>
+                  {routeUnavailable ? (
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Route timing is unavailable for this lot. Open directions to confirm travel time.
+                    </p>
+                  ) : parkingBreakdown ? (
+                    <dl className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-3 font-semibold text-zinc-950 dark:text-zinc-50">
+                        <dt>Total</dt>
+                        <dd>{parkingBreakdown.totalLabel ?? formatMinutes(parkingBreakdown.totalMinutes)}</dd>
+                      </div>
+                      {parkingBreakdown.parts.map((part) => (
+                        <div
+                          key={`${part.label}-${part.minutes}`}
+                          className="flex items-center justify-between gap-3"
+                        >
+                          <dt>{part.label}</dt>
+                          <dd className="font-medium text-zinc-950 dark:text-zinc-50">
+                            {part.display ?? formatMinutes(part.minutes)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : (
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300">
+                      Open directions to confirm route timing.
+                    </p>
+                  )}
+                  {opt.transferType === 'shuttle' ? (
+                    <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                      Includes estimated shuttle wait time and a small reliability buffer. Confirm shuttle frequency with the lot before booking.
+                    </p>
+                  ) : null}
+                  <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    Timing includes drive time, parking/check-in time, and walking time when available.
+                  </p>
+                </section>
+
+                <section className="space-y-2 pt-4">
+                  <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    Why this option
+                  </div>
+                  <p className="leading-relaxed">
+                    {parkingRankExplanation(
+                      (displayParkingOption || (opt as ParkingOption)) as ParkingOption,
+                      sort,
+                      tripData,
+                    )}
+                  </p>
+                </section>
+
+                <section className="space-y-2 pt-4">
+                  <div className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    Price/source
+                  </div>
+                  <p className="leading-relaxed">
+                    {parkingPriceTrust?.disclosure ||
+                      parkingDailyText ||
+                      'Provider controls final price.'}
+                  </p>
+                  <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    Price source:{' '}
+                    <span className="font-medium">
+                      {parkingPriceTrust?.label ||
+                        (displayParkingOption || opt as ParkingOption).sourceName ||
+                        'Parking source'}
+                    </span>
+                  </p>
+                </section>
+
+                <details className="pt-4">
+                  <summary className="cursor-pointer text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-50">
+                    Data source details
+                  </summary>
+                  <div className="mt-3 space-y-3 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                    {compactParkingHiddenBadges.length > 0 ||
+                    (
+                      !compactParkingShowsReviewBadge &&
+                      parkingReviewActionOption &&
+                      hasParkingReviewSource(parkingReviewActionOption) &&
+                      onShowReviews
+                    ) ? (
+                      <div className="flex flex-wrap gap-2">
+                        {compactParkingHiddenBadges.slice(0, 6).map((badge) => (
+                          <span
+                            key={`detail-priority-${badge.key}`}
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
+                          >
+                            {badge.label}
+                          </span>
+                        ))}
+                        {parkingReviewActionOption &&
+                        !compactParkingShowsReviewBadge &&
+                        hasParkingReviewSource(parkingReviewActionOption) &&
+                        onShowReviews ? (
+                          <button
+                            type="button"
+                            onClick={() => onShowReviews(parkingReviewActionOption)}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                            title="See review details"
+                          >
+                            {parkingReviewLabel(parkingReviewActionOption)}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {displayParkingOption ? (
+                      <div className="flex flex-wrap gap-2">
+                        {getVisibleParkingFeatureBadges(displayParkingOption).slice(0, 6).map((meta) => (
+                          <span
+                            key={`detail-${displayParkingOption.id}-${meta.key}`}
+                            className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                          >
+                            {meta.label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {Array.isArray((displayParkingOption || opt as ParkingOption).officialGarageSubOptions) &&
+                    (displayParkingOption || (opt as ParkingOption)).officialGarageSubOptions!.length > 0 ? (
+                      <div>
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          Official SEA garage products
+                        </div>
+                        <ul className="mt-2 space-y-2">
+                          {(displayParkingOption || (opt as ParkingOption)).officialGarageSubOptions!.map((sub) => (
+                            <li key={sub.id}>
+                              <div className="font-medium text-zinc-900 dark:text-zinc-100">{sub.label}</div>
+                              <div>{sub.detail}</div>
+                              <div>Provider: SEA Airport / Port of Seattle · Source: Official published rate</div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {activeParkingRate ? (
+                      <div>
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          {activeParkingRate.label}
+                        </div>
+                        <div>
+                          {activeParkingRate.sourceName || 'Parking source'} · {activeParkingRate.confidence} confidence
+                        </div>
+                        {activeParkingRate.warnings.length > 0 ? (
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            {activeParkingRate.warnings.slice(0, 3).map((warning) => (
+                              <li key={warning}>{warning}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {!routeUnavailable && timing.status !== 'n/a' && timing.flightDeparts && timing.recommendedInsideArrivalBy && timing.latestSafeLeaveTime && typeof timing.optionTravelMinutes === 'number' ? (
+                      <div>
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          Flight timing check
+                        </div>
+                        <div className="mt-1 space-y-1">
+                          <div>Flight departs: {formatTimeFriendly(timing.flightDeparts)}</div>
+                          <div>Recommended inside-airport arrival by: {formatTimeFriendly(timing.recommendedInsideArrivalBy)}</div>
+                          <div>Option travel time: {formatMinutes(timing.optionTravelMinutes)}</div>
+                          <div>Latest safe leave time: {formatTimeFriendly(timing.latestSafeLeaveTime)}</div>
+                          {typeof timing.shortByMinutes === 'number' ? (
+                            <div>Missed by: {timing.shortByMinutes} min</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <div>
+                        <span className="font-medium">Source:</span>{' '}
+                        {(displayParkingOption || opt as ParkingOption).sourceName || 'Parking source'}
+                      </div>
+                      {opt.lastUpdated ? (
+                        <div className="mt-1">
+                          <span className="font-medium">Updated:</span>{' '}
+                          {new Date(opt.lastUpdated).toLocaleString()}
+                        </div>
+                      ) : null}
+                      {(opt as ParkingOption).coordinateSource &&
+                      (opt as ParkingOption).coordinateSource !== 'google_place' ? (
+                        <div className="mt-1">
+                          Parking location estimated from provider/address data.
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {Array.isArray(opt.assumptions) && opt.assumptions.length > 0 ? (
+                      <div>
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          Assumptions
+                        </div>
+                        <p className="mt-1">
+                          {opt.assumptions.slice(0, 3).join(' ')}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              </div>
+            ) : (
+              <>
             {item.type === 'parking' && parkingProviderUrl ? (
               <div className="mb-3">
                 <a
@@ -2852,6 +3405,50 @@ function OptionCard({
                 >
                   View provider
                 </a>
+              </div>
+            ) : null}
+
+            {item.type === 'parking' && compact && (
+              compactParkingHiddenBadges.length > 0 ||
+              (
+                !compactParkingShowsReviewBadge &&
+                parkingReviewActionOption &&
+                hasParkingReviewSource(parkingReviewActionOption) &&
+                onShowReviews
+              )
+            ) ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {compactParkingHiddenBadges.map((badge) => (
+                  <span
+                    key={`detail-priority-${badge.key}`}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
+                  >
+                    {badge.label}
+                  </span>
+                ))}
+                {parkingReviewActionOption &&
+                !compactParkingShowsReviewBadge &&
+                hasParkingReviewSource(parkingReviewActionOption) &&
+                onShowReviews ? (
+                  <button
+                    type="button"
+                    onClick={() => onShowReviews(parkingReviewActionOption)}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                    title="See review details"
+                  >
+                    {parkingReviewLabel(parkingReviewActionOption)}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {item.type === 'parking' && compact ? (
+              <div className="mb-3">
+                <ParkingBookingHelperPanel
+                  option={(displayParkingOption || (opt as ParkingOption)) as ParkingOption}
+                  tripData={tripData}
+                  providerUrl={parkingProviderUrl}
+                />
               </div>
             ) : null}
 
@@ -2948,11 +3545,11 @@ function OptionCard({
               </div>
             )}
 
-            {item.type === 'parking' && !compact && !routeUnavailable && parkingBreakdown && (
+            {item.type === 'parking' && !routeUnavailable && parkingBreakdown && (
               <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
+                    <div className="text-sm font-medium text-zinc-900">Timing breakdown</div>
                     <div className="mt-1 text-xs text-zinc-500">
                       {parkingTripContext === 'city_destination_trip'
                         ? 'From your origin to destination arrival.'
@@ -3003,6 +3600,18 @@ function OptionCard({
                 </div>
               </div>
             )}
+            {item.type === 'parking' && compact ? (
+              <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3">
+                <div className="text-sm font-medium text-zinc-900">Why this parking option</div>
+                <p className="mt-2 text-sm text-zinc-700">
+                  {parkingRankExplanation(
+                    (displayParkingOption || (opt as ParkingOption)) as ParkingOption,
+                    sort,
+                    tripData,
+                  )}
+                </p>
+              </div>
+            ) : null}
             <div><span className="font-medium">Source:</span> {opt.sourceName}</div>
             {opt.lastUpdated && (
               <div className="mt-1"><span className="font-medium">Updated:</span> {new Date(opt.lastUpdated).toLocaleString()}</div>
@@ -3022,6 +3631,8 @@ function OptionCard({
                     <li key={a}>{a}</li>
                   ))}
                 </ul>
+              </>
+            )}
               </>
             )}
           </div>
@@ -3676,10 +4287,10 @@ function StreetParkingPlanNote({
 
   return (
     <div id={POINT_AB_DETAILS_SECTION_IDS['street-meter']} className="scroll-mt-24">
-      <ParkingPlanSection title={eventParkingLikely ? 'Street parking warning' : 'Street parking note'}>
+      <ParkingPlanSection title={eventParkingLikely ? 'Risky during events' : 'Street parking note'}>
         <p className="text-muted-foreground">
           {eventParkingLikely
-            ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+            ? EVENT_STREET_METER_FALLBACK_CON
             : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
         </p>
         {outlookDetail ? (
@@ -3699,7 +4310,7 @@ function StreetParkingDetailsSection({
 }) {
   if (!eventParkingLikely && !streetMeterRow) return null;
 
-  const title = eventParkingLikely ? 'Street parking warning' : 'Street parking note';
+  const title = eventParkingLikely ? 'Risky during events' : 'Street parking note';
   const outlookDetail =
     !eventParkingLikely && streetMeterRow?.detailNote ? streetMeterRow.detailNote : null;
 
@@ -3718,7 +4329,7 @@ function StreetParkingDetailsSection({
         </h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {eventParkingLikely
-            ? 'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.'
+            ? EVENT_STREET_METER_FALLBACK_CON
             : 'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.'}
         </p>
         {outlookDetail ? (
@@ -3833,7 +4444,7 @@ function CityParkingStatusNotice({
             tabIndex={-1}
             className="text-lg font-bold text-foreground"
           >
-            Parking options
+            Parking choices
           </h2>
           <div className="mt-2 font-semibold text-foreground">{copy.title}</div>
           <p className="mt-1 leading-6 text-muted-foreground">{copy.body}</p>
@@ -3872,7 +4483,7 @@ function CityParkingOptionsHeader() {
           tabIndex={-1}
           className="text-xl font-bold text-foreground"
         >
-          Parking options
+          Parking choices
         </h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
           Review nearby lots, pricing, route actions, and provider details.
@@ -4384,7 +4995,7 @@ type RecommendationRequestRef = {
 };
 
 const GOOGLE_PLACE_MATCH_CONCURRENCY = 2;
-const COLLAPSED_PARKING_DISPLAY_COUNT = 6;
+const COLLAPSED_PARKING_DISPLAY_COUNT = 2;
 const PARKING_SHOW_MORE_INCREMENT = 10;
 const MAX_GOOGLE_PLACE_MATCH_LIMIT = 20;
 const QUICK_GO_RECOMMENDATION_SNAPSHOT_PREFIX = 'podpaigo-quickgo-recommendation';
@@ -5105,6 +5716,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const [showParkRideReason, setShowParkRideReason] = useState(false);
   const [expandedModeDetails, setExpandedModeDetails] = useState<string | null>(null);
   const [showParkingAnyway, setShowParkingAnyway] = useState(false);
+  const [dynamicEventParkingSignal, setDynamicEventParkingSignal] =
+    useState<EventParkingSignal | null>(null);
   const [travelPreferences, setTravelPreferences] = useState<TripTravelPreferences>(() =>
     typeof window === 'undefined' ? { businessTravelMode: 'standard', parkingFilters: {} } : readTravelPreferences(),
   );
@@ -5129,6 +5742,18 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     }
   }, [travelPreferences.businessTravelMode]);
 
+  const clearParkingFeatureFilters = useCallback(() => {
+    setTravelPreferences((prev) => {
+      const next: TripTravelPreferences = {
+        ...prev,
+        parkingFilters: {},
+      };
+      writeTravelPreferences(next);
+      return next;
+    });
+    setVisibleParkingCount(COLLAPSED_PARKING_DISPLAY_COUNT);
+  }, []);
+
   const aprFetchIdRef = useRef(0);
   const aprRequestKeyRef = useRef('');
   const priceMatchKeyRef = useRef('');
@@ -5141,6 +5766,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const recommendationsLoadedRouteKeyRef = useRef('');
   const liveRefreshInFlightKeyRef = useRef('');
   const liveRefreshLoadedKeyRef = useRef('');
+  const eventLookupRequestKeyRef = useRef('');
   // Active parking-state identity. Async parking writers (live refresh, price
   // match) capture this at request time and must ignore their response if it no
   // longer matches the active trip, so stale lots/prices never leak across trips.
@@ -6370,6 +6996,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
     ? cityDestinationText || 'General trip'
     : currentAirport.label;
   const tripBadgeLabel = isCityTrip ? 'General trip' : searchParams.get('airport') || currentAirportCode || 'SEA';
+  const showResultsNewTripCta = shouldShowResultsNewTripCta(searchParams);
   const scrollToParkingOptions = () => {
     const sectionId = isCityTrip
       ? POINT_AB_DETAILS_SECTION_IDS.parking
@@ -6461,6 +7088,92 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
     return [googleTransit];
   }, [cityDestinationText, currentAirport, currentAirportCode, isCityTrip, tripData?.destination, tripData?.origin]);
+
+  const cityTripStaticEventSignal = useMemo<EventParkingSignal | null>(() => {
+    if (!isCityTrip || !tripData) return null;
+
+    return isEventVenueDestination({
+      destination: cityDestinationText || tripData.destination,
+      origin: tripData.origin,
+      destinationKind: tripData.destinationKind,
+      airportCode: (tripData as TripDataWithExtras).airportCode,
+    })
+      ? buildStaticEventVenueSignal()
+      : null;
+  }, [
+    cityDestinationText,
+    isCityTrip,
+    tripData?.destination,
+    tripData?.destinationKind,
+    tripData?.origin,
+    (tripData as TripDataWithExtras | null)?.airportCode,
+  ]);
+  const cityTripEventParkingSignal = dynamicEventParkingSignal ?? cityTripStaticEventSignal;
+  const cityTripEventParkingLikely = Boolean(cityTripEventParkingSignal);
+
+  useEffect(() => {
+    if (!isCityTrip || !tripData) {
+      eventLookupRequestKeyRef.current = '';
+      setDynamicEventParkingSignal(null);
+      return;
+    }
+
+    const body = {
+      destination: tripData.destination,
+      destinationName: cityDestinationText || tripData.destination,
+      destinationKind: tripData.destinationKind,
+      origin: tripData.origin,
+      airportCode: (tripData as TripDataWithExtras).airportCode,
+      destinationLat: tripData.destinationLat,
+      destinationLng: tripData.destinationLng,
+      parkingCheckInDate: tripData.parkingCheckInDate,
+      parkingCheckInTime: tripData.parkingCheckInTime,
+      arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
+      arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
+    };
+    const requestKey = JSON.stringify(body);
+    if (eventLookupRequestKeyRef.current === requestKey) return;
+
+    eventLookupRequestKeyRef.current = requestKey;
+    setDynamicEventParkingSignal(null);
+
+    const controller = new AbortController();
+
+    fetch('/api/events/parking-signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { signal?: EventParkingSignal | null } | null) => {
+        if (controller.signal.aborted || eventLookupRequestKeyRef.current !== requestKey) return;
+        const signal = data?.signal;
+        setDynamicEventParkingSignal(signal && signal.status !== 'none' ? signal : null);
+      })
+      .catch(() => {
+        if (controller.signal.aborted || eventLookupRequestKeyRef.current !== requestKey) return;
+        setDynamicEventParkingSignal(null);
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    cityDestinationText,
+    isCityTrip,
+    tripData?.destination,
+    tripData?.destinationKind,
+    tripData?.destinationLat,
+    tripData?.destinationLng,
+    tripData?.origin,
+    tripData?.type,
+    tripData?.parkingCheckInDate,
+    tripData?.parkingCheckInTime,
+    tripData && tripData.type === 'general-trip' ? tripData.arrivalDate : null,
+    tripData && tripData.type === 'general-trip' ? tripData.arrivalTime : null,
+    (tripData as TripDataWithExtras | null)?.airportCode,
+  ]);
 
   const recommendationRouteUnavailableForRefresh =
     Boolean(recommendation?.airportRouteUnavailable) ||
@@ -7164,6 +7877,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   // Excel-style counts: how many lots in the current result set match each
   // feature, before active parking filters are applied.
   const parkingFeatureCounts = countParkingFeatureMatches(parkingOptionsBeforeFeatureFilter);
+  const hasBaseParkingOptions = parkingOptionsBeforeFeatureFilter.length > 0;
+  const hasActiveParkingFeatureFilters = hasActiveParkingFilters(
+    travelPreferences.parkingFilters,
+  );
 
   const parkingDisplayOptions = (() => {
     const options = sortedParkingForCurrentTab.map((opt) => opt.option as ParkingOption);
@@ -7189,6 +7906,9 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
   const enrichedParkingDisplayOptions = parkingDisplayOptions.map(
     (option) => normalizeParkingReviewSummary(googleEnrichedParking[option.id] || option),
   );
+  const hasFilteredParkingOptions = enrichedParkingDisplayOptions.length > 0;
+  const parkingFiltersEmptyState =
+    hasBaseParkingOptions && hasActiveParkingFeatureFilters && !hasFilteredParkingOptions;
   const visibleSmartPickOption =
     enrichedParkingDisplayOptions[0] ||
     (smartPickOption ? googleEnrichedParking[smartPickOption.id] || smartPickOption : null);
@@ -7210,19 +7930,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           scoreBreakdowns: recommendation.optionScoreBreakdowns ?? null,
         })
       : null;
-  const cityTripParkingOutlook =
-    isCityTrip && tripData
-      ? buildParkingOutlook({
-          destination: cityDestinationText || tripData.destination,
-          destinationKind: tripData.destinationKind,
-          airportCode: (tripData as TripDataWithExtras).airportCode,
-          googleParkingOptions: cityTripBestParking?.googleParkingOptions ?? null,
-          arrivalDate: tripData.type === 'general-trip' ? tripData.arrivalDate : undefined,
-          arrivalTime: tripData.type === 'general-trip' ? tripData.arrivalTime : undefined,
-          durationMinutes: tripData.parkingDuration ?? undefined,
-        })
-      : null;
-  const cityTripEventParkingLikely = cityTripParkingOutlook?.headline === 'Event parking likely';
   const cityTripParkRideSelection = (() => {
     if (!isCityTrip || !tripData) return null;
 
@@ -7472,8 +8179,8 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               </span>
             </div>
           ) : null}
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
-            {/* Left: main decision */}
+          <div className="grid grid-cols-1 gap-5 lg:items-start">
+            {/* Main trip context */}
             <div>
               <div className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
                 {tripBadgeLabel}
@@ -7486,10 +8193,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     ? 'No reliable option gets you airport-ready on time'
                     : isCityTrip && cityTripHeroRecommendation
                       ? cityTripHeroRecommendation.title
-                    : intent === 'flying-out' && tripData.type === 'one-way-departure' && primaryLeaveByTime
-                      ? `You should leave at ${formatTimeFriendly(primaryLeaveByTime)}`
+                    : intent === 'flying-out' && tripData.type === 'one-way-departure'
+                      ? `${displayDestination} trip plan`
                       : recommendation.leaveByTime
-                        ? `You should leave at ${formatTimeFriendly(recommendation.leaveByTime)}`
+                        ? `${displayDestination} trip plan`
                         : 'Your best options'}
               </h1>
 
@@ -7497,23 +8204,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                   {cityTripHeroRecommendation.reason}
                 </p>
-              ) : null}
-
-              {shouldRenderParkingSections && isCityTrip && cityTripPointAbRanking && cityTripParkingOutlook ? (
-                <PointAbHeroSummary
-                  className="mt-4"
-                  ranking={cityTripPointAbRanking}
-                  parkingOutlook={cityTripParkingOutlook}
-                  driveTimeLabel={
-                    recommendation.trafficEstimate?.duration
-                      ? formatMinutes(recommendation.trafficEstimate.duration)
-                      : null
-                  }
-                  backupRoutingUsed={
-                    isBackupRouteEstimate(recommendation.trafficEstimate) ||
-                    isStraightLineRouteEstimate(recommendation.trafficEstimate)
-                  }
-                />
               ) : null}
 
               {isCityTrip ? (
@@ -7680,89 +8370,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 ) : null
               ) : (
                 <>
-                  <AirportTripCard
-                    airportCode={currentAirportCode}
-                    airlineOrFlight={airlineOrFlight || null}
-                    leaveByTime={
-                      airportRouteUnavailable
-                        ? null
-                        : primaryLeaveByTime
-                    }
-                    parkingPickName={
-                      shouldRenderParkingSections
-                        ? primaryAirportPlan.selectedParkingName ||
-                          (smartPickOption
-                            ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
-                            : null)
-                        : null
-                    }
-                    bagPlan={
-                      airportCompanionCard?.bagPlan ??
-                      resolveBagPlan({
-                        bagPlan: 'bagPlan' in tripData ? tripData.bagPlan : undefined,
-                        checkingBags: 'checkingBags' in tripData ? !!tripData.checkingBags : false,
-                      })
-                    }
-                    checkingBags={
-                      'checkingBags' in tripData ? !!tripData.checkingBags : false
-                    }
-                    transportMode={
-                      shouldRenderParkingSections && primaryAirportPlan.selectedParkingName
-                        ? 'parking'
-                        : shouldRenderParkingSections ||
-                          airportCompanionCard?.transportMode !== 'parking'
-                          ? airportCompanionCard?.transportMode ?? null
-                          : null
-                    }
-                    transportModeLabel={
-                      shouldRenderParkingSections && primaryAirportPlan.selectedParkingName
-                        ? 'Parking'
-                        : shouldRenderParkingSections ||
-                          airportCompanionCard?.transportMode !== 'parking'
-                          ? airportCompanionCard?.transportModeLabel ?? null
-                          : null
-                    }
-                    travelMinutes={
-                      primaryAirportPlan.travelMinutes ?? airportCompanionCard?.travelMinutes ?? null
-                    }
-                    parkingBufferMinutes={
-                      shouldRenderParkingSections
-                        ? primaryAirportPlan.parkingBufferMinutes ??
-                          airportCompanionCard?.parkingBufferMinutes ??
-                          null
-                        : null
-                    }
-                    shuttleWalkMinutes={
-                      shouldRenderParkingSections
-                        ? primaryAirportPlan.shuttleWalkMinutes ??
-                          airportCompanionCard?.shuttleWalkMinutes ??
-                          null
-                        : null
-                    }
-                    parkingCheckInTime={primaryAirportPlan.parkingCheckInTime}
-                    departureTime={
-                      tripData.type === 'one-way-departure' ? tripData.departureTime : null
-                    }
-                    airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
-                    bookingUrl={
-                      shouldRenderParkingSections
-                        ? selectedParkingTimingOption?.sourceLink ??
-                          airportCompanionCard?.bookingUrl ??
-                          null
-                        : null
-                    }
-                    directionsUrl={
-                      shouldRenderParkingSections
-                        ? selectedParkingRouteLinks?.routeToParkingUrl ||
-                          selectedParkingTimingOption?.mapLink ||
-                          airportCompanionCard?.directionsUrl ||
-                          null
-                        : airportCompanionCard?.directionsUrl || null
-                    }
-                    returnDate={airportCompanionCard?.returnDate ?? null}
-                    intent={intent}
-                    tripData={tripData}
-                  />
                   {showInternalDebug ? (
                     <details className="group rounded-2xl border border-border bg-muted/40">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-foreground marker:hidden [&::-webkit-details-marker]:hidden">
@@ -7926,13 +8533,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 >
                   {isEditing ? 'Editing below' : 'Edit trip'}
                 </button>
-                <Link
-                  href="/trip"
-                  onClick={handleNewTripClick}
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  New trip
-                </Link>
+                {showResultsNewTripCta ? (
+                  <Link
+                    href="/trip"
+                    onClick={handleNewTripClick}
+                    className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    New trip
+                  </Link>
+                ) : null}
               </div>
             </div>
           </div>
@@ -8650,36 +9259,6 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
             return (
               <>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      Recommended plan
-                    </div>
-                    <h2 className="mt-3 max-w-4xl text-xl font-bold leading-tight text-foreground">
-                      {displayRecommendedTitle}
-                    </h2>
-                    <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-                      {displayRecommendedReason}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-muted/40 p-3 text-sm text-foreground sm:min-w-52 lg:hidden">
-                    <div className="text-xs font-semibold uppercase text-muted-foreground">
-                      Leave-by
-                    </div>
-                    <div className="mt-1 text-lg font-bold text-foreground">
-                      {primaryLeaveByTime
-                        ? formatTimeFriendly(primaryLeaveByTime)
-                        : 'Check timing'}
-                    </div>
-                    {!isCityTrip && primaryAirportPlan.basisText ? (
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {primaryAirportPlan.basisText}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
                 {(() => {
                   const selectedRowHidden = selectedModeRow
                     ? ('hiddenByPreference' in selectedModeRow &&
@@ -8687,62 +9266,127 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                       (parkingVisibilityMode === 'hidden_by_preference' &&
                         isParkingUiRowKey(selectedModeRow.key))
                     : false;
+
                   if (!selectedModeRow || selectedRowHidden || selectedModeRow.unavailable) {
                     return null;
                   }
+
                   const heroAction = cardActionFor(selectedModeRow.key);
-                  const heroCaveat = selectedModeRow.cons[0] || 'No major caveats noted';
-                  const heroWhyWon = [...selectedModeRow.pros.slice(0, 2), heroCaveat].filter(Boolean);
+                  const heroCaveat = selectedModeRow.cons[0] || null;
+                  const heroWhyWon =
+                    displayRecommendedReason ||
+                    selectedModeRow.pros.slice(0, 2).join(' · ') ||
+                    null;
+
+                  const airportHeroHeadline =
+                    !isCityTrip && primaryLeaveByTime
+                      ? `Leave at ${formatTimeFriendly(primaryLeaveByTime)}`
+                      : displayRecommendedTitle;
+                  const airportHeroSubheadline =
+                    !isCityTrip && primaryLeaveByTime ? displayRecommendedTitle : null;
+
+                  let heroPrimaryAction: { label: string; onClick: () => void } | null = {
+                    label: heroAction.label,
+                    onClick: heroAction.onClick,
+                  };
+                  let heroSecondaryAction: { label: string; onClick: () => void } | null = null;
+
+                  if (
+                    selectedModeRow.key === 'parking' &&
+                    selectedParkingTimingOption &&
+                    shouldRenderParkingSections
+                  ) {
+                    const officialCtas = resolveOfficialSeaGarageCtas(selectedParkingTimingOption);
+                    const parkingHandoff = buildParkingProviderHandoff(
+                      selectedParkingTimingOption,
+                      tripData,
+                      officialCtas.bookingUrl || selectedParkingTimingOption.sourceLink,
+                    );
+                    if (parkingHandoff.providerUrl) {
+                      heroPrimaryAction = {
+                        label: officialCtas.reserveLabel,
+                        onClick: () => {
+                          window.open(parkingHandoff.providerUrl || undefined, '_blank', 'noopener,noreferrer');
+                        },
+                      };
+                    }
+                    if (selectedParkingRouteLinks?.routeToParkingUrl) {
+                      heroSecondaryAction = {
+                        label: 'Route to parking',
+                        onClick: () => {
+                          window.open(
+                            selectedParkingRouteLinks.routeToParkingUrl || undefined,
+                            '_blank',
+                            'noopener,noreferrer',
+                          );
+                        },
+                      };
+                    }
+                  }
+
                   return (
-                    <div
-                      className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4"
-                      data-testid="recommended-plan-summary"
-                    >
-                      <div className="text-xs font-semibold uppercase tracking-wide text-primary">
-                        Recommended
-                      </div>
-                      <div className="mt-1 text-lg font-bold leading-tight text-foreground">
-                        Recommended: {displayRecommendedTitle}
-                      </div>
-                      <div
-                        className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-foreground"
-                        data-testid="recommended-plan-inline-metrics"
-                      >
-                        <span>{selectedModeRow.cost}</span>
-                        <span className="text-muted-foreground">·</span>
-                        <span>{selectedModeRow.time}</span>
-                        <span className="text-muted-foreground">·</span>
-                        <span>{selectedModeRow.confidence} confidence</span>
-                      </div>
-
-                      {heroWhyWon.length > 0 ? (
-                        <div className="mt-2 text-sm leading-6" data-testid="recommended-plan-why">
-                          <span className="text-muted-foreground">{heroWhyWon.join(' · ')}</span>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                        <button
-                          type="button"
-                          onClick={heroAction.onClick}
-                          className="inline-flex min-h-10 items-center justify-center rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
-                        >
-                          {heroAction.label}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => scrollToBestSection('compare-options-grid')}
-                          className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted/80"
-                        >
-                          Compare options
-                        </button>
-                      </div>
-                    </div>
+                    <ResultsRecommendationHero
+                      headline={airportHeroHeadline}
+                      subheadline={airportHeroSubheadline}
+                      cost={selectedModeRow.cost}
+                      time={selectedModeRow.time}
+                      confidence={selectedModeRow.confidence}
+                      caveat={heroCaveat}
+                      whyLine={heroWhyWon}
+                      primaryAction={heroPrimaryAction}
+                      secondaryAction={heroSecondaryAction}
+                      compareAction={{
+                        label: 'Compare other options',
+                        onClick: () => scrollToBestSection('compare-options-grid'),
+                      }}
+                    />
                   );
                 })()}
 
-                <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Compare options
+                {!isCityTrip && primaryLeaveByTime && !airportRouteUnavailable ? (
+                  <CompactTripTimeline
+                    className="mt-4"
+                    leaveByTime={primaryLeaveByTime}
+                    departureTime={
+                      tripData.type === 'one-way-departure' ? tripData.departureTime : null
+                    }
+                    travelMinutes={
+                      primaryAirportPlan.travelMinutes ?? airportCompanionCard?.travelMinutes ?? null
+                    }
+                    parkingBufferMinutes={
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.parkingBufferMinutes ??
+                          airportCompanionCard?.parkingBufferMinutes ??
+                          null
+                        : null
+                    }
+                    shuttleWalkMinutes={
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.shuttleWalkMinutes ??
+                          airportCompanionCard?.shuttleWalkMinutes ??
+                          null
+                        : null
+                    }
+                    parkingCheckInTime={primaryAirportPlan.parkingCheckInTime}
+                    airportBufferMinutes={airportReadiness?.bufferMinutes ?? null}
+                    transportMode={
+                      shouldRenderParkingSections && primaryAirportPlan.selectedParkingName
+                        ? 'parking'
+                        : airportCompanionCard?.transportMode ?? null
+                    }
+                    parkingPickName={
+                      shouldRenderParkingSections
+                        ? primaryAirportPlan.selectedParkingName ||
+                          (smartPickOption
+                            ? (googleEnrichedParking[smartPickOption.id] || smartPickOption).name
+                            : null)
+                        : null
+                    }
+                  />
+                ) : null}
+
+                <h3 className="mt-6 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Compare ways to get there
                 </h3>
 
                 <CompareOptionsDesktopHeader />
@@ -8786,7 +9430,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                                 pickupWait: 'Pickup wait',
                                 total: 'Total rideshare time',
                               }
-                            : row.key === 'destination-customer' || row.key === 'street-meter'
+                              : row.key === 'destination-customer' || row.key === 'street-meter'
                               ? {
                                   drive: 'Drive route',
                                   parkingBuffer:
@@ -8797,6 +9441,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                                   total: 'Total to destination',
                                   totalFirst: row.key === 'street-meter',
                                 }
+                              : row.key === 'park-ride'
+                                ? {
+                                    drive: 'Drive to Park & Ride',
+                                    pickupWait: 'Estimated wait',
+                                    walk: 'Walk to destination',
+                                    total: 'Total time',
+                                  }
                               : undefined;
                       const modeActions = rowHidden
                         ? undefined
@@ -9085,16 +9736,12 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           </section>
         ) : null}
 
-        {shouldRenderParkingSections ? (
-          <div className="mt-6 rounded-2xl border border-border bg-card/80 p-3 shadow-sm">
-            <TravelPreferencesPanel
-              value={travelPreferences}
-              onChange={setTravelPreferences}
-              embedded
-              hideBusinessModeOptions
-              featureCounts={parkingFeatureCounts}
-            />
-          </div>
+        {shouldRenderParkingSections && isCityTrip && cityTripEventParkingLikely ? (
+          <EventParkingWarning
+            className="mt-6"
+            destinationName={displayDestination}
+            signal={cityTripEventParkingSignal}
+          />
         ) : null}
 
         {shouldRenderParkingSections && isCityTrip && cityTripCustomerParkingIsPrimary ? (
@@ -9110,7 +9757,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           showParkingProviders &&
           shouldDiscoverParkingForTrip(tripData) &&
           (isCityTrip ? cityParkingPlanStatus === 'loading' || parkingEmptyStateMessage : parkingEmptyStateMessage) &&
-          parkingDisplayOptions.length === 0 &&
+          !hasBaseParkingOptions &&
           !routeUnavailableBlocksParking && (
             isCityTrip ? (
               showInternalDebug ? (
@@ -9143,7 +9790,10 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
         }
 
         {
-          shouldRenderParkingSections && showParkingProviders && parkingDisplayOptions.length > 0 && !routeUnavailableBlocksParking && (
+          shouldRenderParkingSections &&
+          showParkingProviders &&
+          (hasFilteredParkingOptions || parkingFiltersEmptyState) &&
+          !routeUnavailableBlocksParking && (
             <div
               id={isCityTrip ? POINT_AB_DETAILS_SECTION_IDS.parking : 'parking-options-section'}
               className={`mt-6 scroll-mt-24${isCityTrip ? ' scroll-target' : ''}`}
@@ -9152,9 +9802,55 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <h2 className="text-xl font-bold">
                     {allParkingRoutesUnavailable
-                      ? `Parking options near ${currentAirport.id}`
-                      : 'Parking options'}
+                      ? `Parking choices near ${currentAirport.id}`
+                      : 'Parking choices'}
                   </h2>
+                </div>
+              ) : null}
+
+              {shouldRenderParkingSections ? (
+                <ParkingFilterBar
+                  className="mb-4"
+                  preferences={travelPreferences}
+                  featureCounts={parkingFeatureCounts}
+                  onToggle={(key) => {
+                    setTravelPreferences((prev) => {
+                      const next = {
+                        ...prev,
+                        parkingFilters: {
+                          ...prev.parkingFilters,
+                          [key]: !prev.parkingFilters[key],
+                        },
+                      };
+                      writeTravelPreferences(next);
+                      return next;
+                    });
+                  }}
+                />
+              ) : null}
+
+              <p className="mb-4 text-xs leading-5 text-muted-foreground">
+                {PROVIDER_AFFILIATE_DISCLOSURE_SHORT}
+              </p>
+
+              {parkingFiltersEmptyState ? (
+                <div
+                  className="mb-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-5 text-sm shadow-sm"
+                  role="status"
+                >
+                  <div className="font-semibold text-zinc-950">
+                    No parking options match those filters.
+                  </div>
+                  <p className="mt-2 text-zinc-600">
+                    Try clearing filters or choosing fewer features.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearParkingFeatureFilters}
+                    className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                  >
+                    Clear filters
+                  </button>
                 </div>
               ) : null}
 
@@ -9194,7 +9890,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                 </div>
               )}
 
-              {parkingDisplayOptions.length > 0 && visibleSmartPickOption && (
+              {hasFilteredParkingOptions && visibleSmartPickOption && (
                 <>
                   {showInternalDebug ? (
                     <>
@@ -9231,8 +9927,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                   />
                 </>
               )}
-              <div className="fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 sm:bottom-5 sm:pr-44">
-                {/* Show Parking Lots Map */}
+              <div className="fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 sm:bottom-5">
                 <div className="pointer-events-none flex max-w-full items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white/90 p-1.5 shadow-[0_12px_35px_rgba(15,23,42,0.18)] backdrop-blur-md">
                   <button
                     type="button"
@@ -9251,23 +9946,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                     <span>Map</span>
                   </button>
 
-                  {!isCityTrip ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        trackEvent('airport_tab_clicked', {
-                          accessToken,
-                          eventProperties: {
-                            airportCode: currentAirportCode,
-                          },
-                        });
-                        setShowAirportGuideModal(true);
-                      }}
-                      className="pointer-events-auto inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.98]"
+                  {showResultsNewTripCta ? (
+                    <Link
+                      href="/trip"
+                      onClick={handleNewTripClick}
+                      className="pointer-events-auto inline-flex h-11 cursor-pointer items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.98]"
                     >
                       <span className="text-base leading-none">✈️</span>
-                      <span>Airport</span>
-                    </button>
+                      <span>New trip</span>
+                    </Link>
                   ) : null}
                 </div>
               </div>
@@ -9521,16 +10208,13 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {shouldRenderParkingSections && displayableRemainingParking.length > 0 && !routeUnavailableBlocksParking && (
                 <section id="more-parking-options-section" className="mt-8 scroll-mt-6">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-semibold text-zinc-900">
-                        More parking options
-                      </h2>
-                      <p className="mt-1 text-sm text-zinc-600">
-                        Additional live and baseline parking choices.
+                    {!canShowMoreParking ? (
+                      <p className="text-sm text-muted-foreground">
+                        Additional parking choices beyond the top picks.
                       </p>
-                    </div>
+                    ) : null}
 
-                    {!routeUnavailableBlocksParking && canShowMoreParking && (
+                    {!routeUnavailableBlocksParking && canShowMoreParking ? (
                       <button
                         type="button"
                         onClick={() =>
@@ -9543,17 +10227,15 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
                         }
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
                       >
-                        {`Show ${nextParkingShowMoreCount} more parking option${
-                          nextParkingShowMoreCount === 1 ? '' : 's'
-                        }`}
+                        Show more parking options
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   {routeUnavailableBlocksParking ? (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
                       <div className="font-semibold">
-                        Parking options are not usable from this origin
+                        Parking choices are not usable from this origin
                       </div>
                       <p className="mt-2">
                         Your starting location appears to be too far from the selected airport area,
@@ -9573,6 +10255,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
 
                         return (
                         <OptionCard
+                          compact
                           aprLivePrices={aprLivePrices}
                           aprLiveChecking={aprLiveChecking}
                           key={`parking-reachable-${opt.type}-${(opt.option as AppOption).id || idx}`}
@@ -9601,7 +10284,7 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
               {shouldRenderParkingSections && routeUnavailableBlocksParking && (
                 <section className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
                   <h2 className="text-lg font-semibold text-amber-950">
-                    Parking options are unavailable from this origin
+                    Parking choices are unavailable from this origin
                   </h2>
 
                   <p className="mt-2 text-sm leading-6 text-amber-900">
@@ -9853,15 +10536,17 @@ export default function ResultsContent({ storedSearchParams }: ResultsContentPro
           <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-muted-foreground">
             {DATA_TRANSPARENCY_DISCLOSURE}
           </p>
-          <div className="flex justify-center">
-            <Link
-              href="/trip"
-              onClick={handleNewTripClick}
-              className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-            >
-              Plan another trip
-            </Link>
-          </div>
+          {showResultsNewTripCta ? (
+            <div className="flex justify-center">
+              <Link
+                href="/trip"
+                onClick={handleNewTripClick}
+                className="inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-5 py-3 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+              >
+                Plan another trip
+              </Link>
+            </div>
+          ) : null}
         </div>
       </main>
       {tripData && recommendation ? (

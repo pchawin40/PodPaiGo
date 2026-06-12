@@ -31,7 +31,9 @@ describe('ParkingLotVisual attribution', () => {
     const img = screen.getByAltText('Google First Lot photo') as HTMLImageElement;
     expect(img.src).toContain('/api/google-place-photo?');
     expect(img.src).toContain(encodeURIComponent('places/abc/photos/primary'));
-    expect(screen.getByText('Google photo')).toBeInTheDocument();
+    expect(screen.queryByText('Google photo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Lot photo')).not.toBeInTheDocument();
+    expect(screen.getByText(/Photo © Google/)).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -83,7 +85,8 @@ describe('ParkingLotVisual attribution', () => {
 
     const img = screen.getByAltText('Quality Inn SEA Airport Parking photo') as HTMLImageElement;
     expect(img.src).toContain('Quality_Inn_SEA.png');
-    expect(screen.getByText('Lot photo')).toBeInTheDocument();
+    expect(screen.queryByText('Lot photo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Google photo')).not.toBeInTheDocument();
     expect(screen.getByText('ParkWhiz')).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -290,7 +293,8 @@ describe('ParkingLotVisual attribution', () => {
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
     expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toContain('priority=visible');
-    expect(screen.getAllByText('Google photo').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Google photo')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Photo © Google/).length).toBeGreaterThan(0);
   });
 
   test('does not render parking review rating or count on the photo card', async () => {

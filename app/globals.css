@@ -904,3 +904,101 @@ textarea::placeholder {
 .scroll-target {
   scroll-margin-top: 96px;
 }
+
+/* Results-page inline timeline — plain class hooks (no escaped Tailwind descendant selectors). */
+.ppg-inline-timeline {
+  color: var(--foreground);
+}
+
+.ppg-inline-timeline-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ppg-inline-timeline-connector {
+  background-color: var(--border);
+}
+
+.ppg-inline-timeline-badge {
+  border: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--muted) 50%, transparent);
+  color: var(--primary);
+}
+
+.ppg-inline-timeline-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.ppg-inline-timeline-time {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.ppg-inline-timeline-estimated {
+  margin-left: 0.25rem;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ppg-inline-timeline-detail {
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+
+/* Dark sidebar timeline (AirportTripCard). */
+.ppg-sidebar-timeline-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(203 213 225);
+}
+
+.ppg-sidebar-timeline-connector {
+  background-color: rgb(255 255 255 / 0.15);
+}
+
+.ppg-sidebar-timeline-badge {
+  border: 1px solid rgb(255 255 255 / 0.2);
+  background-color: rgb(255 255 255 / 0.1);
+  color: rgb(186 230 253);
+}
+
+.ppg-sidebar-timeline-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgb(255 255 255);
+}
+
+.ppg-sidebar-timeline-time {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(186 230 253);
+}
+
+.ppg-sidebar-timeline-estimated {
+  margin-left: 0.25rem;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(148 163 184);
+}
+
+.ppg-sidebar-timeline-detail {
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: rgb(148 163 184);
+}

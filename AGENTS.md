@@ -26,7 +26,7 @@ After updating:
 # Current PodPaiGo State
 
 **Product focus**
-- Beta trip-planning experience for airport, point A→B/city, and Quick Go trips, built around progressive disclosure: every major screen shows the primary answer/action first, with customization, explanations, evidence, and caveats collapsed behind expandable sections. Honest live/estimated/cached/provider labels stay visible.
+- Beta trip-planning experience for airport, point A-B/city, event/stadium, and Quick Go trips, built around progressive disclosure: every major screen shows the primary answer/action first, with customization, explanations, evidence, and caveats collapsed behind expandable sections. Honest live/estimated/cached/provider labels stay visible.
 
 **Active priorities**
 - Progressive disclosure uses the shared `app/components/ui/ExpandableSection.tsx` (accessible button + `aria-expanded`/`aria-controls`, chevron, optional `summary`, controlled or uncontrolled `open`; body stays mounted via the `hidden` attribute so form values and validation persist while collapsed). No external UI libraries.
@@ -34,28 +34,236 @@ After updating:
 - QuickGoPanel default view = destination input + Quick Go CTA + "Starting from … Change"; trip purpose, timing, preference, parking duration, leave-time, family/luggage, and transport availability all live in a collapsed "Customize trip" section. Origin editor stays behind the existing Change button; geolocation/recent/saved origin, query params, analytics, and autocomplete are unchanged.
 - TripFlow step 2 keeps essentials visible (general: destination, origin, date/time; airport: airport, origin, departure/arrival time, See options) and collapses Transportation preferences, general Parking preferences/advanced time, Airline/flight details, and Airport readiness (compact "Recommended buffer: X min" summary). The airport "Parking time" section holds the required trip date, so it is a controlled ExpandableSection that starts open and auto-reopens on parking-date validation errors. Validation behavior is otherwise unchanged.
 - Quick Go results card keeps destination, best way, drive/total time, leave-by, parking expectation, and one primary CTA visible; Why this recommendation / Parking details / Backup option are collapsed. Urgent airport-prompt and warning cards stay visible.
-- Results page preserves the lean Recommended plan hero + compact Compare options; do NOT reintroduce the old large public Parking plan block; keep CTAs (Open directions, Route to parking, Reserve/Compare provider, View parking details) and honest labels visible.
+- Results page uses one unified `ResultsRecommendationHero` (leave time + recommended parking/mode, inline cost/time/confidence/caveat, why line, Reserve/Route + Compare other options CTAs), a collapsed `CompactTripTimeline` below the hero, compact Compare ways to get there scoreboard rows, and a Parking choices section with `ParkingFilterBar` directly above the list, compact `ParkingSmartPick` and regular OptionCard parking cards, only 2 additional lot cards by default + "Show more parking options", short provider disclosure near parking CTAs, contextual sticky Map, and airport-only New trip actions. Google Maps parking search is a true no-parking-data fallback only, not shown during normal parking-card/filter flows. Do NOT reintroduce the old large public Parking plan block.
+- Parking cards default compact across Smart Pick and normal "More parking options" cards: thumbnail/banner image without visible photo-source overlay pills, curated badge row, lot name, honest price/source line, one-line total timing, one short reason, and max-two visible CTAs. Smart Pick and normal compact parking OptionCards may show one real rating/review-count badge when review data exists. Visible parking actions are reserve/check-provider and Route to parking only; do not reintroduce a Walk to destination button. Expanded Details use the cleaner Smart Pick-style disclosure with lightweight Booking, Timing, Why this option, and Price/source sections; walking/transfer time stays as text in Timing, while source/audit/extra badges/assumptions live under Data source details.
+- Parking price display should flow through the shared `formatParkingPriceLine` / `parkingPriceLine` formatter across Smart Pick, regular OptionCard rows, provider cards, and shared result surfaces. Range headlines must use provider/official rate-range secondary copy, exact totals may show `$X/day × N days`, live provider totals stay `Live`, from/cached prices stay `From`/provider-linked, and unknown prices say `Check live price`.
 - Compare options stay a compact scoreboard with fixed desktop columns (Option, Status, Cost, Time, Note, Action), one quiet action per row (View / Why?), and pros/cons/timing/evidence in lower Details sections.
+- Ranking/timing honesty: rideshare never faster than main drive; paid garage/lot full-trip timing uses main-drive-estimate guards; Easiest uses price only as a bounded secondary/tiebreaker while Cheapest remains price-first and Fastest remains time-first; unknown prices must not beat known reasonable prices when ease is similar.
+- Park & Ride totals include estimated wait time in ranking and display. Defaults are light rail/subway/train 8 min, bus/unknown 10 min, ferry 15 min, and low-frequency/uncertain 15 min unless a stronger wait/headway signal exists. Label wait as estimated unless a truly live schedule source exists.
 - Quick Go Best Way uses practical total origin-to-destination timing (estimated/fallback intercity transit and local Park & Ride corridor estimates must not beat known drive/rideshare unless transit-only is selected); honor materially faster verified local transit/rideshare; synthetic "Drive" for free/customer-parking or impractical-transit trips.
-- Keep airport, city/general, and event/stadium parking logic separate; never fake or mislabel live prices. Public/non-admin surfaces stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
+- Keep airport, city/general, and event/stadium parking logic separate; event warnings use the server-side event signal path (`/api/events/parking-signal`) with Ticketmaster lookup when enabled and static venue fallback when disabled/missing/failing. Ticketmaster lookup must use selected trip time in priority order: parking check-in, arrival, trip date/time, then now-fallback only when no trip time exists. Never fake or mislabel live prices. Public/non-admin surfaces stay free of debug/env diagnostics (debug UI gate is admin AND debug flag).
 
 **Current known issues**
-- All UI/UX progressive-disclosure changes are verified by Jest/DOM tests, typecheck, lint (no new issues), and production build only; no live browser/mobile screenshot pass yet.
-- Parking lot list cards below the results hero are still fairly dense; per-lot details/evidence remain a documented future pass. ResultsContent was intentionally not restructured this pass to avoid risk in the heavily-tested 11k-line file.
+- Results UI/ranking/timing cleanup is verified by targeted Jest/DOM tests and production build only; no live browser/mobile screenshot pass yet.
+- Dynamic Ticketmaster event lookup is covered by mocked server/API tests only; no live Ticketmaster-key validation has been run yet.
 - Quick Go Bend/intercity transit suppression is covered by tests only; no live Bend route/browser validation.
-- Pre-existing full-suite failures unrelated to this work: `lib/parking/__tests__/parkAndRidePointAb.test.tsx`, `app/components/__tests__/TripRecalculatingLoader.test.tsx`, `lib/__tests__/providersParkingRouteLimit.test.ts`, `lib/providers/parking/providers/inventory/__tests__/provider.test.ts` (none import the changed UI modules).
+- Pre-existing full-suite failures unrelated to this work: `lib/parking/__tests__/parkAndRidePointAb.test.tsx`, `app/components/__tests__/TripRecalculatingLoader.test.tsx`, `lib/__tests__/providersParkingRouteLimit.test.ts`, `lib/providers/parking/providers/inventory/__tests__/provider.test.ts`.
 
 **Beta validation checklist**
-- ExpandableSection: collapsed sections keep children mounted (form values/validation persist); toggle exposes `aria-expanded`; chevron rotates; controlled `open`/`onOpenChange` works (used by TripFlow Parking time).
+- ExpandableSection: collapsed sections keep children mounted (form values/validation persist); toggle exposes `aria-expanded`; chevron rotates; controlled `open`/`onOpenChange` works (used by TripFlow Parking time and Smart Pick parking Details).
 - Home: above the fold reads as one promise + actions; "How it works" and "How PodPaiGo uses data" expand/collapse; footer/privacy/about and the PodPaiGoAssistant remain.
 - QuickGoPanel: a first-time user sees destination + Quick Go without parsing options; "Customize trip" expands to all settings; geolocation/recent/saved origin, query params, analytics, and keyboard autocomplete still work.
 - TripFlow: collapsed sections expand correctly; airport "Parking time" starts open and auto-opens when a parking date error needs fixing; hidden fields still submit/validate; "See options" submits with correct params.
 - Quick Go results: destination, best way, drive/total time, leave-by, parking expectation, and Open directions visible; Why / Parking details / Backup expand; airport prompt still visible.
-- Results: Recommended plan hero is the first answer; Compare options stay compact with one quiet action per row; no large public Parking plan block reappears; honest live/estimated/cached/provider labels and key CTAs stay visible.
-- Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; official airport price ranges read as estimates with daily-rate basis and confirm-with-airport caveat.
+- Results airport: unified Recommended plan hero answers leave time, parking pick, cost, time, confidence, why, and primary/secondary CTAs within seconds; compact Timeline expands to full steps; Compare ways to get there is secondary; Parking choices shows Filter parking once above the list, 1 Smart Pick + 2 more cards by default, with Details collapsed; New trip remains available for airport results only.
+- Results city/general: hero shows best mode + metrics; Compare rows and parking choices follow the same compact pattern; New trip is hidden on normal city/point A-B/Quick Go results while saved-trip fallback still shows Start a new trip.
+- Parking cards: Smart Pick and normal OptionCard parking cards both default short, keep provider/route CTAs working, show no more than two visible actions on normal cards, avoid large `Google photo`/`Lot photo` image overlay pills, keep required photo attribution as subtle text, never show a visible Walk to destination button, and keep Details readable with Booking, Timing, Why this option, Price/source, plus secondary Data source details for audit-like material.
+- Parking filters: counts stay based on the unfiltered base lot list; if active filters remove every matching lot, keep Filter parking visible, show `No parking options match those filters.`, and provide `Clear filters` to restore the cards. Do not show Google Maps parking search for filtered-empty states when base options exist.
+- Photo/review validation: Google/provider/fallback parking images still render; required Google/provider attribution remains available below the image; Smart Pick and normal compact parking OptionCards show one real `★ rating · N reviews` badge when rating/count data exists, keep it deduplicated, and show no fake rating when missing.
+- Event/stadium validation: Lumen Field / T-Mobile Park / Climate Pledge Arena show one compact warning near parking choices; confirmed Ticketmaster matches say `Event detected nearby` with event/time/source, static-only matches say `Event venue caution`, normal city destinations and airport trips do not show event warnings; future-trip lookups use the selected trip date/time rather than current events.
+- Ranking validation: Easiest still favors low-friction/reliable options, uses price only between similarly easy options, does not prefer unknown price over known reasonable price, and leaves Cheapest/Fastest behavior unchanged.
+- Park & Ride validation: totals and compare rows include estimated wait; breakdown shows Estimated wait; Quick Go/point A-B ranking uses wait-inclusive total time; no fake live schedule claims.
+- Honesty checks: rideshare without live quote says Open app for live price; transit/Park & Ride unconfirmed states remain explicit; parking range totals never show a single daily-price basis; official ranges say official daily rate range, provider-linked ranges say provider rate range, live totals say Live, and unknown prices say Check live price.
 <!-- AGENT_STATE_END -->
 
 # Recent Change Log
+
+### 2026-06-12 — Parking card Details polish and AGENTS refresh
+
+**Summary**
+- Smart Pick and normal parking cards now share the cleaner Details disclosure styling.
+- Parking Details focus on Booking, Timing, Why this option, and Price/source; audit-like source details stay behind Data source details.
+- Visible Walk to destination parking-card actions were removed; walking time remains as Timing text when available.
+- AGENTS.md current-state summary was refreshed for this parking Details behavior.
+
+### 2026-06-12 — Normal parking OptionCard review badges restored
+
+**Summary**
+- Normal compact parking OptionCards now show a real rating/review-count badge when Google/provider review summary data exists, matching Smart Pick behavior.
+- The visible review badge is clickable when review details are available and is not duplicated inside Details.
+- AGENTS.md current-state summary was refreshed for this review-badge behavior.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 41 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — Parking fallback search hidden during normal results and filter recovery added
+
+**Summary**
+- Hid `Open Google Maps parking search` whenever base parking options exist, including normal card/filter flows.
+- Kept Google Maps parking search only for true no-parking-data fallback states.
+- Added a filtered-empty parking state that keeps `Filter parking` visible, explains no options match the active filters, and provides `Clear filters` to restore cards.
+- AGENTS.md current-state summary was refreshed for this parking filter/fallback behavior.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 41 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — Parking image attribution and Smart Pick review badge polish
+
+**Summary**
+- Removed the visible white parking-photo source overlay pill (`Google photo` / `Lot photo`) from parking thumbnails.
+- Kept required Google/provider photo attribution as small muted text below the image; fallback illustrations still render without the large overlay pill.
+- Smart Pick now shows one real rating/review-count badge in the compact badge row when review summary data exists, without duplicating the same badge in Details or faking missing reviews.
+- AGENTS.md current-state summary was refreshed for this parking-card polish.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ParkingLotVisual.test.tsx --runInBand` passed, 64 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — Normal parking OptionCard compact polish
+
+**Summary**
+- Normal parking OptionCards now align more closely with Smart Pick: compact thumbnail/content grid, curated max-three badge row, one timing summary line, one reason line, and max-two visible actions.
+- Reserve/provider and Route to parking actions now sit under the card summary instead of in a detached right rail; Walk to destination/transfer actions moved into Details.
+- Booking helper, timing breakdown, extra badges, reviews, caveats, and why/evidence remain preserved in collapsed Details.
+- AGENTS.md current-state summary was refreshed for the parking-card polish.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 52 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — Compact parking cards, selected event time, Easiest price tie-break, and Park & Ride wait time
+
+**Summary**
+- Normal results parking OptionCards now match the compact Smart Pick default: thumbnail, badges, honest price/source, total time, one reason, CTAs, and collapsed Details for booking helper, timing breakdown, why/evidence, reviews, and caveats.
+- Ticketmaster/event lookup now resolves the selected trip time before falling back to now: parking check-in, arrival time, trip date/time, then now-fallback.
+- Easiest sorting uses price as a bounded secondary/tiebreaker while preserving Cheapest as price-first and Fastest as time-first.
+- Park & Ride access, point A-B ranking, details, and compare timing now include estimated wait time.
+- AGENTS.md current-state summary was refreshed for these results-page fixes.
+
+**Tests run and result**
+- `npm test -- --runTestsByPath app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx app/components/__tests__/OptionComparisonCard.test.tsx lib/events/__tests__/ticketmaster.test.ts lib/parking/__tests__/sortParkingOptions.test.ts lib/parking/__tests__/pointAbRanking.test.ts lib/access/__tests__/parkAndRideAccess.test.ts --runInBand` passed, 152 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — Dynamic event lookup signal for results parking warnings
+
+**Summary**
+- Added a server-only Ticketmaster Discovery API lookup behind `/api/events/parking-signal`, gated by `ENABLE_EVENT_LOOKUP` and `TICKETMASTER_API_KEY`.
+- Normalized event parking output into `EventParkingSignal`; confirmed Ticketmaster matches show event name, venue, time, source, and optional event URL.
+- Preserved static venue fallback when lookup is disabled, key is missing, API fails, no event matches, or destination data is incomplete.
+- Kept airport trips free of event warnings and normal city trips warning-free unless static venue detection or a confirmed API event applies.
+- Added in-memory TTL caching and public endpoint rate limiting for the event lookup path.
+
+**Files changed**
+- `app/api/events/parking-signal/route.ts`
+- `lib/events/ticketmaster.ts`
+- `lib/events/eventParkingSignal.ts`
+- `lib/types.ts`
+- `app/results/EventParkingWarning.tsx`
+- `app/results/ResultsContent.tsx`
+- `.env.example`
+- `lib/events/__tests__/ticketmaster.test.ts`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/events/__tests__/ticketmaster.test.ts lib/parking/__tests__/eventVenueDetection.test.ts app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 49 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — AGENTS.md current-state summary refreshed
+
+**Summary**
+- AGENTS.md current-state summary was refreshed for dynamic event lookup, static venue fallback behavior, and event-warning validation notes.
+
+### 2026-06-12 — Results event parking warning and airport-only New trip CTA
+
+**Summary**
+- Added a compact event parking caution banner for detected stadium/event destinations near results parking choices.
+- Kept event warnings off airport trips and normal city/general destinations unless shared event-venue detection matches.
+- Changed results header/in-page New trip CTAs to show only for airport-related result params; city/general/point A-B results hide them while saved-trip fallback still shows Start a new trip.
+- Updated roadmap event/stadium warning copy.
+
+**Files changed**
+- `app/results/EventParkingWarning.tsx`
+- `app/results/ResultsSiteHeader.tsx`
+- `app/results/resultsNewTripCta.ts`
+- `app/results/ResultsContent.tsx`
+- `app/results/page.tsx`
+- `app/results/[tripId]/page.tsx`
+- `app/components/SiteHeader.tsx`
+- `app/roadmap/page.tsx`
+- `lib/parking/__tests__/eventVenueDetection.test.ts`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `app/results/__tests__/ResultsSiteHeader.test.tsx`
+- `app/results/__tests__/StoredResultsPage.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath lib/parking/__tests__/eventVenueDetection.test.ts app/results/__tests__/ResultsContentHookOrder.test.tsx app/results/__tests__/ResultsSiteHeader.test.tsx app/results/__tests__/StoredResultsPage.test.tsx --runInBand` passed, 45 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — AGENTS.md current-state summary refreshed
+
+**Summary**
+- AGENTS.md current-state summary was refreshed for event/stadium parking warnings and airport-only results New trip CTA behavior.
+
+### 2026-06-12 — Parking price display consistency across parking cards
+
+**Summary**
+- Updated the shared parking price formatter so range-total headlines use range-based secondary copy instead of a single daily price basis.
+- Official range totals now say they are based on the official daily rate range; provider-linked/estimated range totals say they are based on the provider rate range.
+- Exact totals can still show `$X/day × N days`; live provider totals say `Live price from [provider]`; from/cached prices show provider-linked confirmation copy; unknown prices show `Check live price`.
+- Smart Pick and regular ResultsContent OptionCard parking rows now share the corrected formatter behavior.
+
+**Files changed**
+- `lib/access/pricingLadder.ts`
+- `lib/access/types.ts`
+- `__tests__/parkingPriceDisplay.test.ts`
+- `lib/access/__tests__/pricingLadder.test.ts`
+- `lib/parking/__tests__/parkingTrustCleanup.test.ts`
+- `app/results/__tests__/ParkingSmartPick.test.tsx`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- `npm test -- --runTestsByPath __tests__/parkingPriceDisplay.test.ts app/results/__tests__/ParkingSmartPick.test.tsx app/results/__tests__/ResultsContentHookOrder.test.tsx --runInBand` passed, 57 tests.
+- `npm test -- --runTestsByPath lib/access/__tests__/pricingLadder.test.ts lib/parking/__tests__/parkingTrustCleanup.test.ts lib/parking/__tests__/priceDisplay.test.ts --runInBand` passed, 16 tests.
+- `npm run build` passed.
+
+### 2026-06-12 — AGENTS.md current-state summary refreshed
+
+**Summary**
+- Refreshed the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` Current PodPaiGo State section to include shared parking price display rules and updated price-honesty validation notes.
+
+### 2026-06-10 23:45 PDT — Results page UI cleanup (unified hero, compact timeline, parking disclosure)
+
+**Summary**
+- Added `ResultsRecommendationHero`, `CompactTripTimeline`, and `ParkingFilterBar`; unified the recommended plan into one hero (leave time + parking/mode, inline metrics, why line, Reserve/Route + Compare other options CTAs).
+- Removed the heavy sidebar `AirportTripCard` from public results; airport timeline is now a compact expandable row below the hero.
+- Renamed Compare section to "Compare ways to get there"; moved parking filters to a single block directly above Parking choices; default parking list shows Smart Pick plus 2 additional cards with "Show more parking options".
+- Refactored `ParkingSmartPick` into a compact card (thumbnail, price, time, 2 CTAs, collapsed Details/Booking helper via `ExpandableSection`).
+- Added `PROVIDER_AFFILIATE_DISCLOSURE_SHORT` near parking CTAs; sticky bottom actions are Map + New trip; top trip headline no longer duplicates leave-by.
+- Scoring, ranking, pricing, route, and provider logic unchanged.
+
+**Files changed**
+- `app/components/results/ResultsRecommendationHero.tsx`
+- `app/components/results/CompactTripTimeline.tsx`
+- `app/components/results/ParkingFilterBar.tsx`
+- `app/results/ResultsContent.tsx`
+- `app/results/ParkingSmartPick.tsx`
+- `lib/marketing/publicCopy.ts`
+- `app/results/__tests__/ResultsContentHookOrder.test.tsx`
+- `app/results/__tests__/ParkingSmartPick.test.tsx`
+- `AGENTS.md`
+
+**Tests run and result**
+- Targeted Jest (ResultsContentHookOrder, ParkingSmartPick, OptionComparisonCard): 64 passed.
+- Full suite: 1347 passed, 5 failed (pre-existing in parkAndRidePointAb, TripRecalculatingLoader, providersParkingRouteLimit, inventory provider); 5 skipped.
+- `npm run build` passed.
+- `npm run lint` reports pre-existing repo-wide issues; no new errors in changed files.
+
+**Known remaining issues**
+- No live browser/mobile screenshot verification.
+- Additional parking `OptionCard` rows below Smart Pick remain denser than Smart Pick; future pass can mirror the compact Details pattern.
+
+**Next recommended step**
+- Open an SEA airport result on mobile width and confirm the unified hero, collapsed timeline, filter bar above parking, and sticky Map/New trip clearance in ~10 seconds.
+
+### 2026-06-10 23:45 PDT — AGENTS.md current-state summary refreshed
+
+**Summary**
+- Updated the Current PodPaiGo State section inside the `<!-- AGENT_STATE_START --> / <!-- AGENT_STATE_END -->` markers for the results page UI cleanup pass.
 
 ### 2026-06-10 19:10 PDT — Results SEA curated access diagnostic hidden from non-admin users
 

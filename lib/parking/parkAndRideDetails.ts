@@ -141,9 +141,9 @@ function formatBreakdownLine(
 function buildRouteBreakdownLines(option: ParkAndRideOption): string[] {
   return [
     formatBreakdownLine(option, 'Drive to lot', option.driveToLotMinutes),
+    formatBreakdownLine(option, 'Estimated wait', option.waitMinutes),
     formatBreakdownLine(option, 'Transit to destination', option.transitMinutes),
     formatBreakdownLine(option, 'Walk', option.walkMinutes),
-    formatBreakdownLine(option, 'Wait/transfer buffer', option.waitMinutes),
     formatBreakdownLine(option, 'Estimated total', option.totalTimeMinutes),
     option.timeDeltaLabel ? `Compared to driving: ${option.timeDeltaLabel}` : null,
     ...routeTimingLines(option),

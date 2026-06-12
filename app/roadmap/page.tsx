@@ -26,7 +26,7 @@ const roadmapGroups = [
     title: 'Coming next',
     items: [
       'Parking coverage near more destinations and more cities',
-      'Clearer event and stadium parking warnings',
+      'Event and stadium trip warnings for signs, crowds, towing, and safer parking choices',
       'More reliable weather for city trips',
       'Better rideshare and transit links',
     ],

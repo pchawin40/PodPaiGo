@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
-import SiteHeader from '../../components/SiteHeader';
 import ResultsContent from '../ResultsContent';
+import ResultsSiteHeader from '../ResultsSiteHeader';
 
 type StoredTripPayload = {
   query?: string;
@@ -94,7 +94,7 @@ function queryFromStoredPayload(value: string | null): StoredTripState {
   }
 }
 
-function StoredTripFallback({ kind }: { kind: 'missing' | 'invalid' }) {
+export function StoredTripFallback({ kind }: { kind: 'missing' | 'invalid' }) {
   return (
     <main className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4 py-12">
       <section className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
@@ -155,7 +155,9 @@ export default function StoredResultsPage() {
 
   return (
     <>
-      <SiteHeader ctaHref="/trip" ctaLabel="New trip" />
+      <ResultsSiteHeader
+        storedSearchParams={storedTrip.status === 'ready' ? storedTrip.query : null}
+      />
 
       {storedTrip.status === 'loading' ? (
         <div className="flex min-h-[60vh] items-center justify-center bg-zinc-50 px-4">

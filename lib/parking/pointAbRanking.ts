@@ -141,7 +141,7 @@ const CUSTOMER_PARKING_OVER_PARK_RIDE_PENALTY = 52;
 /** Street/meter should not win hero at stadiums and major event venues. */
 const EVENT_STREET_METER_SCORE_PENALTY = 88;
 const EVENT_PARKING_SCORE_BONUS = 20;
-const EVENT_TRANSIT_SCORE_BONUS = 12;
+const EVENT_TRANSIT_SCORE_BONUS = 24;
 
 function normalizeTripLocation(value: string | null | undefined): string {
   return String(value || '').trim().replace(/\s+/g, ' ');
@@ -307,8 +307,13 @@ export function scorePointAbMode(args: {
     score -= args.mode.minutes * 0.9;
     score -= costForScore * 0.15;
   } else {
+    const secondaryCostPenalty = costKnown
+      ? Math.min(18, costForScore * 0.12)
+      : args.mode.key === 'drive'
+        ? 6
+        : 16;
     score -= args.mode.minutes * 0.35;
-    score -= costForScore * 0.25;
+    score -= secondaryCostPenalty;
     if (args.mode.key === 'drive') score += args.mode.costKnown === false ? 2 : 4;
     if (args.mode.key === 'rideshare') score += 12;
     if (args.mode.key === 'parking') score += 4;
@@ -496,6 +501,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
   pros: string[];
   cons: string[];
   unavailable: boolean;
+  routeBreakdown: PointAbParkRidePresentation['details']['routeBreakdown'];
 } {
   if (input.pointAbParkRide) {
     return {
@@ -514,6 +520,7 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       pros: input.pointAbParkRide.pros,
       cons: input.pointAbParkRide.cons,
       unavailable: input.pointAbParkRide.availabilityTier === 'data_not_available',
+      routeBreakdown: input.pointAbParkRide.details.routeBreakdown,
     };
   }
 
@@ -535,6 +542,13 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
       pros: input.bestParkRideAccess.bestFor?.slice(0, 2) || ['Good for same-day transit trips'],
       cons: [input.bestParkRideAccess.overnightCaveat || 'Verify lot rules before leaving your car'],
       unavailable: !input.parkRideReliable && input.bestParkRideAccess.recommendedForTrip === false,
+      routeBreakdown: {
+        driveMinutes: input.bestParkRideAccess.timing.driveMinutes ?? null,
+        transitMinutes: input.bestParkRideAccess.timing.transitMinutes ?? null,
+        walkMinutes: input.bestParkRideAccess.timing.walkMinutes ?? null,
+        waitMinutes: input.bestParkRideAccess.timing.waitMinutes ?? null,
+        totalMinutes: input.bestParkRideAccess.timing.terminalReadyMinutes ?? null,
+      },
     };
   }
 
@@ -553,6 +567,13 @@ function resolveParkRidePresentation(input: RankPointAbModesInput): {
     pros: ['Good for same-day transit trips'],
     cons: ['Verify lot rules before leaving your car'],
     unavailable: true,
+    routeBreakdown: {
+      driveMinutes: null,
+      transitMinutes: null,
+      walkMinutes: null,
+      waitMinutes: null,
+      totalMinutes: null,
+    },
   };
 }
 
@@ -1053,10 +1074,11 @@ export function rankPointAbModes(input: RankPointAbModesInput): PointAbRankingRe
       timing:
         parkRide.durationMinutes != null
           ? {
-              driveMinutes: null,
+              driveMinutes: parkRide.routeBreakdown.driveMinutes,
               parkingBufferMinutes: null,
-              walkToDestinationMinutes: null,
-              pickupWaitMinutes: null,
+              walkToDestinationMinutes: parkRide.routeBreakdown.walkMinutes,
+              pickupWaitMinutes: parkRide.routeBreakdown.waitMinutes,
+              transitMinutes: parkRide.routeBreakdown.transitMinutes,
               totalOptionMinutes: parkRide.durationMinutes,
             }
           : null,

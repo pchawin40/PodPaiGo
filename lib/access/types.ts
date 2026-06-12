@@ -52,6 +52,9 @@ export type AccessPriceEstimate = {
 export type AccessTimeEstimate = {
   terminalReadyMinutes: number;
   driveMinutes?: number;
+  waitMinutes?: number;
+  waitConfidence?: 'live' | 'estimated';
+  transitMode?: 'light_rail' | 'subway' | 'train' | 'bus' | 'ferry' | 'unknown';
   walkMinutes?: number;
   transitMinutes?: number;
   shuttleMinutes?: number;
@@ -125,6 +128,7 @@ export type PriceableParkingLike = {
   price: number;
   priceMin?: number;
   priceMax?: number;
+  priceRangeLabel?: string;
   priceDisplay?: PriceDisplay;
   priceUnit?: ParkingOption['priceUnit'];
   priceSource?: ParkingPriceSource;

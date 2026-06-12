@@ -16,6 +16,16 @@ const sevenDayTrip: TripData = {
   parkingDuration: 7 * 24 * 60,
 };
 
+const threeDayTrip: TripData = {
+  ...sevenDayTrip,
+  parkingDuration: 3 * 24 * 60,
+};
+
+const oneDayTrip: TripData = {
+  ...sevenDayTrip,
+  parkingDuration: 24 * 60,
+};
+
 function parkingOption(overrides: Partial<ParkingOption>): ParkingOption {
   return {
     id: 'test-parking',
@@ -75,7 +85,7 @@ describe('parking price display', () => {
     expect(line.confidence).toBe('official');
   });
 
-  test('check-live with no price displays estimated total and daily band', () => {
+  test('check-live with no price displays check live price without a fake estimate', () => {
     const option = parkingOption({
       price: 0,
       priceDisplay: 'check-live',
@@ -84,13 +94,48 @@ describe('parking price display', () => {
     });
 
     const line = parkingPriceLine(option, sevenDayTrip);
-    expect(line.primary).toContain('Estimated');
-    expect(line.primary).toContain('total');
-    expect(line.primary).toMatch(/\$/);
-    expect(line.secondary).toContain('/day × 7 days');
+    expect(line.primary).toBe('Check live price');
+    expect(line.secondary).toBe('Provider controls final price.');
   });
 
-  test('official price range is explained as an estimate built from daily rates', () => {
+  test('range headline uses provider rate range copy instead of single daily basis', () => {
+    const option = parkingOption({
+      name: 'Provider Garage',
+      price: 18,
+      priceUnit: 'per-day',
+      priceDisplay: 'estimated',
+      priceSource: 'estimated',
+      pricingConfidence: 'estimated',
+      priceConfidence: 'medium',
+    });
+
+    const line = parkingPriceLine(option, oneDayTrip);
+    expect(line.primary).toMatch(/^Estimated \$\d+–\$\d+ total$/);
+    expect(line.secondary).toBe(
+      'Based on provider rate range for 1 day. Final price controlled by provider.',
+    );
+    expect(line.secondary).not.toContain('$18/day');
+    expect(line.secondary).not.toContain('/day ×');
+  });
+
+  test('exact total estimate can show daily price math', () => {
+    const option = parkingOption({
+      name: 'Exact Estimate Garage',
+      price: 54,
+      priceUnit: 'total',
+      priceDisplay: 'estimated',
+      priceSource: 'estimated',
+      priceConfidence: 'medium',
+    });
+
+    const line = parkingPriceLine(option, threeDayTrip);
+    expect(line.primary).toBe('Estimated $54 total');
+    expect(line.secondary).toBe(
+      'Based on $18/day × 3 days. Final price controlled by provider.',
+    );
+  });
+
+  test('official price range is explained as an official daily rate range', () => {
     const option = parkingOption({
       name: 'SEA Airport Garage',
       type: 'official',
@@ -107,8 +152,29 @@ describe('parking price display', () => {
     expect(line.primary).toContain('$84–$196 total');
     expect(line.primary).not.toMatch(/^Official/);
     expect(line.badge).toBe('Official rate range');
-    expect(line.secondary).toContain('Based on ~$12–$28/day × 7 days');
-    expect(line.secondary).toContain('Confirm with the airport.');
+    expect(line.secondary).toBe(
+      'Based on official daily rate range for 7 days. Final price depends on the garage and rate selected.',
+    );
+  });
+
+  test('provider-linked explicit range uses provider rate range copy', () => {
+    const option = parkingOption({
+      name: 'Provider Range Garage',
+      price: 18,
+      priceMin: 12,
+      priceMax: 24,
+      priceUnit: 'per-day',
+      priceDisplay: 'estimated',
+      priceSource: 'estimated',
+      pricingConfidence: 'estimated',
+    });
+
+    const line = parkingPriceLine(option, oneDayTrip);
+    expect(line.primary).toBe('Estimated $12–$24 total');
+    expect(line.secondary).toBe(
+      'Based on provider rate range for 1 day. Final price controlled by provider.',
+    );
+    expect(line.secondary).not.toContain('$18/day');
   });
 
   test('official known daily rate still displays', () => {
@@ -147,6 +213,7 @@ describe('parking price display', () => {
     expect(canDisplayParkingPrice(option)).toBe(true);
     expect(line.primary).toContain('$');
     expect(line.secondary).not.toContain('$1470');
+    expect(line.secondary).toBe('Live price from ParkWhiz. Confirm details before checkout.');
     expect(line.confidence).toBe('live');
   });
 
@@ -164,7 +231,8 @@ describe('parking price display', () => {
 
     expect(canDisplayParkingPrice(option)).toBe(true);
     const line = parkingPriceLine(option, sevenDayTrip);
-    expect(line.primary).toContain('$');
+    expect(line.primary).toBe('From $30/day');
+    expect(line.secondary).toBe('Cached/provider-linked price. Confirm final price with provider.');
     expect(line.confidence).toBe('live');
   });
 });

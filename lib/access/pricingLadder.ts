@@ -20,6 +20,29 @@ function formatMoneyRange(min: number, max: number): string {
   return `${formatMoney(min)}–${formatMoney(max)}`;
 }
 
+function formatDayCount(days: number): string {
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
+function hasPositiveRange(
+  option: PriceableParkingLike,
+): option is PriceableParkingLike & { priceMin: number; priceMax: number } {
+  return (
+    typeof option.priceMin === 'number' &&
+    typeof option.priceMax === 'number' &&
+    option.priceMin > 0 &&
+    option.priceMax > 0
+  );
+}
+
+function hasUsableExplicitPrice(option: PriceableParkingLike): boolean {
+  return (typeof option.price === 'number' && option.price > 0) || hasPositiveRange(option);
+}
+
+function providerLabel(option: PriceableParkingLike): string | null {
+  return option.bookingProvider || option.sourceName || null;
+}
+
 function isWithinDays(iso: string | undefined, days: number): boolean {
   if (!iso) return false;
   const fetched = Date.parse(iso);
@@ -163,12 +186,7 @@ export function resolvePricingConfidence(
 export function deriveParkingDailyRange(
   option: PriceableParkingLike,
 ): DollarRange {
-  if (
-    typeof option.priceMin === 'number' &&
-    typeof option.priceMax === 'number' &&
-    option.priceMin > 0 &&
-    option.priceMax > 0
-  ) {
+  if (hasPositiveRange(option)) {
     return {
       min: Math.min(option.priceMin, option.priceMax),
       max: Math.max(option.priceMin, option.priceMax),
@@ -222,10 +240,7 @@ export function deriveParkingTotalRange(
 
   if (
     option.priceUnit === 'total' &&
-    typeof option.priceMin === 'number' &&
-    typeof option.priceMax === 'number' &&
-    option.priceMin > 0 &&
-    option.priceMax > 0
+    hasPositiveRange(option)
   ) {
     return {
       min: Math.min(option.priceMin, option.priceMax),
@@ -260,8 +275,40 @@ export function formatParkingPriceLine(
 ): ParkingPriceDisplayLine {
   const confidence = resolvePricingConfidence(option);
   const days = Math.max(1, estimateParkingDays(tripData));
+  const dayCount = formatDayCount(days);
+  const hasExplicitPrice = hasUsableExplicitPrice(option);
+  const hasExplicitRange = hasPositiveRange(option);
+
+  if (
+    !hasExplicitPrice &&
+    (option.priceDisplay === 'check-live' || option.priceDisplay === 'unavailable')
+  ) {
+    return {
+      primary: 'Check live price',
+      secondary: 'Provider controls final price.',
+      confidence: 'final_on_provider',
+      badge: null,
+    };
+  }
+
   const total = deriveParkingTotalRange(option, tripData);
   const label = formatPricingConfidenceLabel(confidence);
+  const provider = providerLabel(option);
+
+  if (
+    option.priceDisplay === 'from-per-day' &&
+    typeof option.price === 'number' &&
+    option.price > 0
+  ) {
+    const fromPrefix = confidence === 'estimated' ? 'Estimated from' : 'From';
+
+    return {
+      primary: `${fromPrefix} ${formatMoney(option.price)}/day`,
+      secondary: 'Cached/provider-linked price. Confirm final price with provider.',
+      confidence,
+      badge: null,
+    };
+  }
 
   const daily =
     option.priceUnit === 'total' &&
@@ -278,13 +325,13 @@ export function formatParkingPriceLine(
   const totalText = formatMoneyRange(total.min, total.max);
   const dailyIsExact = daily.min === daily.max;
   const totalIsExact = total.min === total.max;
+  const primaryIsRange = !totalIsExact || (hasExplicitRange && option.priceMin !== option.priceMax);
   const showDailyApprox =
     !dailyIsExact || confidence === 'estimated' || !totalIsExact;
   const hasDisplayableTotal = total.min > 0 && total.max > 0;
 
   let primary: string;
   let badge: string | null = null;
-  let officialRangeCaveat: string | null = null;
 
   if (confidence === 'live' && totalIsExact) {
     primary = `Live ${totalText} total`;
@@ -293,14 +340,10 @@ export function formatParkingPriceLine(
   } else if (confidence === 'official') {
     primary = `Estimated ${totalText} total`;
     badge = 'Official rate range';
-    officialRangeCaveat =
-      option.type === 'official'
-        ? 'Final price depends on the garage and rate you choose. Confirm with the airport.'
-        : 'Final price depends on the rate you choose. Confirm on the official site.';
   } else if (confidence === 'recent') {
     primary = totalIsExact ? `Recent ${totalText} total` : `Estimated ${totalText} total`;
   } else if (confidence === 'final_on_provider' && !hasDisplayableTotal) {
-    primary = 'Check provider';
+    primary = 'Check live price';
   } else if (confidence === 'estimated' || !totalIsExact) {
     primary = `Estimated ${totalText} total`;
     badge = 'Estimated range';
@@ -313,13 +356,18 @@ export function formatParkingPriceLine(
 
   const dailyPrefix = showDailyApprox && !dailyIsExact ? '~' : '';
   const baseSecondary = dailyIsExact
-    ? `Based on ${dailyPrefix}${formatMoney(daily.min)}/day × ${days} day${days === 1 ? '' : 's'}`
-    : `Based on ${dailyPrefix}${dailyText}/day × ${days} day${days === 1 ? '' : 's'}`;
-  const secondary = officialRangeCaveat
-    ? `${baseSecondary}. ${officialRangeCaveat}`
-    : confidence === 'final_on_provider' || confidence === 'estimated' || badge === 'Estimated range'
-      ? `${baseSecondary}. Provider controls final price.`
-      : baseSecondary;
+    ? `Based on ${dailyPrefix}${formatMoney(daily.min)}/day × ${dayCount}`
+    : `Based on ${dailyPrefix}${dailyText}/day × ${dayCount}`;
+  const secondary =
+    confidence === 'live' && totalIsExact
+      ? `Live price from ${provider || 'provider'}. Confirm details before checkout.`
+      : confidence === 'official' && primaryIsRange
+        ? `Based on official daily rate range for ${dayCount}. Final price depends on the garage and rate selected.`
+        : primaryIsRange
+          ? `Based on provider rate range for ${dayCount}. Final price controlled by provider.`
+          : confidence === 'final_on_provider' || confidence === 'estimated' || badge === 'Estimated range'
+            ? `${baseSecondary}. Final price controlled by provider.`
+            : baseSecondary;
 
   return {
     primary,

@@ -157,6 +157,106 @@ describe('pointAbRanking', () => {
     );
   });
 
+  test('easiest mode uses price as a secondary factor for similar point A to B options', () => {
+    const cheapSimilar = scorePointAbMode({
+      mode: {
+        key: 'parking',
+        label: 'Paid garage/lot',
+        cost: 12,
+        minutes: 32,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: 12,
+      rideshareCost: 45,
+    });
+    const expensiveSimilar = scorePointAbMode({
+      mode: {
+        key: 'parking',
+        label: 'Paid garage/lot',
+        cost: 45,
+        minutes: 32,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: 45,
+      rideshareCost: 45,
+    });
+
+    expect(cheapSimilar).toBeGreaterThan(expensiveSimilar);
+  });
+
+  test('easiest mode keeps a much easier option above a cheap but slower option', () => {
+    const closeExpensive = scorePointAbMode({
+      mode: {
+        key: 'parking',
+        label: 'Paid garage/lot',
+        cost: 60,
+        minutes: 28,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: 60,
+      rideshareCost: null,
+    });
+    const farCheap = scorePointAbMode({
+      mode: {
+        key: 'parking',
+        label: 'Paid garage/lot',
+        cost: 3,
+        minutes: 58,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: 3,
+      rideshareCost: null,
+    });
+
+    expect(closeExpensive).toBeGreaterThan(farCheap);
+  });
+
+  test('easiest mode penalizes unknown price when ease is similar', () => {
+    const known = scorePointAbMode({
+      mode: {
+        key: 'rideshare',
+        label: 'Rideshare',
+        cost: 24,
+        minutes: 30,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: null,
+      rideshareCost: 24,
+    });
+    const unknown = scorePointAbMode({
+      mode: {
+        key: 'rideshare',
+        label: 'Rideshare',
+        cost: 999999,
+        costKnown: false,
+        minutes: 30,
+        reliable: true,
+        confidence: 'Medium',
+      },
+      sort: 'easiest',
+      noParkingPreferred: false,
+      parkingCost: null,
+      rideshareCost: null,
+    });
+
+    expect(known).toBeGreaterThan(unknown);
+  });
+
   test('Google ParkingOptions free customer lot signals become a separate verify candidate', () => {
     const suburbanTrip = {
       ...tripData,
@@ -2123,6 +2223,17 @@ describe('pointAbRanking', () => {
     // A real local corridor keeps Park & Ride reliable, timed, and eligible.
     expect(pointAbParkRide?.reliable).toBe(true);
     expect(pointAbParkRide?.durationMinutes).not.toBeNull();
+    expect(pointAbParkRide?.details.routeBreakdown.waitMinutes).toBeGreaterThan(0);
+    expect(pointAbParkRide?.durationMinutes).toBe(
+      (pointAbParkRide?.details.routeBreakdown.driveMinutes ?? 0) +
+        (pointAbParkRide?.details.routeBreakdown.waitMinutes ?? 0) +
+        (pointAbParkRide?.details.routeBreakdown.transitMinutes ?? 0) +
+        (pointAbParkRide?.details.routeBreakdown.walkMinutes ?? 0),
+    );
+    expect(parkRideMode?.timing?.pickupWaitMinutes).toBe(
+      pointAbParkRide?.details.routeBreakdown.waitMinutes,
+    );
+    expect(parkRideMode?.timing?.totalOptionMinutes).toBe(pointAbParkRide?.durationMinutes);
     expect(parkRideMode?.status).not.toBe('unavailable');
     expect(parkRideMode?.status).not.toBe('not_recommended');
     expect(ranked.canonicalWinners.visibleOptionKeys).toContain('park-ride');

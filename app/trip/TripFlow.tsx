@@ -1131,7 +1131,7 @@ export default function TripFlow() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Card
                 title="Compare a local trip"
-                subtitle="Going to work, downtown, an event, hotel, hospital, restaurant, or anywhere in WA."
+                subtitle="Going to work, downtown, an event, hotel, hospital, restaurant, or anywhere."
                 selected={state.intent === 'general-trip'}
                 onClick={() => {
                   trackEvent('trip_type_selected', {

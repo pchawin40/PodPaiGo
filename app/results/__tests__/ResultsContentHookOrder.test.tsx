@@ -8,7 +8,12 @@ import ResultsContent, {
   buildRecommendationRequestKey,
   buildParkingTripIdentityKey,
 } from '../ResultsContent';
-import type { OptionScoreBreakdown, Recommendation, TripData } from '@/lib/types';
+import type {
+  EventParkingSignal,
+  OptionScoreBreakdown,
+  Recommendation,
+  TripData,
+} from '@/lib/types';
 import { TRAVEL_PREFERENCES_STORAGE_KEY } from '@/lib/trip/travelPreferences';
 
 const mockRouterReplace = jest.fn();
@@ -225,6 +230,40 @@ function cityTripRecommendationWithEstimatedParking(): Recommendation {
   };
 }
 
+function cityTripRecommendationWithAdditionalRangeParking(): Recommendation {
+  const recommendation = cityTripRecommendationWithParking();
+  return {
+    ...recommendation,
+    parking: [
+      {
+        ...recommendation.parking[0],
+        price: 12,
+        priceUnit: 'total',
+        priceDisplay: 'live',
+        pricingConfidence: 'live',
+        trustStatus: 'live',
+        sourceName: 'ParkWhiz',
+        bookingProvider: 'ParkWhiz',
+      },
+      {
+        ...recommendation.parking[1],
+        id: 'provider-range-option-card',
+        name: 'Provider Range OptionCard Garage',
+        price: 18,
+        priceMin: 12,
+        priceMax: 24,
+        priceUnit: 'per-day',
+        priceDisplay: 'estimated',
+        priceSource: 'estimated',
+        pricingConfidence: 'estimated',
+        priceConfidence: 'medium',
+        trustStatus: 'estimated',
+        sourceName: 'Estimated provider',
+      },
+    ],
+  };
+}
+
 function namedParkingOption(name: string, id: string) {
   return {
     id,
@@ -249,6 +288,31 @@ function cityTripRecommendationWithNamedParking(name: string, id: string): Recom
     ...cityTripRecommendationWithParking(),
     parkingDataStatus: 'available',
     parking: [namedParkingOption(name, id)],
+  };
+}
+
+function confirmedTicketmasterEventSignal(): EventParkingSignal {
+  return {
+    source: 'ticketmaster',
+    status: 'confirmed-event',
+    eventName: 'Seattle Sounders FC vs Portland Timbers',
+    venueName: 'Lumen Field',
+    eventStartLocal: 'Jun 12, 2026, 7:30 PM',
+    eventUrl: 'https://ticketmaster.test/event',
+    distanceMiles: 0.1,
+    confidence: 'high',
+    warningCopy:
+      'Seattle Sounders FC vs Portland Timbers at Lumen Field starts around Jun 12, 2026, 7:30 PM. Street and meter parking may be restricted, full, or tow-enforced. Official/prepaid lots, transit, or rideshare may be safer.',
+  };
+}
+
+function staticVenueEventSignal(): EventParkingSignal {
+  return {
+    source: 'static-venue',
+    status: 'venue-caution',
+    confidence: 'low',
+    warningCopy:
+      'This looks like an event venue. Street and meter parking may be restricted, full, time-limited, or tow-enforced during games and events. Confirm posted signs before relying on street parking.',
   };
 }
 
@@ -398,7 +462,13 @@ function cityTripRecommendationForPreferenceToggle(
   };
 }
 
-function installResultsFetchMock(recommendation: Recommendation) {
+function installResultsFetchMock(
+  recommendation: Recommendation,
+  options?: {
+    eventSignal?: EventParkingSignal | null;
+    eventLookupReject?: boolean;
+  },
+) {
   const fetchMock = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     if (url === '/api/recommendations') {
@@ -406,6 +476,16 @@ function installResultsFetchMock(recommendation: Recommendation) {
         ok: true,
         text: async () => JSON.stringify(recommendation),
         json: async () => recommendation,
+      });
+    }
+    if (url === '/api/events/parking-signal') {
+      if (options?.eventLookupReject) {
+        return Promise.reject(new Error('event lookup failed'));
+      }
+      return Promise.resolve({
+        ok: true,
+        text: async () => JSON.stringify({ signal: options?.eventSignal ?? null }),
+        json: async () => ({ signal: options?.eventSignal ?? null }),
       });
     }
     return Promise.resolve({
@@ -1123,12 +1203,32 @@ describe('ResultsContent hook order', () => {
     });
 
     const parkingSection = getParkingDetailsSection();
-    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     expect(within(parkingSection).getAllByText('Estimated Garage Placeholder').length).toBeGreaterThan(0);
     expect(within(parkingSection).getAllByText('Estimated range').length).toBeGreaterThan(0);
     expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
     expect(screen.queryByText('Confirmed paid parking option')).not.toBeInTheDocument();
+  });
+
+  test('regular parking OptionCard uses range-based secondary pricing copy', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithAdditionalRangeParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Provider Range OptionCard Garage').length).toBeGreaterThan(0);
+    });
+
+    expect(
+      screen.getByText(
+        'Based on provider rate range for 1 day. Final price controlled by provider.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText((text) => text.includes('$18/day'))).not.toBeInTheDocument();
   });
 
   test('actual priced lots replace estimated placeholder when returned', async () => {
@@ -1200,7 +1300,7 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Actual Live Garage').length).toBeGreaterThan(0);
     });
     expect(screen.queryByText('Estimated Garage Placeholder')).not.toBeInTheDocument();
-    expect(within(getParkingDetailsSection()).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(getParkingDetailsSection()).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     expect(screen.queryByText('Nearby parking options')).not.toBeInTheDocument();
   });
 
@@ -1402,19 +1502,23 @@ describe('ResultsContent hook order', () => {
       expect(screen.getByText('Recommended plan')).toBeInTheDocument();
     });
 
+    expect(screen.queryByRole('heading', { name: 'Event detected nearby' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event venue caution' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'New trip' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'Plan another trip' })).toBeInTheDocument();
     expect(screen.queryByText('Smart recommendation')).not.toBeInTheDocument();
     expect(screen.getAllByText('Recommended plan')).toHaveLength(1);
 
     const summary = screen.getByTestId('recommended-plan-summary');
-    expect(within(summary).getByText(/Recommended:/)).toBeInTheDocument();
+    expect(within(summary).queryByText(/^Recommended:/)).not.toBeInTheDocument();
     expect(within(summary).getByTestId('recommended-plan-inline-metrics')).toHaveTextContent(
       /Medium confidence/,
     );
     expect(within(summary).getByTestId('recommended-plan-why')).toHaveTextContent(
-      /Can cost more than transit/,
+      /Best fit for this overnight airport trip/,
     );
     expect(
-      within(summary).getByRole('button', { name: 'Compare options' }),
+      within(summary).getByRole('button', { name: 'Compare other options' }),
     ).toBeInTheDocument();
     expect(within(summary).queryByText('Main caveat')).not.toBeInTheDocument();
 
@@ -1465,7 +1569,7 @@ describe('ResultsContent hook order', () => {
     expect(screen.getAllByText('Pickup wait').length).toBeGreaterThan(0);
     expect(screen.getByText('Check app')).toBeInTheDocument();
     expect(screen.queryByText('Filter parking')).not.toBeInTheDocument();
-    expect(screen.queryByText('More parking options')).not.toBeInTheDocument();
+    expect(screen.queryByText('Show more parking options')).not.toBeInTheDocument();
     expect(screen.queryByText('Test Garage One')).not.toBeInTheDocument();
     expect(screen.queryByText('Test Garage Two')).not.toBeInTheDocument();
 
@@ -1473,8 +1577,8 @@ describe('ResultsContent hook order', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Parking is visible for comparison.')).toBeInTheDocument();
-      expect(screen.getByText('More parking options')).toBeInTheDocument();
       expect(screen.getByText('Filter parking')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     });
     expect(screen.queryByText(/inferred claims/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/strict filters/i)).not.toBeInTheDocument();
@@ -1526,6 +1630,18 @@ describe('ResultsContent hook order', () => {
       expect(screen.getAllByText('Pike Place MarketFront Parking Garage').length).toBeGreaterThan(0);
     });
 
+    const moreParkingSection = document.getElementById('more-parking-options-section');
+    expect(moreParkingSection).toBeInTheDocument();
+    const normalParkingCard = within(moreParkingSection as HTMLElement)
+      .getAllByText('Pike Place MarketFront Parking Garage')[0]
+      .closest('[id^="option-parking"]') as HTMLElement | null;
+    expect(normalParkingCard).toBeInTheDocument();
+    const normalParkingSummary = within(normalParkingCard as HTMLElement).getByTestId(
+      'compact-parking-option-summary',
+    );
+    expect(
+      within(normalParkingSummary).getByRole('button', { name: '★ 4.5 · 332 reviews' }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText('★ 4.5 · 332 reviews')).toHaveLength(1);
   });
 
@@ -1709,6 +1825,7 @@ describe('ResultsContent hook order', () => {
     expect(within(section).getAllByText('$3 one-way adult est.').length).toBeGreaterThan(0);
     expect(within(section).getAllByText('Timed for arrival around 7:30 PM').length).toBeGreaterThan(0);
     expect(within(section).getAllByText('Schedule not confirmed — compare route.').length).toBeGreaterThan(0);
+    expect(within(section).getByText(/Estimated wait:/i)).toBeInTheDocument();
     expect(within(section).getAllByText('Medium confidence').length).toBeGreaterThan(0);
     expect(within(section).getAllByText('Timing estimate; verify lot rules').length).toBeGreaterThan(0);
     expect(within(section).queryByText('High confidence')).not.toBeInTheDocument();
@@ -1799,13 +1916,52 @@ describe('ResultsContent hook order', () => {
     const parkingSection = getParkingDetailsSection();
 
     expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
-    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     expect(within(parkingSection).getAllByText('Test Garage One').length).toBeGreaterThan(0);
     expect(within(parkingSection).getByRole('link', { name: 'Route to parking' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Open Google Maps parking search' })).not.toBeInTheDocument();
     expect(within(parkingSection).queryByRole('link', { name: 'Search nearby parking' })).not.toBeInTheDocument();
     expect(within(parkingSection).queryByText('Nearby parking options')).not.toBeInTheDocument();
-    expect(within(parkingSection).queryByText('Why this option')).not.toBeInTheDocument();
     expect(within(parkingSection).queryByText('Before you park')).not.toBeInTheDocument();
+
+    const moreParkingSection = document.getElementById('more-parking-options-section');
+    expect(moreParkingSection).toBeInTheDocument();
+    const normalParkingCard = within(moreParkingSection as HTMLElement)
+      .getAllByText('Test Garage Two')[0]
+      .closest('[id^="option-parking"]') as HTMLElement | null;
+    expect(normalParkingCard).toBeInTheDocument();
+    expect(normalParkingCard).toHaveClass('rounded-2xl');
+    expect(within(normalParkingCard as HTMLElement).getByText('Details')).toBeInTheDocument();
+    expect(within(normalParkingCard as HTMLElement).queryByText('Details & evidence')).not.toBeInTheDocument();
+    const normalParkingSummary = within(normalParkingCard as HTMLElement).getByTestId(
+      'compact-parking-option-summary',
+    );
+    const visibleBadges = within(normalParkingSummary).getAllByTestId(
+      'compact-parking-visible-badge',
+    );
+    expect(visibleBadges.length).toBeGreaterThan(0);
+    expect(visibleBadges.length).toBeLessThanOrEqual(3);
+    expect(within(normalParkingSummary).queryByText('Drive to lot')).not.toBeInTheDocument();
+    expect(within(normalParkingSummary).queryByText('Park/check-in')).not.toBeInTheDocument();
+    expect(within(normalParkingSummary).queryByText('Timing breakdown')).not.toBeInTheDocument();
+    expect(within(normalParkingSummary).queryByRole('button', { name: 'Walk to destination' })).not.toBeInTheDocument();
+    const compactActionRow = within(normalParkingSummary).getByTestId('compact-parking-action-row');
+    expect(within(compactActionRow).queryByRole('button', { name: 'Walk to destination' })).not.toBeInTheDocument();
+    expect(within(compactActionRow).getAllByRole('button').length).toBeLessThanOrEqual(2);
+    const cardDetails = normalParkingCard?.querySelector('details');
+    expect(cardDetails).toBeInTheDocument();
+    expect(cardDetails?.open).toBe(false);
+    expect(cardDetails).toHaveClass('ppg-section-panel');
+    expect(within(cardDetails as HTMLElement).getByText('Booking')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Timing')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Why this option')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Price/source')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Data source details')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).queryByText('Timing breakdown')).not.toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Drive to lot')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getByText('Park/check-in')).toBeInTheDocument();
+    expect(within(cardDetails as HTMLElement).getAllByText('Walk to destination').length).toBeGreaterThan(0);
+    expect(within(cardDetails as HTMLElement).queryByRole('button', { name: 'Walk to destination' })).not.toBeInTheDocument();
 
     const streetSection = document.getElementById('details-street-meter');
     expect(streetSection).toBeInTheDocument();
@@ -1815,9 +1971,60 @@ describe('ResultsContent hook order', () => {
         'Street/meter parking may exist nearby, but availability and rules can vary. Check posted signs, meters, loading zones, time limits, and event restrictions before leaving your car.',
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event detected nearby' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event venue caution' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'New trip' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Plan another trip' })).not.toBeInTheDocument();
   });
 
-  test('stadium parking labels street parking as a warning outside the parking plan', async () => {
+  test('parking filters with zero matches keep filters visible and clear back to cards', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation);
+
+    render(<ResultsContent storedSearchParams={cityTripSearchParams()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    const parkingSection = getParkingDetailsSection();
+    expect(within(parkingSection).getByText('Filter parking')).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('button', { name: 'EV charging (0)' })).toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Open Google Maps parking search' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(parkingSection).getByRole('button', { name: 'EV charging (0)' }));
+
+    await waitFor(() => {
+      expect(within(parkingSection).getByText('No parking options match those filters.')).toBeInTheDocument();
+    });
+
+    expect(within(parkingSection).getByText('Filter parking')).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('button', { name: 'EV charging (0)' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(
+      within(parkingSection).getByText('Try clearing filters or choosing fewer features.'),
+    ).toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Test Garage One')).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByText('Test Garage Two')).not.toBeInTheDocument();
+    expect(within(parkingSection).queryByRole('link', { name: 'Open Google Maps parking search' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(parkingSection).getByRole('button', { name: 'Clear filters' }));
+
+    await waitFor(() => {
+      expect(within(parkingSection).getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+    expect(within(parkingSection).queryByText('No parking options match those filters.')).not.toBeInTheDocument();
+    expect(within(parkingSection).getByRole('button', { name: 'EV charging (0)' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  test('stadium parking renders event warning and labels street parking as risky', async () => {
     process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
     const recommendation = cityTripRecommendationWithParking();
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
@@ -1844,17 +2051,182 @@ describe('ResultsContent hook order', () => {
     const parkingSection = getParkingDetailsSection();
     const streetSection = document.getElementById('details-street-meter');
 
+    expect(screen.getAllByRole('heading', { name: 'Event venue caution' })).toHaveLength(1);
+    expect(
+      screen.getByText(
+        'This looks like an event venue. Street and meter parking may be restricted, full, time-limited, or tow-enforced during games and events. Confirm posted signs before relying on street parking.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Venue caution')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
-    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     expect(streetSection).toBeInTheDocument();
-    expect(within(streetSection as HTMLElement).getByText('Street parking warning')).toBeInTheDocument();
+    expect(within(streetSection as HTMLElement).getByText('Risky during events')).toBeInTheDocument();
     expect(
       within(streetSection as HTMLElement).getByText(
-        'Street/meter parking near event venues may be restricted, full, time-limited, or tow-enforced during games and events.',
+        'Risky during events. Check posted signs, event-zone rules, time limits, and towing restrictions.',
       ),
     ).toBeInTheDocument();
     expect(within(streetSection as HTMLElement).queryByText('Street / meter parking')).not.toBeInTheDocument();
     expect(within(streetSection as HTMLElement).queryByText('Street parking note')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'New trip' })).not.toBeInTheDocument();
+  });
+
+  test('Lumen Field with mocked matching event shows Event detected nearby', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation, {
+      eventSignal: confirmedTicketmasterEventSignal(),
+    });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+          destinationLat: '47.5952',
+          destinationLng: '-122.3316',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Event detected nearby' })).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(
+        'Seattle Sounders FC vs Portland Timbers at Lumen Field starts around Jun 12, 2026, 7:30 PM. Street and meter parking may be restricted, full, or tow-enforced. Official/prepaid lots, transit, or rideshare may be safer.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Event source: Ticketmaster' })).toHaveAttribute(
+      'href',
+      'https://ticketmaster.test/event',
+    );
+    expect(screen.queryByRole('heading', { name: 'Event venue caution' })).not.toBeInTheDocument();
+  });
+
+  test('event lookup request includes selected parking and arrival time, not an implicit current window', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const fetchMock = installResultsFetchMock(recommendation, { eventSignal: null });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+          destinationLat: '47.5952',
+          destinationLng: '-122.3316',
+          arrivalDate: '2026-06-15',
+          arrivalTime: '09:00',
+          parkingCheckInDate: '2026-06-15',
+          parkingCheckInTime: '08:45',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/events/parking-signal',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    const eventCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === '/api/events/parking-signal',
+    );
+    expect(eventCall).toBeDefined();
+    const body = JSON.parse(String((eventCall?.[1] as RequestInit | undefined)?.body ?? '{}'));
+    expect(body).toMatchObject({
+      destination: 'Lumen Field, Seattle, WA',
+      parkingCheckInDate: '2026-06-15',
+      parkingCheckInTime: '08:45',
+      arrivalDate: '2026-06-15',
+      arrivalTime: '09:00',
+    });
+  });
+
+  test('empty event lookup response falls back to static venue caution', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation, { eventSignal: null });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+          destinationLat: '47.5952',
+          destinationLng: '-122.3316',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole('heading', { name: 'Event venue caution' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event detected nearby' })).not.toBeInTheDocument();
+  });
+
+  test('event lookup failure falls back to static venue caution', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation, { eventLookupReject: true });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Lumen Field, Seattle, WA',
+          destinationName: 'Lumen Field',
+          destinationKind: 'stadium',
+          destinationLat: '47.5952',
+          destinationLng: '-122.3316',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole('heading', { name: 'Event venue caution' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event detected nearby' })).not.toBeInTheDocument();
+  });
+
+  test('normal grocery destination shows no event warning without API event result', async () => {
+    process.env.NEXT_PUBLIC_ENABLE_PARKING_LIVE_REFRESH = 'false';
+    const recommendation = cityTripRecommendationWithParking();
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    installResultsFetchMock(recommendation, { eventSignal: null });
+
+    render(
+      <ResultsContent
+        storedSearchParams={cityTripSearchParams({
+          destination: 'Fred Meyer Monroe WA',
+          destinationName: 'Fred Meyer Monroe WA',
+          destinationKind: 'grocery',
+          destinationLat: '47.8550',
+          destinationLng: '-121.9700',
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Test Garage One').length).toBeGreaterThan(0);
+    });
+
+    expect(screen.queryByRole('heading', { name: 'Event detected nearby' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Event venue caution' })).not.toBeInTheDocument();
   });
 
   test('parking details keep route-timing honesty after hiding the parking plan', async () => {
@@ -1885,10 +2257,10 @@ describe('ResultsContent hook order', () => {
     const parkingSection = getParkingDetailsSection();
 
     expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
-    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     // The old plan timing row is hidden, but the remaining parking card still avoids a fake
     // precise route time when the lot route is unavailable.
-    expect(within(parkingSection).getAllByText('Route timing unavailable').length).toBeGreaterThan(0);
+    expect(within(parkingSection).getAllByText(/route timing is unavailable/i).length).toBeGreaterThan(0);
     expect(
       within(parkingSection).getAllByText('Showing best available parking estimate. Open directions to confirm route timing.').length,
     ).toBeGreaterThan(0);
@@ -1945,7 +2317,7 @@ describe('ResultsContent hook order', () => {
     const parkingSection = getParkingDetailsSection();
     const routeTimeCard = getRouteTimeCard();
     expect(screen.queryByRole('heading', { name: 'Parking plan' })).not.toBeInTheDocument();
-    expect(within(parkingSection).getByRole('heading', { name: 'Parking options' })).toBeInTheDocument();
+    expect(within(parkingSection).getByRole('heading', { name: 'Parking choices' })).toBeInTheDocument();
     expect(within(parkingSection).getByText('No bookable lots found yet')).toBeInTheDocument();
     expect(
       within(parkingSection).getByText('Street parking, transit, or rideshare may still be useful. Verify signs and map results.'),

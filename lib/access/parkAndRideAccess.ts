@@ -108,6 +108,106 @@ function estimateDriveMinutes(
   return 25;
 }
 
+type ParkRideTransitMode = NonNullable<AccessStrategyOption['timing']['transitMode']>;
+
+type ParkRideWaitCarrier = ParkingOption & {
+  waitMinutes?: number;
+  transitWaitMinutes?: number;
+  headwayMinutes?: number;
+  transitHeadwayMinutes?: number;
+  frequency?: number;
+  serviceFrequencyMinutes?: number;
+  scheduleConfidenceLabel?: string;
+  description?: string;
+  providerNote?: string;
+};
+
+function positiveMinutes(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : null;
+}
+
+function inferParkRideTransitMode(parking: ParkingOption): ParkRideTransitMode {
+  const text = [
+    parking.name,
+    parking.sourceName,
+    parking.bookingProvider,
+    ...(parking.bestFor || []),
+    ...(parking.assumptions || []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  if (/\bferry\b/.test(text)) return 'ferry';
+  if (/\b(subway|metro)\b/.test(text)) return 'subway';
+  if (/\b(light rail|link|rail station)\b/.test(text)) return 'light_rail';
+  if (/\b(train|commuter rail|sounder)\b/.test(text)) return 'train';
+  if (/\b(bus|brt|rapidride|transit center)\b/.test(text)) return 'bus';
+  return 'unknown';
+}
+
+function hasLowFrequencySignal(parking: ParkRideWaitCarrier): boolean {
+  const text = [
+    parking.scheduleConfidenceLabel,
+    parking.priceNote,
+    parking.description,
+    parking.providerNote,
+    ...(parking.assumptions || []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return /\b(low frequency|infrequent|limited service|reduced service|late night)\b/.test(text);
+}
+
+function defaultEstimatedParkRideWaitMinutes(
+  mode: ParkRideTransitMode,
+  lowFrequency: boolean,
+): number {
+  if (lowFrequency) return 15;
+  if (mode === 'light_rail' || mode === 'subway' || mode === 'train') return 8;
+  if (mode === 'ferry') return 15;
+  return 10;
+}
+
+function resolveParkRideWaitEstimate(parking: ParkingOption): {
+  waitMinutes: number;
+  waitConfidence: 'live' | 'estimated';
+  transitMode: ParkRideTransitMode;
+} {
+  const carrier = parking as ParkRideWaitCarrier;
+  const explicitWait =
+    positiveMinutes(carrier.transitWaitMinutes) ?? positiveMinutes(carrier.waitMinutes);
+  const headway =
+    positiveMinutes(carrier.transitHeadwayMinutes) ??
+    positiveMinutes(carrier.headwayMinutes) ??
+    positiveMinutes(carrier.frequency) ??
+    positiveMinutes(carrier.serviceFrequencyMinutes);
+  const transitMode = inferParkRideTransitMode(parking);
+
+  if (explicitWait != null) {
+    return { waitMinutes: explicitWait, waitConfidence: 'estimated', transitMode };
+  }
+
+  if (headway != null) {
+    return {
+      waitMinutes: Math.max(1, Math.round(headway / 2)),
+      waitConfidence: 'estimated',
+      transitMode,
+    };
+  }
+
+  return {
+    waitMinutes: defaultEstimatedParkRideWaitMinutes(
+      transitMode,
+      hasLowFrequencySignal(carrier),
+    ),
+    waitConfidence: 'estimated',
+    transitMode,
+  };
+}
+
 function buildSameDayPricing(
   parking: ParkingOption,
   tripData: TripData,
@@ -176,7 +276,9 @@ export function buildParkAndRideAccessFromParking(
   const walkMinutes = parking.walkingMinutes ?? 8;
   const transitMinutes =
     parking.transferToTerminalMinutes ?? parking.shuttleMinutes ?? 35;
-  const terminalReadyMinutes = driveMinutes + walkMinutes + transitMinutes;
+  const waitEstimate = resolveParkRideWaitEstimate(parking);
+  const terminalReadyMinutes =
+    driveMinutes + waitEstimate.waitMinutes + walkMinutes + transitMinutes;
 
   const pricing = canEstimateParkingCost
     ? buildSameDayPricing(parking, tripData, transitRange, rules)
@@ -204,10 +306,16 @@ export function buildParkAndRideAccessFromParking(
     timing: {
       terminalReadyMinutes,
       driveMinutes,
+      waitMinutes: waitEstimate.waitMinutes,
+      waitConfidence: waitEstimate.waitConfidence,
+      transitMode: waitEstimate.transitMode,
       walkMinutes,
       transitMinutes,
       assumptions: [
         `Drive to ${parking.name}`,
+        waitEstimate.waitConfidence === 'live'
+          ? `Transit wait ${waitEstimate.waitMinutes} min from schedule/headway data`
+          : `Estimated transit wait ${waitEstimate.waitMinutes} min`,
         'Walk or transfer to transit',
         `Transit/light rail toward ${airportCode}`,
         canEstimateParkingCost

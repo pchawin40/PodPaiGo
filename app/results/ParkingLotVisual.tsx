@@ -475,9 +475,13 @@ export default function ParkingLotVisual({
             ? 'google_photo_metadata_present_but_not_selected'
             : providerPhotoFailed
               ? 'provider_photo_image_load_failed'
-              : providerPhotoAvailable
+        : providerPhotoAvailable
                 ? 'provider_photo_available_but_not_selected'
                 : 'no_google_or_provider_photo_metadata_inside_visual';
+    const captionParts = [
+      showAttribution ? 'photo-attribution' : null,
+      showGoogleMapsAttribution ? 'google-maps-attribution' : null,
+    ].filter(Boolean);
 
     useEffect(() => {
       logParkingPhotoReviewTrace('inside_parking_lot_visual', option as Partial<ParkingOption>, {
@@ -499,7 +503,7 @@ export default function ParkingLotVisual({
 
     if (src) {
         return (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
             {resolved.safeModeNotice ? (
               <p
                 className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-950"
@@ -530,47 +534,44 @@ export default function ParkingLotVisual({
                     }}
                 />
 
-                <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-3">
-                    <div className="flex items-end justify-between gap-3">
-                      <span className="max-w-[60%] truncate rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-zinc-900 shadow-sm">
-                        {resolved.source === 'placeholder'
-                          ? 'Illustration'
-                          : resolved.source === 'google_live' || resolved.source === 'google_business'
-                            ? 'Google photo'
-                            : 'Lot photo'}
-                      </span>
-                    </div>
-                    {showAttribution ? (
-                      <p className="text-[10px] leading-snug text-white/90">
-                        {resolved.attributionUrl ? (
-                          <a
-                            href={resolved.attributionUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline decoration-white/40 underline-offset-2"
-                          >
-                            {resolved.attribution}
-                          </a>
-                        ) : (
-                          resolved.attribution
-                        )}
-                      </p>
-                    ) : null}
-                    {showGoogleMapsAttribution ? (
-                      <p className="text-[10px] leading-snug text-white/90">
-                        Photo via{' '}
-                        <a
-                          href={GOOGLE_MAPS_ATTRIBUTION_URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline decoration-white/40 underline-offset-2"
-                        >
-                          {GOOGLE_MAPS_ATTRIBUTION_LABEL}
-                        </a>
-                      </p>
-                    ) : null}
-                </div>
             </div>
+            {captionParts.length > 0 ? (
+              <p
+                className="px-1 text-[10px] leading-snug text-muted-foreground"
+                data-testid="parking-photo-attribution"
+              >
+                {showAttribution ? (
+                  <>
+                    {resolved.attributionUrl ? (
+                      <a
+                        href={resolved.attributionUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-muted-foreground/40 underline-offset-2"
+                      >
+                        {resolved.attribution}
+                      </a>
+                    ) : (
+                      resolved.attribution
+                    )}
+                  </>
+                ) : null}
+                {showAttribution && showGoogleMapsAttribution ? ' · ' : null}
+                {showGoogleMapsAttribution ? (
+                  <>
+                    Photo via{' '}
+                    <a
+                      href={GOOGLE_MAPS_ATTRIBUTION_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline decoration-muted-foreground/40 underline-offset-2"
+                    >
+                      {GOOGLE_MAPS_ATTRIBUTION_LABEL}
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             </div>
         );
     }
@@ -586,11 +587,7 @@ export default function ParkingLotVisual({
                 loading="lazy"
             />
 
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-                <span className="rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-slate-800 shadow-sm">
-                    Illustration
-                </span>
-            </div>
+            <span className="sr-only">Parking illustration</span>
         </div>
     );
 }

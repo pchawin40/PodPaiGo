@@ -577,6 +577,7 @@ describe('OptionComparisonCard compact layout', () => {
 
     expect(within(detailsContainer).getByText(/Nearby Park & Ride lots/i)).toBeInTheDocument();
     expect(within(detailsContainer).getByText(/Parking rules/i)).toBeInTheDocument();
+    expect(within(detailsContainer).getByText(/Estimated wait:/i)).toBeInTheDocument();
     expect(
       within(detailsContainer).getAllByRole('link', { name: 'Open lot rules' }).length,
     ).toBeGreaterThan(0);

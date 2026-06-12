@@ -16,8 +16,6 @@ import {
 } from '../../lib/parking/routeDisplay';
 import {
   buildParkingDriveContextFromOption,
-  formatRouteDisplayMinutes,
-  resolveParkingDriveOrRouteTimeForDisplay,
   resolveWalkToDestinationMinutes,
 } from '../../lib/parking/routeMinutes';
 import { getParkingVisualBadgeLabel } from '../../lib/parking/parkingLabels';
@@ -59,6 +57,7 @@ import {
   getParkingReviewSummary,
   normalizeParkingReviewSummary,
 } from '../../lib/parking/reviewSummary';
+import ExpandableSection from '../components/ui/ExpandableSection';
 
 function formatTimeFriendly(time24: string) {
   const m = time24.match(/^([0-2]\d):([0-5]\d)$/);
@@ -86,12 +85,6 @@ function formatCompactMinutes(minutes: number): string {
   return `${mins}m`;
 }
 
-function formatCompactRouteMinutes(minutes: number | null): string {
-  if (minutes === 0) return '0m';
-  if (minutes == null) return 'Check route';
-  return formatCompactMinutes(minutes);
-}
-
 function formatPriceSource(option: ParkingOption): string {
   if (option.priceSource === 'official-rate' || option.pricingConfidence === 'official') {
     return 'Official published rate';
@@ -112,15 +105,6 @@ function formatConfidence(option: ParkingOption): string {
     return 'Lower confidence';
   }
   return 'Medium confidence';
-}
-
-function transferDirectionLabel(option: ParkingOption, airportTrip: boolean): string {
-  if (!airportTrip) return 'Go from parking to your destination';
-  if (option.transferType === 'walk' || option.transferType === 'airport-garage') {
-    return 'Walk from parking to terminal';
-  }
-  if (option.transferType === 'transit') return 'Take transit from lot to terminal';
-  return 'Take shuttle from parking to terminal';
 }
 
 function parkingToDestinationTimeLabel(
@@ -313,6 +297,18 @@ function parkingReviewLabel(option: ParkingOption): string {
   }
 
   return 'Check reviews';
+}
+
+function parkingReviewSummaryLabel(option: ParkingOption): string | null {
+  const summary = getParkingReviewSummary(option);
+  if (
+    typeof summary.reviewScore !== 'number' &&
+    typeof summary.reviewCount !== 'number'
+  ) {
+    return null;
+  }
+
+  return parkingReviewLabel(option);
 }
 
 function visualSourceFromParkingOption(option: ParkingOption): {
@@ -833,12 +829,12 @@ export default function ParkingSmartPick({
 
   const displayLeaveByTime = leaveByTime ? formatTimeFriendly(leaveByTime) : null;
   const canShowReviewAction = hasParkingReviewSource(best);
+  const visibleReviewBadgeLabel = parkingReviewSummaryLabel(best);
+  const visibleModeBadges = modeBadges.filter(
+    (badge) => badge.key !== 'mode-best' && badge.key !== 'reviews',
+  );
 
   const bestRouteLinks = parkingRouteLinks(best, tripData);
-  const bestOriginRouteTime = resolveParkingDriveOrRouteTimeForDisplay(
-    best,
-    buildParkingDriveContextFromOption(best),
-  );
   const officialCtas = resolveOfficialSeaGarageCtas(best);
   const handoff = buildParkingProviderHandoff(
     best,
@@ -868,7 +864,7 @@ export default function ParkingSmartPick({
       : 'Best overall';
 
   return (
-    <section className="travel-card overflow-hidden rounded-3xl p-4 shadow-[0_18px_50px_rgba(14,116,144,0.12)] sm:p-5">
+    <section className="travel-card overflow-hidden rounded-2xl border border-border p-3 shadow-sm sm:p-4">
       {showInternalDebug ? (
         <>
           <ParkingPhotoReviewTrace
@@ -884,413 +880,186 @@ export default function ParkingSmartPick({
           />
         </>
       ) : null}
-      <div className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary">
-        {smartPickBadgeLabel}
-      </div>
 
-      <div className="mt-4">
-        {showInternalDebug ? (
-          <ParkingPhotoReviewTrace
-            stage="parking_smart_pick_visual_handoff"
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="h-24 w-full shrink-0 overflow-hidden rounded-xl sm:h-28 sm:w-36">
+          {showInternalDebug ? (
+            <ParkingPhotoReviewTrace
+              stage="parking_smart_pick_visual_handoff"
+              option={best}
+              stageNote="ParkingSmartPick props passed into ParkingLotVisual"
+            />
+          ) : null}
+          <ParkingLotVisual
             option={best}
-            stageNote="ParkingSmartPick props passed into ParkingLotVisual"
+            tripContext={parkingTripContext}
+            airportCode={(tripData as { airportCode?: string } | null)?.airportCode ?? null}
+            photoPriority="smart-pick"
           />
-        ) : null}
-        <ParkingLotVisual
-          option={best}
-          tripContext={parkingTripContext}
-          airportCode={(tripData as { airportCode?: string } | null)?.airportCode ?? null}
-          photoPriority="smart-pick"
-        />
-      </div>
+        </div>
 
-      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-xl font-semibold leading-tight text-foreground sm:text-2xl">{best.name}</h2>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-            {modeBadges.map((badge) => (
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex rounded-full border border-primary/25 bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase text-primary">
+              {smartPickBadgeLabel}
+            </span>
+            {visibleModeBadges.slice(0, 2).map((badge) => (
               <span
                 key={badge.key}
-                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
+                className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badge.className}`}
               >
                 {badge.label}
               </span>
             ))}
-
             <ParkingAvailabilityBadge option={best} />
-            {canShowReviewAction && onShowReviews ? (
-              <button
-                type="button"
-                onClick={() => onShowReviews(best)}
-                className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
-                title="See review details"
-              >
-                {parkingReviewLabel(best)}
-              </button>
-            ) : canShowReviewAction && best.googleMapsUri ? (
+            {visibleReviewBadgeLabel ? (
+              onShowReviews ? (
+                <button
+                  type="button"
+                  onClick={() => onShowReviews(best)}
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                >
+                  {visibleReviewBadgeLabel}
+                </button>
+              ) : best.googleMapsUri ? (
+                <a
+                  href={best.googleMapsUri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                >
+                  {visibleReviewBadgeLabel}
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100">
+                  {visibleReviewBadgeLabel}
+                </span>
+              )
+            ) : null}
+          </div>
+
+          <h2 className="mt-2 text-lg font-semibold leading-tight text-foreground">{best.name}</h2>
+
+          <div className="mt-2 text-xl font-bold text-foreground">{bestPriceDisplay.primary}</div>
+          {bestPriceDisplay.badge ? (
+            <div className="mt-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+              {bestPriceDisplay.badge}
+            </div>
+          ) : null}
+          {bestPriceDisplay.secondary ? (
+            <div className="mt-0.5 text-xs font-medium text-muted-foreground">
+              {bestPriceDisplay.secondary}
+            </div>
+          ) : null}
+
+          <p className="mt-2 text-sm text-muted-foreground">
+            {bestTimeLabel}
+            {airportTrip && !routeTimingUnavailable
+              ? ` · ${parkingToDestinationTimeLabel(best, airportTrip, bestTime.parts[1]?.minutes)} to terminal`
+              : ''}
+            {' · '}
+            {formatPriceSource(best)}
+          </p>
+
+          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{pickExplanation}</p>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {handoff.providerUrl ? (
               <a
-                href={best.googleMapsUri}
+                href={handoff.providerUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
               >
-                {parkingReviewLabel(best)}
+                {ctaLabel}
+              </a>
+            ) : null}
+            {bestRouteLinks.routeToParkingUrl ? (
+              <a
+                href={bestRouteLinks.routeToParkingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted/80"
+              >
+                Route to parking
               </a>
             ) : null}
           </div>
 
-          <div className="mt-4 text-2xl font-bold text-slate-950 dark:text-slate-50">
-            {bestPriceDisplay.primary}
-          </div>
-
-          {bestPriceDisplay.badge ? (
-            <div className="mt-2">
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
-                {bestPriceDisplay.badge}
-              </span>
-            </div>
-          ) : null}
-
-          {bestPriceDisplay.secondary && (
-            <div className="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              {bestPriceDisplay.secondary}
-            </div>
-          )}
-
-          <div className="mt-3 text-sm text-zinc-700">
-            <span className="rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
-              {bestTimeLabel}
-            </span>
-          </div>
-
-          {displayLeaveByTime && (
-            <div className="mt-2 text-sm font-semibold text-emerald-700">
-              Leave by {displayLeaveByTime}
-              <span className="block text-xs font-medium text-emerald-800/80">
-                {leaveByReason || 'Based on your timing choice.'}
-              </span>
-            </div>
-          )}
-
-          <div className="mt-3 text-sm text-zinc-700">
-            {savings ? (
-              <>
-                Save{' '}
-                <span className="font-semibold text-emerald-800">
-                  {formatMoneyWhole(savings)}
-                </span>{' '}
-                {savingsPercent ? `(${savingsPercent}%) ` : ''}
-                vs official parking with similar timing.
-              </>
-            ) : (
-              <>{pickExplanation}</>
-            )}
-          </div>
-
-          {savings ? (
-            <div className="mt-2 text-sm text-zinc-700">{pickExplanation}</div>
-          ) : null}
-
-          {customerOnlyWarning ? (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-950">
-              {customerOnlyWarning}
-            </div>
-          ) : null}
-
-          {routeTimingUnavailable ? (
-            <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm font-medium text-foreground">
-              Showing best available parking estimate. Open directions to confirm route timing.
-            </div>
-          ) : null}
-
-          {isCachedParkingOption(best) ? (
-            <div className="mt-3">
-              <CachedParkingNotice option={best} />
-            </div>
-          ) : null}
-
-          <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-950">
-              Booking helper · check-in &amp; check-out times
-            </summary>
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => void copyText(handoff.copySummary)}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100"
-              >
-                Copy times
-              </button>
-            </div>
-            {handoff.window ? (
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <div>
-                  <div className="text-xs font-medium text-slate-500">Check-in</div>
-                  <div className="font-semibold text-slate-900">
-                    {handoff.window.checkInDate} {handoff.window.checkInTime}
-                  </div>
+          <ExpandableSection title="Details" className="mt-3" contentClassName="space-y-4">
+            <section className="space-y-2">
+              <div className="text-sm font-semibold text-foreground">Booking</div>
+              <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="text-muted-foreground">Provider</dt>
+                  <dd className="text-right font-medium text-foreground">
+                    {handoff.providerName || best.bookingProvider || best.sourceName || 'Parking provider'}
+                  </dd>
                 </div>
-                <div>
-                  <div className="text-xs font-medium text-slate-500">Check-out</div>
-                  <div className="font-semibold text-slate-900">
-                    {handoff.window.checkOutDate} {handoff.window.checkOutTime}
+                {handoff.window ? (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-muted-foreground">Check-in</dt>
+                      <dd className="text-right font-medium text-foreground">
+                        {handoff.window.checkInDate} {handoff.window.checkInTime}
+                      </dd>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-muted-foreground">Check-out</dt>
+                      <dd className="text-right font-medium text-foreground">
+                        {handoff.window.checkOutDate} {handoff.window.checkOutTime}
+                      </dd>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-muted-foreground">Duration</dt>
+                      <dd className="text-right font-medium text-foreground">
+                        {formatParkingHandoffDuration(handoff.window.durationMinutes)}
+                      </dd>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-start justify-between gap-3 sm:col-span-2">
+                    <dt className="text-muted-foreground">Parking window</dt>
+                    <dd className="text-right font-medium text-foreground">
+                      Check selected trip dates/times
+                    </dd>
                   </div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-slate-500">Duration</div>
-                  <div className="font-semibold text-slate-900">
-                    {formatParkingHandoffDuration(handoff.window.durationMinutes)}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2 font-medium text-slate-900">Check selected trip dates/times</div>
-            )}
-            <div className="mt-2 text-xs text-slate-600">
-              {handoff.providerUrlSupportsPrefill
-                ? 'Verify these times at provider checkout.'
-                : 'Open provider and enter these times.'}
-            </div>
-          </details>
-
-          <details className="mt-4">
-            <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-800 dark:text-blue-300">
-              Details & evidence
-            </summary>
-
-            <div className="mt-3 rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-200">
-              {handoff.providerUrl ? (
-                <div className="mb-3">
+                )}
+              </dl>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void copyText(handoff.copySummary)}
+                  className="inline-flex items-center justify-center rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                >
+                  Copy times
+                </button>
+                {handoff.providerUrl ? (
                   <a
                     href={handoff.providerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300"
+                    className="inline-flex items-center justify-center rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
                   >
                     {officialCtas.isInfoOnly ? 'Check official parking' : 'View provider'}
                   </a>
-                </div>
-              ) : null}
-
-              {Array.isArray(best.officialGarageSubOptions) && best.officialGarageSubOptions.length > 0 ? (
-                <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 text-sm text-indigo-950 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-100">
-                  <div className="font-semibold">Official SEA garage products</div>
-                  <ul className="mt-2 space-y-2 text-sm">
-                    {best.officialGarageSubOptions.map((sub) => (
-                      <li key={sub.id}>
-                        <div className="font-medium">{sub.label}</div>
-                        <div className="text-xs text-indigo-900/80 dark:text-indigo-100/80">{sub.detail}</div>
-                        <div className="text-xs text-indigo-900/80 dark:text-indigo-100/80">
-                          Provider: SEA Airport / Port of Seattle · Source: Official published rate
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
-                <div className="font-semibold">{priceTrust.label}</div>
-                <div className="mt-1">{priceTrust.disclosure}</div>
+                ) : null}
               </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Confirm final price and parking window at provider checkout.
+              </p>
+            </section>
 
-              <div className="mb-3 flex flex-wrap gap-2">
-                {getVisibleParkingFeatureBadges(best).map((meta) => (
-                  <span
-                    key={`smart-detail-${meta.key}`}
-                    className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
-                  >
-                    {meta.label}
-                  </span>
-                ))}
-                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${weatherBadge.className}`}>
-                  {weatherBadge.label}
-                </span>
-              </div>
-
-              <div className="mb-3 rounded-2xl border border-border bg-card p-4 text-sm text-foreground">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-base font-semibold text-foreground">
-                  Full route plan
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Drive to the lot first, then follow the{' '}
-                  {airportTrip ? 'parking-to-terminal' : 'walk-to-destination'} step.
+            <section className="space-y-2 border-t border-border pt-4">
+              <div className="text-sm font-semibold text-foreground">Timing</div>
+              {routeTimingUnavailable ? (
+                <p className="text-sm text-muted-foreground">
+                  Showing best available parking estimate. Open directions to confirm route timing.
                 </p>
-              </div>
-              <div className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground">
-                {routeTimingUnavailable
-                  ? 'Route timing unavailable'
-                  : bestTimeIsPartial
-                    ? `${formatCompactMinutes(bestTime.totalMinutes)} partial trip`
-                    : `${formatCompactMinutes(bestTime.totalMinutes)} total trip`}
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-3">
-              <div className="rounded-xl border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  1. Origin to parking lot
-                </div>
-                <div className="mt-2 font-semibold text-foreground">
-                  {routeTimingUnavailable
-                    ? 'Check route'
-                    : bestOriginRouteTime.source === 'fallback-route-time' ||
-                        bestOriginRouteTime.source === 'fallback-total-time'
-                      ? formatRouteDisplayMinutes(
-                          bestOriginRouteTime.minutes,
-                          bestOriginRouteTime.source,
-                        )
-                      : formatCompactRouteMinutes(bestOriginRouteTime.minutes)}
-                </div>
-                <div className="mt-2 text-muted-foreground">
-                  {best.address || best.canonicalAddress || best.routeDestination || best.name}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {bestRouteLinks.routeToParkingUrl ? (
-                    <a
-                      href={bestRouteLinks.routeToParkingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                    >
-                      Directions to lot
-                    </a>
-                  ) : null}
-                  {(best.address || best.canonicalAddress) ? (
-                    <button
-                      type="button"
-                      onClick={() => void copyText(best.address || best.canonicalAddress || '')}
-                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                    >
-                      Copy address
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  2. Parking to {airportTrip ? 'terminal' : 'destination'}
-                </div>
-                <div className="mt-2 font-semibold text-foreground">
-                  {parkingToDestinationTimeLabel(best, airportTrip, bestTime.parts[1]?.minutes)}
-                </div>
-                <div className="mt-2 text-muted-foreground">
-                  {transferDirectionLabel(best, airportTrip)}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {bestRouteLinks.parkingToDestinationUrl ? (
-                    <a
-                      href={bestRouteLinks.parkingToDestinationUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                    >
-                      Directions from lot
-                    </a>
-                  ) : null}
-                  {bestRouteLinks.parkingToAirportUrl ? (
-                    <a
-                      href={bestRouteLinks.parkingToAirportUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                    >
-                      Terminal step
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  3. Total trip summary
-                </div>
-                <div className="mt-2 font-semibold text-foreground">
-                  {bestPriceDisplay.primary}
-                </div>
-                <dl className="mt-2 space-y-1 text-muted-foreground">
-                  <div className="flex justify-between gap-3">
-                    <dt>Price label</dt>
-                    <dd className="font-medium text-foreground">{formatPriceSource(best)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Confidence</dt>
-                    <dd className="font-medium text-foreground">{formatConfidence(best)}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Weather</dt>
-                    <dd className="font-medium text-foreground">
-                      {weatherImpact?.riskLevel === 'high'
-                        ? 'High impact'
-                        : weatherImpact?.riskLevel === 'medium'
-                          ? 'Moderate impact'
-                          : 'Low impact'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Coverage</dt>
-                    <dd className="font-medium text-foreground">
-                      {best.covered ? 'Covered' : 'Uncovered or unknown'}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Provider</dt>
-                    <dd className="font-medium text-foreground">
-                      {best.bookingProvider || best.sourceName || 'Parking source'}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
-              </div>
-
-              <div className="mb-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-zinc-900">Time breakdown</div>
-                    <div className="mt-1 text-xs text-zinc-500">
-                      {airportTrip
-                        ? 'From your origin to being inside the airport terminal.'
-                        : 'From your origin to destination arrival.'}
-                    </div>
-                  </div>
-
-                  <div className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-900">
-                    {routeTimingUnavailable
-                      ? 'Check route'
-                      : bestTimeIsPartial
-                        ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
-                        : formatCompactMinutes(bestTime.totalMinutes)}
-                  </div>
-                </div>
-
-                {routeTimingUnavailable ? (
-                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-                    Route timing is unavailable for this lot. Price, provider, and access details are shown so you can compare, but directions should be confirmed in Maps.
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-2">
-                    {bestTime.parts.map((part) => (
-                      <div
-                        key={`${part.label}-${part.minutes}`}
-                        className="flex items-center justify-between gap-3"
-                      >
-                        <span>{part.label}</span>
-                        <span className="font-medium text-zinc-900">
-                          {part.display ?? formatCompactMinutes(part.minutes)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="mt-3 border-t border-zinc-200 pt-3">
-                  <div className="flex items-center justify-between gap-3 font-semibold text-zinc-900">
-                    <span>
+              ) : (
+                <dl className="space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between gap-3 font-semibold text-foreground">
+                    <dt>
                       {bestTimeIsPartial
                         ? airportTrip
                           ? 'Partial to terminal'
@@ -1298,24 +1067,148 @@ export default function ParkingSmartPick({
                         : airportTrip
                           ? 'Total to terminal'
                           : 'Total to destination'}
-                    </span>
-                    <span>
-                      {routeTimingUnavailable
-                        ? 'Check route'
-                        : bestTimeIsPartial
-                          ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
-                          : formatCompactMinutes(bestTime.totalMinutes)}
-                    </span>
+                    </dt>
+                    <dd>
+                      {bestTimeIsPartial
+                        ? `${formatCompactMinutes(bestTime.totalMinutes)} partial`
+                        : formatCompactMinutes(bestTime.totalMinutes)}
+                    </dd>
                   </div>
-                </div>
-              </div>
+                  {bestTime.parts.map((part) => (
+                    <div
+                      key={`${part.label}-${part.minutes}`}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <dt>{part.label}</dt>
+                      <dd className="font-medium text-foreground">
+                        {part.display ?? formatCompactMinutes(part.minutes)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {displayLeaveByTime ? (
+                <p className="text-xs leading-relaxed text-emerald-700">
+                  Leave by {displayLeaveByTime}. {leaveByReason || 'Based on your timing choice.'}
+                </p>
+              ) : null}
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Timing includes drive time, parking/check-in time, and walking or transfer time when available.
+              </p>
+            </section>
 
-              <div className="space-y-2">
-                {best.sourceName && (
+            <section className="space-y-2 border-t border-border pt-4">
+              <div className="text-sm font-semibold text-foreground">Why this option</div>
+              <p className="text-sm leading-relaxed text-muted-foreground">{pickExplanation}</p>
+              {savings ? (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Saves <span className="font-semibold text-emerald-800">{formatMoneyWhole(savings)}</span>{' '}
+                  {savingsPercent ? `(${savingsPercent}%) ` : ''}
+                  vs official parking with similar timing.
+                </p>
+              ) : null}
+              {customerOnlyWarning ? (
+                <p className="text-xs leading-relaxed text-amber-800">{customerOnlyWarning}</p>
+              ) : null}
+            </section>
+
+            <section className="space-y-2 border-t border-border pt-4">
+              <div className="text-sm font-semibold text-foreground">Price/source</div>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {priceTrust.disclosure}
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Price source:{' '}
+                <span className="font-medium text-foreground">
+                  {best.bookingProvider || best.sourceName || priceTrust.label}
+                </span>
+              </p>
+            </section>
+
+            <details className="border-t border-border pt-4">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                Data source details
+              </summary>
+              <div className="mt-3 space-y-3 text-xs leading-relaxed text-muted-foreground">
+                {canShowReviewAction && !visibleReviewBadgeLabel && onShowReviews ? (
+                  <button
+                    type="button"
+                    onClick={() => onShowReviews(best)}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                  >
+                    {parkingReviewLabel(best)}
+                  </button>
+                ) : canShowReviewAction && !visibleReviewBadgeLabel && best.googleMapsUri ? (
+                  <a
+                    href={best.googleMapsUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-300/30 dark:bg-amber-300/10 dark:text-amber-100"
+                  >
+                    {parkingReviewLabel(best)}
+                  </a>
+                ) : null}
+
+                {isCachedParkingOption(best) ? <CachedParkingNotice option={best} /> : null}
+
+                {Array.isArray(best.officialGarageSubOptions) && best.officialGarageSubOptions.length > 0 ? (
                   <div>
-                    Source: <span className="font-medium">{best.sourceName}</span>
+                    <div className="font-semibold text-foreground">Official SEA garage products</div>
+                    <ul className="mt-2 space-y-2">
+                      {best.officialGarageSubOptions.map((sub) => (
+                        <li key={sub.id}>
+                          <div className="font-medium text-foreground">{sub.label}</div>
+                          <div>{sub.detail}</div>
+                          <div>Provider: SEA Airport / Port of Seattle · Source: Official published rate</div>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                )}
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  {getVisibleParkingFeatureBadges(best).slice(0, 6).map((meta) => (
+                    <span
+                      key={`smart-detail-${meta.key}`}
+                      className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                    >
+                      {meta.label}
+                    </span>
+                  ))}
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${weatherBadge.className}`}>
+                    {weatherBadge.label}
+                  </span>
+                </div>
+
+                <div>
+                  {best.sourceName ? (
+                    <div>
+                      Source: <span className="font-medium text-foreground">{best.sourceName}</span>
+                    </div>
+                  ) : null}
+                  {bestWithMeta.updatedAt ? (
+                    <div className="mt-1">
+                      Updated: <span className="font-medium text-foreground">{bestWithMeta.updatedAt}</span>
+                    </div>
+                  ) : null}
+                  {best.priceConfidence ? (
+                    <div className="mt-1">
+                      Price label: <span className="font-medium text-foreground">{formatPriceSource(best)}</span>
+                    </div>
+                  ) : null}
+                  {best.trustStatus ? (
+                    <div className="mt-1">
+                      Overall confidence: <span className="font-medium text-foreground">{formatConfidence(best)}</span>
+                    </div>
+                  ) : null}
+                </div>
+
+                {best.assumptions && best.assumptions.length > 0 ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Assumptions</div>
+                    <p className="mt-1">{best.assumptions.slice(0, 3).join(' ')}</p>
+                  </div>
+                ) : null}
 
                 {showInternalDebug ? (
                   <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
@@ -1351,79 +1244,9 @@ export default function ParkingSmartPick({
                     </div>
                   </div>
                 ) : null}
-
-                {bestWithMeta.updatedAt && (
-                  <div>
-                    Updated: <span className="font-medium">{bestWithMeta.updatedAt}</span>
-                  </div>
-                )}
-
-                {best.priceConfidence && (
-                  <div>
-                    Price label:{' '}
-                    <span className="font-medium">{formatPriceSource(best)}</span>
-                  </div>
-                )}
-
-                {best.trustStatus && (
-                  <div>
-                    Overall confidence:{' '}
-                    <span className="font-medium">{formatConfidence(best)}</span>
-                  </div>
-                )}
-
-                {best.assumptions && best.assumptions.length > 0 && (
-                  <div>
-                    <div className="mt-3 font-medium text-zinc-900">Assumptions</div>
-                    <ul className="mt-2 list-disc space-y-1 pl-5">
-                      {best.assumptions.slice(0, 6).map((assumption) => (
-                        <li key={assumption}>{assumption}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </div>
-            </div>
-          </details>
-        </div>
-
-        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:min-w-40">
-          {handoff.providerUrl && (
-            <a
-              href={handoff.providerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-blue-700"
-            >
-              {ctaLabel}
-            </a>
-          )}
-
-          {bestRouteLinks.routeToParkingUrl && (
-            <a
-              href={bestRouteLinks.routeToParkingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            >
-              Route to parking
-            </a>
-          )}
-
-          {(bestRouteLinks.parkingToAirportUrl || bestRouteLinks.parkingToDestinationUrl) && (
-            <a
-              href={bestRouteLinks.parkingToAirportUrl || bestRouteLinks.parkingToDestinationUrl || '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            >
-              {bestRouteLinks.parkingToAirportUrl
-                ? airportTrip
-                  ? 'Parking to terminal'
-                  : 'Parking to destination'
-                : bestRouteLinks.transferLinkLabel}
-            </a>
-          )}
+            </details>
+          </ExpandableSection>
         </div>
       </div>
     </section>

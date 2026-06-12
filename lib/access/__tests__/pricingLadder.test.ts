@@ -72,8 +72,8 @@ describe('pricingLadder', () => {
     expect(daily.max).toBe(DEFAULT_UNKNOWN_DAILY_RANGE.max);
 
     const line = formatParkingPriceLine(option, sevenDayTrip);
-    expect(line.primary).toContain('Estimated');
-    expect(line.primary).toMatch(/\$/);
+    expect(line.primary).toBe('Check live price');
+    expect(line.secondary).toBe('Provider controls final price.');
   });
 
   test('official rate maps to Official confidence', () => {

@@ -312,6 +312,17 @@ function frictionPenalty(option: ParkingOption): number {
   return penalty;
 }
 
+function easiestSecondaryPricePenalty(
+  option: ParkingOption,
+  tripData?: TripData | null,
+): number {
+  const cost = getParkingComparableCost(option, tripData);
+  if (!hasUsableComparableCost(cost)) return 32;
+
+  const reliabilityPenalty = cheapestPriceReliabilityClass(option, tripData) * 4;
+  return Math.min(18, cost * 0.08) + reliabilityPenalty;
+}
+
 function easiestKey(option: ParkingOption, tripData?: TripData | null): number {
   const totalTime = getParkingTotalTimeMinutes(option, tripData);
 
@@ -322,6 +333,7 @@ function easiestKey(option: ParkingOption, tripData?: TripData | null): number {
     availabilityPenalty(option) +
     trustPenalty(option.trustStatus) +
     priceConfidencePenalty(option) +
+    easiestSecondaryPricePenalty(option, tripData) +
     unknownPricePenalty(option, tripData) +
     easiestConfidenceBonus(option) +
     streetParkingScorePenalty(option, tripData)
