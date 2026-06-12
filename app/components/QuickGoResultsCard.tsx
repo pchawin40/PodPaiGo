@@ -38,6 +38,7 @@ import {
 } from '../../lib/trip/quickGo';
 import type { ParkingOption, TripData, TrustStatus } from '../../lib/types';
 import type { WeatherImpact } from '../../lib/weather/types';
+import ExpandableSection from './ui/ExpandableSection';
 import PrimaryButton from './ui/PrimaryButton';
 import StatusPill from './ui/StatusPill';
 import TravelCard from './ui/TravelCard';
@@ -396,14 +397,10 @@ export default function QuickGoResultsCard({
         </div>
       </div>
 
-      {(weatherText || guidance || formattedLeaveBy) ? (
-        <div className="mt-5 rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-          {formattedLeaveBy ? (
-            <p className="font-medium text-foreground">Leave by {formattedLeaveBy}.</p>
-          ) : null}
-          {weatherText ? <p className="mt-1">{weatherText}</p> : null}
-          {guidance ? <p className="mt-1">{guidance}</p> : null}
-        </div>
+      {formattedLeaveBy ? (
+        <p className="mt-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm font-semibold text-foreground">
+          Leave by {formattedLeaveBy}.
+        </p>
       ) : null}
 
       <dl className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -511,32 +508,6 @@ export default function QuickGoResultsCard({
           </dd>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card/80 p-4">
-          <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Parking confidence
-          </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">
-            {quickGoParkingConfidenceLabel(parkingConfidence)}
-          </dd>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card/80 p-4">
-          <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Stress level
-          </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">
-            {bestOption ? quickGoStressLabel(bestOption.stressScore) : 'Medium'}
-          </dd>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card/80 p-4">
-          <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Backup option
-          </dt>
-          <dd className="mt-2 text-lg font-semibold text-foreground">
-            {formatBackup(backupOption, backupWayLabel)}
-          </dd>
-        </div>
       </dl>
 
       {directionsUrl || providerCta ? (
@@ -547,6 +518,48 @@ export default function QuickGoResultsCard({
           {providerCta ? <QuickGoProviderCtaButton cta={providerCta} /> : null}
         </div>
       ) : null}
+
+      <div className="mt-6 space-y-3">
+        <ExpandableSection title="Why this recommendation?">
+          <dl className="space-y-3 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Stress level
+              </dt>
+              <dd className="mt-1 font-medium text-foreground">
+                {bestOption ? quickGoStressLabel(bestOption.stressScore) : 'Medium'}
+              </dd>
+            </div>
+            {weatherText ? <p className="text-muted-foreground">{weatherText}</p> : null}
+            {guidance ? <p className="text-muted-foreground">{guidance}</p> : null}
+          </dl>
+        </ExpandableSection>
+
+        <ExpandableSection title="Parking details">
+          <dl className="space-y-3 text-sm">
+            <div>
+              <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Parking confidence
+              </dt>
+              <dd className="mt-1 font-medium text-foreground">
+                {quickGoParkingConfidenceLabel(parkingConfidence)}
+              </dd>
+            </div>
+            <p className="text-muted-foreground">
+              Confirm posted signs and the final price with the provider before you park.
+            </p>
+          </dl>
+        </ExpandableSection>
+
+        <ExpandableSection
+          title="Backup option"
+          summary={formatBackup(backupOption, backupWayLabel)}
+        >
+          <p className="text-sm text-muted-foreground">
+            If your main option does not work out, this is the next-best way to go.
+          </p>
+        </ExpandableSection>
+      </div>
     </TravelCard>
   );
 }

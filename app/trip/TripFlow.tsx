@@ -25,6 +25,7 @@ import { estimateParkingDays } from '../../lib/tripTime';
 import { formatMoney } from '../utils/formatter';
 import { calculateAirportReadinessBuffer } from '../../lib/airports/airportReadiness';
 import TransitPaymentPicker from '../components/TransitPaymenPicker';
+import ExpandableSection from '../components/ui/ExpandableSection';
 import {
   getOptionButtonClass,
   getOptionInlineBadgeClass,
@@ -406,6 +407,9 @@ export default function TripFlow() {
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
   const [showAdvancedGeneralParkingTime, setShowAdvancedGeneralParkingTime] = useState(false);
   const [generalParkingWindowOverridden, setGeneralParkingWindowOverridden] = useState(false);
+  // Airport "Parking time" holds the required trip date, so it starts open and
+  // re-opens automatically when a parking date error needs fixing.
+  const [parkingTimeOpen, setParkingTimeOpen] = useState(true);
 
   // track if user manually interacted with time input
   const [timeTouched, setTimeTouched] = useState(false);
@@ -442,6 +446,13 @@ export default function TripFlow() {
 
   const ENABLE_AIRPORT_TIMING_FIELDS = false;
   const showTimingFields = ENABLE_AIRPORT_TIMING_FIELDS || intent !== 'parking-trip';
+
+  const transportAvailabilityLabel: Record<TransportAvailability, string> = {
+    car: 'I have a car',
+    rideshare: 'No car / rideshare',
+    transit: 'Transit only',
+    all: 'Compare all',
+  };
 
   const selectedAirport = useMemo(() => {
     return getAirportById(state.airportCode) || getAirportById('SEA')!;
